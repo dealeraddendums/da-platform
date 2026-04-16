@@ -3,53 +3,60 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 export type UserRole =
-  | "root_admin"
-  | "reseller_admin"
-  | "reseller_user"
+  | "super_admin"
   | "group_admin"
-  | "group_user"
-  | "group_user_restricted"
-  | "dealer";
+  | "dealer_admin"
+  | "dealer_user";
 
-export type UserRow = {
+export type ProfileRow = {
   id: string;
-  dealer_id: string;
-  user_type: UserRole;
   email: string;
-  name: string;
+  full_name: string | null;
+  role: UserRole;
+  dealer_id: string | null;
   created_at: string;
+  updated_at: string;
 };
 
-type UserInsert = {
-  id?: string;
-  dealer_id: string;
-  user_type: UserRole;
+type ProfileInsert = {
+  id: string;
   email: string;
-  name: string;
-  created_at?: string;
+  full_name?: string | null;
+  role?: UserRole;
+  dealer_id?: string | null;
 };
 
-type UserUpdate = {
-  dealer_id?: string;
-  user_type?: UserRole;
+type ProfileUpdate = {
   email?: string;
-  name?: string;
+  full_name?: string | null;
+  role?: UserRole;
+  dealer_id?: string | null;
+  updated_at?: string;
 };
 
+// Database type shaped exactly as Supabase's generated types expect.
 export type Database = {
   public: {
     Tables: {
-      users: {
-        Row: UserRow;
-        Insert: UserInsert;
-        Update: UserUpdate;
-        Relationships: [];
+      profiles: {
+        Row: ProfileRow;
+        Insert: ProfileInsert;
+        Update: ProfileUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "profiles_id_fkey";
+            columns: ["id"];
+            isOneToOne: true;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          }
+        ];
       };
     };
-    Views: Record<string, never>;
-    Functions: Record<string, never>;
-    Enums: Record<string, never>;
-    CompositeTypes: Record<string, never>;
+    Views: { [_ in never]: never };
+    Functions: { [_ in never]: never };
+    Enums: { [_ in never]: never };
+    CompositeTypes: { [_ in never]: never };
   };
 };
 
@@ -57,8 +64,8 @@ export type Database = {
 export function createServerSupabaseClient() {
   const cookieStore = cookies();
   return createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-anon-key",
     {
       cookies: {
         getAll() {
@@ -83,8 +90,8 @@ export function createServerSupabaseClient() {
 /** Service-role client — bypasses RLS, for admin operations only. */
 export function createAdminSupabaseClient() {
   return createClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",
+    process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder-service-role-key",
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 }

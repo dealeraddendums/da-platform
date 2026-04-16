@@ -6,8 +6,7 @@ type Params = { params: { id: string } };
 
 /**
  * POST /api/users/[id]/reset-password
- * Trigger a Supabase magic-link / password-reset email for a sub-user.
- * The requesting user must own the target user's dealer_id.
+ * Trigger a Supabase password-reset email for a sub-user.
  */
 export async function POST(
   _req: NextRequest,
@@ -16,15 +15,14 @@ export async function POST(
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  const dealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
+  const dealerId = claims.dealer_id;
   const admin = createAdminSupabaseClient();
 
-  // Verify target user belongs to the caller's dealer
   const { data: targetUser, error: fetchError } = await admin
-    .from("users")
+    .from("profiles")
     .select("id, email, dealer_id")
     .eq("id", params.id)
-    .eq("dealer_id", dealerId)
+    .eq("dealer_id", dealerId ?? "")
     .single();
 
   if (fetchError || !targetUser) {

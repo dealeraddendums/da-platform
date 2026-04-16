@@ -6,18 +6,21 @@ import type { UserRole } from "@/lib/db";
 /**
  * GET /api/users
  * List all users belonging to the authenticated dealer.
- * RLS policy on the users table enforces dealer isolation automatically.
  */
 export async function GET(): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
   const supabase = createServerSupabaseClient();
-  const dealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
+  const dealerId = claims.dealer_id;
+
+  if (!dealerId) {
+    return NextResponse.json({ users: [] });
+  }
 
   const { data, error: dbError } = await supabase
-    .from("users")
-    .select("id, dealer_id, user_type, email, name, created_at")
+    .from("profiles")
+    .select("id, dealer_id, role, email, full_name, created_at")
     .eq("dealer_id", dealerId)
     .order("created_at", { ascending: false });
 
@@ -36,33 +39,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  let body: { email?: string; name?: string; user_type?: UserRole };
+  let body: { email?: string; full_name?: string; role?: UserRole };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { email, name, user_type } = body;
-  if (!email || !name) {
+  const { email, full_name, role } = body;
+  if (!email || !full_name) {
     return NextResponse.json(
-      { error: "email and name are required" },
+      { error: "email and full_name are required" },
       { status: 400 }
     );
   }
 
-  const dealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
+  const dealerId = claims.dealer_id;
 
-  // Use service-role client to create auth user + profile atomically
   const admin = createAdminSupabaseClient();
 
-  // 1. Create Supabase Auth user with app_metadata carrying role/dealer_id
   const { data: authData, error: authError } = await admin.auth.admin.createUser(
     {
       email,
       email_confirm: true,
       app_metadata: {
-        user_type: user_type ?? "dealer",
+        role: role ?? "dealer_user",
         dealer_id: dealerId,
       },
     }
@@ -72,21 +73,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: authError.message }, { status: 400 });
   }
 
-  // 2. Insert matching row in public.users
   const { data: profile, error: profileError } = await admin
-    .from("users")
+    .from("profiles")
     .insert({
       id: authData.user.id,
       dealer_id: dealerId,
-      user_type: user_type ?? "dealer",
+      role: role ?? "dealer_user",
       email,
-      name,
+      full_name,
     })
     .select()
     .single();
 
   if (profileError) {
-    // Roll back auth user
     await admin.auth.admin.deleteUser(authData.user.id);
     return NextResponse.json({ error: profileError.message }, { status: 500 });
   }

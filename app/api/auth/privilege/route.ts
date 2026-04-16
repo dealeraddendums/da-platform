@@ -10,11 +10,8 @@ export async function GET(): Promise<NextResponse> {
   if (error) return error;
 
   return NextResponse.json({
-    user_type: claims.user_type,
+    role: claims.role,
     dealer_id: claims.dealer_id,
     user_id: claims.sub,
-    ...(claims.impersonating_dealer_id
-      ? { impersonating_dealer_id: claims.impersonating_dealer_id }
-      : {}),
   });
 }

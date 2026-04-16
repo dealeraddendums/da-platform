@@ -10,23 +10,14 @@ export async function POST(): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  if (!claims.impersonating_dealer_id) {
-    return NextResponse.json(
-      { error: "No active impersonation session" },
-      { status: 400 }
-    );
-  }
-
   const admin = createAdminSupabaseClient();
 
-  // Remove impersonation fields from app_metadata
   const { error: updateError } = await admin.auth.admin.updateUserById(
     claims.sub,
     {
       app_metadata: {
-        user_type: claims.user_type,
+        role: claims.role,
         dealer_id: claims.dealer_id,
-        // Explicitly clear impersonation fields by omitting them
         impersonating_dealer_id: null,
         impersonating_user_id: null,
         real_user_id: null,
