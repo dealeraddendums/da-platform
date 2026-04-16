@@ -26,11 +26,25 @@ CREATE INDEX IF NOT EXISTS users_dealer_id_idx ON public.users (dealer_id);
 -- Enable RLS
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 
+-- Helper to extract dealer_id from JWT.
+-- Supabase stores custom app_metadata one level deep in the JWT payload.
+-- Once the custom_access_token hook (002_jwt_hook.sql) is enabled in the
+-- Supabase dashboard, dealer_id is also promoted to a top-level claim; until
+-- then we read it from app_metadata.
+CREATE OR REPLACE FUNCTION public.jwt_dealer_id() RETURNS text
+  LANGUAGE sql STABLE
+  AS $$
+    SELECT coalesce(
+      auth.jwt() ->> 'dealer_id',
+      (auth.jwt() -> 'app_metadata') ->> 'dealer_id'
+    );
+  $$;
+
 -- Dealer isolation policy:
 -- Users can only read rows where dealer_id matches their JWT claim.
 -- root_admin bypasses this via the service-role client in admin routes.
 CREATE POLICY "dealer_isolation" ON public.users
-  USING (dealer_id = (auth.jwt() ->> 'dealer_id'));
+  USING (dealer_id = public.jwt_dealer_id());
 
 -- Allow each authenticated user to read their own row regardless of dealer
 -- (used during login to bootstrap the session).
@@ -41,14 +55,14 @@ CREATE POLICY "self_read" ON public.users
 -- Allow authenticated users to insert within their own dealer_id
 CREATE POLICY "dealer_insert" ON public.users
   FOR INSERT
-  WITH CHECK (dealer_id = (auth.jwt() ->> 'dealer_id'));
+  WITH CHECK (dealer_id = public.jwt_dealer_id());
 
 -- Allow authenticated users to update within their own dealer_id
 CREATE POLICY "dealer_update" ON public.users
   FOR UPDATE
-  USING (dealer_id = (auth.jwt() ->> 'dealer_id'));
+  USING (dealer_id = public.jwt_dealer_id());
 
 -- Allow authenticated users to delete within their own dealer_id
 CREATE POLICY "dealer_delete" ON public.users
   FOR DELETE
-  USING (dealer_id = (auth.jwt() ->> 'dealer_id'));
+  USING (dealer_id = public.jwt_dealer_id());
