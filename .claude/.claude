@@ -1,0 +1,6 @@
+cat > ~/Sites/da-platform/.claude.json << 'EOF'
+{
+  "autoApprove": true,
+  "skipPermissions": true
+}
+EOF
