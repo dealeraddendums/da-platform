@@ -34,6 +34,59 @@ type ProfileUpdate = {
   updated_at?: string;
 };
 
+export type DealerRow = {
+  id: string;
+  dealer_id: string;
+  name: string;
+  active: boolean;
+  group_id: string | null;
+  primary_contact: string | null;
+  primary_contact_email: string | null;
+  phone: string | null;
+  logo_url: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  country: string;
+  makes: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+type DealerInsert = {
+  dealer_id: string;
+  name: string;
+  active?: boolean;
+  group_id?: string | null;
+  primary_contact?: string | null;
+  primary_contact_email?: string | null;
+  phone?: string | null;
+  logo_url?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  country?: string;
+  makes?: string[];
+};
+
+export type DealerUpdate = {
+  name?: string;
+  active?: boolean;
+  group_id?: string | null;
+  primary_contact?: string | null;
+  primary_contact_email?: string | null;
+  phone?: string | null;
+  logo_url?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  country?: string;
+  makes?: string[];
+};
+
 // Database type shaped exactly as Supabase's generated types expect.
 export type Database = {
   public: {
@@ -51,6 +104,12 @@ export type Database = {
             referencedColumns: ["id"];
           }
         ];
+      };
+      dealers: {
+        Row: DealerRow;
+        Insert: DealerInsert;
+        Update: DealerUpdate;
+        Relationships: [];
       };
     };
     Views: { [_ in never]: never };

@@ -32,7 +32,6 @@ const nav: NavItem[] = [
         <polyline points="9 22 9 12 15 12 15 22" />
       </svg>
     ),
-    disabled: true,
   },
   {
     label: "Groups",
@@ -103,7 +102,9 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 py-2 overflow-y-auto">
         {nav.map((item) => {
-          const isActive = !item.disabled && pathname === item.href;
+          const isActive =
+            !item.disabled &&
+            (pathname === item.href || pathname.startsWith(item.href + "/"));
           return item.disabled ? (
             <div key={item.href} className="nav-item disabled">
               {item.icon}
@@ -130,7 +131,7 @@ export default function Sidebar() {
           borderTop: "1px solid rgba(255,255,255,0.08)",
         }}
       >
-        Phase 1 — Auth &amp; Users
+        Phase 2 — Dealer Profile
       </div>
     </aside>
   );
