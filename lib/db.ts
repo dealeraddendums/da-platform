@@ -132,6 +132,73 @@ export type DealerUpdate = {
   makes?: string[];
 };
 
+export type TemplateRow = {
+  id: string;
+  dealer_id: string;
+  name: string;
+  document_type: "addendum" | "infosheet";
+  vehicle_types: string[];
+  template_json: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TemplateInsert = {
+  dealer_id: string;
+  name: string;
+  document_type: "addendum" | "infosheet";
+  vehicle_types?: string[];
+  template_json?: Record<string, unknown>;
+  is_active?: boolean;
+};
+
+export type TemplateUpdate = {
+  name?: string;
+  document_type?: "addendum" | "infosheet";
+  vehicle_types?: string[];
+  template_json?: Record<string, unknown>;
+  is_active?: boolean;
+  updated_at?: string;
+};
+
+export type DealerSettingsRow = {
+  dealer_id: string;
+  ai_content_default: boolean;
+  nudge_left: number;
+  nudge_right: number;
+  nudge_top: number;
+  nudge_bottom: number;
+  default_template_new: string | null;
+  default_template_used: string | null;
+  default_template_cpo: string | null;
+  updated_at: string;
+};
+
+type DealerSettingsInsert = {
+  dealer_id: string;
+  ai_content_default?: boolean;
+  nudge_left?: number;
+  nudge_right?: number;
+  nudge_top?: number;
+  nudge_bottom?: number;
+  default_template_new?: string | null;
+  default_template_used?: string | null;
+  default_template_cpo?: string | null;
+};
+
+export type DealerSettingsUpdate = {
+  ai_content_default?: boolean;
+  nudge_left?: number;
+  nudge_right?: number;
+  nudge_top?: number;
+  nudge_bottom?: number;
+  default_template_new?: string | null;
+  default_template_used?: string | null;
+  default_template_cpo?: string | null;
+  updated_at?: string;
+};
+
 // Database type shaped exactly as Supabase's generated types expect.
 export type Database = {
   public: {
@@ -167,6 +234,34 @@ export type Database = {
             isOneToOne: false;
             referencedRelation: "groups";
             referencedColumns: ["id"];
+          }
+        ];
+      };
+      templates: {
+        Row: TemplateRow;
+        Insert: TemplateInsert;
+        Update: TemplateUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "templates_dealer_id_fkey";
+            columns: ["dealer_id"];
+            isOneToOne: false;
+            referencedRelation: "dealers";
+            referencedColumns: ["dealer_id"];
+          }
+        ];
+      };
+      dealer_settings: {
+        Row: DealerSettingsRow;
+        Insert: DealerSettingsInsert;
+        Update: DealerSettingsUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "dealer_settings_dealer_id_fkey";
+            columns: ["dealer_id"];
+            isOneToOne: true;
+            referencedRelation: "dealers";
+            referencedColumns: ["dealer_id"];
           }
         ];
       };
