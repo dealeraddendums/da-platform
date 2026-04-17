@@ -104,8 +104,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Optionally create a dealer_admin auth user
   if (username?.trim() && password?.trim()) {
+    const rawUsername = username.trim();
+    const authEmail = rawUsername.includes("@") ? rawUsername : `${rawUsername}@dealeraddendums.com`;
     const { data: authUser, error: authError } = await admin.auth.admin.createUser({
-      email: username.trim(),
+      email: authEmail,
       password: password.trim(),
       email_confirm: true,
       user_metadata: { full_name: (rest.primary_contact as string | undefined) ?? "" },
@@ -122,7 +124,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     await admin.from("profiles").upsert({
       id: authUser.user.id,
-      email: username.trim(),
+      email: authEmail,
       full_name: (rest.primary_contact as string | undefined) ?? null,
       role: "dealer_admin" as const,
       dealer_id,

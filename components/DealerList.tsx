@@ -407,7 +407,7 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="label">Username (login email)</label>
-            <input className="input" type="email" value={fields.username} onChange={set("username")} placeholder="dealer@example.com" />
+            <input className="input" type="text" value={fields.username} onChange={set("username")} placeholder="Username" />
             <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Leave blank to skip account creation</p>
           </div>
           <div>
