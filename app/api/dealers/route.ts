@@ -49,6 +49,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 /**
  * POST /api/dealers
  * Create a new dealer. super_admin only.
+ * Optional: username + password to create a dealer_admin auth user.
+ * Optional: sendNotify=true for placeholder welcome email.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { error } = await requireSuperAdmin();
@@ -57,6 +59,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: {
     dealer_id?: string;
     name?: string;
+    username?: string;
+    password?: string;
+    sendNotify?: boolean;
   } & DealerUpdate;
 
   try {
@@ -65,7 +70,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { dealer_id, name, ...rest } = body;
+  const { dealer_id, name, username, password, sendNotify, ...rest } = body;
   if (!dealer_id || !name) {
     return NextResponse.json(
       { error: "dealer_id and name are required" },
@@ -73,10 +78,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // internal_id = never-changing billing ID, set once at creation
+  // inventory_dealer_id = supplier-assigned ID, starts equal to dealer_id then replaced when feed goes live
+  const internalId = Date.now().toString();
+
   const admin = createAdminSupabaseClient();
   const { data, error: dbError } = await admin
     .from("dealers")
-    .insert({ dealer_id, name, ...rest })
+    .insert({
+      dealer_id,
+      name,
+      internal_id: internalId,
+      inventory_dealer_id: dealer_id,
+      ...rest,
+    })
     .select()
     .single();
 
@@ -87,5 +102,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
 
-  return NextResponse.json({ data }, { status: 201 });
+  // Optionally create a dealer_admin auth user
+  if (username?.trim() && password?.trim()) {
+    const { data: authUser, error: authError } = await admin.auth.admin.createUser({
+      email: username.trim(),
+      password: password.trim(),
+      email_confirm: true,
+      user_metadata: { full_name: (rest.primary_contact as string | undefined) ?? "" },
+      app_metadata: { role: "dealer_admin" },
+    });
+
+    if (authError) {
+      // Dealer was created — return it with a warning about user creation failure
+      return NextResponse.json(
+        { data, warning: `Dealer created but user account failed: ${authError.message}` },
+        { status: 201 }
+      );
+    }
+
+    await admin.from("profiles").upsert({
+      id: authUser.user.id,
+      email: username.trim(),
+      full_name: (rest.primary_contact as string | undefined) ?? null,
+      role: "dealer_admin" as const,
+      dealer_id,
+    });
+  }
+
+  return NextResponse.json(
+    { data, emailSent: sendNotify ? true : false },
+    { status: 201 }
+  );
 }

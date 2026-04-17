@@ -49,27 +49,37 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 /**
  * POST /api/groups
  * Create a new group. super_admin only.
+ * Optional: username + password to create a group_admin auth user.
+ * Optional: sendNotify=true for placeholder welcome email.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { error } = await requireSuperAdmin();
   if (error) return error;
 
-  let body: { name?: string } & GroupUpdate;
+  let body: {
+    name?: string;
+    internal_id?: string;
+    username?: string;
+    password?: string;
+    sendNotify?: boolean;
+  } & GroupUpdate;
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { name, ...rest } = body;
+  const { name, internal_id, username, password, sendNotify, ...rest } = body;
   if (!name?.trim()) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
+  const groupInternalId = internal_id?.trim() || Date.now().toString();
+
   const admin = createAdminSupabaseClient();
   const { data, error: dbError } = await admin
     .from("groups")
-    .insert({ name: name.trim(), ...rest })
+    .insert({ name: name.trim(), internal_id: groupInternalId, ...rest })
     .select()
     .single();
 
@@ -77,5 +87,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
 
-  return NextResponse.json({ data }, { status: 201 });
+  const group = data as GroupRow;
+
+  // Optionally create a group_admin auth user
+  if (username?.trim() && password?.trim()) {
+    const { data: authUser, error: authError } = await admin.auth.admin.createUser({
+      email: username.trim(),
+      password: password.trim(),
+      email_confirm: true,
+      user_metadata: { full_name: (rest.primary_contact as string | undefined) ?? "" },
+      app_metadata: { role: "group_admin" },
+    });
+
+    if (authError) {
+      return NextResponse.json(
+        { data: group, warning: `Group created but user account failed: ${authError.message}` },
+        { status: 201 }
+      );
+    }
+
+    await admin.from("profiles").upsert({
+      id: authUser.user.id,
+      email: username.trim(),
+      full_name: (rest.primary_contact as string | undefined) ?? null,
+      role: "group_admin" as const,
+      group_id: group.id,
+    });
+  }
+
+  return NextResponse.json(
+    { data: group, emailSent: sendNotify ? true : false },
+    { status: 201 }
+  );
 }

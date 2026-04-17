@@ -242,6 +242,8 @@ export default function GroupList() {
   );
 }
 
+const GROUP_ACCOUNT_TYPES = ["Free", "Standard", "Premium", "Enterprise"];
+
 type NewGroupFormProps = {
   onCreated: (id: string) => void;
   onCancel: () => void;
@@ -250,32 +252,61 @@ type NewGroupFormProps = {
 function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [fields, setFields] = useState({
     name: "",
+    internal_id: String(Date.now()),
+    account_type: "Standard",
     primary_contact: "",
     primary_contact_email: "",
-    phone: "",
+    username: "",
+    password: "",
+    confirm_password: "",
+    address: "",
     city: "",
     state: "",
+    zip: "",
+    phone: "",
+    billing_contact: "",
+    billing_email: "",
+    billing_phone: "",
   });
 
   function set(key: keyof typeof fields) {
-    return (e: React.ChangeEvent<HTMLInputElement>) =>
+    return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       setFields((f) => ({ ...f, [key]: e.target.value }));
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submit(sendNotify: boolean) {
+    if (!fields.name.trim()) {
+      setError("Group Name is required.");
+      return;
+    }
+    if (fields.username.trim() && fields.password !== fields.confirm_password) {
+      setError("Passwords do not match.");
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
-    const body: { name: string } & GroupUpdate = {
+    const body = {
       name: fields.name.trim(),
+      internal_id: fields.internal_id.trim() || String(Date.now()),
+      account_type: fields.account_type,
       primary_contact: fields.primary_contact.trim() || null,
       primary_contact_email: fields.primary_contact_email.trim() || null,
       phone: fields.phone.trim() || null,
+      address: fields.address.trim() || null,
       city: fields.city.trim() || null,
       state: fields.state.trim().toUpperCase() || null,
+      zip: fields.zip.trim() || null,
+      billing_contact: fields.billing_contact.trim() || null,
+      billing_email: fields.billing_email.trim() || null,
+      billing_phone: fields.billing_phone.trim() || null,
+      username: fields.username.trim() || undefined,
+      password: fields.password || undefined,
+      sendNotify,
     };
 
     const res = await fetch("/api/groups", {
@@ -284,67 +315,154 @@ function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
       body: JSON.stringify(body),
     });
 
-    if (res.ok) {
-      const json = (await res.json()) as { data: GroupRow };
-      onCreated(json.data.id);
+    const json = (await res.json()) as { data?: GroupRow; error?: string; warning?: string; emailSent?: boolean };
+
+    if (res.ok && json.data) {
+      if (json.warning) setError(json.warning);
+      if (sendNotify) {
+        setToast("Email sent to new group admin.");
+        setTimeout(() => {
+          onCreated(json.data!.id);
+        }, 1200);
+      } else {
+        onCreated(json.data.id);
+      }
     } else {
-      const json = (await res.json()) as { error?: string };
       setError(json.error ?? "Failed to create group");
       setSaving(false);
     }
   }
 
   return (
-    <div
-      className="card p-6 mb-4"
-      style={{ borderLeft: "3px solid var(--blue)" }}
-    >
-      <h2 className="font-semibold mb-4" style={{ color: "var(--text-primary)" }}>
+    <div className="card p-6 mb-4" style={{ borderLeft: "3px solid var(--blue)" }}>
+      <h2 className="font-semibold mb-5" style={{ color: "var(--text-primary)", fontSize: 16 }}>
         New Group
       </h2>
-      <form onSubmit={(e) => void handleSubmit(e)}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-          <div className="sm:col-span-2 lg:col-span-1">
+
+      {toast && (
+        <div className="mb-4 px-4 py-2 rounded text-sm font-medium"
+          style={{ background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" }}>
+          {toast}
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {/* Row 1: Group Name, Group ID, Account Type */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
             <label className="label">Group Name *</label>
-            <input className="input" required value={fields.name} onChange={set("name")} placeholder="e.g. ABC Auto Group" />
+            <input className="input" required value={fields.name} onChange={set("name")} placeholder="ABC Auto Group" />
           </div>
           <div>
-            <label className="label">Primary Contact</label>
-            <input className="input" value={fields.primary_contact} onChange={set("primary_contact")} placeholder="Contact name" />
+            <label className="label">Group ID *</label>
+            <input className="input" required value={fields.internal_id} onChange={set("internal_id")} placeholder="Billing identifier" />
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Used for billing; never changes</p>
           </div>
           <div>
-            <label className="label">Email</label>
-            <input className="input" type="email" value={fields.primary_contact_email} onChange={set("primary_contact_email")} placeholder="contact@group.com" />
+            <label className="label">Account Type</label>
+            <select className="input" value={fields.account_type} onChange={set("account_type")}>
+              {GROUP_ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Row 2: Contact Name, Contact Email, Phone */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Contact Name</label>
+            <input className="input" value={fields.primary_contact} onChange={set("primary_contact")} placeholder="Jane Smith" />
+          </div>
+          <div>
+            <label className="label">Contact Email</label>
+            <input className="input" type="email" value={fields.primary_contact_email} onChange={set("primary_contact_email")} placeholder="jane@group.com" />
           </div>
           <div>
             <label className="label">Phone</label>
             <input className="input" value={fields.phone} onChange={set("phone")} placeholder="(555) 123-4567" />
           </div>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="label">City</label>
-              <input className="input" value={fields.city} onChange={set("city")} placeholder="Chicago" />
-            </div>
-            <div style={{ width: 70 }}>
+        </div>
+
+        {/* Row 3: Username, Password, Confirm Password */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Username (login email)</label>
+            <input className="input" type="email" value={fields.username} onChange={set("username")} placeholder="admin@group.com" />
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Leave blank to skip account creation</p>
+          </div>
+          <div>
+            <label className="label">Password</label>
+            <input className="input" type="password" value={fields.password} onChange={set("password")} placeholder="Min. 8 characters" />
+          </div>
+          <div>
+            <label className="label">Confirm Password</label>
+            <input className="input" type="password" value={fields.confirm_password} onChange={set("confirm_password")} placeholder="Re-enter password" />
+          </div>
+        </div>
+
+        {/* Row 4: Address, City, State/Zip */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Address</label>
+            <input className="input" value={fields.address} onChange={set("address")} placeholder="123 Main St" />
+          </div>
+          <div>
+            <label className="label">City</label>
+            <input className="input" value={fields.city} onChange={set("city")} placeholder="Chicago" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
               <label className="label">State</label>
               <input className="input" value={fields.state} onChange={set("state")} placeholder="IL" maxLength={2} />
+            </div>
+            <div>
+              <label className="label">Zip</label>
+              <input className="input" value={fields.zip} onChange={set("zip")} placeholder="60601" />
             </div>
           </div>
         </div>
 
-        {error && (
-          <p className="text-sm mb-3" style={{ color: "var(--error)" }}>{error}</p>
-        )}
-
-        <div className="flex items-center gap-3">
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? "Creating…" : "Create Group"}
-          </button>
-          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>
-            Cancel
-          </button>
+        {/* Row 5: Billing Contact, Billing Email, Billing Phone */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Billing Contact</label>
+            <input className="input" value={fields.billing_contact} onChange={set("billing_contact")} placeholder="Billing name" />
+          </div>
+          <div>
+            <label className="label">Billing Email</label>
+            <input className="input" type="email" value={fields.billing_email} onChange={set("billing_email")} placeholder="billing@group.com" />
+          </div>
+          <div>
+            <label className="label">Billing Phone</label>
+            <input className="input" value={fields.billing_phone} onChange={set("billing_phone")} placeholder="(555) 987-6543" />
+          </div>
         </div>
-      </form>
+      </div>
+
+      {error && (
+        <p className="text-sm mt-4" style={{ color: "var(--error)" }}>{error}</p>
+      )}
+
+      <div className="flex items-center gap-3 mt-5 flex-wrap">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => void submit(true)}
+          style={{ background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, height: 36, padding: "0 16px", fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1 }}
+        >
+          {saving ? "Saving…" : "SAVE AND NOTIFY NEW GROUP"}
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => void submit(false)}
+          style={{ background: "#4caf50", color: "#fff", border: "none", borderRadius: 4, height: 36, padding: "0 16px", fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1 }}
+        >
+          {saving ? "Saving…" : "SAVE NEW GROUP"}
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

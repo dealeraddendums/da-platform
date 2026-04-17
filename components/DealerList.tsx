@@ -251,6 +251,16 @@ function StatusBadge({ active }: { active: boolean }) {
   );
 }
 
+const AUTO_MAKES = [
+  "Acura","Alfa Romeo","Aston Martin","Audi","Bentley","BMW","Buick","Cadillac",
+  "Chevrolet","Chrysler","Dodge","Ferrari","Fiat","Ford","Genesis","GMC","Honda",
+  "Hyundai","Infiniti","Jaguar","Jeep","Kia","Lamborghini","Land Rover","Lexus",
+  "Lincoln","Lotus","Maserati","Mazda","Mercedes-Benz","Mini","Mitsubishi","Nissan",
+  "Porsche","Ram","Rolls-Royce","Subaru","Tesla","Toyota","Volkswagen","Volvo","Other",
+];
+
+const ACCOUNT_TYPES = ["Free", "Standard", "Premium", "Enterprise"];
+
 type NewDealerFormProps = {
   onCreated: (id: string) => void;
   onCancel: () => void;
@@ -259,34 +269,57 @@ type NewDealerFormProps = {
 function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [fields, setFields] = useState({
-    dealer_id: "",
     name: "",
+    dealer_id: String(Date.now()),
+    account_type: "Standard",
+    franchise: "",
     primary_contact: "",
     primary_contact_email: "",
-    phone: "",
+    username: "",
+    password: "",
+    confirm_password: "",
+    address: "",
     city: "",
     state: "",
+    zip: "",
+    phone: "",
   });
 
   function set(key: keyof typeof fields) {
-    return (e: React.ChangeEvent<HTMLInputElement>) =>
+    return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       setFields((f) => ({ ...f, [key]: e.target.value }));
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submit(sendNotify: boolean) {
+    if (!fields.name.trim() || !fields.dealer_id.trim()) {
+      setError("Dealer Name and Dealer ID are required.");
+      return;
+    }
+    if (fields.username.trim() && fields.password !== fields.confirm_password) {
+      setError("Passwords do not match.");
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
-    const body: { dealer_id: string; name: string } & DealerUpdate = {
+    const body = {
       dealer_id: fields.dealer_id.trim(),
       name: fields.name.trim(),
+      account_type: fields.account_type,
+      makes: fields.franchise ? [fields.franchise] : [],
       primary_contact: fields.primary_contact.trim() || null,
       primary_contact_email: fields.primary_contact_email.trim() || null,
       phone: fields.phone.trim() || null,
+      address: fields.address.trim() || null,
       city: fields.city.trim() || null,
       state: fields.state.trim().toUpperCase() || null,
+      zip: fields.zip.trim() || null,
+      username: fields.username.trim() || undefined,
+      password: fields.password || undefined,
+      sendNotify,
     };
 
     const res = await fetch("/api/dealers", {
@@ -295,71 +328,148 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
       body: JSON.stringify(body),
     });
 
-    if (res.ok) {
-      const json = (await res.json()) as { data: DealerRow };
-      onCreated(json.data.id);
+    const json = (await res.json()) as { data?: DealerRow; error?: string; warning?: string; emailSent?: boolean };
+
+    if (res.ok && json.data) {
+      if (json.warning) setError(json.warning);
+      if (sendNotify) {
+        setToast("Email sent to new dealer.");
+        setTimeout(() => {
+          onCreated(json.data!.id);
+        }, 1200);
+      } else {
+        onCreated(json.data.id);
+      }
     } else {
-      const json = (await res.json()) as { error?: string };
       setError(json.error ?? "Failed to create dealer");
       setSaving(false);
     }
   }
 
   return (
-    <div
-      className="card p-6 mb-4"
-      style={{ borderLeft: "3px solid var(--blue)" }}
-    >
-      <h2 className="font-semibold mb-4" style={{ color: "var(--text-primary)" }}>
+    <div className="card p-6 mb-4" style={{ borderLeft: "3px solid var(--blue)" }}>
+      <h2 className="font-semibold mb-5" style={{ color: "var(--text-primary)", fontSize: 16 }}>
         New Dealer
       </h2>
-      <form onSubmit={(e) => void handleSubmit(e)}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+
+      {toast && (
+        <div className="mb-4 px-4 py-2 rounded text-sm font-medium"
+          style={{ background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" }}>
+          {toast}
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {/* Row 1: Name, Dealer ID, Account Type */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Dealer Name *</label>
+            <input className="input" required value={fields.name} onChange={set("name")} placeholder="ABC Motors" />
+          </div>
           <div>
             <label className="label">Dealer ID *</label>
             <input className="input" required value={fields.dealer_id} onChange={set("dealer_id")} placeholder="e.g. DA-12345" />
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Matches Aurora DEALER_ID</p>
           </div>
           <div>
-            <label className="label">Dealer Name *</label>
-            <input className="input" required value={fields.name} onChange={set("name")} placeholder="e.g. ABC Motors" />
+            <label className="label">Account Type</label>
+            <select className="input" value={fields.account_type} onChange={set("account_type")}>
+              {ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Row 2: Franchise Brand, Contact Name, Contact Email */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Franchise Brand</label>
+            <select className="input" value={fields.franchise} onChange={set("franchise")}>
+              <option value="">— Select make —</option>
+              {AUTO_MAKES.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
           </div>
           <div>
-            <label className="label">Primary Contact</label>
-            <input className="input" value={fields.primary_contact} onChange={set("primary_contact")} placeholder="Contact name" />
+            <label className="label">Contact Name</label>
+            <input className="input" value={fields.primary_contact} onChange={set("primary_contact")} placeholder="Jane Smith" />
           </div>
           <div>
-            <label className="label">Email</label>
-            <input className="input" type="email" value={fields.primary_contact_email} onChange={set("primary_contact_email")} placeholder="contact@dealer.com" />
+            <label className="label">Contact Email</label>
+            <input className="input" type="email" value={fields.primary_contact_email} onChange={set("primary_contact_email")} placeholder="jane@dealer.com" />
           </div>
+        </div>
+
+        {/* Row 3: Username, Password, Confirm Password */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Username (login email)</label>
+            <input className="input" type="email" value={fields.username} onChange={set("username")} placeholder="dealer@example.com" />
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Leave blank to skip account creation</p>
+          </div>
+          <div>
+            <label className="label">Password</label>
+            <input className="input" type="password" value={fields.password} onChange={set("password")} placeholder="Min. 8 characters" />
+          </div>
+          <div>
+            <label className="label">Confirm Password</label>
+            <input className="input" type="password" value={fields.confirm_password} onChange={set("confirm_password")} placeholder="Re-enter password" />
+          </div>
+        </div>
+
+        {/* Row 4: Address, City, State, Zip, Phone */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Address</label>
+            <input className="input" value={fields.address} onChange={set("address")} placeholder="123 Main St" />
+          </div>
+          <div>
+            <label className="label">City</label>
+            <input className="input" value={fields.city} onChange={set("city")} placeholder="Chicago" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="label">State</label>
+              <input className="input" value={fields.state} onChange={set("state")} placeholder="IL" maxLength={2} />
+            </div>
+            <div>
+              <label className="label">Zip</label>
+              <input className="input" value={fields.zip} onChange={set("zip")} placeholder="60601" />
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="label">Phone</label>
             <input className="input" value={fields.phone} onChange={set("phone")} placeholder="(555) 123-4567" />
           </div>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="label">City</label>
-              <input className="input" value={fields.city} onChange={set("city")} placeholder="Chicago" />
-            </div>
-            <div style={{ width: 70 }}>
-              <label className="label">State</label>
-              <input className="input" value={fields.state} onChange={set("state")} placeholder="IL" maxLength={2} />
-            </div>
-          </div>
         </div>
+      </div>
 
-        {error && (
-          <p className="text-sm mb-3" style={{ color: "var(--error)" }}>{error}</p>
-        )}
+      {error && (
+        <p className="text-sm mt-4" style={{ color: "var(--error)" }}>{error}</p>
+      )}
 
-        <div className="flex items-center gap-3">
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? "Creating…" : "Create Dealer"}
-          </button>
-          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>
-            Cancel
-          </button>
-        </div>
-      </form>
+      <div className="flex items-center gap-3 mt-5 flex-wrap">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => void submit(true)}
+          style={{ background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, height: 36, padding: "0 16px", fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1 }}
+        >
+          {saving ? "Saving…" : "SAVE AND NOTIFY NEW DEALER"}
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => void submit(false)}
+          style={{ background: "#4caf50", color: "#fff", border: "none", borderRadius: 4, height: 36, padding: "0 16px", fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1 }}
+        >
+          {saving ? "Saving…" : "SAVE NEW DEALER"}
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

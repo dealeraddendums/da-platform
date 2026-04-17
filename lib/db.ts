@@ -41,6 +41,8 @@ export type GroupRow = {
   id: string;
   name: string;
   active: boolean;
+  account_type: string;
+  internal_id: string | null;
   primary_contact: string | null;
   primary_contact_email: string | null;
   phone: string | null;
@@ -49,6 +51,9 @@ export type GroupRow = {
   state: string | null;
   zip: string | null;
   country: string;
+  billing_contact: string | null;
+  billing_email: string | null;
+  billing_phone: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -56,6 +61,8 @@ export type GroupRow = {
 type GroupInsert = {
   name: string;
   active?: boolean;
+  account_type?: string;
+  internal_id?: string | null;
   primary_contact?: string | null;
   primary_contact_email?: string | null;
   phone?: string | null;
@@ -64,11 +71,15 @@ type GroupInsert = {
   state?: string | null;
   zip?: string | null;
   country?: string;
+  billing_contact?: string | null;
+  billing_email?: string | null;
+  billing_phone?: string | null;
 };
 
 export type GroupUpdate = {
   name?: string;
   active?: boolean;
+  account_type?: string;
   primary_contact?: string | null;
   primary_contact_email?: string | null;
   phone?: string | null;
@@ -77,6 +88,9 @@ export type GroupUpdate = {
   state?: string | null;
   zip?: string | null;
   country?: string;
+  billing_contact?: string | null;
+  billing_email?: string | null;
+  billing_phone?: string | null;
 };
 
 export type DealerRow = {
@@ -88,6 +102,7 @@ export type DealerRow = {
   inventory_dealer_id: string | null;
   name: string;
   active: boolean;
+  account_type: string;
   group_id: string | null;
   primary_contact: string | null;
   primary_contact_email: string | null;
@@ -109,6 +124,7 @@ type DealerInsert = {
   inventory_dealer_id?: string | null;
   name: string;
   active?: boolean;
+  account_type?: string;
   group_id?: string | null;
   primary_contact?: string | null;
   primary_contact_email?: string | null;
@@ -127,6 +143,7 @@ export type DealerUpdate = {
   /** inventory_dealer_id can be updated by super_admin when feed goes live. internal_id must never be updated. */
   inventory_dealer_id?: string | null;
   active?: boolean;
+  account_type?: string;
   group_id?: string | null;
   primary_contact?: string | null;
   primary_contact_email?: string | null;
