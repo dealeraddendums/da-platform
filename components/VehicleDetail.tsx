@@ -188,23 +188,18 @@ export default function VehicleDetail({ vehicle: initialVehicle, onClose }: Prop
             style={{ borderTop: "1px solid var(--border)" }}
           >
             <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
-              Print jobs available in Phase 6 — Document Builder
+              Open in Document Builder to create addendums and infosheets
             </p>
             <div className="flex gap-2">
-              <button
-                className="btn btn-secondary"
-                disabled
-                title="Coming in Phase 6"
+              <a
+                href={`/builder/${vehicle.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-primary"
+                style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
               >
-                Print Addendum
-              </button>
-              <button
-                className="btn btn-secondary"
-                disabled
-                title="Coming in Phase 6"
-              >
-                Print Infosheet
-              </button>
+                Open in Builder
+              </a>
             </div>
           </div>
         </div>

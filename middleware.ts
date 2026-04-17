@@ -40,7 +40,11 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/dealers") ||
     pathname.startsWith("/groups") ||
     pathname.startsWith("/documents") ||
-    pathname.startsWith("/admin");
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/builder") ||
+    pathname.startsWith("/vehicles") ||
+    pathname.startsWith("/templates") ||
+    pathname.startsWith("/settings");
 
   // Redirect unauthenticated users away from protected routes
   if (isProtected && !session) {
