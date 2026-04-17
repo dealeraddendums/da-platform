@@ -119,6 +119,7 @@ export default async function ApiDocsPage() {
   if (!data || data.role !== "super_admin") redirect("/dashboard");
 
   const totalEndpoints = NEW_PLATFORM_SECTIONS.reduce((n, s) => n + s.endpoints.length, 0);
+  const legacyCount = 17;
 
   return (
     <div>
@@ -127,7 +128,7 @@ export default async function ApiDocsPage() {
           API Documentation
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
-          {totalEndpoints} endpoints across {NEW_PLATFORM_SECTIONS.length} resource groups &mdash; super_admin access only
+          {totalEndpoints + legacyCount} total endpoints — {legacyCount} legacy (ported) + {totalEndpoints} new platform &mdash; super_admin access only
         </p>
       </div>
 
@@ -150,29 +151,89 @@ export default async function ApiDocsPage() {
 
       {/* Legacy APIs section */}
       <div className="mb-8">
-        <div className="flex items-center gap-3 mb-3">
+        <div className="flex items-center gap-3 mb-4">
           <h2 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>
-            Legacy APIs (Ported)
+            Legacy APIs (Ported from api.dealeraddendums.com)
           </h2>
           <span
             className="text-xs px-2 py-0.5 rounded"
-            style={{ background: "var(--bg-subtle)", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+            style={{ background: "#e8f5e9", color: "#2e7d32", border: "1px solid #a5d6a7" }}
           >
-            0 endpoints
+            17 endpoints
           </span>
         </div>
-        <div
-          className="card p-5"
-          style={{ borderLeft: "3px solid var(--border-strong)" }}
-        >
-          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-            No legacy endpoints ported yet.
-          </p>
-          <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-            The legacy API at api.dealeraddendums.com requires authentication to view endpoint documentation.
-            Share the legacy API spec (route list, parameters, response shapes) to enable porting under matching URL paths with Supabase JWT auth.
-          </p>
-        </div>
+
+        {[
+          {
+            title: "Vehicle & VIN",
+            endpoints: [
+              { method: "GET" as Method, path: "/api/vehicle",                             description: "Vehicle lookup: feature=button checks for addendum PDF; feature=pricing returns MSRP + options (requires stock); feature=both returns both", role: "public" },
+              { method: "GET" as Method, path: "/api/decode-vin",                          description: "Decode VIN via NHTSA vPIC; returns make, model, year, body class, and all decoded fields", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/generate-button/[vin]/[theme]",       description: "Returns HTML download-button embed for a VIN; empty string if no PDF exists. Optional: ?text=", role: "public (embed widget)" },
+              { method: "GET" as Method, path: "/api/generate-addendum/[vin]/[theme]",     description: "Returns HTML addendum embed. Optional: ?feature=pricing|both&stock=&text=", role: "public (embed widget)" },
+            ],
+          },
+          {
+            title: "Dealer Data (key→JWT)",
+            endpoints: [
+              { method: "GET" as Method, path: "/api/search",                              description: "Search dealer_inventory by VIN; optionally scoped to dealership_id", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getalldealerships",                   description: "List all dealerships from dealer_dim; super_admin gets all, others get own", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getallvehicles",                      description: "List all active vehicles for a dealer from dealer_inventory; pass ?dealer= for admin override", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getdealeroptions",                    description: "List addendum options for the dealer's vehicles from addendum_data; optional ?from=&to= date filter", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getdealerdefaults",                   description: "List default addendum items for the dealer from addendum_defaults", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getvehicleoptions",                   description: "List addendum options for a specific VIN from addendum_data; requires ?vin=", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/countoptions",                        description: "Count how many times a named option was added for the dealer; requires ?option=; optional ?from=&to=", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/countgroupoptions",                   description: "Count option appearances across all dealers in the same group; requires ?option=; optional ?from=&to=", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getdealernames",                      description: "List dealer_dim IDs and names; super_admin gets all, others get own", role: "authenticated" },
+            ],
+          },
+          {
+            title: "DMS Integrations (public webhooks)",
+            endpoints: [
+              { method: "GET" as Method, path: "/api/dealerdotcom",                        description: "Dealer.com DMS: returns vehicle pricing (MSRP, INTERNET_PRICE) + addendum options for a VIN+stock", role: "public" },
+              { method: "GET" as Method, path: "/api/dealerdotcomWS",                      description: "Dealer.com DMS: returns wholesale price as plain text string (e.g. $1234.56)", role: "public" },
+              { method: "GET" as Method, path: "/api/dealeron",                            description: "DealerOn DMS: returns vehicle pricing + addendum options (trimmed option schema)", role: "public" },
+              { method: "GET" as Method, path: "/api/dealeronWS",                          description: "DealerOn DMS: returns wholesale price as plain text string", role: "public" },
+            ],
+          },
+        ].map((section) => (
+          <div key={section.title} className="mb-5">
+            <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+              {section.title}
+            </p>
+            <div className="card" style={{ overflow: "hidden" }}>
+              {section.endpoints.map((ep, i) => (
+                <div
+                  key={`${ep.method}-${ep.path}`}
+                  className="flex items-start gap-4 px-4 py-3"
+                  style={{
+                    borderBottom: i < section.endpoints.length - 1 ? "1px solid var(--border)" : "none",
+                    background: i % 2 === 0 ? "var(--bg-surface)" : "var(--bg-subtle)",
+                  }}
+                >
+                  <span
+                    className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 mt-0.5"
+                    style={{ background: METHOD_COLORS[ep.method].bg, color: METHOD_COLORS[ep.method].text, minWidth: 52, textAlign: "center" }}
+                  >
+                    {ep.method}
+                  </span>
+                  <code className="text-sm flex-shrink-0" style={{ color: "var(--text-primary)", fontFamily: "monospace", minWidth: 280 }}>
+                    {ep.path}
+                  </code>
+                  <span className="text-sm flex-1" style={{ color: "var(--text-secondary)" }}>
+                    {ep.description}
+                  </span>
+                  <span
+                    className="text-xs px-2 py-0.5 rounded flex-shrink-0 mt-0.5"
+                    style={{ background: "var(--bg-subtle)", color: "var(--text-muted)", border: "1px solid var(--border)", whiteSpace: "nowrap" }}
+                  >
+                    {ep.role}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* New Platform APIs */}
