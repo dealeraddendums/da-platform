@@ -2,18 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { UserRole } from "@/lib/db";
 
 type NavItem = {
   label: string;
   href: string;
   icon: React.ReactNode;
   disabled?: boolean;
+  roles: UserRole[];
 };
 
 const nav: NavItem[] = [
   {
     label: "Dashboard",
     href: "/dashboard",
+    roles: ["super_admin", "group_admin", "dealer_admin", "dealer_user"],
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <rect x="3" y="3" width="7" height="7" rx="1" />
@@ -26,6 +29,7 @@ const nav: NavItem[] = [
   {
     label: "Dealers",
     href: "/dealers",
+    roles: ["super_admin", "group_admin"],
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -36,6 +40,7 @@ const nav: NavItem[] = [
   {
     label: "Groups",
     href: "/groups",
+    roles: ["super_admin"],
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -48,6 +53,7 @@ const nav: NavItem[] = [
   {
     label: "Inventory",
     href: "/vehicles",
+    roles: ["dealer_admin", "dealer_user"],
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <rect x="1" y="3" width="15" height="13" rx="1" />
@@ -60,6 +66,7 @@ const nav: NavItem[] = [
   {
     label: "Builder",
     href: "/builder",
+    roles: ["dealer_admin", "dealer_user"],
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M12 20h9" />
@@ -70,6 +77,7 @@ const nav: NavItem[] = [
   {
     label: "Templates",
     href: "/templates",
+    roles: ["dealer_admin", "dealer_user"],
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -81,6 +89,7 @@ const nav: NavItem[] = [
   {
     label: "Settings",
     href: "/settings",
+    roles: ["dealer_admin"],
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <circle cx="12" cy="12" r="3" />
@@ -91,6 +100,7 @@ const nav: NavItem[] = [
   {
     label: "API Docs",
     href: "/api-docs",
+    roles: ["super_admin"],
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <polyline points="16 18 22 12 16 6" />
@@ -101,6 +111,8 @@ const nav: NavItem[] = [
   {
     label: "Documents",
     href: "/documents",
+    roles: ["super_admin", "group_admin", "dealer_admin", "dealer_user"],
+    disabled: true,
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -109,23 +121,24 @@ const nav: NavItem[] = [
         <line x1="16" y1="17" x2="8" y2="17" />
       </svg>
     ),
-    disabled: true,
   },
   {
     label: "Users",
     href: "/users",
+    roles: ["super_admin"],
+    disabled: true,
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
         <circle cx="12" cy="7" r="4" />
       </svg>
     ),
-    disabled: true,
   },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ role = "dealer_user" }: { role?: UserRole }) {
   const pathname = usePathname();
+  const visibleNav = nav.filter((item) => item.roles.includes(role));
 
   return (
     <aside
@@ -153,7 +166,7 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 py-2 overflow-y-auto">
-        {nav.map((item) => {
+        {visibleNav.map((item) => {
           const isActive =
             !item.disabled &&
             (pathname === item.href || pathname.startsWith(item.href + "/"));

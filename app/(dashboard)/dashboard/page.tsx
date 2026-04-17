@@ -8,6 +8,37 @@ const ROLE_LABELS: Record<UserRole, string> = {
   dealer_user: "Dealer User",
 };
 
+type StatCard = { label: string; value: string; note: string };
+
+function getStatCards(role: UserRole): StatCard[] {
+  switch (role) {
+    case "super_admin":
+      return [
+        { label: "Dealers", value: "—", note: "All accounts" },
+        { label: "Groups", value: "—", note: "Dealer groups" },
+        { label: "Documents", value: "—", note: "Phase 6" },
+        { label: "Users", value: "—", note: "Coming soon" },
+      ];
+    case "group_admin":
+      return [
+        { label: "Dealers", value: "—", note: "In your group" },
+        { label: "Documents", value: "—", note: "Phase 6" },
+      ];
+    case "dealer_admin":
+      return [
+        { label: "Inventory", value: "—", note: "Active vehicles" },
+        { label: "Documents", value: "—", note: "Phase 6" },
+        { label: "Templates", value: "—", note: "Saved layouts" },
+      ];
+    case "dealer_user":
+    default:
+      return [
+        { label: "Inventory", value: "—", note: "Active vehicles" },
+        { label: "Documents", value: "—", note: "Phase 6" },
+      ];
+  }
+}
+
 export default async function DashboardPage() {
   const supabase = createClient();
   const {
@@ -25,9 +56,14 @@ export default async function DashboardPage() {
     profile = data as ProfileRow | null;
   }
 
-  const roleLabel = profile?.role
-    ? (ROLE_LABELS[profile.role as UserRole] ?? profile.role)
-    : "—";
+  // Mirror layout.tsx fallback: profiles → JWT app_metadata → default
+  const role: UserRole =
+    profile?.role ??
+    (session?.user.app_metadata?.role as UserRole | undefined) ??
+    "dealer_user";
+
+  const roleLabel = ROLE_LABELS[role] ?? role;
+  const cards = getStatCards(role);
 
   return (
     <div>
@@ -46,12 +82,7 @@ export default async function DashboardPage() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {[
-          { label: "Dealers", value: "—", note: "Phase 2" },
-          { label: "Groups", value: "—", note: "Phase 3" },
-          { label: "Documents", value: "—", note: "Phase 6" },
-          { label: "Users", value: "—", note: "Coming soon" },
-        ].map((card) => (
+        {cards.map((card) => (
           <div key={card.label} className="card p-4">
             <p
               className="text-xs font-semibold uppercase tracking-wider mb-2"

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { ProfileRow } from "@/lib/db";
+import type { ProfileRow, UserRole } from "@/lib/db";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 
@@ -27,15 +27,21 @@ export default async function DashboardLayout({
 
   const profile = data as ProfileRow | null;
 
+  // Prefer profiles table role; fall back to JWT app_metadata claim set by the hook
+  const role: UserRole =
+    profile?.role ??
+    (session.user.app_metadata?.role as UserRole | undefined) ??
+    "dealer_user";
+
   const userDisplay = {
     email: session.user.email ?? "",
     fullName: profile?.full_name ?? null,
-    role: profile?.role ?? "dealer_user",
+    role,
   };
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar />
+      <Sidebar role={role} />
       <div className="flex flex-col flex-1 overflow-hidden">
         <Topbar user={userDisplay} />
         <main
