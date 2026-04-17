@@ -46,6 +46,18 @@ const nav: NavItem[] = [
     ),
   },
   {
+    label: "Inventory",
+    href: "/vehicles",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="1" y="3" width="15" height="13" rx="1" />
+        <path d="M16 8h4l3 5v3h-7V8z" />
+        <circle cx="5.5" cy="18.5" r="2.5" />
+        <circle cx="18.5" cy="18.5" r="2.5" />
+      </svg>
+    ),
+  },
+  {
     label: "Documents",
     href: "/documents",
     icon: (
@@ -130,7 +142,7 @@ export default function Sidebar() {
           borderTop: "1px solid rgba(255,255,255,0.08)",
         }}
       >
-        Phase 3 — Group Management
+        Phase 4 — Vehicle Inventory
       </div>
     </aside>
   );
