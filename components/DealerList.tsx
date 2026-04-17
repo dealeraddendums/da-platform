@@ -259,7 +259,12 @@ const AUTO_MAKES = [
   "Porsche","Ram","Rolls-Royce","Subaru","Tesla","Toyota","Volkswagen","Volvo","Other",
 ];
 
-const ACCOUNT_TYPES = ["Free", "Standard", "Premium", "Enterprise"];
+const ACCOUNT_TYPES: { label: string; value: string }[] = [
+  { label: "Trial",    value: "Trial" },
+  { label: "Manual",   value: "Monthly Subscription Manual" },
+  { label: "Auto Web", value: "Monthly Subscription Automatic Web" },
+  { label: "Auto DMS", value: "Monthly Subscription Automatic DMS" },
+];
 
 type NewDealerFormProps = {
   onCreated: (id: string) => void;
@@ -273,7 +278,7 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
   const [fields, setFields] = useState({
     name: "",
     dealer_id: String(Date.now()),
-    account_type: "Standard",
+    account_type: "Monthly Subscription Manual",
     franchise: "",
     primary_contact: "",
     primary_contact_email: "",
@@ -374,7 +379,7 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
           <div>
             <label className="label">Account Type</label>
             <select className="input" value={fields.account_type} onChange={set("account_type")}>
-              {ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              {ACCOUNT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
           </div>
         </div>

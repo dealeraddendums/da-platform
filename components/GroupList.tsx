@@ -242,7 +242,12 @@ export default function GroupList() {
   );
 }
 
-const GROUP_ACCOUNT_TYPES = ["Free", "Standard", "Premium", "Enterprise"];
+const GROUP_ACCOUNT_TYPES: { label: string; value: string }[] = [
+  { label: "Trial",    value: "Trial" },
+  { label: "Manual",   value: "Monthly Subscription Manual" },
+  { label: "Auto Web", value: "Monthly Subscription Automatic Web" },
+  { label: "Auto DMS", value: "Monthly Subscription Automatic DMS" },
+];
 
 type NewGroupFormProps = {
   onCreated: (id: string) => void;
@@ -256,7 +261,7 @@ function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
   const [fields, setFields] = useState({
     name: "",
     internal_id: String(Date.now()),
-    account_type: "Standard",
+    account_type: "Monthly Subscription Manual",
     primary_contact: "",
     primary_contact_email: "",
     username: "",
@@ -361,7 +366,7 @@ function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
           <div>
             <label className="label">Account Type</label>
             <select className="input" value={fields.account_type} onChange={set("account_type")}>
-              {GROUP_ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              {GROUP_ACCOUNT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
           </div>
         </div>
