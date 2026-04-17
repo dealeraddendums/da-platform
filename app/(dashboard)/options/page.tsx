@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
-import GroupList from "@/components/GroupList";
+import OptionsLibrary from "@/components/OptionsLibrary";
+import VehicleSubNav from "@/components/VehicleSubNav";
 
-export const metadata = { title: "Groups — DA Platform" };
+export const metadata = { title: "Addendum Options — DA Platform" };
 
-export default async function GroupsPage() {
+export default async function OptionsPage() {
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect("/login");
@@ -13,33 +14,32 @@ export default async function GroupsPage() {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("role, group_id")
+    .select("role, dealer_id")
     .eq("id", session.user.id)
-    .single<{ role: string; group_id: string | null }>();
+    .single<{ role: string; dealer_id: string | null }>();
 
   const role = profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user";
 
-  if (role === "super_admin") {
-    return <GroupList />;
-  }
+  if (role !== "dealer_admin" && role !== "dealer_user") redirect("/dashboard");
 
-  if (role === "group_admin") {
-    if (profile?.group_id) redirect(`/groups/${profile.group_id}`);
+  if (!profile?.dealer_id) {
     return (
       <div>
-        <h1 className="text-xl font-semibold mb-2" style={{ color: "var(--text-inverse)" }}>
-          Group
-        </h1>
         <div className="card p-6">
           <p style={{ color: "var(--text-secondary)" }}>
-            No group has been assigned to your account. Contact your administrator.
+            No dealer assigned to your account. Contact your administrator.
           </p>
         </div>
       </div>
     );
   }
 
-  redirect("/dashboard");
+  return (
+    <div>
+      <VehicleSubNav />
+      <OptionsLibrary dealerId={profile.dealer_id} />
+    </div>
+  );
 }

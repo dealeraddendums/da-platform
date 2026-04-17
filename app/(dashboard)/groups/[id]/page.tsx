@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { ProfileRow, GroupRow } from "@/lib/db";
+import type { GroupRow } from "@/lib/db";
 import GroupProfileCard from "@/components/GroupProfileCard";
 
 type Props = { params: { id: string } };
@@ -11,49 +11,36 @@ export const metadata = { title: "Group Profile — DA Platform" };
 
 export default async function GroupPage({ params }: Props) {
   const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect("/login");
 
-  const { data: profileData } = await supabase
+  const admin = createAdminSupabaseClient();
+  const { data: profile } = await admin
     .from("profiles")
-    .select("*")
+    .select("role, group_id")
     .eq("id", session.user.id)
-    .returns<ProfileRow[]>()
-    .single();
+    .single<{ role: string; group_id: string | null }>();
 
-  const profile = profileData as ProfileRow | null;
-  const isSuperAdmin = profile?.role === "super_admin";
-  const isGroupAdmin = profile?.role === "group_admin";
+  const role = profile?.role
+    ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
+    ?? "dealer_user";
 
-  // Only super_admin and group_admin may view groups
-  if (!isSuperAdmin && !isGroupAdmin) {
-    redirect("/dashboard");
-  }
+  const isSuperAdmin = role === "super_admin";
+  const isGroupAdmin = role === "group_admin";
 
-  // group_admin may only view their own group
+  if (!isSuperAdmin && !isGroupAdmin) redirect("/dashboard");
   if (isGroupAdmin && profile?.group_id !== params.id) {
     redirect(`/groups/${profile?.group_id ?? ""}`);
   }
 
-  const admin = createAdminSupabaseClient();
-  const { data: groupData } = await admin
-    .from("groups")
-    .select("*")
-    .eq("id", params.id)
-    .single();
-
+  const { data: groupData } = await admin.from("groups").select("*").eq("id", params.id).single();
   const group = groupData as GroupRow | null;
   if (!group) notFound();
 
-  // group_admin can edit their own group's contact info; super_admin can edit anything
   const canEdit = isSuperAdmin || isGroupAdmin;
 
   return (
     <div>
-      {/* Breadcrumb */}
       {isSuperAdmin && (
         <nav className="mb-4">
           <Link href="/groups" className="text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>
@@ -61,12 +48,7 @@ export default async function GroupPage({ params }: Props) {
           </Link>
         </nav>
       )}
-
-      <GroupProfileCard
-        group={group}
-        canEdit={canEdit}
-        isSuperAdmin={isSuperAdmin}
-      />
+      <GroupProfileCard group={group} canEdit={canEdit} isSuperAdmin={isSuperAdmin} />
     </div>
   );
 }

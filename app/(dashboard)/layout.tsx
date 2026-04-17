@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { ProfileRow, UserRole } from "@/lib/db";
+import { createAdminSupabaseClient } from "@/lib/db";
+import type { UserRole } from "@/lib/db";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 
@@ -10,28 +11,19 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) redirect("/login");
 
-  if (!session) {
-    redirect("/login");
-  }
-
-  const { data } = await supabase
+  const admin = createAdminSupabaseClient();
+  const { data: profile } = await admin
     .from("profiles")
-    .select("*")
+    .select("role, dealer_id, full_name")
     .eq("id", session.user.id)
-    .returns<ProfileRow[]>()
-    .single();
+    .single<{ role: string; dealer_id: string | null; full_name: string | null }>();
 
-  const profile = data as ProfileRow | null;
-
-  // Prefer profiles table role; fall back to JWT app_metadata claim set by the hook
-  const role: UserRole =
-    profile?.role ??
-    (session.user.app_metadata?.role as UserRole | undefined) ??
-    "dealer_user";
+  const role: UserRole = (profile?.role
+    ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
+    ?? "dealer_user") as UserRole;
 
   const userDisplay = {
     email: session.user.email ?? "",

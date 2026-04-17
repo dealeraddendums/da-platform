@@ -1,36 +1,34 @@
 import { redirect } from "next/navigation";
-import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
-import type { ProfileRow, DealerSettingsRow } from "@/lib/db";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/db";
+import type { DealerSettingsRow, UserRole } from "@/lib/db";
 import SettingsForm from "@/components/SettingsForm";
 
 export const metadata = { title: "Settings — DA Platform" };
 
 export default async function SettingsPage() {
   const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect("/login");
 
-  const { data } = await supabase
+  const admin = createAdminSupabaseClient();
+  const { data: profile } = await admin
     .from("profiles")
-    .select("*")
+    .select("role, dealer_id, group_id")
     .eq("id", session.user.id)
-    .returns<ProfileRow[]>()
-    .single();
+    .single<{ role: string; dealer_id: string | null; group_id: string | null }>();
 
-  const profile = data as ProfileRow | null;
-  if (!profile) redirect("/login");
+  const role = (profile?.role
+    ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
+    ?? "dealer_user") as UserRole;
 
-  if (profile.role === "dealer_user") redirect("/dashboard");
+  if (role === "dealer_user") redirect("/dashboard");
 
-  const isDealer = profile.role === "dealer_admin";
-  const dealerId = isDealer ? profile.dealer_id : null;
+  const isDealer = role === "dealer_admin";
+  const dealerId = isDealer ? (profile?.dealer_id ?? null) : null;
 
   let initialSettings: DealerSettingsRow | null = null;
   if (dealerId) {
-    const admin = createAdminSupabaseClient();
     const { data: s } = await admin
       .from("dealer_settings")
       .select("*")
@@ -51,8 +49,8 @@ export default async function SettingsPage() {
       </div>
       <SettingsForm
         fixedDealerId={dealerId}
-        role={profile.role}
-        groupId={profile.group_id}
+        role={role}
+        groupId={profile?.group_id ?? null}
         initialSettings={initialSettings}
       />
     </div>

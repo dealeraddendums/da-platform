@@ -1,0 +1,89 @@
+// Server-only: builds an HTML string for Puppeteer to render as a PDF.
+import { renderW } from '@/components/builder/widgetRenderer';
+import type { Widget, PaperSize } from '@/components/builder/types';
+import { formatOptionPrice } from '@/lib/option-price';
+import type { VehicleRow } from '@/lib/vehicles';
+import type { VehicleOptionRow } from '@/lib/db';
+
+const PAPER_DIMS: Record<PaperSize, { w: number; h: number }> = {
+  standard: { w: 408, h: 1056 },
+  narrow: { w: 300, h: 1056 },
+  infosheet: { w: 816, h: 1056 },
+};
+
+export interface BuildPdfHtmlInput {
+  widgets: Widget[];
+  paperSize: PaperSize;
+  fontScale: number;
+  bgUrl: string;
+  vehicle?: VehicleRow;
+  options?: VehicleOptionRow[];
+}
+
+export function buildPdfHtml({
+  widgets,
+  paperSize,
+  fontScale,
+  bgUrl,
+  vehicle,
+  options,
+}: BuildPdfHtmlInput): string {
+  const paper = PAPER_DIMS[paperSize];
+
+  const enriched = widgets.map(w => {
+    const d = { ...w.d };
+
+    if (vehicle) {
+      if (w.type === 'vehicle') {
+        d.vehicleData = {
+          stock: vehicle.STOCK_NUMBER ?? '',
+          vin: vehicle.VIN_NUMBER ?? '',
+          year: vehicle.YEAR ?? '',
+          color: vehicle.EXT_COLOR ?? '',
+          make: vehicle.MAKE ?? '',
+          trim: vehicle.TRIM ?? '',
+          model: vehicle.MODEL ?? '',
+          mileage: vehicle.MILEAGE ?? '',
+        };
+      }
+      if (w.type === 'barcode') d.vin = vehicle.VIN_NUMBER;
+    }
+
+    if (options !== undefined && w.type === 'options') {
+      d.items = options.filter(o => o.active).map(o => ({
+        name: o.option_name,
+        desc: '',
+        price: formatOptionPrice(o.option_price),
+      }));
+    }
+
+    return { ...w, d };
+  });
+
+  const widgetHtml = enriched
+    .map(w => {
+      const inner = renderW(w.type, w.d, fontScale);
+      return `<div style="position:absolute;left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px;overflow:hidden;z-index:10;">${inner}</div>`;
+    })
+    .join('\n');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: ${paper.w}px; height: ${paper.h}px; overflow: hidden; background: #fff; font-family: -apple-system, Roboto, Arial, sans-serif; }
+.paper { position: relative; width: ${paper.w}px; height: ${paper.h}px; background: #fff; overflow: hidden; }
+.frame { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.frame img { width: 100%; height: 100%; display: block; mix-blend-mode: multiply; }
+</style>
+</head>
+<body>
+<div class="paper">
+  <div class="frame"><img src="${bgUrl}" alt=""></div>
+  ${widgetHtml}
+</div>
+</body>
+</html>`;
+}

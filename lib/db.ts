@@ -82,6 +82,10 @@ export type GroupUpdate = {
 export type DealerRow = {
   id: string;
   dealer_id: string;
+  /** Never-changing billing ID (_ID). Used by da-billing for lineItemDescription. Never update. */
+  internal_id: string | null;
+  /** Inventory supplier-assigned ID. Matches Aurora DEALER_ID for inventory queries. */
+  inventory_dealer_id: string | null;
   name: string;
   active: boolean;
   group_id: string | null;
@@ -101,6 +105,8 @@ export type DealerRow = {
 
 type DealerInsert = {
   dealer_id: string;
+  internal_id?: string | null;
+  inventory_dealer_id?: string | null;
   name: string;
   active?: boolean;
   group_id?: string | null;
@@ -118,6 +124,8 @@ type DealerInsert = {
 
 export type DealerUpdate = {
   name?: string;
+  /** inventory_dealer_id can be updated by super_admin when feed goes live. internal_id must never be updated. */
+  inventory_dealer_id?: string | null;
   active?: boolean;
   group_id?: string | null;
   primary_contact?: string | null;
@@ -209,6 +217,91 @@ export type AiContentCacheRow = {
   model_version: string | null;
 };
 
+export type VehicleOptionRow = {
+  id: string;
+  vehicle_id: number;
+  dealer_id: string;
+  option_name: string;
+  option_price: string;
+  sort_order: number;
+  active: boolean;
+  source: "default" | "manual";
+  created_at: string;
+  updated_at: string;
+};
+
+type VehicleOptionInsert = {
+  vehicle_id: number;
+  dealer_id: string;
+  option_name: string;
+  option_price?: string;
+  sort_order?: number;
+  active?: boolean;
+  source?: "default" | "manual";
+};
+
+type VehicleOptionUpdate = {
+  option_name?: string;
+  option_price?: string;
+  sort_order?: number;
+  active?: boolean;
+  updated_at?: string;
+};
+
+export type PrintHistoryRow = {
+  id: string;
+  vehicle_id: number;
+  dealer_id: string;
+  document_type: "addendum" | "infosheet" | "buyer_guide";
+  printed_by: string;
+  template_id: string | null;
+  pdf_url: string | null;
+  created_at: string;
+};
+
+type PrintHistoryInsert = {
+  vehicle_id: number;
+  dealer_id: string;
+  document_type: "addendum" | "infosheet" | "buyer_guide";
+  printed_by: string;
+  template_id?: string | null;
+  pdf_url?: string | null;
+};
+
+export type AddendumLibraryRow = {
+  id: string;
+  dealer_id: string;
+  option_name: string;
+  item_price: string;
+  description: string;
+  ad_type: string;
+  makes: string;
+  makes_not: boolean;
+  models: string;
+  models_not: boolean;
+  trims: string;
+  trims_not: boolean;
+  body_styles: string;
+  year_condition: number;
+  year_value: number | null;
+  miles_condition: number;
+  miles_value: number | null;
+  msrp_condition: number;
+  msrp1: number | null;
+  msrp2: number | null;
+  sort_order: number;
+  active: boolean;
+  show_models_only: boolean;
+  separator_above: boolean;
+  separator_below: boolean;
+  spaces: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type AddendumLibraryInsert = Omit<AddendumLibraryRow, 'id' | 'created_at' | 'updated_at'>;
+type AddendumLibraryUpdate = Partial<Omit<AddendumLibraryRow, 'id' | 'dealer_id' | 'created_at' | 'updated_at'>>;
+
 type AiContentCacheInsert = {
   vin: string;
   dealer_id: string;
@@ -296,6 +389,48 @@ export type Database = {
         Insert: AiContentCacheInsert;
         Update: AiContentCacheUpdate;
         Relationships: [];
+      };
+      vehicle_options: {
+        Row: VehicleOptionRow;
+        Insert: VehicleOptionInsert;
+        Update: VehicleOptionUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "vehicle_options_dealer_id_fkey";
+            columns: ["dealer_id"];
+            isOneToOne: false;
+            referencedRelation: "dealers";
+            referencedColumns: ["dealer_id"];
+          }
+        ];
+      };
+      print_history: {
+        Row: PrintHistoryRow;
+        Insert: PrintHistoryInsert;
+        Update: Record<string, never>;
+        Relationships: [
+          {
+            foreignKeyName: "print_history_dealer_id_fkey";
+            columns: ["dealer_id"];
+            isOneToOne: false;
+            referencedRelation: "dealers";
+            referencedColumns: ["dealer_id"];
+          }
+        ];
+      };
+      addendum_library: {
+        Row: AddendumLibraryRow;
+        Insert: AddendumLibraryInsert;
+        Update: AddendumLibraryUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "addendum_library_dealer_id_fkey";
+            columns: ["dealer_id"];
+            isOneToOne: false;
+            referencedRelation: "dealers";
+            referencedColumns: ["dealer_id"];
+          }
+        ];
       };
     };
     Views: { [_ in never]: never };

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { ProfileRow } from "@/lib/db";
+import { createAdminSupabaseClient } from "@/lib/db";
 
 export const metadata = { title: "API Docs — DA Platform" };
 
@@ -103,20 +103,21 @@ const NEW_PLATFORM_SECTIONS: Section[] = [
 
 export default async function ApiDocsPage() {
   const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect("/login");
 
-  const { data } = await supabase
+  const admin = createAdminSupabaseClient();
+  const { data: profile } = await admin
     .from("profiles")
     .select("role")
     .eq("id", session.user.id)
-    .returns<Pick<ProfileRow, "role">[]>()
-    .single();
+    .single<{ role: string }>();
 
-  if (!data || data.role !== "super_admin") redirect("/dashboard");
+  const role = profile?.role
+    ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
+    ?? "dealer_user";
+
+  if (role !== "super_admin") redirect("/dashboard");
 
   const totalEndpoints = NEW_PLATFORM_SECTIONS.reduce((n, s) => n + s.endpoints.length, 0);
   const legacyCount = 17;

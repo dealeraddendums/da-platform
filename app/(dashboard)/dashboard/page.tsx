@@ -1,5 +1,7 @@
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { UserRole, ProfileRow } from "@/lib/db";
+import { createAdminSupabaseClient } from "@/lib/db";
+import type { UserRole } from "@/lib/db";
 
 const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super Admin",
@@ -41,38 +43,27 @@ function getStatCards(role: UserRole): StatCard[] {
 
 export default async function DashboardPage() {
   const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) redirect("/login");
 
-  let profile: ProfileRow | null = null;
-  if (session) {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", session.user.id)
-      .returns<ProfileRow[]>()
-      .single();
-    profile = data as ProfileRow | null;
-  }
+  const admin = createAdminSupabaseClient();
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("role, dealer_id, full_name")
+    .eq("id", session.user.id)
+    .single<{ role: string; dealer_id: string | null; full_name: string | null }>();
 
-  // Mirror layout.tsx fallback: profiles → JWT app_metadata → default
-  const role: UserRole =
-    profile?.role ??
-    (session?.user.app_metadata?.role as UserRole | undefined) ??
-    "dealer_user";
+  const role = (profile?.role
+    ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
+    ?? "dealer_user") as UserRole;
 
   const roleLabel = ROLE_LABELS[role] ?? role;
   const cards = getStatCards(role);
 
   return (
     <div>
-      {/* Page header */}
       <div className="mb-6">
-        <h1
-          className="text-xl font-semibold"
-          style={{ color: "var(--text-inverse)" }}
-        >
+        <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>
           Dashboard
         </h1>
         <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.6)" }}>
@@ -80,7 +71,6 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {cards.map((card) => (
           <div key={card.label} className="card p-4">
@@ -90,10 +80,7 @@ export default async function DashboardPage() {
             >
               {card.label}
             </p>
-            <p
-              className="text-xl font-semibold"
-              style={{ color: "var(--text-primary)" }}
-            >
+            <p className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
               {card.value}
             </p>
             <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
@@ -103,7 +90,6 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      {/* Account info */}
       <div className="card p-6 max-w-md">
         <p
           className="text-xs font-semibold uppercase tracking-wider mb-4"
@@ -113,23 +99,16 @@ export default async function DashboardPage() {
         </p>
         <dl className="space-y-3">
           <div className="flex items-center justify-between">
-            <dt className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              Email
-            </dt>
-            <dd
-              className="text-sm font-medium"
-              style={{ color: "var(--text-primary)" }}
-            >
-              {session?.user.email ?? "—"}
+            <dt className="text-sm" style={{ color: "var(--text-secondary)" }}>Email</dt>
+            <dd className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+              {session.user.email ?? "—"}
             </dd>
           </div>
           <div
             className="flex items-center justify-between"
             style={{ paddingTop: 8, borderTop: "1px solid var(--border)" }}
           >
-            <dt className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              Role
-            </dt>
+            <dt className="text-sm" style={{ color: "var(--text-secondary)" }}>Role</dt>
             <dd>
               <span
                 className="text-xs font-semibold px-2 py-1 rounded-full"
@@ -144,13 +123,8 @@ export default async function DashboardPage() {
               className="flex items-center justify-between"
               style={{ paddingTop: 8, borderTop: "1px solid var(--border)" }}
             >
-              <dt className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                Dealer ID
-              </dt>
-              <dd
-                className="text-sm font-medium"
-                style={{ color: "var(--text-primary)" }}
-              >
+              <dt className="text-sm" style={{ color: "var(--text-secondary)" }}>Dealer ID</dt>
+              <dd className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
                 {profile.dealer_id}
               </dd>
             </div>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabaseClient } from "./db";
+import { createServerSupabaseClient, createAdminSupabaseClient } from "./db";
 import type { UserRole } from "./db";
 
 export type JwtClaims = {
@@ -9,6 +9,60 @@ export type JwtClaims = {
   dealer_id: string | null;
   group_id: string | null;
 };
+
+export type ServerProfile = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: UserRole;
+  dealer_id: string | null;
+  group_id: string | null;
+};
+
+/**
+ * Reads the current user's profile via admin client (bypasses RLS).
+ * Use this in page server components instead of querying profiles with
+ * the user-scoped client, which can return null if the JWT is stale.
+ * Returns null if there is no active session.
+ */
+export async function getServerProfile(): Promise<{
+  session: { user: { id: string; email?: string; app_metadata?: Record<string, unknown> } };
+  profile: ServerProfile | null;
+} | null> {
+  const supabase = createServerSupabaseClient();
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error || !session) return null;
+
+  const admin = createAdminSupabaseClient();
+  const { data, error: dbError } = await admin
+    .from("profiles")
+    .select("id, email, full_name, role, dealer_id, group_id")
+    .eq("id", session.user.id)
+    .single();
+
+  if (data) {
+    return { session, profile: data as ServerProfile };
+  }
+
+  // DB query failed — fall back to JWT app_metadata (set when role changes)
+  if (dbError) {
+    const appMeta = session.user.app_metadata as Record<string, unknown> | undefined;
+    const role = (appMeta?.role as UserRole | undefined) ?? "dealer_user";
+    return {
+      session,
+      profile: {
+        id: session.user.id,
+        email: session.user.email ?? "",
+        full_name: null,
+        role,
+        dealer_id: (appMeta?.dealer_id as string | null) ?? null,
+        group_id: (appMeta?.group_id as string | null) ?? null,
+      },
+    };
+  }
+
+  return { session, profile: null };
+}
 
 /** Extract session and custom claims from the Supabase cookie session. */
 export async function getJwtClaims(): Promise<JwtClaims | null> {
@@ -20,15 +74,21 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
 
   if (error || !session) return null;
 
-  const appMeta = session.user.app_metadata as Partial<JwtClaims>;
-  const userMeta = session.user.user_metadata as Partial<JwtClaims>;
+  // Use profiles table as source of truth for role/dealer_id/group_id
+  // so changes take effect immediately without requiring re-login.
+  const admin = createAdminSupabaseClient();
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("role, dealer_id, group_id")
+    .eq("id", session.user.id)
+    .single();
 
   return {
     sub: session.user.id,
     email: session.user.email ?? "",
-    role: (appMeta.role ?? userMeta.role ?? "dealer_user") as UserRole,
-    dealer_id: (appMeta.dealer_id ?? userMeta.dealer_id ?? null) as string | null,
-    group_id: (appMeta.group_id ?? userMeta.group_id ?? null) as string | null,
+    role: ((profile?.role as UserRole) ?? "dealer_user"),
+    dealer_id: profile?.dealer_id ?? null,
+    group_id: profile?.group_id ?? null,
   };
 }
 
