@@ -1,0 +1,23 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ec2-54-167-226-23.compute-1.amazonaws.com
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /var/www/da-platform
+            git pull origin main
+            npm ci --production=false
+            npm run build
+            pm2 restart da-platform || pm2 start ecosystem.config.js
+            echo "Deploy complete"
