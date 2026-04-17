@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { DealerRow, DealerUpdate } from "@/lib/db";
+import type { GroupRow, GroupUpdate } from "@/lib/db";
 
 type Params = { params: { id: string } };
 
 /**
- * GET /api/dealers/[id]
- * Returns dealer profile.
- * super_admin: any dealer. Others: only their own dealer (matched by dealer_id claim).
+ * GET /api/groups/[id]
+ * super_admin: any group. group_admin: own group only.
  */
 export async function GET(
   _req: NextRequest,
@@ -17,34 +16,34 @@ export async function GET(
   const { claims, error } = await requireAuth();
   if (error) return error;
 
+  if (claims.role !== "super_admin" && claims.role !== "group_admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const admin = createAdminSupabaseClient();
   const { data, error: dbError } = await admin
-    .from("dealers")
+    .from("groups")
     .select("*")
     .eq("id", params.id)
     .single();
 
   if (dbError || !data) {
-    return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
+    return NextResponse.json({ error: "Group not found" }, { status: 404 });
   }
 
-  const dealer = data as DealerRow;
+  const group = data as GroupRow;
 
-  // Non-admins may only read their own dealer
-  if (
-    claims.role !== "super_admin" &&
-    dealer.dealer_id !== claims.dealer_id
-  ) {
+  // group_admin may only see their own group
+  if (claims.role === "group_admin" && group.id !== claims.group_id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  return NextResponse.json({ data: dealer });
+  return NextResponse.json({ data: group });
 }
 
 /**
- * PATCH /api/dealers/[id]
- * Update dealer.
- * super_admin: any. dealer_admin: own dealer only. dealer_user/group_admin: 403.
+ * PATCH /api/groups/[id]
+ * super_admin: any. group_admin: own group only (name/contact, not active).
  */
 export async function PATCH(
   req: NextRequest,
@@ -53,37 +52,25 @@ export async function PATCH(
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  if (claims.role === "dealer_user" || claims.role === "group_admin") {
+  if (claims.role !== "super_admin" && claims.role !== "group_admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: DealerUpdate;
+  // group_admin may only patch their own group
+  if (claims.role === "group_admin" && params.id !== claims.group_id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  let body: GroupUpdate;
   try {
-    body = (await req.json()) as DealerUpdate;
+    body = (await req.json()) as GroupUpdate;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const admin = createAdminSupabaseClient();
-
-  // For dealer_admin, verify they own this dealer before patching
-  if (claims.role === "dealer_admin") {
-    const { data: existing } = await admin
-      .from("dealers")
-      .select("dealer_id")
-      .eq("id", params.id)
-      .single();
-    const row = existing as { dealer_id: string } | null;
-    if (!row || row.dealer_id !== claims.dealer_id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
-
-  // Whitelist updatable fields
-  const patch: DealerUpdate = {};
+  // Whitelist updatable fields; group_admin cannot toggle active
+  const patch: GroupUpdate = {};
   if (body.name !== undefined) patch.name = body.name;
-  if (body.active !== undefined && claims.role === "super_admin") patch.active = body.active;
-  if (body.group_id !== undefined && claims.role === "super_admin") patch.group_id = body.group_id;
   if (body.primary_contact !== undefined) patch.primary_contact = body.primary_contact;
   if (body.primary_contact_email !== undefined) patch.primary_contact_email = body.primary_contact_email;
   if (body.phone !== undefined) patch.phone = body.phone;
@@ -92,11 +79,11 @@ export async function PATCH(
   if (body.state !== undefined) patch.state = body.state;
   if (body.zip !== undefined) patch.zip = body.zip;
   if (body.country !== undefined) patch.country = body.country;
-  if (body.makes !== undefined) patch.makes = body.makes;
-  if (body.logo_url !== undefined) patch.logo_url = body.logo_url;
+  if (body.active !== undefined && claims.role === "super_admin") patch.active = body.active;
 
+  const admin = createAdminSupabaseClient();
   const { data, error: dbError } = await admin
-    .from("dealers")
+    .from("groups")
     .update(patch)
     .eq("id", params.id)
     .select()
@@ -104,17 +91,18 @@ export async function PATCH(
 
   if (dbError || !data) {
     return NextResponse.json(
-      { error: dbError?.message ?? "Dealer not found" },
+      { error: dbError?.message ?? "Group not found" },
       { status: dbError ? 500 : 404 }
     );
   }
 
-  return NextResponse.json({ data: data as DealerRow });
+  return NextResponse.json({ data: data as GroupRow });
 }
 
 /**
- * DELETE /api/dealers/[id]
- * Permanently delete a dealer. super_admin only.
+ * DELETE /api/groups/[id]
+ * Permanently delete a group. super_admin only.
+ * Dealers in this group will have their group_id set to null (ON DELETE SET NULL).
  */
 export async function DELETE(
   _req: NextRequest,
@@ -125,7 +113,7 @@ export async function DELETE(
 
   const admin = createAdminSupabaseClient();
   const { error: dbError } = await admin
-    .from("dealers")
+    .from("groups")
     .delete()
     .eq("id", params.id);
 

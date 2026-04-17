@@ -7,6 +7,7 @@ export type JwtClaims = {
   email: string;
   role: UserRole;
   dealer_id: string | null;
+  group_id: string | null;
 };
 
 /** Extract session and custom claims from the Supabase cookie session. */
@@ -27,6 +28,7 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
     email: session.user.email ?? "",
     role: (appMeta.role ?? userMeta.role ?? "dealer_user") as UserRole,
     dealer_id: (appMeta.dealer_id ?? userMeta.dealer_id ?? null) as string | null,
+    group_id: (appMeta.group_id ?? userMeta.group_id ?? null) as string | null,
   };
 }
 

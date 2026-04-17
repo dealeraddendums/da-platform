@@ -14,6 +14,7 @@ export type ProfileRow = {
   full_name: string | null;
   role: UserRole;
   dealer_id: string | null;
+  group_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -24,6 +25,7 @@ type ProfileInsert = {
   full_name?: string | null;
   role?: UserRole;
   dealer_id?: string | null;
+  group_id?: string | null;
 };
 
 type ProfileUpdate = {
@@ -31,7 +33,50 @@ type ProfileUpdate = {
   full_name?: string | null;
   role?: UserRole;
   dealer_id?: string | null;
+  group_id?: string | null;
   updated_at?: string;
+};
+
+export type GroupRow = {
+  id: string;
+  name: string;
+  active: boolean;
+  primary_contact: string | null;
+  primary_contact_email: string | null;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  country: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type GroupInsert = {
+  name: string;
+  active?: boolean;
+  primary_contact?: string | null;
+  primary_contact_email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  country?: string;
+};
+
+export type GroupUpdate = {
+  name?: string;
+  active?: boolean;
+  primary_contact?: string | null;
+  primary_contact_email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  country?: string;
 };
 
 export type DealerRow = {
@@ -105,11 +150,25 @@ export type Database = {
           }
         ];
       };
+      groups: {
+        Row: GroupRow;
+        Insert: GroupInsert;
+        Update: GroupUpdate;
+        Relationships: [];
+      };
       dealers: {
         Row: DealerRow;
         Insert: DealerInsert;
         Update: DealerUpdate;
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "dealers_group_id_fkey";
+            columns: ["group_id"];
+            isOneToOne: false;
+            referencedRelation: "groups";
+            referencedColumns: ["id"];
+          }
+        ];
       };
     };
     Views: { [_ in never]: never };
