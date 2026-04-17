@@ -10,6 +10,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.90.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.47.3",
     "mysql2": "^3.22.1",

@@ -199,6 +199,32 @@ export type DealerSettingsUpdate = {
   updated_at?: string;
 };
 
+export type AiContentCacheRow = {
+  id: string;
+  vin: string;
+  dealer_id: string;
+  description: string | null;
+  features: [string, string][] | null;
+  generated_at: string;
+  model_version: string | null;
+};
+
+type AiContentCacheInsert = {
+  vin: string;
+  dealer_id: string;
+  description?: string | null;
+  features?: [string, string][] | null;
+  generated_at?: string;
+  model_version?: string | null;
+};
+
+type AiContentCacheUpdate = {
+  description?: string | null;
+  features?: [string, string][] | null;
+  generated_at?: string;
+  model_version?: string | null;
+};
+
 // Database type shaped exactly as Supabase's generated types expect.
 export type Database = {
   public: {
@@ -264,6 +290,12 @@ export type Database = {
             referencedColumns: ["dealer_id"];
           }
         ];
+      };
+      ai_content_cache: {
+        Row: AiContentCacheRow;
+        Insert: AiContentCacheInsert;
+        Update: AiContentCacheUpdate;
+        Relationships: [];
       };
     };
     Views: { [_ in never]: never };

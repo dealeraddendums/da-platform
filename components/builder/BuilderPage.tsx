@@ -39,9 +39,10 @@ const BG_COLORS = [
 interface Props {
   vehicle?: VehiclePreload;
   templateId?: string;
+  aiEnabled?: boolean;
 }
 
-export default function BuilderPage({ vehicle, templateId }: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: Props) {
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
   const [nid, setNid] = useState(1);
   const [selId, setSelId] = useState<string | null>(null);
@@ -50,6 +51,8 @@ export default function BuilderPage({ vehicle, templateId }: Props) {
   const [fontScale, setFontScale] = useState(1.0);
   const [bgUrl, setBgUrl] = useState(BG_DEFAULT);
   const [bgInputVal, setBgInputVal] = useState(BG_DEFAULT);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiPendingLoad, setAiPendingLoad] = useState(false);
   const [bgOpen, setBgOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [templateName, setTemplateName] = useState('New Template');
@@ -389,6 +392,10 @@ export default function BuilderPage({ vehicle, templateId }: Props) {
       setSelId(null);
       pushHistory(ws, nextNid);
       showToast('Infosheet layout loaded');
+      // Auto-load AI content when switching to infosheet with a vehicle
+      if (vehicle && aiEnabled) {
+        setAiPendingLoad(true);
+      }
     } else {
       setBgUrl(BG_DEFAULT); setBgInputVal(BG_DEFAULT);
       const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox'];
@@ -404,7 +411,7 @@ export default function BuilderPage({ vehicle, templateId }: Props) {
       setSelId(null);
       pushHistory(ws, nextNid);
     }
-  }, [pushHistory, showToast]);
+  }, [pushHistory, showToast, vehicle, aiEnabled]);
 
   // ── Drag from palette ──────────────────────────────────────────────
   const [dragType, setDragType] = useState<string | null>(null);
@@ -433,6 +440,55 @@ export default function BuilderPage({ vehicle, templateId }: Props) {
       return next;
     });
   }, [selId]);
+
+  // ── AI content fetch / regenerate ─────────────────────────────────
+  const fetchAiContent = useCallback(async (force = false) => {
+    if (!vehicle?.vin || !vehicle?.dealer_id) return;
+    setAiLoading(true);
+    try {
+      let data: { description?: string | null; features?: [string, string][] | null } | null = null;
+      if (force) {
+        const r = await fetch('/api/ai-content/regenerate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vin: vehicle.vin, dealer_id: vehicle.dealer_id }),
+        });
+        if (r.ok) data = await r.json();
+      } else {
+        const r = await fetch(`/api/ai-content?vin=${encodeURIComponent(vehicle.vin)}&dealer_id=${encodeURIComponent(vehicle.dealer_id)}`);
+        if (r.ok) data = await r.json();
+      }
+      if (!data?.description && !data?.features) {
+        if (force) showToast('AI generation failed — check API key');
+        return;
+      }
+      setWidgets(prev => {
+        const next = { ...prev };
+        Object.values(next).forEach(w => {
+          if (w.type === 'description' && data!.description) {
+            next[w.id] = { ...w, d: { ...w.d, text: data!.description, aiMode: 'ai' } };
+          }
+          if (w.type === 'features' && data!.features?.length) {
+            next[w.id] = { ...w, d: { ...w.d, items: data!.features, aiMode: 'ai' } };
+          }
+        });
+        widgetsRef.current = next;
+        return next;
+      });
+      showToast(force ? '✓ AI content regenerated' : '✓ AI content loaded');
+    } catch {
+      if (force) showToast('AI generation failed');
+    } finally {
+      setAiLoading(false);
+    }
+  }, [vehicle, showToast]);
+
+  // Trigger AI load after infosheet layout is committed to state
+  useEffect(() => {
+    if (!aiPendingLoad) return;
+    setAiPendingLoad(false);
+    fetchAiContent(false);
+  }, [aiPendingLoad, fetchAiContent]);
 
   // ── Save template ──────────────────────────────────────────────────
   const saveTemplate = useCallback(async () => {
@@ -539,6 +595,15 @@ export default function BuilderPage({ vehicle, templateId }: Props) {
           <button onClick={() => setPreviewMode(p => !p)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 13px', borderRadius: 4, fontSize: 12, fontWeight: 500, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.25)', background: previewMode ? '#1976d2' : 'rgba(255,255,255,0.1)', color: '#fff', fontFamily: 'inherit' }}>
             {previewMode ? '✎ Edit' : '👁 Preview'}
           </button>
+          {vehicle && (usedTypes.has('description') || usedTypes.has('features')) && (
+            <button
+              onClick={() => fetchAiContent(true)}
+              disabled={aiLoading}
+              style={{ ...tbBtn, background: aiLoading ? 'rgba(255,255,255,0.08)' : 'rgba(25,118,210,0.85)', borderColor: '#1976d2', opacity: aiLoading ? 0.6 : 1 }}
+            >
+              {aiLoading ? '⟳ Generating…' : '✦ Regenerate AI'}
+            </button>
+          )}
           <button onClick={() => setShowPrint(true)} style={tbBtn}>🖨 Print settings</button>
           <button onClick={openTemplates} style={tbBtn}>All templates</button>
           <button onClick={() => { setSaveTname(templateName); setShowSave(true); }} style={{ ...tbBtn, background: '#1976d2', borderColor: '#1976d2' }}>Save template</button>

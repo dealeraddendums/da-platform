@@ -1,5 +1,5 @@
 import { redirect, notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/aurora";
 import type { VehicleRowPacket } from "@/lib/aurora";
 import type { VehiclePreload } from "@/components/builder/types";
@@ -80,5 +80,15 @@ export default async function BuilderVehicleRoute({
       .join(", ") || null,
   };
 
-  return <BuilderPage vehicle={vehicle} />;
+  // Fetch dealer's AI content default setting
+  const admin = createAdminSupabaseClient();
+  const { data: settings } = await admin
+    .from("dealer_settings")
+    .select("ai_content_default")
+    .eq("dealer_id", r.DEALER_ID)
+    .single<{ ai_content_default: boolean }>();
+
+  const aiEnabled = settings?.ai_content_default ?? false;
+
+  return <BuilderPage vehicle={vehicle} aiEnabled={aiEnabled} />;
 }
