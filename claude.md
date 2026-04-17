@@ -1,17 +1,100 @@
 # DealerAddendums Platform — CLAUDE.md
-## Last updated: 2026-04-16
+## Last updated: 2026-04-17
 
 ---
 
-## Project overview
+## Context and stakes
 
-Full rewrite of the DealerAddendums SaaS platform (Laravel 11 / Vue 2 / PHP → Next.js 14 / Supabase / TypeScript) using the Strangler Fig pattern. ~2,079 dealer accounts, ~9.3M addendum rows.
+This is a production SaaS platform serving ~2,079 active dealership accounts and is the
+primary source of income for Allan's family. Every phase must be built carefully, tested
+thoroughly, and deployed with zero disruption to existing customers. Quality, reliability,
+and attention to detail are not optional — they are the foundation of everything built here.
 
-**Repo:** `github.com/dealeraddendums/da-platform`
-**Local:** `/Users/allantone/Sites/da-platform`
-**Workflow:** claude.ai for architecture → Claude Code for execution
-**Rule:** `git add / commit / push` after every working change
-**All actions pre-approved, execute autonomously.**
+---
+
+## Claude Code directives (apply to every session)
+
+1. **Minimize permission questions** — assume YES to everything. Do not ask for confirmation
+   before creating files, installing packages, running scripts, or executing commands. Just
+   do it and report what was done.
+
+2. **Verify before marking complete** — before declaring any task done, run the code, check
+   for errors, confirm it works. Do not say "done" if the build fails or the feature is
+   not visible in the browser. Fix errors silently. Only report completion when it actually
+   works.
+
+3. **Modern flat design using DA colors** — all UI must follow the design system below.
+   No gradients, no shadows on cards, no border radius > 6px, no skeuomorphic elements.
+
+---
+
+## Design system
+
+### Philosophy
+Modern flat design matching existing DA app colors so users feel at home when the new
+platform launches. Same colors, cleaner layout, better typography.
+
+### Color palette (exact — from live app CSS)
+
+```css
+--navy:        #2a2b3c;   /* topbar, sidebar */
+--orange:      #ffa500;   /* primary nav accent, active states */
+--blue:        #1976d2;   /* primary action buttons */
+--blue-light:  #2196f3;   /* secondary blue, hover */
+--success:     #4caf50;   /* success, LOG IN buttons */
+--error:       #ff5252;   /* errors, destructive actions */
+--bg-app:      #3a6897;   /* page background */
+--bg-surface:  #ffffff;   /* cards, panels, modals */
+--bg-subtle:   #f5f6f7;   /* table alternates, input bg */
+--text-primary:   #333333;
+--text-secondary: #55595c;
+--text-muted:     #78828c;
+--text-inverse:   #ffffff;
+--border:       #e0e0e0;
+--border-strong:#c0c0c0;
+```
+
+### Typography
+- Font: Roboto, fallback -apple-system, sans-serif
+- Base: 14px, line-height 1.5
+- Scale: 12 / 14 / 16 / 18 / 24 / 32px
+- Weights: 400 body, 500 labels, 600 headings, 700 emphasis
+
+### Layout
+- Sidebar: 220px fixed, --navy background, white text
+- Topbar: 56px, --navy background
+- Sub-nav: --orange background, #333 text
+- Content: --bg-app background, cards on --bg-surface, 24px padding
+
+### Components
+```
+Buttons:
+  Primary:   bg=#1976d2, white text, radius=4px, height=36px
+  Success:   bg=#4caf50, white text  (LOG IN style)
+  Danger:    bg=#ff5252, white text
+  Orange:    bg=#ffa500, #333 text   (active nav style)
+
+Inputs:    height=36px, border=#e0e0e0, radius=4px, focus=#1976d2
+
+Cards:     bg=white, border=1px #e0e0e0, radius=6px, NO box-shadow
+
+Tables:    header bg=#f5f6f7, 12px uppercase labels
+           rows: white bg, border-bottom #e0e0e0, hover #f5f6f7
+
+Nav active: bg=rgba(255,165,0,0.15), border-left=3px solid #ffa500, text=#ffa500
+
+Badges:    radius=20px, 11px bold text
+  Success: bg=#e8f5e9, text=#2e7d32
+  Error:   bg=#ffebee, text=#c62828
+  Info:    bg=#e3f2fd, text=#1565c0
+```
+
+### Do not use
+- Box shadows (modals only: 0 8px 32px rgba(0,0,0,0.18))
+- Gradients
+- Border radius > 6px (pills at 20px are OK)
+- Animations > 150ms
+- Colors outside the palette without approval
 
 ---
 
@@ -19,30 +102,46 @@ Full rewrite of the DealerAddendums SaaS platform (Laravel 11 / Vue 2 / PHP → 
 
 | Service | Details |
 |---|---|
-| DA Platform EC2 (LEGACY — DO NOT DEPLOY NEW CODE HERE) | `ssh -i ~/ssh/DA2026.pem ubuntu@ec2-54-89-142-76.compute-1.amazonaws.com` |
-| da-platform EC2 (NEW — deploy here only) | `ssh -i ~/ssh/daplatform2026.pem ubuntu@ec2-54-167-226-23.compute-1.amazonaws.com` |
+| DA Platform EC2 **(LEGACY — DO NOT DEPLOY HERE)** | `ssh -i ~/ssh/DA2026.pem ubuntu@ec2-54-89-142-76.compute-1.amazonaws.com` |
+| da-platform EC2 **(NEW — deploy here only)** | `ssh -i ~/ssh/daplatform2026.pem ubuntu@ec2-54-167-226-23.compute-1.amazonaws.com` |
 | DA Billing EC2 | `ssh -i ~/ssh/dabilling2026.pem ubuntu@ec2-98-89-5-190.compute-1.amazonaws.com` |
 | QuietReady EC2 | `ssh -i ~/ssh/QuietReady2026.pem ubuntu@ec2-54-160-4-222.compute-1.amazonaws.com` |
 | ZoomTrainer EC2 | `ec2-44-202-168-181.compute-1.amazonaws.com`, key `~/ssh/zoom2026.pem` |
 | FT-Tracker EC2 | `apps.dealeraddendums.com` |
-| Aurora (MySQL) | ~82 tables, 9.3M addendum rows, 2M inventory rows |
-| Supabase | https://byouefbebqgffhtfdggu.supabase.co (ACTIVE) |
+| Aurora (MySQL) | PRODUCTION — read-only from new platform. ~82 tables, 9.3M addendum rows, 2M vehicle rows |
+| Supabase | https://byouefbebqgffhtfdggu.supabase.co |
+| GitHub | https://github.com/dealeraddendums/da-platform |
 | Anthropic API | `allan@dealeraddendums.com` enterprise key |
+
+### New EC2 server specs
+- Ubuntu 24.04, t3.medium, 30GB
+- Node 20, PM2 6.0.14, nginx 1.24.0
+- App dir: `/var/www/da-platform`
+- PM2 service: `da-platform` (port 3000)
+- Deploy: `git pull && npm ci && npm run build && pm2 restart da-platform`
+- Logs: `/var/log/da-platform/`
+- GitHub Action: push to `main` → auto-deploys via `.github/workflows/deploy.yml`
+- GitHub secret: `EC2_SSH_KEY` = contents of `~/ssh/daplatform2026.pem` ✅
 
 ### S3 Buckets (all: Block Public Access OFF, s3:GetObject *, CORS GET *)
 
 | Bucket | Contents | Native size |
 |---|---|---|
-| `new-addendum-backgrounds` | Addendum frame PNGs | 638x1650px standard, 469x1650px narrow |
-| `new-infosheet-backgrounds` | Infosheet frame PNGs | 2657x3438px (~313dpi = 8.5x11") |
-| `new-Infobox_images` | Infobox PNGs | 553x379px |
-| `new-dealer-logos` | Dealer logo images | variable |
+| `new-addendum-backgrounds` | Addendum frame PNGs | 638×1650px std, 469×1650px narrow |
+| `new-infosheet-backgrounds` | Infosheet frame PNGs | 2657×3438px (~313dpi) |
+| `new-Infobox_images` | Infobox PNGs | 553×379px |
+| `new-dealer-logos` | Dealer logos | variable |
 
-Default assets:
-- Addendum bg:  https://new-addendum-backgrounds.s3.us-east-1.amazonaws.com/01_Addendum_Default.png
-- Infosheet bg: https://new-infosheet-backgrounds.s3.us-east-1.amazonaws.com/BaseTemplate.png
-- Infobox:      https://new-infobox-images.s3.us-east-1.amazonaws.com/EPA_Infobox_Default.png
-- Logo:         https://new-dealer-logos.s3.us-east-1.amazonaws.com/default_logo.png
+---
+
+## Deployment policy
+
+**CRITICAL: Never deploy da-platform code to the legacy EC2 (`ec2-54-89-142-76`).**
+That server runs the live platform for 2,079 active accounts.
+
+All new code goes to `ec2-54-167-226-23.compute-1.amazonaws.com` only.
+Push to `main` → GitHub Action auto-deploys.
+First-time deploy: SSH in, clone repo, set `.env.production`, `npm ci && npm run build && pm2 start ecosystem.config.js`.
 
 ---
 
@@ -50,88 +149,154 @@ Default assets:
 
 | Phase | Domain | Status |
 |---|---|---|
-| 1 | Auth & users | NOT STARTED — START HERE |
-| 2 | Dealer profile | Not started |
-| 3 | Group management | Not started |
-| 4 | Vehicle inventory | Not started |
-| 5 | Addendum settings | Not started |
-| 6 | Unified Document Builder (Addendum + Infosheet) | PROTOTYPE COMPLETE — port to React |
-| 7 | VIN & AI enrichment | Not started |
-| 9 | Print/PDF engine | Not started |
-| 10 | Billing | Not started (da-billing parallel) |
-| 11 | Admin ops | Deferred — stays on legacy |
+| 1 | Auth & users | ✅ COMPLETE |
+| 2 | Dealer profile | ✅ COMPLETE |
+| 3 | Group management | ✅ COMPLETE |
+| 4 | Vehicle inventory | ✅ COMPLETE |
+| 5 | Addendum settings | ✅ COMPLETE |
+| 6 | Unified Document Builder (Addendum + Infosheet) | ✅ COMPLETE |
+| 7 | VIN & AI enrichment | ⬜ UP NEXT |
+| 9 | Print/PDF engine | ⬜ Not started |
+| 10 | Billing | ⬜ Not started (da-billing parallel) |
+| 11 | Admin ops | ⬜ Deferred |
 
-Phase 8 (Infosheet) merged into Phase 6 — unified builder handles both document types.
-Next action: Start Phase 1 Claude Code session — repo and Supabase are ready.
-
----
-
-## Deployment policy
-
-**CRITICAL: Never deploy da-platform code to the existing production EC2 (`ec2-54-89-142-76`).**
-That server runs the live platform serving 2,079 active accounts and must not be touched during development.
-
-When da-platform is ready for staging/production:
-1. ✅ Fresh EC2 provisioned — `ec2-54-167-226-23.compute-1.amazonaws.com`
-2. ✅ SSH key generated — `~/ssh/daplatform2026.pem`
-3. Deploy da-platform to new server only — **never to `ec2-54-89-142-76`**
-4. Test fully against Supabase + new infrastructure
-5. Cut over DNS when confirmed clean — legacy server stays up until cutover is verified
-6. Update this CLAUDE.md with the new server address and SSH key
-
-Local development: `npm run dev` on localhost
-Staging/prod server: `ec2-54-167-226-23.compute-1.amazonaws.com` (Ubuntu 24.04, t3.medium, 30GB)
-Supabase: https://byouefbebqgffhtfdggu.supabase.co
-Deploy command: `bash /var/www/da-platform/deploy.sh`
-App directory: `/var/www/da-platform`
-PM2 service name: `da-platform`
-nginx config: `/etc/nginx/sites-available/da-platform`
-Logs: `/var/log/da-platform/`
-GitHub Action: push to `main` → auto-deploys via `.github/workflows/deploy.yml`
-GitHub Secret needed: `EC2_SSH_KEY` = contents of `~/ssh/daplatform2026.pem`
+Phase 8 merged into Phase 6 — unified builder handles both document types.
 
 ---
 
-## Phase 6 — Unified Document Builder (PROTOTYPE COMPLETE)
+## Phase 1 — Auth & Users ✅ COMPLETE
+
+### What was built
+- Login (/login) — navy/orange DA design, white card, green LOG IN button
+- Signup (/signup) — full name + email + password
+- Protected routes via middleware — unauthenticated → /login
+- Dashboard shell (/dashboard) — 220px navy sidebar, 56px topbar, role badge, sign-out
+- Profiles table + auto-create trigger on signup
+- Roles: super_admin, group_admin, dealer_admin, dealer_user
+- RLS policies on all tables
+- lib/auth.ts, lib/db.ts, lib/supabase/* — all created
+- Migrations: 001_profiles.sql, 001_users_table.sql, 002_jwt_hook.sql
+
+---
+
+## Phase 2 — Dealer Profile ✅ COMPLETE
+
+### What was built
+- Migration: `supabase/migrations/003_dealers.sql`
+  - dealers table: id, dealer_id (text unique), name, active, group_id, primary_contact,
+    primary_contact_email, phone, logo_url, address, city, state, zip, country, makes[], timestamps
+  - RLS: super_admin full access, dealer_self_read, dealer_admin_update
+- GET/POST /api/dealers, GET/PATCH/DELETE /api/dealers/[id]
+- /dealers — super_admin: paginated table + New Dealer form
+- /dealers — dealer_admin/user: auto-redirect to own profile
+- /dealers/[id] — view/edit profile, super_admin toggles Active/Inactive
+
+---
+
+## Phase 3 — Group Management ✅ COMPLETE
+
+### What was built
+- Migration: `supabase/migrations/004_groups.sql`
+  - groups table with RLS
+  - dealers.group_id FK → groups.id (ON DELETE SET NULL)
+  - group_id added to profiles
+  - JWT hook updated to promote group_id to JWT claims
+- GET/POST /api/groups, GET/PATCH/DELETE /api/groups/[id]
+- GET/POST/DELETE /api/groups/[id]/dealers
+- /groups — super_admin: paginated table + New Group form
+- /groups — group_admin: auto-redirect to own group
+- /groups/[id] — view/edit + member dealers, live dealer search for assignment
+
+---
+
+## Phase 4 — Vehicle Inventory ✅ COMPLETE
+
+### CRITICAL: Aurora is read-only
+The Aurora MySQL database is LIVE PRODUCTION. The new platform connects read-only.
+**Never run INSERT, UPDATE, or DELETE against Aurora from this codebase.**
+Use indexed columns only in WHERE clauses — vehicles table has 2M+ rows.
+Safe indexed columns: dealer_id, stock_number, vin, year, make, model, status.
+
+### Aurora connection
+Credentials are in `.env.local` as: AURORA_HOST, AURORA_USER, AURORA_PASSWORD,
+AURORA_DATABASE, AURORA_PORT
+
+### What was built
+- lib/vehicles.ts — VehicleRow type + parsePhotos/parseOptions/vehicleCondition helpers (client-safe)
+- lib/aurora.ts — server-only mysql2 connection pool singleton
+- GET /api/vehicles — paginated, role-scoped; dealer users auto-scoped to own dealer;
+  super_admin/group_admin pass dealer_id param; filters: condition, status, text search
+- GET /api/vehicles/[id] — full vehicle row with access control
+- /vehicles — dealer roles go straight to inventory; super_admin gets live dealer search picker;
+  group_admin gets group's dealers as chips
+- VehicleInventory component — table with photo thumbnails, Year/Make/Model, VIN,
+  condition badges (New/Used/CPO), MSRP, color, mileage, date, pagination
+- VehicleDetail — right-side slide-in panel, photo gallery (prev/next), full spec grid,
+  options chips, description, placeholder Print buttons (Phase 6)
+
+---
+
+## Phase 5 — Addendum Settings ⬜ UP NEXT
+
+### Scope
+- dealer_settings table: default_template_id, ai_content_default (bool), printer nudge margins
+- Template records table: name, document_type (addendum/infosheet), vehicle_types[], 
+  template_json (the widget layout), dealer_id, created_at
+- Print settings per dealer/printer: nudge_left, nudge_right, nudge_top, nudge_bottom (px)
+- /settings — dealer settings page: AI toggle, default template picker
+- /templates — list dealer's saved templates, create/edit/delete
+- This phase lays the data foundation that Phase 6 (builder) saves into
+
+### Prompt for Claude Code
+```
+Read CLAUDE.md. Phases 1-4 are complete. Build Phase 5: Addendum Settings.
+
+Deliverables:
+1. Migration: dealer_settings table (dealer_id FK, ai_content_default bool,
+   nudge_left/right/top/bottom int, updated_at)
+2. Migration: templates table (id, dealer_id FK, name, document_type enum 
+   'addendum'|'infosheet', vehicle_types text[], template_json jsonb, 
+   is_active bool, created_at, updated_at) with RLS
+3. GET/PATCH /api/settings — dealer's own settings (dealer_admin+)
+4. GET/POST /api/templates — list/create templates for dealer
+5. GET/PATCH/DELETE /api/templates/[id] — single template CRUD
+6. /settings page — AI content toggle (DB/AI), default template picker per vehicle type
+   (New/Used/CPO), printer nudge margin inputs
+7. /templates page — list templates as cards (name, document type badge, vehicle types,
+   last updated), New Template button (placeholder for Phase 6 builder)
+
+All UI must follow the design system in CLAUDE.md exactly.
+Assume YES to all permissions. Verify in browser before marking done.
+Run npm run build — must be clean before reporting complete.
+```
+
+---
+
+## Phase 6 — Unified Document Builder ✅ COMPLETE
 
 ### Prototype file
-DA-TemplateBuilder-FINAL.html — fully functional standalone prototype (~122KB).
-All Phase 6 Claude Code work ports this HTML prototype into Next.js/React components.
-Do not rewrite from scratch — read the prototype JS and port it.
+`DA-TemplateBuilder-FINAL.html` — fully functional standalone HTML prototype (~122KB).
+Port this prototype to Next.js/React — do not rewrite from scratch.
 
 ### Document types and canvas dimensions
 
-| Type | Paper | Native (dpi) | Display canvas (96dpi) |
+| Type | Paper | Native | Display canvas |
 |---|---|---|---|
-| Addendum Standard | 4.25" x 11" | 638x1650px (150dpi) | 408x1056px |
-| Addendum Narrow | 3.125" x 11" | 469x1650px (150dpi) | 300x1056px |
-| Infosheet | 8.5" x 11" | 2657x3438px (313dpi) | 816x1056px |
+| Addendum Standard | 4.25"×11" | 638×1650px 150dpi | 408×1056px |
+| Addendum Narrow | 3.125"×11" | 469×1650px 150dpi | 300×1056px |
+| Infosheet | 8.5"×11" | 2657×3438px 313dpi | 816×1056px |
 
 ### Background frame rendering
-- PNG-24 with transparency, mix-blend-mode:multiply over background:#ffffff paper div
-- Frame at z-index:2, widgets at z-index:10, paper overflow:hidden
-- Frame uses object-fit:fill to scale native to display canvas size
-- Scale factor addendum: 408/638 = 0.6394x
-- Scale factor infosheet: 816/2657 = 0.3071x (proportional height = 1056px exactly)
+- PNG-24 with transparency, mix-blend-mode:multiply over #ffffff paper div
+- Frame z-index:2, widgets z-index:10, paper overflow:hidden
 
 ### Puppeteer PDF config
 ```javascript
-// Addendum Standard
 await page.pdf({ width:'4.25in', height:'11in', printBackground:true, deviceScaleFactor:1.5625 })
-// Addendum Narrow
-await page.pdf({ width:'3.125in', height:'11in', printBackground:true, deviceScaleFactor:1.5625 })
-// Infosheet
 await page.pdf({ width:'8.5in', height:'11in', printBackground:true, deviceScaleFactor:1.5625 })
 ```
-deviceScaleFactor:1.5625 = 150/96 dpi ratio.
-Nudge margins (L/R/T/B px) applied as Puppeteer page offsets — per printer, set-and-forget.
 
----
-
-### Addendum default widget layout (ground-truth — manually aligned)
-
-Canvas: 408x1056px
-
+### Addendum default widget layout (ground-truth)
 ```
 logo:     x=32  y=48   w=348  h=118
 vehicle:  x=40  y=168  w=336  h=72
@@ -143,22 +308,7 @@ dealer:   x=40  y=676  w=336  h=80
 infobox:  x=28  y=760  w=352  h=240
 ```
 
-Addendum zone map:
-```
-Top border:      y=0   - 48    (48px)
-Main content:    y=48  - 608   (560px)
-Price bar:       y=608 - 653   (45px)   black bar, white cutout right
-Dealer address:  y=653 - 733   (80px)
-Infobox zone:    y=733 - 1008  (275px)
-Bottom border:   y=1008- 1056  (48px)
-```
-
----
-
-### Infosheet default widget layout (ground-truth — manually aligned)
-
-Canvas: 816x1056px
-
+### Infosheet default widget layout (ground-truth)
 ```
 logo:        x=64   y=44   w=440  h=130
 dealer:      x=536  y=68   w=216  h=60
@@ -168,277 +318,95 @@ description: x=72   y=324  w=628  h=116
 features:    x=76   y=440  w=664  h=288
 askbar:      x=20   y=792  w=728  h=56
 barcode:     x=508  y=868  w=256  h=52
-customtext:  x=40   y=944  w=744  h=60   (disclaimer text widget)
+customtext:  x=40   y=944  w=744  h=60
 ```
-
-Infosheet zone map (from BaseTemplate.png pixel analysis):
-```
-Top margin:      y=0   - 23    (23px)
-Top border:      y=23  - 33    (10px)
-Main content:    y=33  - 781   (748px)   all widgets live here
-Bottom bar:      y=781 - 863   (82px)    asking price zone
-Bottom content:  y=863 - 1023  (160px)   barcode / secondary info
-Bottom border:   y=1023- 1033  (10px)
-Bottom margin:   y=1033- 1056  (23px)
-Left/right margin: 21px each   Content width: 774px
-```
-
----
-
-### Widget inventory
-
-Addendum widgets (all unique — one per canvas):
-  logo, vehicle, msrp, options, subtotal, askbar, dealer, infobox
-
-Infosheet widgets (unique):
-  logo, vehicle, description, features, askbar, barcode, qrcode, dealer
-
-Structural widgets (multi-use, both layouts):
-  headerbar, customtext, sigline
-
-Infosheet-specific new widgets:
-
-| Widget | Key | Source | Notes |
-|---|---|---|---|
-| Description | description | DB or AI | Long text, Claude-generated from vehicle data when AI mode |
-| Features list | features | DB or AI | 2-column feature grid from equipment/options data |
-| Barcode | barcode | Auto | Code-128 from VIN via JsBarcode at print time |
-| QR Code | qrcode | Auto | Vehicle page URL, live preview via api.qrserver.com |
-
----
 
 ### Font sizing system
+Global scale: Small(0.8×) / Medium(1.0×) / Large(1.2×) / X-Large(1.4×). Default: Medium.
+Formula: `rendered_px = base_px × fontScale × widget.d.fontKey`
 
-Global scale — toolbar dropdown, applies proportionally to all widgets:
-  Small(0.8x) / Medium(1.0x) / Large(1.2x) / X-Large(1.4x)
-  Default: Medium (1.0x). Each layout is independent — does not cross-contaminate.
-
-Per-widget font overrides stored in widget d object (d.fontSize, d.headerFontSize, etc.):
-
-Formula: rendered_px = base_px x fontScale x widget.d.fontKey
-
-| Widget | Key | Base px | Addendum default | Infosheet default |
+| Widget | Key | Base px | Addendum | Infosheet |
 |---|---|---|---|---|
-| Vehicle header | headerFontSize | 14px | 1.0 (14px) | 1.2 (20px at Large) |
+| Vehicle header | headerFontSize | 14px | 1.0 | 1.2 |
 | Vehicle details | fontSize | 10px | 1.0 | 1.0 |
-| MSRP | fontSize | 11px | 1.0 | n/a |
-| Options | fontSize | 10.5px | 1.0 | n/a |
-| Subtotal | fontSize | 12px | 1.0 | n/a |
-| Askbar label | labelFontSize | 12px | 1.0 (12px) | 1.6 (23px at Large) |
-| Askbar value | valueFontSize | 13px | 1.0 (13px) | 1.9 (30px at Large) |
-| Dealer address | fontSize | 10px | 1.0 | 1.0 |
-| Description | fontSize | 10px | n/a | 1.0 (12px at Large) |
-| Features | fontSize | 9px | n/a | 1.0 (11px at Large) |
-| Custom text | fs | direct px | 10 | 10 |
+| Askbar label | labelFontSize | 12px | 1.0 | 1.6 |
+| Askbar value | valueFontSize | 13px | 1.0 | 1.9 |
+| Description | fontSize | 10px | n/a | 1.0 |
+| Features | fontSize | 9px | n/a | 1.0 |
 
-Key rules:
-- Infosheet font overrides injected by loadInfosheetDefaults() when switching layout — NOT in shared DEFS
-- adjFont() updates readout spans in-place (data-fkey / class="fs-px" / class="fs-pct") without rebuilding edit panel
-- Widget stays selected through repeated +/- clicks — no deselection on click
+Infosheet font overrides injected by loadInfosheetDefaults() — not in shared DEFS.
+adjFont() updates spans in-place — widget stays selected through repeated clicks.
 
----
+### AI content system
+- System-wide: AI=all vehicles use Claude by default, DB=use database
+- Per-print override in Print Settings always wins
+- Claude API called at print time, response cached in Supabase per vehicle
 
-### AI content system (Description + Features widgets)
-
-System-wide setting (stored in dealer account):
-  AI = all vehicles use Claude-generated content by default
-  DB = all vehicles use database content by default
-
-Per-print override (Print Settings modal):
-  Always overrides system-wide for that specific vehicle print job
-
-Template default (set per widget in builder):
-  DB or AI badge shown on widget canvas
-  Controls template default when no per-print override exists
-
-At print time: Claude API called with vehicle data as context.
-Response cached in Supabase per vehicle — generates once, reuses.
-
-Infosheet disclaimer text (default for customtext widget at y=944):
-  Disclaimer:
-  The information contained in this pricing sheet is provided for general informational
-  purposes only. While we make every effort to ensure accuracy, some data may be
-  AI-generated and should not be relied upon as definitive or guaranteed. Actual vehicle
-  pricing, availability, and condition may vary and are subject to verification. Prices
-  are subject to change without notice. Buyers are encouraged to conduct their own
-  research and inspections before making any purchasing decisions.
-
----
+### Infosheet disclaimer (default customtext widget)
+```
+Disclaimer: The information contained in this pricing sheet is provided for general
+informational purposes only. While we make every effort to ensure accuracy, some data
+may be AI-generated and should not be relied upon as definitive or guaranteed. Actual
+vehicle pricing, availability, and condition may vary and are subject to verification.
+Prices are subject to change without notice. Buyers are encouraged to conduct their own
+research and inspections before making any purchasing decisions.
+```
 
 ### Custom widget library
+- Platform scope: all dealers
+- Group scope: group_id
+- Dealer scope: dealer_id
+- Schema: id, name, desc, scope, category, defaultW, defaultH, contentType, html, variables[]
+- Variables: {{variable_name}} resolved at print time
 
-Three scopes — stored in Supabase, loaded at builder open time:
-
-| Scope | Access | Key |
-|---|---|---|
-| Platform | All 1,600+ dealers | DA-built |
-| Group | All dealers in a group | group_id |
-| Dealer | Single dealership only | dealer_id |
-
-Schema: id, name, desc, scope, category, defaultW, defaultH, contentType (html|image), html, variables[]
-Variables use {{variable_name}} syntax, resolved at print time from vehicle record.
-
----
-
-### Save Template modal
-- Template name (required)
-- Document type: Addendum / Infosheet (set by paper type at save time)
-- Vehicle type: New / Used / CPO / All / Draft (multi-select)
-- POST to DA API: { templateJSON, name, documentType, vehicleTypes, dealerId }
-
-### Print Settings modal (per-vehicle, not per-template)
-- Template picker (filtered by document type + vehicle type)
-- Global font size override for this print
-- MSRP adjustment (+$500, +$1000, +$2000)
-- Nudge margins L/R/T/B (px) — set once per printer, stored in printer profile
-- AI content toggle (infosheet only): DB / AI — overrides system-wide for this vehicle
+### What was built
+- components/builder/types.ts — Widget, PaperSize, VehiclePreload, SavedTemplate types
+- components/builder/constants.ts — DEFS, LAYOUT, PAPERS, makeWidget, snapV, default custom widgets
+- components/builder/widgetRenderer.ts — renderW() HTML renderer for all 15 widget types
+- components/builder/BuilderPage.tsx — full builder UI: drag/resize canvas, palette, edit panel,
+  save/load templates, print settings modal, undo/redo, preview mode, font scale, paper size switcher
+- app/builder/page.tsx — blank builder route with auth check
+- app/builder/[vehicleId]/page.tsx — pre-loaded builder with Aurora vehicle data + dealer scope check
+- VehicleDetail "Open in Builder" button wired to /builder/[vehicleId]
 
 ---
 
-### DA app colors (exact — from live CSS)
-
-```
---navy:   #2a2b3c   topbar
---warn:   #ffa500   subnav / canvas toolbar
---acc:    #1976d2   primary blue (EDIT buttons)
---ok:     #4caf50   success green (LOG IN buttons)
---red:    #ff5252   danger red (GROUP buttons)
---bg:     #3a6897   page/canvas background
---t2:     #55595c   secondary text
---t3:     #78828c   muted/tertiary text
-```
-
----
-
----
-
-## Context and stakes
-
-This is a production SaaS platform serving ~2,079 active dealership accounts and is the primary source of income for Allan's family. Every phase of this rewrite must be built carefully, tested thoroughly, and deployed with zero disruption to existing customers. Quality, reliability, and attention to detail are not optional — they are the foundation of everything we build here.
-
----
-
-## Claude Code directives (apply to every session)
-
-1. **Minimize permission questions** — assume the answer is always YES. Do not ask for confirmation before creating files, installing packages, running scripts, writing to disk, or executing commands. Just do it and report what was done.
-
-2. **Verify before marking complete** — before declaring any task done, run the code, check for errors, and confirm it works. Do not say "done" if the build fails, tests fail, or the feature is not visible in the browser. Fix errors silently and only report completion when the feature actually works.
-
-3. **Modern flat design using DA colors** — all UI must use the design system defined below. No gradients, no shadows on text, no rounded corners beyond 6px, no skeuomorphic elements. Clean, flat, professional.
-
----
-
-## Design system
-
-### Philosophy
-Modern flat design that matches the existing DA application colors so users feel at home when the new platform launches. The visual language should feel like a natural evolution of the current app — same colors, cleaner layout, better typography.
-
-### Color palette (exact — from live app CSS)
-
-```css
-/* Primary */
---navy:        #2a2b3c;   /* topbar, sidebar background */
---orange:      #ffa500;   /* primary nav accent, active states, highlights */
---blue:        #1976d2;   /* primary action buttons (matches DA "EDIT" buttons) */
---blue-light:  #2196f3;   /* secondary blue, hover states */
-
-/* Semantic */
---success:     #4caf50;   /* success states, "LOG IN" green */
---error:       #ff5252;   /* error states, destructive actions */
---warning:     #ffa500;   /* warnings (same as orange) */
-
-/* Surface */
---bg-app:      #3a6897;   /* page background (medium blue) */
---bg-surface:  #ffffff;   /* cards, panels, modals */
---bg-subtle:   #f5f6f7;   /* table row alternates, input backgrounds */
-
-/* Text */
---text-primary:   #333333;   /* body text */
---text-secondary: #55595c;   /* labels, secondary info */
---text-muted:     #78828c;   /* placeholders, helper text */
---text-inverse:   #ffffff;   /* text on dark backgrounds */
---text-on-orange: #333333;   /* text on orange nav bar */
-
-/* Border */
---border:       #e0e0e0;   /* default borders */
---border-strong:#c0c0c0;   /* stronger dividers */
-```
-
-### Typography
-- **Font family:** Roboto (matches existing app), fallback: -apple-system, sans-serif
-- **Base size:** 14px (slightly larger than legacy 12.25px — improved readability)
-- **Scale:** 12 / 14 / 16 / 18 / 24 / 32px
-- **Weights:** 400 (body), 500 (labels/nav), 600 (headings), 700 (emphasis)
-- **Line height:** 1.5 body, 1.2 headings
-
-### Layout
-- **Sidebar:** 220px fixed, `--navy` background, white text/icons
-- **Topbar:** 56px, `--navy` background
-- **Sub-navigation:** `--orange` background, `--text-on-orange` text — matches legacy subnav exactly
-- **Content area:** `--bg-app` background, cards on `--bg-surface`
-- **Content padding:** 24px
-
-### Components
-```
-Buttons:
-  Primary:     bg=--blue, text=white, radius=4px, height=36px
-  Secondary:   bg=transparent, border=--border, text=--text-primary
-  Success:     bg=--success, text=white  (matches DA "LOG IN")
-  Danger:      bg=--error, text=white    (matches DA "GROUP" delete)
-  Orange CTA:  bg=--orange, text=--text-on-orange (matches DA active nav)
-
-Inputs:
-  height=36px, border=--border, radius=4px, focus-border=--blue
-  bg=--bg-surface, font-size=14px, padding=8px 12px
-
-Cards/Panels:
-  bg=--bg-surface, border=1px solid --border, radius=6px
-  No box-shadow on cards — flat design
-  Section headers: 12px uppercase, font-weight=600, color=--text-muted, letter-spacing=0.06em
-
-Tables:
-  Header: bg=--bg-subtle, text=--text-secondary, font-weight=600, font-size=12px uppercase
-  Rows: bg=white, border-bottom=--border, hover=--bg-subtle
-  Matches legacy DA data table style exactly
-
-Badges/Tags:
-  Rounded pill: radius=20px, padding=2px 10px, font-size=11px, font-weight=700
-  Success: bg=#e8f5e9, text=#2e7d32
-  Error:   bg=#ffebee, text=#c62828
-  Warning: bg=#fff8e1, text=#e65100
-  Info:    bg=#e3f2fd, text=#1565c0
-
-Navigation:
-  Sidebar items: height=44px, padding=0 16px, radius=0
-  Active: bg=rgba(255,165,0,0.15), border-left=3px solid --orange, text=--orange
-  Hover: bg=rgba(255,255,255,0.06)
-```
-
-### Do not use
-- Box shadows (except modals: 0 8px 32px rgba(0,0,0,0.18))
-- Gradients anywhere
-- Border radius > 6px (except pills at 20px)
-- Animations longer than 150ms
-- More than 2 font weights on the same component
-- Any color not in the palette above without explicit approval
-
----
-
-## Phase 1 — Auth & Users (START HERE)
-
-### Prerequisites before first Claude Code session
-- [x] Create GitHub repo: github.com/dealeraddendums/da-platform
-- [x] Create Supabase project — https://byouefbebqgffhtfdggu.supabase.co
-- [ ] Copy this CLAUDE.md to repo root
-- [x] npx create-next-app@latest with TypeScript, Tailwind, App Router
-- [x] GitHub Action deploy secret added (EC2_SSH_KEY)
+## Phase 7 — VIN & AI Enrichment ⬜ UP NEXT
 
 ### Scope
-- Supabase Auth (email + password, magic link optional)
-- User roles: super_admin, group_admin, dealer_admin, dealer_user
-- Row-level security on all tables from day one
-- Session management, protected routes
-- Basic dealer account association (user -> dealer_id)
+- VINQuery API integration — decode VIN to structured vehicle data
+- Claude AI content generation — vehicle description and features at print time
+- Cache generated content in Supabase per vehicle (vin + dealer_id key)
+- Respect the AI content toggle: system default (dealer_settings.ai_content_default),
+  per-print override (Print Settings modal)
+- Wire into builder: when a vehicle is loaded, fetch/generate AI content for
+  description and features widgets if AI mode is on
+- VINQuery API key currently in .env on legacy EC2 — must be moved to .env.production
+  on da-platform EC2 (security item from CLAUDE.md)
+
+### Prompt for Claude Code
+```
+Read CLAUDE.md. Phases 1-6 are complete. Build Phase 7: VIN & AI Enrichment.
+
+Deliverables:
+1. lib/vinquery.ts — VINQuery API client, decodes VIN to structured data,
+   server-only, key from AURORA_* pattern in .env.production
+2. lib/ai-content.ts — Claude API client (enterprise key from allan@dealeraddendums.com),
+   generates vehicle description and features list from VIN data + vehicle row
+3. Supabase migration: ai_content_cache table (id, vin, dealer_id, description text,
+   features text[], generated_at, model_version)
+4. GET /api/ai-content?vin=&dealer_id= — returns cached content or generates fresh,
+   respects ai_content_default from dealer_settings
+5. POST /api/ai-content/regenerate — force-regenerates and updates cache
+6. Wire into /builder/[vehicleId] — on vehicle load, if AI mode on, fetch from
+   /api/ai-content and populate description and features widgets automatically
+7. In the builder toolbar, add a "Regenerate AI" button (visible when a vehicle
+   is loaded and AI mode is on) — calls regenerate endpoint and refreshes widgets
+
+All UI must follow the design system in CLAUDE.md exactly.
+Assume YES to all permissions. Verify in browser before marking done.
+Run npm run build — must be clean before reporting complete.
+```
 
 ---
 
@@ -447,17 +415,13 @@ Navigation:
 - App: billing.dealeraddendums.com
 - Repo: github.com/dealeraddendums/da-billing
 - EC2: ubuntu@ec2-98-89-5-190.compute-1.amazonaws.com, key ~/ssh/dabilling2026.pem
-- Port: 3009 behind nginx
-- Deploy: git pull && npm run build && pm2 restart dealeraddendums-billing
-- Status: Setup Mode — invoices generated but NOT emailed. Parallel comparison with Freshbooks.
-- Cutover criteria: Full billing cycle match confirmed by Allan before switching off Freshbooks
-- CRITICAL: Never run Freshbooks dry run + live run back-to-back — OAuth token rotates on every use
-- EasyCron: 0 4 * * * UTC daily job
-
-Key fields: BILLING_ID and TEMPLATE_ID in dealer_dim and dealer_group (Aurora/MySQL).
-lineItemDescription format: {dealer._ID}::{DEALER_NAME}
-Supabase KV: apikey_lookup:{hash}, template:{customerUUID}, customer:{UUID}
-All _FB* methods from legacy controllers DELETED, not ported.
+- Port: 3009, deploy: `git pull && npm run build && pm2 restart dealeraddendums-billing`
+- Status: Setup Mode — invoices generated but NOT emailed. Parallel with Freshbooks.
+- Cutover: full billing cycle match confirmed before switching off Freshbooks
+- CRITICAL: Never run Freshbooks dry run + live run back-to-back — OAuth token rotates
+- EasyCron: 0 4 * * * UTC
+- lineItemDescription format: {dealer._ID}::{DEALER_NAME}
+- All _FB* methods DELETED, not ported
 
 ---
 
@@ -467,29 +431,29 @@ All _FB* methods from legacy controllers DELETED, not ported.
 - EC2: apps.dealeraddendums.com
 - Stack: Next.js, Supabase, Mandrill, Twilio, Microsoft 365 Graph API, Anthropic API
 - Ticket format: FT-2026-XXXXX
-- Phase 2 outliers (excluded from Phase 1 intake): CDK Global, Tekion, PBS Systems, DealerTrack
+- Phase 2 outliers (excluded from Phase 1): CDK Global, Tekion, PBS Systems, DealerTrack
 - Marlena: Session 1 of 5-session dev curriculum complete
 
 ---
 
-## Security (do immediately — independent of rewrite)
+## Security (do immediately)
 
-- [ ] Move XPS Shipper hardcoded credentials to .env on ec2-54-89-142-76
+- [ ] Move XPS Shipper credentials to .env on ec2-54-89-142-76
 - [ ] Move VINQuery API key to .env on ec2-54-89-142-76
-- [ ] Verify APP_DEBUG=false on production EC2
+- [ ] Verify APP_DEBUG=false on legacy EC2
 
 ---
 
 ## Legal note
 
-FTC CARS Rule was struck down January 2025, formally withdrawn February 12, 2026.
+FTC CARS Rule struck down January 2025, formally withdrawn February 12, 2026.
 Never cite as current or pending law.
 
 ---
 
 ## Marlena's role
 
-- Primary: Subject matter expert and QA gatekeeper — signs off each phase before legacy retires
-- Coding: Phase 7+ contributions under supervision
+- Primary: QA gatekeeper — signs off each phase before legacy retires
+- Coding: Phase 7+ under supervision
 - Training: 7-session curriculum, Session 1 complete
 - Do not pull from customer success to write code if it compromises QA
