@@ -272,7 +272,7 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                       style={{ cursor: "pointer" }}
                     />
                   </th>
-                  {["Stock #", "Year / Make / Model", "VIN", "Condition", "MSRP", "Added", "Addendum", "Info Sheet", "Buyer Guide", "", ""].map((h, i) => (
+                  {["Stock #", "Year / Make / Model", "VIN", "Condition", "MSRP", "Added", "", "", "Buyer Guide", "Info Sheet", "Addendum"].map((h, i) => (
                     <th key={i} className="text-left px-3 py-2.5"
                       style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
                       {h}
@@ -304,13 +304,13 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                       <td className="px-3 py-2 text-xs" style={{ color: "var(--text-secondary)" }}>{fmt(v.msrp)}</td>
                       <td className="px-3 py-2 text-xs" style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtDate(v.date_added)}</td>
                       <td className="px-3 py-2">
-                        <PrintBtn vehicleId={v.id} docType="addendum" printed={printed.includes("addendum")} />
-                      </td>
-                      <td className="px-3 py-2">
-                        <PrintBtn vehicleId={v.id} docType="infosheet" printed={printed.includes("infosheet")} />
-                      </td>
-                      <td className="px-3 py-2">
-                        <PrintBtn vehicleId={v.id} docType="buyer_guide" printed={printed.includes("buyer_guide")} />
+                        <button
+                          onClick={() => setHistoryVehicle({ id: v.id, stock_number: v.stock_number })}
+                          style={{ height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, background: "#fff", color: "#555", border: "1px solid #c0c0c0", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
+                          title="View history"
+                        >
+                          ⏱
+                        </button>
                       </td>
                       <td className="px-3 py-2">
                         <button
@@ -321,13 +321,13 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                         </button>
                       </td>
                       <td className="px-3 py-2">
-                        <button
-                          onClick={() => setHistoryVehicle({ id: v.id, stock_number: v.stock_number })}
-                          style={{ height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, background: "#fff", color: "#555", border: "1px solid #c0c0c0", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
-                          title="View history"
-                        >
-                          ⏱
-                        </button>
+                        <PrintBtn vehicleId={v.id} docType="buyer_guide" printed={printed.includes("buyer_guide")} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <PrintBtn vehicleId={v.id} docType="infosheet" printed={printed.includes("infosheet")} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <PrintBtn vehicleId={v.id} docType="addendum" printed={printed.includes("addendum")} />
                       </td>
                     </tr>
                   );
