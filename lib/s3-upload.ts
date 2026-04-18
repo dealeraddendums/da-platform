@@ -2,7 +2,7 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-const BUCKET = 'da-platform-pdfs';
+const BUCKET = 'dealer-addendums';
 
 function getClient(): S3Client {
   return new S3Client({
