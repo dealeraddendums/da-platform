@@ -1,36 +1,32 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import AddVehicleModal from "./AddVehicleModal";
+import EditVehicleModal from "./EditVehicleModal";
+import VehicleHistoryPanel from "./VehicleHistoryPanel";
 import type { DealerVehicleRow } from "@/lib/db";
 
-type Props = {
-  dealerId: string;
-};
+type Props = { dealerId: string };
 
 type ListResponse = {
   data: DealerVehicleRow[];
   total: number;
   page: number;
   per_page: number;
+  printedTypes?: Record<string, string[]>;
 };
 
 const PER_PAGE = 50;
-
-const SOURCE_LABELS: Record<string, string> = {
-  nhtsa: "NHTSA",
-  override: "Override",
-  dealer_vehicles: "Prior entry",
-  aurora: "Legacy DB",
-  partial: "Partial",
-  manual: "Manual",
+const DOC_LABELS: Record<string, string> = {
+  addendum: "Addendum",
+  infosheet: "Info Sheet",
+  buyer_guide: "Buyer Guide",
 };
 
 function conditionBadge(c: string) {
   const styles: Record<string, React.CSSProperties> = {
-    New: { background: "#e3f2fd", color: "#1565c0", border: "1px solid #bbdefb" },
-    Used: { background: "#f3e5f5", color: "#6a1b9a", border: "1px solid #e1bee7" },
+    New:       { background: "#e3f2fd", color: "#1565c0", border: "1px solid #bbdefb" },
+    Used:      { background: "#f3e5f5", color: "#6a1b9a", border: "1px solid #e1bee7" },
     Certified: { background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" },
   };
   const s = styles[c] ?? { background: "#f5f6f7", color: "#555", border: "1px solid #e0e0e0" };
@@ -51,8 +47,27 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
 }
 
+function PrintBtn({ vehicleId, docType, printed }: { vehicleId: string; docType: string; printed: boolean }) {
+  return (
+    <button
+      onClick={() => { window.location.href = `/dealer-vehicles/${vehicleId}/addendum?type=${docType}`; }}
+      style={{
+        height: 28, padding: "0 9px", fontSize: 11, fontWeight: 600,
+        borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap",
+        background: printed ? "#1976d2" : "#fff",
+        color: printed ? "#fff" : "#333",
+        border: printed ? "1px solid #1565c0" : "1px solid #c0c0c0",
+      }}
+      title={`Open ${DOC_LABELS[docType]} builder`}
+    >
+      {DOC_LABELS[docType]}
+    </button>
+  );
+}
+
 export default function ManualVehicleInventory({ dealerId }: Props) {
   const [vehicles, setVehicles] = useState<DealerVehicleRow[]>([]);
+  const [printedTypes, setPrintedTypes] = useState<Record<string, string[]>>({});
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
@@ -61,13 +76,17 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [editingVehicle, setEditingVehicle] = useState<DealerVehicleRow | null>(null);
+  const [historyVehicle, setHistoryVehicle] = useState<{ id: string; stock_number: string } | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
   const fetchVehicles = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const params = new URLSearchParams({
-      page: String(page),
-      condition,
-    });
+    setCheckedIds(new Set());
+    const params = new URLSearchParams({ page: String(page), condition });
     if (q) params.set("q", q);
 
     const res = await fetch(`/api/dealer-vehicles?${params}`);
@@ -78,24 +97,66 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
     } else {
       setVehicles(json.data);
       setTotal(json.total);
+      setPrintedTypes(json.printedTypes ?? {});
     }
   }, [page, condition, q]);
 
-  useEffect(() => { fetchVehicles(); }, [fetchVehicles]);
+  useEffect(() => { void fetchVehicles(); }, [fetchVehicles]);
 
   const totalPages = Math.ceil(total / PER_PAGE);
+
+  function toggleCheck(id: string) {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (checkedIds.size === vehicles.length) {
+      setCheckedIds(new Set());
+    } else {
+      setCheckedIds(new Set(vehicles.map((v) => v.id)));
+    }
+  }
+
+  function bulkPrint(docType: string) {
+    const ids = Array.from(checkedIds);
+    for (const id of ids) {
+      window.open(`/dealer-vehicles/${id}/addendum?type=${docType}`, "_blank");
+    }
+  }
+
+  async function confirmBulkDelete() {
+    setDeleting(true);
+    const ids = Array.from(checkedIds);
+    const res = await fetch("/api/dealer-vehicles/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    setDeleting(false);
+    setShowDeleteConfirm(false);
+    if (res.ok) {
+      setCheckedIds(new Set());
+      void fetchVehicles();
+    } else {
+      const json = await res.json() as { error?: string };
+      alert(json.error ?? "Delete failed");
+    }
+  }
 
   return (
     <div>
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <form
           onSubmit={(e) => { e.preventDefault(); setQ(searchInput); setPage(1); }}
           style={{ display: "flex", gap: 6 }}
         >
           <input
-            type="text"
-            value={searchInput}
+            type="text" value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search stock, VIN, make, model…"
             style={{ height: 36, border: "1px solid var(--border)", borderRadius: 4, padding: "0 10px", fontSize: 13, width: 240 }}
@@ -122,16 +183,46 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
           <option value="Certified">Certified</option>
         </select>
 
-        <div style={{ marginLeft: "auto" }}>
-          <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} />
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} label="+ Add Vehicle" />
+          <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} initialTab="import" label="↑ Import Vehicles" />
         </div>
       </div>
 
       {/* Summary */}
-      <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", marginBottom: 10 }}>
+      <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", marginBottom: 8 }}>
         {total.toLocaleString()} vehicle{total !== 1 ? "s" : ""}
         {q ? ` matching "${q}"` : ""}
       </p>
+
+      {/* Bulk actions toolbar */}
+      {checkedIds.size > 0 && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+          padding: "8px 14px", marginBottom: 10,
+          background: "#fff", border: "1px solid var(--border)", borderLeft: "3px solid var(--orange)",
+          borderRadius: 4,
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginRight: 4 }}>
+            {checkedIds.size} selected
+          </span>
+          <button onClick={() => bulkPrint("addendum")} style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
+            Print Addendums
+          </button>
+          <button onClick={() => bulkPrint("infosheet")} style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
+            Print Info Sheets
+          </button>
+          <button onClick={() => bulkPrint("buyer_guide")} style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
+            Print Buyer Guides
+          </button>
+          <button onClick={() => setShowDeleteConfirm(true)} style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#ff5252", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", marginLeft: 4 }}>
+            Delete
+          </button>
+          <button onClick={() => setCheckedIds(new Set())} style={{ height: 30, padding: "0 10px", fontSize: 12, background: "#fff", border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer", color: "var(--text-muted)", marginLeft: "auto" }}>
+            Cancel
+          </button>
+        </div>
+      )}
 
       {error && q && (
         <div style={{ padding: "10px 14px", background: "#ffebee", border: "1px solid #ffcdd2", borderRadius: 4, color: "#c62828", fontSize: 13, marginBottom: 12 }}>
@@ -149,12 +240,8 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
             ) : (
               <>
                 <div style={{ fontSize: 40, marginBottom: 12, opacity: 0.25 }}>🚗</div>
-                <p style={{ color: "var(--text-primary)", fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
-                  No vehicles yet
-                </p>
-                <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 24 }}>
-                  Add your first vehicle to get started.
-                </p>
+                <p style={{ color: "var(--text-primary)", fontSize: 16, fontWeight: 600, marginBottom: 8 }}>No vehicles yet</p>
+                <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 24 }}>Add your first vehicle to get started.</p>
                 <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
                   <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} label="+ Add Vehicle" />
                   <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} initialTab="import" label="↑ Import Vehicles" />
@@ -164,11 +251,19 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table className="w-full text-sm" style={{ minWidth: 780 }}>
+            <table className="w-full text-sm" style={{ minWidth: 960 }}>
               <thead>
                 <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
-                  {["Stock #", "Year / Make / Model", "VIN", "Condition", "MSRP", "Mileage", "Added", "Decode", ""].map((h) => (
-                    <th key={h} className="text-left px-3 py-2.5"
+                  <th className="px-3 py-2.5" style={{ width: 36 }}>
+                    <input
+                      type="checkbox"
+                      checked={checkedIds.size === vehicles.length && vehicles.length > 0}
+                      onChange={toggleAll}
+                      style={{ cursor: "pointer" }}
+                    />
+                  </th>
+                  {["Stock #", "Year / Make / Model", "VIN", "Condition", "MSRP", "Added", "Addendum", "Info Sheet", "Buyer Guide", "", ""].map((h, i) => (
+                    <th key={i} className="text-left px-3 py-2.5"
                       style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
                       {h}
                     </th>
@@ -176,63 +271,62 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {vehicles.map((v, i) => (
-                  <tr key={v.id} style={{ borderBottom: i < vehicles.length - 1 ? "1px solid var(--border)" : "none" }}>
-                    <td className="px-3 py-2.5">
-                      <span className="font-mono text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                        {v.stock_number}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div style={{ color: "var(--text-primary)", fontWeight: 500, fontSize: 13 }}>
-                        {[v.year, v.make, v.model].filter(Boolean).join(" ") || "—"}
-                      </div>
-                      {v.trim && (
-                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{v.trim}</div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className="font-mono text-xs" style={{ color: "var(--text-secondary)" }}>
-                        {v.vin ?? "—"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5">{conditionBadge(v.condition)}</td>
-                    <td className="px-3 py-2.5 text-xs" style={{ color: "var(--text-secondary)" }}>
-                      {fmt(v.msrp)}
-                    </td>
-                    <td className="px-3 py-2.5 text-xs" style={{ color: "var(--text-secondary)" }}>
-                      {v.mileage ? v.mileage.toLocaleString() : "—"}
-                    </td>
-                    <td className="px-3 py-2.5 text-xs" style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-                      {fmtDate(v.date_added)}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {v.decode_flagged ? (
-                        <span style={{ fontSize: 11, color: "#f57f17", background: "#fffde7", border: "1px solid #fff176", borderRadius: 20, padding: "2px 7px", whiteSpace: "nowrap" }}>
-                          ⚠ {SOURCE_LABELS[v.decode_source ?? ""] ?? v.decode_source ?? "?"}
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: 11, color: "#2e7d32", background: "#e8f5e9", border: "1px solid #c8e6c9", borderRadius: 20, padding: "2px 7px" }}>
-                          {SOURCE_LABELS[v.decode_source ?? ""] ?? v.decode_source ?? "—"}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <Link
-                        href={`/dealer-vehicles/${v.id}/addendum`}
-                        style={{ fontSize: 12, color: "#1976d2", textDecoration: "none", fontWeight: 600, whiteSpace: "nowrap" }}
-                      >
-                        Open Builder →
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                {vehicles.map((v, i) => {
+                  const printed = printedTypes[v.id] ?? [];
+                  return (
+                    <tr key={v.id} style={{ borderBottom: i < vehicles.length - 1 ? "1px solid var(--border)" : "none", background: checkedIds.has(v.id) ? "#f0f7ff" : undefined }}>
+                      <td className="px-3 py-2">
+                        <input type="checkbox" checked={checkedIds.has(v.id)} onChange={() => toggleCheck(v.id)} style={{ cursor: "pointer" }} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="font-mono text-xs font-semibold" style={{ color: "var(--text-primary)" }}>{v.stock_number}</span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div style={{ color: "var(--text-primary)", fontWeight: 500, fontSize: 13 }}>
+                          {[v.year, v.make, v.model].filter(Boolean).join(" ") || "—"}
+                        </div>
+                        {v.trim && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{v.trim}</div>}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="font-mono text-xs" style={{ color: "var(--text-secondary)" }}>{v.vin ?? "—"}</span>
+                      </td>
+                      <td className="px-3 py-2">{conditionBadge(v.condition)}</td>
+                      <td className="px-3 py-2 text-xs" style={{ color: "var(--text-secondary)" }}>{fmt(v.msrp)}</td>
+                      <td className="px-3 py-2 text-xs" style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtDate(v.date_added)}</td>
+                      <td className="px-3 py-2">
+                        <PrintBtn vehicleId={v.id} docType="addendum" printed={printed.includes("addendum")} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <PrintBtn vehicleId={v.id} docType="infosheet" printed={printed.includes("infosheet")} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <PrintBtn vehicleId={v.id} docType="buyer_guide" printed={printed.includes("buyer_guide")} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          onClick={() => setEditingVehicle(v)}
+                          style={{ height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, background: "#fff", color: "#333", border: "1px solid #c0c0c0", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
+                        >
+                          Edit
+                        </button>
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          onClick={() => setHistoryVehicle({ id: v.id, stock_number: v.stock_number })}
+                          style={{ height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, background: "#fff", color: "#555", border: "1px solid #c0c0c0", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
+                          title="View history"
+                        >
+                          ⏱
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderTop: "1px solid var(--border)", background: "#fafafa" }}>
             <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
@@ -251,6 +345,54 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
           </div>
         )}
       </div>
+
+      {/* Edit modal */}
+      {editingVehicle && (
+        <EditVehicleModal
+          vehicle={editingVehicle}
+          onSaved={(updated) => {
+            setVehicles((vs) => vs.map((v) => v.id === updated.id ? updated : v));
+            setEditingVehicle(null);
+          }}
+          onClose={() => setEditingVehicle(null)}
+        />
+      )}
+
+      {/* History panel */}
+      {historyVehicle && (
+        <VehicleHistoryPanel
+          vehicleId={historyVehicle.id}
+          stockNumber={historyVehicle.stock_number}
+          onClose={() => setHistoryVehicle(null)}
+        />
+      )}
+
+      {/* Delete confirmation modal */}
+      {showDeleteConfirm && (
+        <>
+          <div onClick={() => setShowDeleteConfirm(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000 }} />
+          <div style={{
+            position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+            background: "#fff", borderRadius: 6, zIndex: 1001, width: "min(420px, 96vw)",
+            padding: 24, boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+          }}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}>
+              Delete {checkedIds.size} vehicle{checkedIds.size !== 1 ? "s" : ""}?
+            </h3>
+            <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 20 }}>
+              This cannot be undone. Print history will be preserved.
+            </p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setShowDeleteConfirm(false)} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
+                Cancel
+              </button>
+              <button onClick={confirmBulkDelete} disabled={deleting} style={{ height: 36, padding: "0 16px", background: "#ff5252", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: deleting ? "not-allowed" : "pointer" }}>
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

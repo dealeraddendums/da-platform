@@ -485,6 +485,32 @@ export type DealerVehicleInsert = {
   decode_flagged?: boolean;
 };
 
+export type VehicleAuditLogRow = {
+  id: string;
+  dealer_id: string;
+  vehicle_id: string | null;
+  stock_number: string | null;
+  action: "import" | "edit" | "print" | "delete";
+  method: string | null;
+  changed_by: string | null;
+  changed_by_email: string | null;
+  changes: Record<string, { old: unknown; new: unknown }> | null;
+  document_type: string | null;
+  created_at: string;
+};
+
+export type VehicleAuditLogInsert = {
+  dealer_id: string;
+  vehicle_id?: string | null;
+  stock_number?: string | null;
+  action: "import" | "edit" | "print" | "delete";
+  method?: string | null;
+  changed_by?: string | null;
+  changed_by_email?: string | null;
+  changes?: Record<string, { old: unknown; new: unknown }> | null;
+  document_type?: string | null;
+};
+
 export type NhtsaOverrideRow = {
   id: string;
   vin_prefix: string;
@@ -653,6 +679,12 @@ export type Database = {
         Row: DealerVehicleRow;
         Insert: DealerVehicleInsert;
         Update: Partial<Omit<DealerVehicleRow, 'id' | 'dealer_id' | 'date_added'>>;
+        Relationships: [];
+      };
+      vehicle_audit_log: {
+        Row: VehicleAuditLogRow;
+        Insert: VehicleAuditLogInsert;
+        Update: Record<string, never>;
         Relationships: [];
       };
       nhtsa_overrides: {

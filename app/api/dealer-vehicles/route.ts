@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { DealerVehicleInsert } from "@/lib/db";
+import type { DealerVehicleInsert, VehicleAuditLogInsert } from "@/lib/db";
 
 const PER_PAGE = 50;
 
@@ -53,12 +53,33 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: dbErr.message }, { status: 500 });
   }
 
+  // Fetch print status from audit log (gracefully skip if table not yet created)
+  let printedTypes: Record<string, string[]> = {};
+  if (data?.length) {
+    try {
+      const ids = data.map((v) => v.id);
+      const { data: prints } = await admin
+        .from("vehicle_audit_log")
+        .select("vehicle_id, document_type")
+        .in("vehicle_id", ids)
+        .eq("action", "print");
+      for (const p of prints ?? []) {
+        if (!p.vehicle_id || !p.document_type) continue;
+        if (!printedTypes[p.vehicle_id]) printedTypes[p.vehicle_id] = [];
+        if (!printedTypes[p.vehicle_id].includes(p.document_type)) {
+          printedTypes[p.vehicle_id].push(p.document_type);
+        }
+      }
+    } catch { printedTypes = {}; }
+  }
+
   return NextResponse.json({
     data: data ?? [],
     total: count ?? 0,
     page,
     per_page: PER_PAGE,
     dealer_id: dealerId,
+    printedTypes,
   });
 }
 
@@ -130,6 +151,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
     return NextResponse.json({ error: dbErr.message }, { status: 500 });
   }
+
+  const logEntry: VehicleAuditLogInsert = {
+    dealer_id: dealerId,
+    vehicle_id: data.id,
+    stock_number: stockNumber,
+    action: "import",
+    method: (body.decode_source as string | undefined) === "manual" ? "manual" : "vin_decoder",
+    changed_by: claims.sub,
+    changed_by_email: claims.email,
+  };
+  void admin.from("vehicle_audit_log").insert(logEntry);
 
   return NextResponse.json(data, { status: 201 });
 }

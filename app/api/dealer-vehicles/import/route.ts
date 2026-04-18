@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { DealerVehicleInsert } from "@/lib/db";
+import type { DealerVehicleInsert, VehicleAuditLogInsert } from "@/lib/db";
 
 type MappedVehicle = {
   stock_number: string;
@@ -130,6 +130,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const imported = data?.length ?? 0;
     skipped += inserts.length - imported;
+
+    // Audit log — one entry per successfully imported vehicle
+    if (data?.length) {
+      const idMap = new Map(deduped.map((r, i) => [r.stock_number, data[i]?.id as string | undefined]));
+      const logEntries: VehicleAuditLogInsert[] = data
+        .map((row, i) => ({
+          dealer_id: dealerId,
+          vehicle_id: row.id as string,
+          stock_number: deduped[i]?.stock_number ?? null,
+          action: "import" as const,
+          method: "csv",
+          changed_by: claims.sub,
+          changed_by_email: claims.email,
+        }))
+        .filter((e) => e.vehicle_id);
+      if (logEntries.length) {
+        void admin.from("vehicle_audit_log").insert(logEntries);
+      }
+      void idMap; // suppress unused warning
+    }
 
     return NextResponse.json({ imported, skipped, total: vehicles.length });
   } catch (err) {
