@@ -119,7 +119,8 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
   // Import tab state
   const [importFile, setImportFile] = useState<File | null>(null);
   const [fileHeaders, setFileHeaders] = useState<string[]>([]);
-  const [fileRows, setFileRows] = useState<Record<string, string>[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [fileRows, setFileRows] = useState<Record<string, any>[]>([]);
   const [mapping, setMapping] = useState<Record<DAField, string>>({} as Record<DAField, string>);
   const [importMode, setImportMode] = useState<ImportMode>("update");
   const [importing, setImporting] = useState(false);
@@ -232,7 +233,8 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
         const data = e.target?.result;
         const wb = XLSX.read(data, { type: "binary" });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const raw = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const raw = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: "" });
         if (!raw.length) {
           setImportError("No data rows found in file");
           return;
@@ -269,35 +271,54 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
     setImportProgress({ done: 0, total: fileRows.length });
     setImportDone(null);
 
-    function get(row: Record<string, string>, field: DAField): string {
+    // XLSX returns numeric cells as actual numbers — always coerce to string first
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function safeStr(val: any): string {
+      return val == null ? "" : String(val).trim();
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function safeNum(val: any): number | undefined {
+      const n = parseFloat(String(val).replace(/[^0-9.]/g, ""));
+      return isNaN(n) ? undefined : n;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function get(row: Record<string, any>, field: DAField): string {
       const col = mapping[field];
-      return col ? (row[col] ?? "").trim() : "";
+      return col ? safeStr(row[col]) : "";
     }
 
     // Map all rows to typed vehicle objects; skip rows with no stock number
-    const mapped = fileRows
-      .map((row) => {
-        const stock = get(row, "Stock Number");
-        if (!stock) return null;
-        const msrpRaw = get(row, "MSRP").replace(/[$,]/g, "");
-        const mileageRaw = get(row, "Mileage").replace(/,/g, "");
-        return {
-          stock_number: stock,
-          vin: get(row, "VIN").toUpperCase() || undefined,
-          year: get(row, "Year") ? parseInt(get(row, "Year"), 10) : undefined,
-          make: get(row, "Make") || undefined,
-          model: get(row, "Model") || undefined,
-          trim: get(row, "Trim") || undefined,
-          body_style: get(row, "Body Style") || undefined,
-          exterior_color: get(row, "Color") || undefined,
-          mileage: mileageRaw ? parseInt(mileageRaw, 10) : 0,
-          msrp: msrpRaw ? parseFloat(msrpRaw) : undefined,
-          condition: isCertifiedValue(get(row, "Certified"))
-            ? "Certified"
-            : normalizeCondition(get(row, "Condition")),
-        };
-      })
-      .filter((v): v is NonNullable<typeof v> => v !== null);
+    let mapped: NonNullable<unknown>[];
+    try {
+      mapped = fileRows
+        .map((row) => {
+          const stock = get(row, "Stock Number");
+          if (!stock) return null;
+          return {
+            stock_number: stock,
+            vin: get(row, "VIN").toUpperCase() || undefined,
+            year: safeNum(get(row, "Year")),
+            make: get(row, "Make") || undefined,
+            model: get(row, "Model") || undefined,
+            trim: get(row, "Trim") || undefined,
+            body_style: get(row, "Body Style") || undefined,
+            exterior_color: get(row, "Color") || undefined,
+            mileage: safeNum(get(row, "Mileage")) ?? 0,
+            msrp: safeNum(get(row, "MSRP")),
+            condition: isCertifiedValue(get(row, "Certified"))
+              ? "Certified"
+              : normalizeCondition(get(row, "Condition")),
+          };
+        })
+        .filter((v): v is NonNullable<typeof v> => v !== null);
+    } catch (err) {
+      console.error("[import] row mapping error:", err);
+      setImportError(`Row processing error: ${err instanceof Error ? err.message : String(err)}`);
+      setImporting(false);
+      setImportProgress(null);
+      return;
+    }
 
     const BATCH = 50;
     let totalImported = 0;
@@ -306,6 +327,7 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
     for (let i = 0; i < mapped.length; i += BATCH) {
       const batch = mapped.slice(i, i + BATCH);
       const isFirstBatch = i === 0;
+      console.log(`[import] sending batch ${Math.floor(i / BATCH) + 1}, rows ${i + 1}–${i + batch.length} of ${mapped.length}`);
 
       try {
         const res = await fetch("/api/dealer-vehicles/import", {
@@ -659,7 +681,8 @@ function ImportTab({
 }: {
   importFile: File | null;
   fileHeaders: string[];
-  fileRows: Record<string, string>[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fileRows: Record<string, any>[];
   mapping: Record<DAField, string>;
   setMapping: React.Dispatch<React.SetStateAction<Record<DAField, string>>>;
   importMode: ImportMode;
