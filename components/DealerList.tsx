@@ -5,23 +5,36 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 
+type DealerListRow = DealerRow & {
+  group_name: string | null;
+  lifetime_prints: number;
+  last_30_prints: number;
+};
+
 type DealersResponse = {
-  data: DealerRow[];
+  data: DealerListRow[];
   total: number;
   page: number;
   per_page: number;
 };
 
+function churnRisk(d: DealerListRow): "critical" | "low" | "none" {
+  if (d.lifetime_prints < 10) return "none";
+  if (d.lifetime_prints >= 50 && d.last_30_prints === 0) return "critical";
+  if (d.lifetime_prints >= 50 && d.last_30_prints <= 5) return "low";
+  return "none";
+}
+
 const PER_PAGE = 25;
 
 export default function DealerList() {
   const router = useRouter();
-  const [dealers, setDealers] = useState<DealerRow[]>([]);
+  const [dealers, setDealers] = useState<DealerListRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const [searchInput, setSearchInput] = useState("");
-  const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false">("all");
+  const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false" | "at_risk">("all");
   const [loading, setLoading] = useState(true);
   const [showNewForm, setShowNewForm] = useState(false);
 
@@ -32,7 +45,11 @@ export default function DealerList() {
       per_page: String(PER_PAGE),
     });
     if (q) params.set("q", q);
-    if (activeFilter !== "all") params.set("active", activeFilter);
+    if (activeFilter === "at_risk") {
+      params.set("at_risk", "true");
+    } else if (activeFilter !== "all") {
+      params.set("active", activeFilter);
+    }
 
     try {
       const res = await fetch(`/api/dealers?${params.toString()}`);
@@ -56,7 +73,7 @@ export default function DealerList() {
     setQ(searchInput);
   }
 
-  function handleFilterChange(value: "all" | "true" | "false") {
+  function handleFilterChange(value: "all" | "true" | "false" | "at_risk") {
     setPage(1);
     setActiveFilter(value);
   }
@@ -95,46 +112,48 @@ export default function DealerList() {
 
       {/* Filters */}
       <div className="card p-4 mb-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          <form onSubmit={handleSearch} className="flex items-center gap-2 flex-1 min-w-0">
-            <input
-              className="input flex-1 min-w-0"
-              style={{ maxWidth: 320 }}
-              placeholder="Search by name, dealer ID, city…"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-            />
-            <button type="submit" className="btn btn-secondary" style={{ flexShrink: 0 }}>
-              Search
+        <form onSubmit={handleSearch} className="flex items-center gap-2 mb-3">
+          <input
+            className="input flex-1 min-w-0"
+            style={{ maxWidth: 360 }}
+            placeholder="Search by name or dealer ID…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+          <button type="submit" className="btn btn-secondary" style={{ flexShrink: 0 }}>
+            Search
+          </button>
+          {q && (
+            <button
+              type="button"
+              className="text-sm"
+              style={{ color: "var(--text-muted)" }}
+              onClick={() => { setSearchInput(""); setQ(""); setPage(1); }}
+            >
+              Clear
             </button>
-            {q && (
-              <button
-                type="button"
-                className="text-sm"
-                style={{ color: "var(--text-muted)" }}
-                onClick={() => { setSearchInput(""); setQ(""); setPage(1); }}
-              >
-                Clear
-              </button>
-            )}
-          </form>
-          <div className="flex items-center gap-1">
-            {(["all", "true", "false"] as const).map((v) => (
+          )}
+        </form>
+        <div className="flex items-center gap-1">
+          {(["all", "true", "false", "at_risk"] as const).map((v) => {
+            const label = v === "all" ? "All" : v === "true" ? "Active" : v === "false" ? "Inactive" : "⚠ At Risk";
+            const isAtRisk = v === "at_risk";
+            return (
               <button
                 key={v}
                 type="button"
                 onClick={() => handleFilterChange(v)}
                 className="text-xs font-medium px-3 py-1.5 rounded"
                 style={{
-                  background: activeFilter === v ? "var(--blue)" : "var(--bg-subtle)",
-                  color: activeFilter === v ? "#fff" : "var(--text-secondary)",
-                  border: "1px solid var(--border)",
+                  background: activeFilter === v ? (isAtRisk ? "#ffa500" : "var(--blue)") : "var(--bg-subtle)",
+                  color: activeFilter === v ? (isAtRisk ? "#333" : "#fff") : "var(--text-secondary)",
+                  border: `1px solid ${activeFilter === v ? (isAtRisk ? "#ffa500" : "var(--blue)") : "var(--border)"}`,
                 }}
               >
-                {v === "all" ? "All" : v === "true" ? "Active" : "Inactive"}
+                {label}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
       </div>
 
@@ -152,7 +171,7 @@ export default function DealerList() {
           <table className="w-full text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-                {["Dealer ID", "Name", "Status", "Location", "Primary Contact", "Created", ""].map((h) => (
+                {["Dealer Name", "Group", "Status", "Billing", "Lifetime Prints", "Last 30 Days", "Created", ""].map((h) => (
                   <th
                     key={h}
                     className="text-left px-4 py-2.5 font-semibold"
@@ -164,42 +183,54 @@ export default function DealerList() {
               </tr>
             </thead>
             <tbody>
-              {dealers.map((d, i) => (
-                <tr
-                  key={d.id}
-                  style={{
-                    borderBottom: i < dealers.length - 1 ? "1px solid var(--border)" : "none",
-                  }}
-                >
-                  <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--text-muted)" }}>
-                    {d.dealer_id}
-                  </td>
-                  <td className="px-4 py-3 font-medium" style={{ color: "var(--text-primary)" }}>
-                    {d.name}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge active={d.active} />
-                  </td>
-                  <td className="px-4 py-3" style={{ color: "var(--text-secondary)" }}>
-                    {[d.city, d.state].filter(Boolean).join(", ") || "—"}
-                  </td>
-                  <td className="px-4 py-3" style={{ color: "var(--text-secondary)" }}>
-                    {d.primary_contact || "—"}
-                  </td>
-                  <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
-                    {new Date(d.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link
-                      href={`/dealers/${d.id}`}
-                      className="text-xs font-medium"
-                      style={{ color: "var(--blue)" }}
-                    >
-                      View →
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {dealers.map((d, i) => {
+                const risk = churnRisk(d);
+                return (
+                  <tr
+                    key={d.id}
+                    style={{ borderBottom: i < dealers.length - 1 ? "1px solid var(--border)" : "none" }}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        {risk === "critical" && (
+                          <span title="No prints in 30 days — churn risk" style={{ color: "#ffa500", fontSize: 14, lineHeight: 1, cursor: "help", flexShrink: 0 }}>⚠</span>
+                        )}
+                        {risk === "low" && (
+                          <span title="Low print activity" style={{ width: 7, height: 7, borderRadius: "50%", background: "#ffd54f", display: "inline-block", flexShrink: 0 }} />
+                        )}
+                        <Link
+                          href={`/dealers/${d.id}`}
+                          className="font-medium"
+                          style={{ color: "var(--text-primary)" }}
+                        >
+                          {d.name}
+                        </Link>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>
+                      {d.group_name ?? "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge active={d.active} />
+                    </td>
+                    <td className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>—</td>
+                    <td className="px-4 py-3 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+                      {d.lifetime_prints.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-sm font-medium" style={{ color: d.last_30_prints === 0 && d.lifetime_prints >= 50 ? "#ffa500" : "var(--text-primary)" }}>
+                      {d.last_30_prints.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
+                      {new Date(d.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Link href={`/dealers/${d.id}`} className="text-xs font-medium" style={{ color: "var(--blue)" }}>
+                        View →
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -241,9 +272,9 @@ function StatusBadge({ active }: { active: boolean }) {
     <span
       className="text-xs font-semibold px-2 py-0.5 rounded-full"
       style={{
-        background: active ? "#e8f5e9" : "#fafafa",
-        color: active ? "#2e7d32" : "#78828c",
-        border: `1px solid ${active ? "#c8e6c9" : "#e0e0e0"}`,
+        background: active ? "#e8f5e9" : "#ffebee",
+        color: active ? "#2e7d32" : "#c62828",
+        border: `1px solid ${active ? "#c8e6c9" : "#ffcdd2"}`,
       }}
     >
       {active ? "Active" : "Inactive"}
