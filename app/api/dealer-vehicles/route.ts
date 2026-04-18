@@ -69,8 +69,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (status !== "all") query = query.eq("status", status);
   if (condition !== "all") query = query.ilike("condition", condition);
   if (q) {
+    const yearNum = parseInt(q, 10);
+    const yearClause = (!isNaN(yearNum) && yearNum >= 1900 && yearNum <= 2099) ? `,year.eq.${yearNum}` : "";
     query = query.or(
-      `stock_number.ilike.%${q}%,vin.ilike.%${q}%,make.ilike.%${q}%,model.ilike.%${q}%`
+      `stock_number.ilike.%${q}%,vin.ilike.%${q}%,make.ilike.%${q}%,model.ilike.%${q}%${yearClause}`
     );
   }
   if (printStatus === "printed" && printedIds && printedIds.length > 0) {
