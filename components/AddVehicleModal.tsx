@@ -31,6 +31,7 @@ const DA_IMPORT_FIELDS = [
   "Mileage",
   "MSRP",
   "Condition",
+  "Certified",
 ] as const;
 
 type DAField = (typeof DA_IMPORT_FIELDS)[number];
@@ -60,6 +61,10 @@ const LABEL_STYLE: React.CSSProperties = {
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function isCertifiedValue(raw: string): boolean {
+  return ["yes", "y", "true", "1", "x", "certified", "cert", "cpo"].includes(raw.trim().toLowerCase());
+}
 
 function normalizeCondition(raw: string): string {
   const v = (raw ?? "").trim().toUpperCase();
@@ -287,7 +292,9 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
           exterior_color: get(row, "Color") || undefined,
           mileage: mileageRaw ? parseInt(mileageRaw, 10) : 0,
           msrp: msrpRaw ? parseFloat(msrpRaw) : undefined,
-          condition: normalizeCondition(get(row, "Condition")),
+          condition: isCertifiedValue(get(row, "Certified"))
+            ? "Certified"
+            : normalizeCondition(get(row, "Condition")),
         };
       })
       .filter((v): v is NonNullable<typeof v> => v !== null);
