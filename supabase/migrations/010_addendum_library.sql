@@ -70,6 +70,6 @@ CREATE POLICY "group_admin_read" ON public.addendum_library
     (auth.jwt() -> 'app_metadata' ->> 'role') = 'group_admin' AND
     dealer_id IN (
       SELECT d.dealer_id FROM public.dealers d
-      WHERE d.group_id = (auth.jwt() -> 'app_metadata' ->> 'group_id')
+      WHERE d.group_id = (auth.jwt() -> 'app_metadata' ->> 'group_id')::uuid
     )
   );
