@@ -12,7 +12,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   if (type === 'vehicle') {
-    const vd = { stock: 'STOCK_TEST1', vin: '2HGFC3B96HH362096', year: '2017', color: 'White', make: 'Honda', trim: 'Touring', model: 'Civic', mileage: '10' };
+    const vd = (d.vehicleData as Record<string, string>) || { stock: 'STOCK_TEST1', vin: '2HGFC3B96HH362096', year: '2017', color: 'White', make: 'Honda', trim: 'Touring', model: 'Civic', mileage: '10' };
     const lb: Record<string, string> = { stock: 'Stock:', vin: 'VIN:', year: 'Year:', color: 'Color:', make: 'Make:', trim: 'Trim:', model: 'Model:', mileage: 'Mileage:' };
     const flds = (d.fields as string[]) || Object.keys(vd);
     const hdrFs = Math.round(14 * fs * ((d.headerFontSize as number) || 1));

@@ -11,6 +11,7 @@ type Props = {
 
 type FormData = {
   name: string;
+  inventory_dealer_id: string;
   primary_contact: string;
   primary_contact_email: string;
   phone: string;
@@ -25,6 +26,7 @@ type FormData = {
 function dealerToForm(d: DealerRow): FormData {
   return {
     name: d.name,
+    inventory_dealer_id: d.inventory_dealer_id ?? "",
     primary_contact: d.primary_contact ?? "",
     primary_contact_email: d.primary_contact_email ?? "",
     phone: d.phone ?? "",
@@ -67,6 +69,10 @@ export default function DealerProfileCard({ dealer: initialDealer, canEdit, isSu
 
     const patch: DealerUpdate = {
       name: form.name.trim(),
+      // inventory_dealer_id only included in PATCH when super_admin edits it
+      ...(isSuperAdmin && form.inventory_dealer_id.trim()
+        ? { inventory_dealer_id: form.inventory_dealer_id.trim() }
+        : {}),
       primary_contact: form.primary_contact.trim() || null,
       primary_contact_email: form.primary_contact_email.trim() || null,
       phone: form.phone.trim() || null,
@@ -136,7 +142,7 @@ export default function DealerProfileCard({ dealer: initialDealer, canEdit, isSu
             </span>
           </div>
           <p className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-            Dealer ID: {dealer.dealer_id}
+            Inventory ID: {dealer.inventory_dealer_id ?? dealer.dealer_id}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -196,6 +202,69 @@ export default function DealerProfileCard({ dealer: initialDealer, canEdit, isSu
             Dealer Information
           </p>
           <div className="space-y-4">
+            {/* Internal ID — read-only, never changes */}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Internal ID</span>
+                <span
+                  className="ml-1 text-xs font-medium px-1.5 py-0.5 rounded"
+                  style={{ background: "#fff8e1", color: "#e65100", verticalAlign: "middle" }}
+                >
+                  billing
+                </span>
+              </div>
+              <span
+                className="text-sm font-mono font-medium text-right"
+                style={{ color: "var(--text-primary)" }}
+                title="Never-changing ID used for billing (_ID). Do not edit."
+              >
+                {dealer.internal_id ?? <span style={{ color: "var(--text-muted)" }}>—</span>}
+              </span>
+            </div>
+
+            {/* Inventory Dealer ID — editable by super_admin */}
+            {editing && isSuperAdmin ? (
+              <div>
+                <label className="label">
+                  Inventory Dealer ID
+                  <span
+                    className="ml-1 text-xs font-normal"
+                    style={{ color: "var(--text-muted)", textTransform: "none", letterSpacing: 0 }}
+                  >
+                    (supplier-assigned, matches Aurora DEALER_ID)
+                  </span>
+                </label>
+                <input
+                  className="input"
+                  value={form.inventory_dealer_id}
+                  onChange={set("inventory_dealer_id")}
+                  placeholder="e.g. 1234567"
+                />
+                <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                  Update this when the inventory feed goes live and the supplier assigns a new ID.
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Inventory Dealer ID</span>
+                  <span
+                    className="ml-1 text-xs font-medium px-1.5 py-0.5 rounded"
+                    style={{ background: "#e3f2fd", color: "#1565c0", verticalAlign: "middle" }}
+                  >
+                    Aurora
+                  </span>
+                </div>
+                <span
+                  className="text-sm font-mono font-medium text-right"
+                  style={{ color: "var(--text-primary)" }}
+                  title="Matches Aurora DEALER_ID for inventory queries."
+                >
+                  {dealer.inventory_dealer_id ?? <span style={{ color: "var(--text-muted)" }}>—</span>}
+                </span>
+              </div>
+            )}
+
             <Field
               label="Dealer Name"
               value={form.name}

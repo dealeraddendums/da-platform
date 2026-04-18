@@ -30,6 +30,7 @@ const PER_PAGE = 50;
 
 type Condition = "all" | "new" | "used" | "cpo";
 type Status = "active" | "all";
+type PrintFilter = "all" | "printed" | "unprinted";
 
 export default function VehicleInventory({ fixedDealerId, role, groupId }: Props) {
   const [dealerId, setDealerId] = useState<string | null>(fixedDealerId);
@@ -38,11 +39,14 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
   const [page, setPage] = useState(1);
   const [condition, setCondition] = useState<Condition>("all");
   const [status, setStatus] = useState<Status>("active");
+  const [printFilter, setPrintFilter] = useState<PrintFilter>("all");
   const [q, setQ] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleRow | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
+  const [bulkPrinting, setBulkPrinting] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
   const isGroupAdmin = role === "group_admin";
@@ -52,6 +56,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
     if (!dealerId) return;
     setLoading(true);
     setError(null);
+    setCheckedIds(new Set());
 
     const params = new URLSearchParams({
       dealer_id: dealerId,
@@ -78,6 +83,77 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
       setLoading(false);
     }
   }, [dealerId, page, condition, status, q]);
+
+  const displayedVehicles = printFilter === "all"
+    ? vehicles
+    : printFilter === "printed"
+    ? vehicles.filter((v) => v.PRINT_STATUS === "1")
+    : vehicles.filter((v) => v.PRINT_STATUS !== "1");
+
+  function toggleCheck(id: number) {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (checkedIds.size === displayedVehicles.length) {
+      setCheckedIds(new Set());
+    } else {
+      setCheckedIds(new Set(displayedVehicles.map((v) => v.id)));
+    }
+  }
+
+  async function bulkPrint(docType: "addendum" | "infosheet" | "buyer_guide") {
+    if (checkedIds.size === 0) return;
+    const ids = Array.from(checkedIds);
+
+    // Single vehicle: open in builder instead of bulk PDF
+    if (ids.length === 1) {
+      window.open(`/builder/${ids[0]}?doc_type=${docType}`, "_blank");
+      setCheckedIds(new Set());
+      return;
+    }
+
+    setBulkPrinting(true);
+    try {
+      const paperSize = docType === "infosheet" ? "infosheet" : "standard";
+      const res = await fetch("/api/pdf/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vehicleIds: ids, docType, paperSize }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json() as { error?: string };
+        alert(json.error ?? "Bulk PDF generation failed");
+        return;
+      }
+
+      const contentType = res.headers.get("Content-Type") ?? "";
+      if (contentType.includes("application/zip")) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `addendums_${Date.now()}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } else {
+        // Single URL returned
+        const json = await res.json() as { url?: string };
+        if (json.url) window.open(json.url, "_blank");
+      }
+
+      setCheckedIds(new Set());
+    } finally {
+      setBulkPrinting(false);
+    }
+  }
 
   useEffect(() => {
     void fetchVehicles();
@@ -180,7 +256,73 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
                 </button>
               ))}
             </div>
+
+            {/* Print filter */}
+            <div className="flex items-center gap-1">
+              {(["all", "printed", "unprinted"] as PrintFilter[]).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPrintFilter(p)}
+                  className="text-xs font-medium px-3 py-1.5 rounded"
+                  style={{
+                    background: printFilter === p ? "var(--success)" : "var(--bg-subtle)",
+                    color: printFilter === p ? "#fff" : "var(--text-secondary)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  {p === "all" ? "All" : p === "printed" ? "Printed" : "Unprinted"}
+                </button>
+              ))}
+            </div>
           </div>
+        </div>
+      )}
+
+      {/* Bulk action toolbar */}
+      {checkedIds.size > 0 && (
+        <div
+          className="card p-3 mb-4 flex items-center gap-3"
+          style={{ borderLeft: "3px solid var(--orange)" }}
+        >
+          <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+            {checkedIds.size} selected
+          </span>
+          <button
+            type="button"
+            className="btn btn-primary text-xs"
+            style={{ height: 30 }}
+            disabled={bulkPrinting}
+            onClick={() => void bulkPrint("addendum")}
+          >
+            Addendum
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary text-xs"
+            style={{ height: 30 }}
+            disabled={bulkPrinting}
+            onClick={() => void bulkPrint("infosheet")}
+          >
+            Info Sheet
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary text-xs"
+            style={{ height: 30 }}
+            disabled={bulkPrinting}
+            onClick={() => void bulkPrint("buyer_guide")}
+          >
+            Buyer Guide
+          </button>
+          <button
+            type="button"
+            className="text-xs"
+            style={{ color: "var(--text-muted)", marginLeft: "auto" }}
+            onClick={() => setCheckedIds(new Set())}
+          >
+            Clear
+          </button>
         </div>
       )}
 
@@ -212,7 +354,14 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-                    {["Photo", "Vehicle", "VIN / Stock", "Condition", "MSRP", "Color", "Miles", "In Stock", ""].map((h) => (
+                    <th className="px-3 py-2.5" style={{ width: 36 }}>
+                      <input
+                        type="checkbox"
+                        checked={checkedIds.size === displayedVehicles.length && displayedVehicles.length > 0}
+                        onChange={toggleAll}
+                      />
+                    </th>
+                    {["Photo", "Vehicle", "VIN / Stock", "Cond.", "MSRP", "Color", "Miles", "Printed", ""].map((h) => (
                       <th
                         key={h}
                         className="text-left px-3 py-2.5 font-semibold"
@@ -224,18 +373,30 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
                   </tr>
                 </thead>
                 <tbody>
-                  {vehicles.map((v, i) => {
+                  {displayedVehicles.map((v, i) => {
                     const photos = parsePhotos(v.PHOTOS);
                     const cond = vehicleCondition(v);
+                    const printed = v.PRINT_STATUS === "1";
+                    const checked = checkedIds.has(v.id);
                     return (
                       <tr
                         key={v.id}
                         style={{
-                          borderBottom: i < vehicles.length - 1 ? "1px solid var(--border)" : "none",
+                          borderBottom: i < displayedVehicles.length - 1 ? "1px solid var(--border)" : "none",
+                          background: checked ? "rgba(25,118,210,0.04)" : undefined,
                           cursor: "pointer",
                         }}
                         onClick={() => setSelectedVehicle(v)}
                       >
+                        {/* Checkbox */}
+                        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleCheck(v.id)}
+                          />
+                        </td>
+
                         {/* Photo */}
                         <td className="px-3 py-2" style={{ width: 56 }}>
                           {photos[0] ? (
@@ -293,20 +454,43 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
                           {v.MILEAGE ? parseInt(v.MILEAGE, 10).toLocaleString() : "—"}
                         </td>
 
-                        {/* Date in stock */}
-                        <td className="px-3 py-2 text-xs" style={{ color: "var(--text-muted)" }}>
-                          {v.DATE_IN_STOCK ? formatDate(v.DATE_IN_STOCK) : "—"}
+                        {/* Print status */}
+                        <td className="px-3 py-2">
+                          {printed ? (
+                            <span
+                              className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                              style={{ background: "#e8f5e9", color: "#2e7d32" }}
+                            >
+                              ✓ Printed
+                            </span>
+                          ) : (
+                            <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>
+                          )}
                         </td>
 
-                        {/* Action */}
-                        <td className="px-3 py-2 text-right">
-                          <button
-                            className="text-xs font-medium"
-                            style={{ color: "var(--blue)" }}
-                            onClick={(e) => { e.stopPropagation(); setSelectedVehicle(v); }}
-                          >
-                            View
-                          </button>
+                        {/* Actions */}
+                        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={`/vehicles/${v.id}/addendum`}
+                              className="text-xs font-medium"
+                              style={{
+                                color: printed ? "var(--success)" : "var(--blue)",
+                                textDecoration: "none",
+                                whiteSpace: "nowrap",
+                              }}
+                              title="Addendum options"
+                            >
+                              Addendum
+                            </a>
+                            <button
+                              className="text-xs font-medium"
+                              style={{ color: "var(--text-muted)" }}
+                              onClick={() => setSelectedVehicle(v)}
+                            >
+                              Details
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

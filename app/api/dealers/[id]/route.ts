@@ -94,6 +94,10 @@ export async function PATCH(
   if (body.country !== undefined) patch.country = body.country;
   if (body.makes !== undefined) patch.makes = body.makes;
   if (body.logo_url !== undefined) patch.logo_url = body.logo_url;
+  // inventory_dealer_id: super_admin only (updated when feed goes live). internal_id is never updated.
+  if (body.inventory_dealer_id !== undefined && claims.role === "super_admin") {
+    patch.inventory_dealer_id = body.inventory_dealer_id;
+  }
 
   const { data, error: dbError } = await admin
     .from("dealers")

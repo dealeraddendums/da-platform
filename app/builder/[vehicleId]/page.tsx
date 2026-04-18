@@ -46,6 +46,7 @@ export default async function BuilderVehicleRoute({
     .single<{ role: string; dealer_id: string | null }>();
 
   // Scope check: dealer_admin/user can only open their own dealer's vehicles
+  // TODO: verify this should use inventory_dealer_id (profile.dealer_id is Supabase; r.DEALER_ID is Aurora)
   if (
     profile?.role === "dealer_admin" ||
     profile?.role === "dealer_user"

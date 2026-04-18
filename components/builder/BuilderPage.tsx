@@ -53,6 +53,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   const [bgInputVal, setBgInputVal] = useState(BG_DEFAULT);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiPendingLoad, setAiPendingLoad] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [bgOpen, setBgOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [templateName, setTemplateName] = useState('New Template');
@@ -490,6 +491,44 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
     fetchAiContent(false);
   }, [aiPendingLoad, fetchAiContent]);
 
+  // ── PDF download ───────────────────────────────────────────────────
+  const downloadPdf = useCallback(async () => {
+    if (!vehicle?.id) { showToast('Open a vehicle to generate a PDF'); return; }
+    setPdfLoading(true);
+    try {
+      const docType = paperSize === 'infosheet' ? 'infosheet' : 'addendum';
+      const res = await fetch('/api/pdf/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vehicleId: parseInt(vehicle.id, 10),
+          widgets: Object.values(widgetsRef.current),
+          paperSize,
+          fontScale,
+          bgUrl,
+          docType,
+        }),
+      });
+      const json = await res.json() as { url?: string; error?: string };
+      if (!res.ok || !json.url) {
+        showToast(json.error ?? 'PDF generation failed');
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = json.url;
+      a.download = `${vehicle.year ?? ''}_${vehicle.make ?? ''}_${vehicle.model ?? ''}_${vehicle.stock_number || vehicle.id}.pdf`.replace(/\s+/g, '_');
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('PDF downloaded');
+    } catch {
+      showToast('PDF generation failed');
+    } finally {
+      setPdfLoading(false);
+    }
+  }, [vehicle, paperSize, fontScale, bgUrl, showToast]);
+
   // ── Save template ──────────────────────────────────────────────────
   const saveTemplate = useCallback(async () => {
     const name = saveTname.trim() || templateName;
@@ -607,7 +646,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
           <button onClick={() => setShowPrint(true)} style={tbBtn}>🖨 Print settings</button>
           <button onClick={openTemplates} style={tbBtn}>All templates</button>
           <button onClick={() => { setSaveTname(templateName); setShowSave(true); }} style={{ ...tbBtn, background: '#1976d2', borderColor: '#1976d2' }}>Save template</button>
-          <button onClick={() => showToast('Print engine coming in Phase 9')} style={{ ...tbBtn, background: '#4caf50', borderColor: '#4caf50' }}>⬛ Print / PDF</button>
+          <button
+            onClick={() => void downloadPdf()}
+            disabled={pdfLoading}
+            style={{ ...tbBtn, background: pdfLoading ? 'rgba(76,175,80,0.6)' : '#4caf50', borderColor: '#4caf50', opacity: pdfLoading ? 0.7 : 1 }}
+          >{pdfLoading ? '⟳ Generating…' : '⬛ Print / PDF'}</button>
         </div>
       </div>
 
@@ -904,6 +947,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
               await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nudge_left: nudge.left, nudge_right: nudge.right, nudge_top: nudge.top, nudge_bottom: nudge.bottom }) });
               setShowPrint(false); showToast('Print settings saved');
             }} style={mfSave}>SAVE CHANGES</button>
+            <button
+              onClick={() => { setShowPrint(false); void downloadPdf(); }}
+              disabled={pdfLoading}
+              style={{ ...mfSave, background: pdfLoading ? 'rgba(76,175,80,0.6)' : '#4caf50', borderColor: '#4caf50' }}
+            >{pdfLoading ? '⟳ Generating…' : 'Download PDF'}</button>
           </div>
         </Modal>
       )}

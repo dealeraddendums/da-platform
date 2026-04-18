@@ -37,6 +37,7 @@ export async function GET(
     const vehicle = rows[0] as VehicleRowPacket;
 
     // Access control: dealer users can only see their own dealer's vehicles
+    // TODO: verify this should use inventory_dealer_id (claims.dealer_id is Supabase; vehicle.DEALER_ID is Aurora)
     if (claims.role === "dealer_admin" || claims.role === "dealer_user") {
       if (vehicle.DEALER_ID !== claims.dealer_id) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });

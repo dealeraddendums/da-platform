@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       `SELECT VIN_NUMBER, YEAR, MAKE, MODEL, TRIM, EXT_COLOR, MILEAGE, MSRP,
               NEW_USED, CERTIFIED, OPTIONS
        FROM dealer_inventory
-       WHERE VIN_NUMBER = ? AND DEALER_ID = ? LIMIT 1`,
+       WHERE VIN_NUMBER = ? AND DEALER_ID = ? LIMIT 1`, // TODO: verify this should use inventory_dealer_id
       [vin, dealerId]
     );
     const row = rows[0];

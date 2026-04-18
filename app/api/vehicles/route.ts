@@ -73,6 +73,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   // ── Build query ────────────────────────────────────────────────────────────
 
+  // TODO: verify this should use inventory_dealer_id (dealerId here comes from profiles.dealer_id via claims)
   const where: string[] = ["DEALER_ID = ?"];
   const params: (string | number)[] = [dealerId];
 
