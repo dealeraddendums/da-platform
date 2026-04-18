@@ -30,6 +30,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const condition = sp.get("condition") ?? "all";
   const status = sp.get("status") ?? "active";
   const printStatus = sp.get("print_status") ?? "all"; // "all" | "printed" | "unprinted"
+  const SORTABLE_COLS = ["date_added", "year", "vin", "condition", "msrp"];
+  const rawSort = sp.get("sort_by") ?? "date_added";
+  const sortCol = SORTABLE_COLS.includes(rawSort) ? rawSort : "date_added";
+  const sortAsc = sp.get("sort_dir") === "asc";
   const from = (page - 1) * PER_PAGE;
   const to = from + PER_PAGE - 1;
 
@@ -59,7 +63,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .from("dealer_vehicles")
     .select("*", { count: "exact" })
     .eq("dealer_id", dealerId)
-    .order("date_added", { ascending: false })
+    .order(sortCol, { ascending: sortAsc })
     .range(from, to);
 
   if (status !== "all") query = query.eq("status", status);

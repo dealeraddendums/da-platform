@@ -65,6 +65,29 @@ function PrintBtn({ vehicleId, docType, printed }: { vehicleId: string; docType:
   );
 }
 
+function SortTh({ label, col, sortBy, sortDir, onSort }: {
+  label: string; col: string; sortBy: string; sortDir: "asc" | "desc";
+  onSort: (col: string) => void;
+}) {
+  const active = sortBy === col;
+  return (
+    <th
+      className="text-left px-3 py-2.5"
+      onClick={() => onSort(col)}
+      style={{
+        fontSize: 11, fontWeight: 600, textTransform: "uppercase" as const,
+        letterSpacing: "0.05em", color: active ? "#1976d2" : "var(--text-muted)",
+        whiteSpace: "nowrap" as const, cursor: "pointer", userSelect: "none" as const,
+      }}
+    >
+      {label}
+      <span style={{ marginLeft: 4, opacity: active ? 1 : 0.35, fontSize: 10 }}>
+        {active ? (sortDir === "asc" ? "↑" : "↓") : "⇅"}
+      </span>
+    </th>
+  );
+}
+
 export default function ManualVehicleInventory({ dealerId }: Props) {
   const [vehicles, setVehicles] = useState<DealerVehicleRow[]>([]);
   const [printedTypes, setPrintedTypes] = useState<Record<string, string[]>>({});
@@ -74,6 +97,8 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
   const [searchInput, setSearchInput] = useState("");
   const [condition, setCondition] = useState("all");
   const [printStatus, setPrintStatus] = useState("all");
+  const [sortBy, setSortBy] = useState("date_added");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aiEnabled, setAiEnabled] = useState(false);
@@ -97,7 +122,7 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
     setLoading(true);
     setError(null);
     setCheckedIds(new Set());
-    const params = new URLSearchParams({ page: String(page), condition, print_status: printStatus });
+    const params = new URLSearchParams({ page: String(page), condition, print_status: printStatus, sort_by: sortBy, sort_dir: sortDir });
     if (q) params.set("q", q);
 
     const res = await fetch(`/api/dealer-vehicles?${params}`);
@@ -110,7 +135,7 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
       setTotal(json.total);
       setPrintedTypes(json.printedTypes ?? {});
     }
-  }, [page, condition, printStatus, q]);
+  }, [page, condition, printStatus, sortBy, sortDir, q]);
 
   useEffect(() => { void fetchVehicles(); }, [fetchVehicles]);
 
@@ -137,6 +162,16 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
     for (const id of ids) {
       window.open(`/dealer-vehicles/${id}/addendum?type=${docType}`, "_blank");
     }
+  }
+
+  function handleSort(col: string) {
+    if (sortBy === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(col);
+      setSortDir(col === "date_added" ? "desc" : "asc");
+    }
+    setPage(1);
   }
 
   async function confirmBulkDelete() {
@@ -283,11 +318,17 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                       style={{ cursor: "pointer" }}
                     />
                   </th>
-                  {["Stock #", "Year / Make / Model", "VIN", "Condition", "MSRP", "Added", "", "", "Buyer Guide", "Info Sheet", "Addendum"].map((h, i) => (
-                    <th key={i} className="text-left px-3 py-2.5"
-                      style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-                      {h}
-                    </th>
+                  {/* Stock # — not sortable */}
+                  <th className="text-left px-3 py-2.5" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>Stock #</th>
+                  {/* Year / Make / Model — sortable by year */}
+                  <SortTh label="Year / Make / Model" col="year" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortTh label="VIN" col="vin" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortTh label="Condition" col="condition" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortTh label="MSRP" col="msrp" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortTh label="Added" col="date_added" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  {/* Action columns */}
+                  {["", "", "Buyer Guide", "Info Sheet", "Addendum"].map((h, i) => (
+                    <th key={i} className="text-left px-3 py-2.5" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
