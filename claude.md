@@ -1,5 +1,5 @@
 # DealerAddendums Platform — CLAUDE.md
-## Last updated: 2026-04-17
+## Last updated: 2026-04-18
 
 ---
 
@@ -112,6 +112,7 @@ Badges:    radius=20px, 11px bold text
 | Supabase | https://byouefbebqgffhtfdggu.supabase.co |
 | GitHub | https://github.com/dealeraddendums/da-platform |
 | Anthropic API | `allan@dealeraddendums.com` enterprise key |
+| AWS IAM | User `da-platform-app`, group `FileserverS3` (AmazonS3FullAccess) |
 
 ### New EC2 server specs
 - Ubuntu 24.04, t3.medium, 30GB
@@ -127,10 +128,14 @@ Badges:    radius=20px, 11px bold text
 
 | Bucket | Contents | Native size |
 |---|---|---|
-| `new-addendum-backgrounds` | Addendum frame PNGs | 638×1650px std, 469×1650px narrow |
-| `new-infosheet-backgrounds` | Infosheet frame PNGs | 2657×3438px (~313dpi) |
-| `new-Infobox_images` | Infobox PNGs | 553×379px |
+| `dealer-addendums` | Generated PDFs (signed 24hr URLs) | variable |
+| `addendum-product-images` | Option/product images for addendum library | variable |
 | `new-dealer-logos` | Dealer logos | variable |
+| `new-infobox-images` | Infobox PNGs | 553×379px |
+| `new-infosheet-backgrounds` | Infosheet frame PNGs | 2657×3438px (~313dpi) |
+| `new-addendum-backgrounds` | Addendum frame PNGs | 638×1650px std, 469×1650px narrow |
+
+AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION=us-east-1`) are set in `.env.production` on the new EC2 and in `.env.local` for local dev.
 
 ---
 
@@ -292,6 +297,24 @@ Run npm run build — must be clean before reporting complete.
   Aurora PRINT_STATUS, All/Printed/Unprinted filter tabs, per-row Addendum link
   (green when printed)
 
+### Manual vehicle inventory additions (2026-04-18)
+- Migration 016_vehicle_audit_log.sql: vehicle_audit_log table tracks import/edit/print/delete
+  with method field (vin_decoder, csv_import, manual, automaticX)
+- Migration 017_dealer_vehicles_fields.sql: description, options, created_by columns on dealer_vehicles
+- dealer-vehicles API: print_status filter (all/printed/unprinted via audit log),
+  sortable columns (date_added/year/vin/condition/msrp, default newest-first),
+  year search fix (integer column uses year.eq.N not ilike)
+- EditVehicleModal: description + options textareas pre-filled from vehicle
+- AddVehicleModal: description/options auto-populated from AI after VIN decode if aiEnabled;
+  created_by write-once (excluded from PATCH)
+- OptionsLibrary Add/Edit Option form:
+  - Applies To toggle: All Vehicles / Assign with Rules (replaces advanced collapse)
+  - ✦ Generate button → POST /api/ai-content/option-description (claude-haiku-4-5-20251001)
+  - + Add Image button → ImagePickerModal (Library tab: S3 grid; Upload tab: drag/drop)
+  - GET /api/option-images — lists `addendum-product-images` S3 bucket
+  - POST /api/option-images/upload — uploads to S3 (PNG/JPG/GIF/WebP, max 5MB)
+  - Inserts `<img src="..." width="125" style="max-width:125px;" />` into description or item name
+
 ### Dealer ID fix (migration 008)
 - Migration 008_dealers_add_internal_id.sql: adds internal_id (billing, never
   changes) and inventory_dealer_id (Aurora match, replaceable) as nullable text
@@ -408,42 +431,17 @@ research and inspections before making any purchasing decisions.
 
 ---
 
-## Phase 7 — VIN & AI Enrichment ⬜ UP NEXT
+## Phase 7 — VIN & AI Enrichment ✅ COMPLETE
 
-### Scope
-- VINQuery API integration — decode VIN to structured vehicle data
-- Claude AI content generation — vehicle description and features at print time
-- Cache generated content in Supabase per vehicle (vin + dealer_id key)
-- Respect the AI content toggle: system default (dealer_settings.ai_content_default),
-  per-print override (Print Settings modal)
-- Wire into builder: when a vehicle is loaded, fetch/generate AI content for
-  description and features widgets if AI mode is on
-- VINQuery API key currently in .env on legacy EC2 — must be moved to .env.production
-  on da-platform EC2 (security item from CLAUDE.md)
-
-### Prompt for Claude Code
-```
-Read CLAUDE.md. Phases 1-6 are complete. Build Phase 7: VIN & AI Enrichment.
-
-Deliverables:
-1. lib/vinquery.ts — VINQuery API client, decodes VIN to structured data,
-   server-only, key from AURORA_* pattern in .env.production
-2. lib/ai-content.ts — Claude API client (enterprise key from allan@dealeraddendums.com),
-   generates vehicle description and features list from VIN data + vehicle row
-3. Supabase migration: ai_content_cache table (id, vin, dealer_id, description text,
-   features text[], generated_at, model_version)
-4. GET /api/ai-content?vin=&dealer_id= — returns cached content or generates fresh,
-   respects ai_content_default from dealer_settings
-5. POST /api/ai-content/regenerate — force-regenerates and updates cache
-6. Wire into /builder/[vehicleId] — on vehicle load, if AI mode on, fetch from
-   /api/ai-content and populate description and features widgets automatically
-7. In the builder toolbar, add a "Regenerate AI" button (visible when a vehicle
-   is loaded and AI mode is on) — calls regenerate endpoint and refreshes widgets
-
-All UI must follow the design system in CLAUDE.md exactly.
-Assume YES to all permissions. Verify in browser before marking done.
-Run npm run build — must be clean before reporting complete.
-```
+### What was built
+- lib/vinquery.ts — VINQuery API client, decodes VIN to structured vehicle data (server-only)
+- lib/ai-content.ts — Claude API client, generates vehicle description + features list
+- Supabase migration: ai_content_cache table (vin + dealer_id key, description, features[], model_version)
+- GET /api/ai-content?vin=&dealer_id= — returns cached content or generates fresh
+- POST /api/ai-content/regenerate — force-regenerates and updates cache
+- POST /api/ai-content/option-description — generates 1-2 sentence description for an addendum option item
+- Builder wired: vehicle load triggers AI content fetch if AI mode on; Regenerate AI toolbar button
+- ANTHROPIC_API_KEY and VINQUERY_API_KEY set in .env.production on new EC2
 
 ---
 
@@ -468,9 +466,9 @@ Run npm run build — must be clean before reporting complete.
   /api/pdf/bulk, triggers ZIP download
 - Packages added: puppeteer, @aws-sdk/client-s3, @aws-sdk/s3-request-presigner, jszip
 
-### EC2 requirements (must be done manually)
-- Install Chromium system deps: libnss3 and related packages
-- Add to .env.production: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+### EC2 requirements
+- Install Chromium system deps: libnss3 and related packages ⬜ (pending)
+- AWS credentials: ✅ added to .env.production (IAM user da-platform-app)
 
 ---
 
