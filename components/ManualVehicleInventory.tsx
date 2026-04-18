@@ -73,6 +73,7 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
   const [q, setQ] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [condition, setCondition] = useState("all");
+  const [printStatus, setPrintStatus] = useState("all");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aiEnabled, setAiEnabled] = useState(false);
@@ -96,7 +97,7 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
     setLoading(true);
     setError(null);
     setCheckedIds(new Set());
-    const params = new URLSearchParams({ page: String(page), condition });
+    const params = new URLSearchParams({ page: String(page), condition, print_status: printStatus });
     if (q) params.set("q", q);
 
     const res = await fetch(`/api/dealer-vehicles?${params}`);
@@ -109,7 +110,7 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
       setTotal(json.total);
       setPrintedTypes(json.printedTypes ?? {});
     }
-  }, [page, condition, q]);
+  }, [page, condition, printStatus, q]);
 
   useEffect(() => { void fetchVehicles(); }, [fetchVehicles]);
 
@@ -191,6 +192,16 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
           <option value="New">New</option>
           <option value="Used">Used</option>
           <option value="Certified">Certified</option>
+        </select>
+
+        <select
+          value={printStatus}
+          onChange={(e) => { setPrintStatus(e.target.value); setPage(1); }}
+          style={{ height: 36, border: "1px solid var(--border)", borderRadius: 4, padding: "0 8px", fontSize: 13 }}
+        >
+          <option value="all">All Print Status</option>
+          <option value="printed">Printed</option>
+          <option value="unprinted">Unprinted</option>
         </select>
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>

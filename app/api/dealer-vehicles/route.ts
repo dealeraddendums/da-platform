@@ -29,10 +29,32 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const q = sp.get("q") ?? "";
   const condition = sp.get("condition") ?? "all";
   const status = sp.get("status") ?? "active";
+  const printStatus = sp.get("print_status") ?? "all"; // "all" | "printed" | "unprinted"
   const from = (page - 1) * PER_PAGE;
   const to = from + PER_PAGE - 1;
 
   const admin = createAdminSupabaseClient();
+
+  // Resolve print-status filter: fetch printed vehicle IDs when needed
+  let printedIds: string[] | null = null;
+  if (printStatus !== "all") {
+    try {
+      const { data: prints } = await admin
+        .from("vehicle_audit_log")
+        .select("vehicle_id")
+        .eq("dealer_id", dealerId)
+        .eq("action", "print");
+      const seen = new Set<string>();
+      for (const p of prints ?? []) { if (p.vehicle_id) seen.add(p.vehicle_id); }
+      printedIds = Array.from(seen);
+    } catch { printedIds = []; }
+  }
+
+  // Short-circuit: "printed" filter with no printed vehicles → empty result
+  if (printStatus === "printed" && printedIds && printedIds.length === 0) {
+    return NextResponse.json({ data: [], total: 0, page, per_page: PER_PAGE, dealer_id: dealerId, printedTypes: {} });
+  }
+
   let query = admin
     .from("dealer_vehicles")
     .select("*", { count: "exact" })
@@ -46,6 +68,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     query = query.or(
       `stock_number.ilike.%${q}%,vin.ilike.%${q}%,make.ilike.%${q}%,model.ilike.%${q}%`
     );
+  }
+  if (printStatus === "printed" && printedIds && printedIds.length > 0) {
+    query = query.in("id", printedIds);
+  } else if (printStatus === "unprinted" && printedIds && printedIds.length > 0) {
+    query = query.not("id", "in", `(${printedIds.join(",")})`);
   }
 
   const { data, count, error: dbErr } = await query;
