@@ -105,9 +105,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ imported: 0, skipped, total: vehicles.length });
     }
 
+    // Deduplicate within the batch — PostgreSQL cannot upsert the same key twice
+    // in one statement. Keep the last occurrence so the most recent data wins.
+    const dedupMap = new Map<string, DealerVehicleInsert>();
+    for (const row of inserts) dedupMap.set(row.stock_number, row);
+    const deduped = Array.from(dedupMap.values());
+    skipped += inserts.length - deduped.length;
+
     const { data, error: upsertErr } = await admin
       .from("dealer_vehicles")
-      .upsert(inserts, { onConflict: "dealer_id,stock_number", ignoreDuplicates: false })
+      .upsert(deduped, { onConflict: "dealer_id,stock_number", ignoreDuplicates: false })
       .select("id");
 
     if (upsertErr) {
