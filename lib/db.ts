@@ -351,6 +351,79 @@ type AiContentCacheUpdate = {
   model_version?: string | null;
 };
 
+export type DealerVehicleRow = {
+  id: string;
+  dealer_id: string;
+  stock_number: string;
+  vin: string | null;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  trim: string | null;
+  body_style: string | null;
+  exterior_color: string | null;
+  interior_color: string | null;
+  engine: string | null;
+  transmission: string | null;
+  drivetrain: string | null;
+  mileage: number;
+  msrp: number | null;
+  condition: string;
+  status: string;
+  decode_source: string | null;
+  decode_flagged: boolean;
+  date_added: string;
+  updated_at: string;
+};
+
+export type DealerVehicleInsert = {
+  dealer_id: string;
+  stock_number: string;
+  vin?: string | null;
+  year?: number | null;
+  make?: string | null;
+  model?: string | null;
+  trim?: string | null;
+  body_style?: string | null;
+  exterior_color?: string | null;
+  interior_color?: string | null;
+  engine?: string | null;
+  transmission?: string | null;
+  drivetrain?: string | null;
+  mileage?: number;
+  msrp?: number | null;
+  condition?: string;
+  status?: string;
+  decode_source?: string | null;
+  decode_flagged?: boolean;
+};
+
+export type NhtsaOverrideRow = {
+  id: string;
+  vin_prefix: string;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  trim: string | null;
+  body_style: string | null;
+  engine: string | null;
+  transmission: string | null;
+  drivetrain: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NhtsaSyncLogRow = {
+  id: string;
+  synced_at: string;
+  records_imported: number | null;
+  source_url: string | null;
+  status: string | null;
+  notes: string | null;
+};
+
 // Database type shaped exactly as Supabase's generated types expect.
 export type Database = {
   public: {
@@ -469,6 +542,78 @@ export type Database = {
         Row: AdminAuditRow;
         Insert: AdminAuditInsert;
         Update: Record<string, never>;
+        Relationships: [];
+      };
+      dealer_vehicles: {
+        Row: DealerVehicleRow;
+        Insert: DealerVehicleInsert;
+        Update: Partial<Omit<DealerVehicleRow, 'id' | 'dealer_id' | 'date_added'>>;
+        Relationships: [];
+      };
+      nhtsa_overrides: {
+        Row: NhtsaOverrideRow;
+        Insert: Omit<NhtsaOverrideRow, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<NhtsaOverrideRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
+      nhtsa_sync_log: {
+        Row: NhtsaSyncLogRow;
+        Insert: { records_imported?: number | null; source_url?: string | null; status?: string | null; notes?: string | null };
+        Update: { status?: string | null; notes?: string | null; records_imported?: number | null };
+        Relationships: [];
+      };
+      nhtsa_makes: {
+        Row: { id: number; name: string; created_at: string };
+        Insert: { id: number; name: string };
+        Update: { name?: string };
+        Relationships: [];
+      };
+      nhtsa_models: {
+        Row: { id: number; make_id: number | null; name: string; vehicle_type_id: number | null };
+        Insert: { id: number; make_id?: number | null; name: string; vehicle_type_id?: number | null };
+        Update: { name?: string };
+        Relationships: [];
+      };
+      nhtsa_wmi: {
+        Row: { wmi: string; make_id: number | null; manufacturer_name: string | null; country: string | null };
+        Insert: { wmi: string; make_id?: number | null; manufacturer_name?: string | null; country?: string | null };
+        Update: { make_id?: number | null; manufacturer_name?: string | null; country?: string | null };
+        Relationships: [];
+      };
+      nhtsa_trims: {
+        Row: { id: number; model_id: number | null; name: string | null };
+        Insert: { id: number; model_id?: number | null; name?: string | null };
+        Update: { name?: string | null };
+        Relationships: [];
+      };
+      nhtsa_vehicle_types: {
+        Row: { id: number; name: string };
+        Insert: { id: number; name: string };
+        Update: { name?: string };
+        Relationships: [];
+      };
+      nhtsa_body_styles: {
+        Row: { id: number; name: string };
+        Insert: { id: number; name: string };
+        Update: { name?: string };
+        Relationships: [];
+      };
+      nhtsa_vin_patterns: {
+        Row: {
+          id: string; pattern: string; make_id: number | null; model_id: number | null;
+          trim_id: number | null; body_style_id: number | null; vehicle_type_id: number | null;
+          model_year: number | null; engine: string | null; displacement: string | null;
+          cylinders: string | null; fuel_type: string | null; transmission: string | null;
+          drivetrain: string | null; doors: number | null; created_at: string;
+        };
+        Insert: {
+          pattern: string; make_id?: number | null; model_id?: number | null;
+          trim_id?: number | null; body_style_id?: number | null; vehicle_type_id?: number | null;
+          model_year?: number | null; engine?: string | null; displacement?: string | null;
+          cylinders?: string | null; fuel_type?: string | null; transmission?: string | null;
+          drivetrain?: string | null; doors?: number | null;
+        };
+        Update: Record<string, unknown>;
         Relationships: [];
       };
     };

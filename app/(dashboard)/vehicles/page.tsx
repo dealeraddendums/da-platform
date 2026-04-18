@@ -2,9 +2,15 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import VehicleInventory from "@/components/VehicleInventory";
+import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import VehicleSubNav from "@/components/VehicleSubNav";
 
 export const metadata = { title: "Inventory — DA Platform" };
+
+/** Returns true for dealers whose inventory lives in dealer_vehicles (not Aurora). */
+function isManualDealer(accountType: string | null): boolean {
+  return !accountType || accountType === "Trial" || accountType === "Monthly Subscription Manual";
+}
 
 export default async function VehiclesPage() {
   const supabase = createClient();
@@ -21,6 +27,17 @@ export default async function VehiclesPage() {
   const role = profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user";
+
+  // For dealer roles, fetch account_type to determine data source
+  let accountType: string | null = null;
+  if ((role === "dealer_admin" || role === "dealer_user") && profile?.dealer_id) {
+    const { data: dealer } = await admin
+      .from("dealers")
+      .select("account_type")
+      .eq("dealer_id", profile.dealer_id)
+      .single<{ account_type: string | null }>();
+    accountType = dealer?.account_type ?? null;
+  }
 
   let fixedDealerId: string | null = null;
   if (role === "dealer_admin" || role === "dealer_user") {
@@ -41,14 +58,20 @@ export default async function VehiclesPage() {
     fixedDealerId = profile.dealer_id;
   }
 
+  const manual = (role === "dealer_admin" || role === "dealer_user") && isManualDealer(accountType);
+
   return (
     <div>
       {(role === "dealer_admin" || role === "dealer_user") && <VehicleSubNav />}
-      <VehicleInventory
-        fixedDealerId={fixedDealerId}
-        role={role}
-        groupId={profile?.group_id ?? null}
-      />
+      {manual ? (
+        <ManualVehicleInventory dealerId={fixedDealerId!} />
+      ) : (
+        <VehicleInventory
+          fixedDealerId={fixedDealerId}
+          role={role}
+          groupId={profile?.group_id ?? null}
+        />
+      )}
     </div>
   );
 }

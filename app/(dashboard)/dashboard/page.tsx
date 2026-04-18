@@ -5,6 +5,12 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import { getPool } from "@/lib/aurora";
 import type { RowDataPacket } from "mysql2/promise";
+import AddVehicleModal from "@/components/AddVehicleModal";
+import ManualVehicleInventory from "@/components/ManualVehicleInventory";
+
+function isManualDealer(accountType: string | null): boolean {
+  return !accountType || accountType === "Trial" || accountType === "Monthly Subscription Manual";
+}
 
 export const metadata = { title: "Dashboard — DA Platform" };
 
@@ -435,6 +441,64 @@ export default async function DashboardPage() {
     );
   }
 
+  // Fetch dealer's account_type to determine inventory source
+  const { data: dealerRow } = await admin
+    .from("dealers")
+    .select("account_type")
+    .eq("dealer_id", dealerId)
+    .single<{ account_type: string | null }>();
+  const accountType = dealerRow?.account_type ?? null;
+  const manual = isManualDealer(accountType);
+
+  // ── Manual dealer: show Supabase-backed inventory ─────────────────────────
+  if (manual) {
+    const { count: totalManual } = await admin
+      .from("dealer_vehicles")
+      .select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId)
+      .eq("status", "active");
+
+    const { count: unprintedManual } = await admin
+      .from("dealer_vehicles")
+      .select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId)
+      .eq("status", "active")
+      .eq("decode_flagged", false);
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const todayUTC = new Date(); todayUTC.setUTCHours(0, 0, 0, 0);
+    const [printedTodayRes, printed30Res] = await Promise.all([
+      admin.from("print_history").select("*", { count: "exact", head: true })
+        .eq("dealer_id", dealerId).gte("created_at", todayUTC.toISOString()),
+      admin.from("print_history").select("*", { count: "exact", head: true })
+        .eq("dealer_id", dealerId).gte("created_at", thirtyDaysAgo),
+    ]);
+
+    const manualStats = [
+      { label: "Total Vehicles", value: totalManual ?? 0 },
+      { label: "Printed Today", value: printedTodayRes.count ?? 0 },
+      { label: "Printed Last 30 Days", value: printed30Res.count ?? 0 },
+    ];
+
+    return (
+      <div>
+        <div className="mb-5">
+          <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Dashboard</h1>
+        </div>
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          {manualStats.map((s) => (
+            <div key={s.label} className="card p-3">
+              <p style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "var(--text-muted)", marginBottom: 6 }}>{s.label}</p>
+              <p className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>{s.value.toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+        <ManualVehicleInventory dealerId={dealerId} />
+      </div>
+    );
+  }
+
+  // ── Aurora dealer: existing work queue ────────────────────────────────────
   const pool = getPool();
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const todayUTC = new Date();
