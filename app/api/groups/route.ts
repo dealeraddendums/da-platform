@@ -77,11 +77,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const groupInternalId = internal_id?.trim() || Date.now().toString();
 
   const admin = createAdminSupabaseClient();
-  const { data, error: dbError } = await admin
-    .from("groups")
-    .insert({ name: name.trim(), internal_id: groupInternalId, ...rest })
-    .select()
-    .single();
+  const insertPayload = { name: name.trim(), internal_id: groupInternalId, ...rest };
+  let { data, error: dbError } = await admin.from("groups").insert(insertPayload).select().single();
+
+  // If new columns don't exist yet (migration pending), retry with only base columns
+  if (dbError && (dbError.message.includes("account_type") || dbError.message.includes("billing_contact") || dbError.message.includes("billing_email") || dbError.message.includes("billing_phone"))) {
+    const { account_type: _a, billing_contact: _b, billing_email: _c, billing_phone: _d, ...basePayload } = insertPayload as typeof insertPayload & { account_type?: string; billing_contact?: string; billing_email?: string; billing_phone?: string };
+    ({ data, error: dbError } = await admin.from("groups").insert(basePayload).select().single());
+  }
 
   if (dbError) {
     return NextResponse.json({ error: dbError.message }, { status: 500 });

@@ -83,17 +83,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const internalId = Date.now().toString();
 
   const admin = createAdminSupabaseClient();
-  const { data, error: dbError } = await admin
-    .from("dealers")
-    .insert({
-      dealer_id,
-      name,
-      internal_id: internalId,
-      inventory_dealer_id: dealer_id,
-      ...rest,
-    })
-    .select()
-    .single();
+  const insertPayload = { dealer_id, name, internal_id: internalId, inventory_dealer_id: dealer_id, ...rest };
+  let { data, error: dbError } = await admin.from("dealers").insert(insertPayload).select().single();
+
+  // If account_type column doesn't exist yet (migration pending), retry without it
+  if (dbError && dbError.message.includes("account_type")) {
+    const { account_type: _drop, ...payloadWithoutAccountType } = insertPayload as typeof insertPayload & { account_type?: string };
+    ({ data, error: dbError } = await admin.from("dealers").insert(payloadWithoutAccountType).select().single());
+  }
 
   if (dbError) {
     if (dbError.code === "23505") {
