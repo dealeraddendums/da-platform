@@ -31,7 +31,7 @@ function conditionBadge(c: string) {
   const styles: Record<string, React.CSSProperties> = {
     New: { background: "#e3f2fd", color: "#1565c0", border: "1px solid #bbdefb" },
     Used: { background: "#f3e5f5", color: "#6a1b9a", border: "1px solid #e1bee7" },
-    CPO: { background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" },
+    Certified: { background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" },
   };
   const s = styles[c] ?? { background: "#f5f6f7", color: "#555", border: "1px solid #e0e0e0" };
   return (
@@ -119,7 +119,7 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
           <option value="all">All Conditions</option>
           <option value="New">New</option>
           <option value="Used">Used</option>
-          <option value="CPO">CPO</option>
+          <option value="Certified">Certified</option>
         </select>
 
         <div style={{ marginLeft: "auto" }}>
