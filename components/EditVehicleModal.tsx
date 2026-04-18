@@ -5,6 +5,7 @@ import type { DealerVehicleRow } from "@/lib/db";
 
 type Props = {
   vehicle: DealerVehicleRow;
+  aiEnabled?: boolean;
   onSaved: (updated: DealerVehicleRow) => void;
   onClose: () => void;
 };
@@ -14,6 +15,11 @@ const INPUT_STYLE: React.CSSProperties = {
   padding: "0 10px", fontSize: 13, background: "#fff", color: "var(--text-primary)",
   boxSizing: "border-box",
 };
+const TEXTAREA_STYLE: React.CSSProperties = {
+  width: "100%", border: "1px solid var(--border)", borderRadius: 4,
+  padding: "8px 10px", fontSize: 13, background: "#fff", color: "var(--text-primary)",
+  boxSizing: "border-box", resize: "vertical", fontFamily: "inherit", lineHeight: 1.5,
+};
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", fontSize: 12, fontWeight: 600,
   color: "var(--text-secondary)", marginBottom: 4,
@@ -21,7 +27,16 @@ const LABEL_STYLE: React.CSSProperties = {
 
 const CONDITIONS = ["New", "Used", "Certified"];
 
-export default function EditVehicleModal({ vehicle, onSaved, onClose }: Props) {
+function AiBadge() {
+  return (
+    <span style={{
+      marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px",
+      background: "#e3f2fd", color: "#1565c0", borderRadius: 3, verticalAlign: "middle",
+    }}>✦ AI</span>
+  );
+}
+
+export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose }: Props) {
   const [form, setForm] = useState({
     stock_number: vehicle.stock_number,
     vin: vehicle.vin ?? "",
@@ -35,6 +50,8 @@ export default function EditVehicleModal({ vehicle, onSaved, onClose }: Props) {
     engine: vehicle.engine ?? "",
     transmission: vehicle.transmission ?? "",
     drivetrain: vehicle.drivetrain ?? "",
+    description: vehicle.description ?? "",
+    options: vehicle.options ?? "",
     mileage: vehicle.mileage ? String(vehicle.mileage) : "0",
     msrp: vehicle.msrp ? String(vehicle.msrp) : "",
     condition: vehicle.condition,
@@ -112,6 +129,35 @@ export default function EditVehicleModal({ vehicle, onSaved, onClose }: Props) {
             <div><label style={LABEL_STYLE}>Engine</label>{f("engine")}</div>
             <div><label style={LABEL_STYLE}>Transmission</label>{f("transmission")}</div>
             <div><label style={LABEL_STYLE}>Drivetrain</label>{f("drivetrain")}</div>
+
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={LABEL_STYLE}>
+                Description
+                {aiEnabled && <AiBadge />}
+              </label>
+              <textarea
+                value={form.description}
+                onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+                style={{ ...TEXTAREA_STYLE, minHeight: 80 }}
+                rows={4}
+                placeholder="Vehicle description — auto-filled by AI if enabled"
+              />
+            </div>
+
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={LABEL_STYLE}>
+                Options / Features
+                {aiEnabled && <AiBadge />}
+              </label>
+              <textarea
+                value={form.options}
+                onChange={(e) => setForm((p) => ({ ...p, options: e.target.value }))}
+                style={{ ...TEXTAREA_STYLE, minHeight: 80 }}
+                rows={4}
+                placeholder="Factory options and features — auto-filled by AI if enabled"
+              />
+            </div>
+
             <div><label style={LABEL_STYLE}>Mileage</label><input type="number" value={form.mileage} onChange={(e) => setForm((p) => ({ ...p, mileage: e.target.value }))} style={INPUT_STYLE} min="0" /></div>
             <div><label style={LABEL_STYLE}>MSRP</label><input type="number" value={form.msrp} onChange={(e) => setForm((p) => ({ ...p, msrp: e.target.value }))} style={INPUT_STYLE} min="0" step="100" /></div>
             <div>

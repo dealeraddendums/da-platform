@@ -133,6 +133,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     status: "active",
     decode_source: (body.decode_source as string | undefined) || "manual",
     decode_flagged: Boolean(body.decode_flagged),
+    description: (body.description as string | undefined)?.trim() || null,
+    options: (body.options as string | undefined)?.trim() || null,
+    created_by: (body.created_by as string | undefined)?.trim() || null,
   };
 
   const admin = createAdminSupabaseClient();
@@ -157,7 +160,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     vehicle_id: data.id,
     stock_number: stockNumber,
     action: "import",
-    method: (body.decode_source as string | undefined) === "manual" ? "manual" : "vin_decoder",
+    method: (body.created_by as string | undefined)?.trim() || ((body.decode_source as string | undefined) === "manual" ? "manual" : "vin_decoder"),
     changed_by: claims.sub,
     changed_by_email: claims.email,
   };

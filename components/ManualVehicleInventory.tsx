@@ -75,6 +75,16 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
   const [condition, setCondition] = useState("all");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiEnabled, setAiEnabled] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((json: { ai_content_default?: boolean }) => {
+        if (json.ai_content_default) setAiEnabled(true);
+      })
+      .catch(() => null);
+  }, []);
 
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [editingVehicle, setEditingVehicle] = useState<DealerVehicleRow | null>(null);
@@ -184,8 +194,8 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
         </select>
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} label="+ Add Vehicle" />
-          <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} initialTab="import" label="↑ Import Vehicles" />
+          <AddVehicleModal dealerId={dealerId} aiEnabled={aiEnabled} onSaved={() => fetchVehicles()} label="+ Add Vehicle" />
+          <AddVehicleModal dealerId={dealerId} aiEnabled={aiEnabled} onSaved={() => fetchVehicles()} initialTab="import" label="↑ Import Vehicles" />
         </div>
       </div>
 
@@ -243,8 +253,8 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                 <p style={{ color: "var(--text-primary)", fontSize: 16, fontWeight: 600, marginBottom: 8 }}>No vehicles yet</p>
                 <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 24 }}>Add your first vehicle to get started.</p>
                 <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-                  <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} label="+ Add Vehicle" />
-                  <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} initialTab="import" label="↑ Import Vehicles" />
+                  <AddVehicleModal dealerId={dealerId} aiEnabled={aiEnabled} onSaved={() => fetchVehicles()} label="+ Add Vehicle" />
+                  <AddVehicleModal dealerId={dealerId} aiEnabled={aiEnabled} onSaved={() => fetchVehicles()} initialTab="import" label="↑ Import Vehicles" />
                 </div>
               </>
             )}
@@ -350,6 +360,7 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
       {editingVehicle && (
         <EditVehicleModal
           vehicle={editingVehicle}
+          aiEnabled={aiEnabled}
           onSaved={(updated) => {
             setVehicles((vs) => vs.map((v) => v.id === updated.id ? updated : v));
             setEditingVehicle(null);

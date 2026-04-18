@@ -9,6 +9,7 @@ import type { DecodeResult } from "@/lib/vin-decoder";
 
 type Props = {
   dealerId: string;
+  aiEnabled?: boolean;
   onSaved?: () => void;
   initialTab?: Tab;
   label?: string;
@@ -32,6 +33,8 @@ const DA_IMPORT_FIELDS = [
   "MSRP",
   "Condition",
   "Certified",
+  "Description",
+  "Options / Features",
 ] as const;
 
 type DAField = (typeof DA_IMPORT_FIELDS)[number];
@@ -50,6 +53,19 @@ const INPUT_STYLE: React.CSSProperties = {
   background: "#fff",
   color: "var(--text-primary)",
   boxSizing: "border-box",
+};
+const TEXTAREA_STYLE: React.CSSProperties = {
+  width: "100%",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  padding: "8px 10px",
+  fontSize: 13,
+  background: "#fff",
+  color: "var(--text-primary)",
+  boxSizing: "border-box",
+  resize: "vertical",
+  fontFamily: "inherit",
+  lineHeight: 1.5,
 };
 
 const LABEL_STYLE: React.CSSProperties = {
@@ -74,6 +90,15 @@ function normalizeCondition(raw: string): string {
   return raw.trim() || "New";
 }
 
+function AiBadge() {
+  return (
+    <span style={{
+      marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px",
+      background: "#e3f2fd", color: "#1565c0", borderRadius: 3, verticalAlign: "middle",
+    }}>✦ AI</span>
+  );
+}
+
 // ── Field helpers ─────────────────────────────────────────────────────────────
 
 type FormState = {
@@ -89,6 +114,8 @@ type FormState = {
   engine: string;
   transmission: string;
   drivetrain: string;
+  description: string;
+  options: string;
   mileage: string;
   msrp: string;
   condition: string;
@@ -97,12 +124,13 @@ type FormState = {
 const EMPTY_FORM: FormState = {
   stock_number: "", vin: "", year: "", make: "", model: "", trim: "",
   body_style: "", exterior_color: "", interior_color: "", engine: "",
-  transmission: "", drivetrain: "", mileage: "0", msrp: "", condition: "New",
+  transmission: "", drivetrain: "", description: "", options: "",
+  mileage: "0", msrp: "", condition: "New",
 };
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin", label }: Props) {
+export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialTab = "vin", label }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -115,6 +143,8 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiGenerated, setAiGenerated] = useState(false);
 
   // Import tab state
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -138,6 +168,8 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
     setDecodeError(null);
     setForm(EMPTY_FORM);
     setSaveError(null);
+    setAiGenerating(false);
+    setAiGenerated(false);
     setImportFile(null);
     setFileHeaders([]);
     setFileRows([]);
@@ -159,6 +191,7 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
     setDecoding(true);
     setDecodeError(null);
     setDecodeResult(null);
+    setAiGenerated(false);
 
     const res = await fetch(`/api/vehicles/decode?vin=${encodeURIComponent(vin)}`);
     const json = await res.json() as DecodeResult & { error?: string };
@@ -182,6 +215,24 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
       transmission: json.transmission ?? f.transmission,
       drivetrain: json.drivetrain ?? f.drivetrain,
     }));
+
+    // Auto-populate AI content if enabled
+    if (aiEnabled) {
+      setAiGenerating(true);
+      try {
+        const aiRes = await fetch(`/api/ai-content?vin=${encodeURIComponent(vin)}&dealer_id=${encodeURIComponent(dealerId)}`);
+        const aiJson = await aiRes.json() as { description?: string; features?: string[]; error?: string };
+        if (!aiJson.error && aiJson.description) {
+          setForm((f) => ({
+            ...f,
+            description: aiJson.description ?? "",
+            options: (aiJson.features ?? []).join("\n"),
+          }));
+          setAiGenerated(true);
+        }
+      } catch { /* silent — AI content is optional */ }
+      setAiGenerating(false);
+    }
   }
 
   async function handleSave(openAddendum: boolean) {
@@ -202,6 +253,7 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
         msrp: form.msrp ? parseFloat(form.msrp) : null,
         decode_source: decodeResult?.source ?? "manual",
         decode_flagged: decodeResult?.decode_flagged ?? false,
+        created_by: "vin_decoder",
       }),
     });
     const json = await res.json() as { id?: string; error?: string };
@@ -309,6 +361,8 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
             condition: isCertifiedValue(get(row, "Certified"))
               ? "Certified"
               : normalizeCondition(get(row, "Condition")),
+            description: get(row, "Description") || undefined,
+            options: get(row, "Options / Features") || undefined,
           };
         })
         .filter((v): v is NonNullable<typeof v> => v !== null);
@@ -437,6 +491,10 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
         <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
           {tab === "vin" ? (
             <VinTab
+              dealerId={dealerId}
+              aiEnabled={aiEnabled}
+              aiGenerating={aiGenerating}
+              aiGenerated={aiGenerated}
               vinInput={vinInput}
               setVinInput={setVinInput}
               decoding={decoding}
@@ -480,9 +538,14 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
 // ── VIN Tab ───────────────────────────────────────────────────────────────────
 
 function VinTab({
+  dealerId: _dealerId, aiEnabled, aiGenerating, aiGenerated,
   vinInput, setVinInput, decoding, decodeResult, decodeError, onDecode,
   form, setForm, saving, saveError, onSave, onClose,
 }: {
+  dealerId: string;
+  aiEnabled?: boolean;
+  aiGenerating: boolean;
+  aiGenerated: boolean;
   vinInput: string; setVinInput: (v: string) => void;
   decoding: boolean; decodeResult: DecodeResult | null; decodeError: string | null;
   onDecode: () => void;
@@ -616,6 +679,54 @@ function VinTab({
         <div>
           <label style={LABEL_STYLE}>Drivetrain</label>
           {field("drivetrain")}
+        </div>
+
+        {/* Description */}
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label style={LABEL_STYLE}>
+            Description
+            {aiEnabled && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px", background: "#e3f2fd", color: "#1565c0", borderRadius: 3, verticalAlign: "middle" }}>✦ AI</span>}
+          </label>
+          {aiGenerating ? (
+            <div style={{ ...TEXTAREA_STYLE, minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
+              Generating AI content…
+            </div>
+          ) : (
+            <textarea
+              value={form.description}
+              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              style={{ ...TEXTAREA_STYLE, minHeight: 80 }}
+              rows={4}
+              placeholder="Vehicle description — auto-filled by AI if enabled"
+            />
+          )}
+          {aiGenerated && !aiGenerating && form.description && (
+            <p style={{ fontSize: 11, color: "#1565c0", margin: "3px 0 0" }}>✦ Generated by AI — edit as needed</p>
+          )}
+        </div>
+
+        {/* Options / Features */}
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label style={LABEL_STYLE}>
+            Options / Features
+            {aiEnabled && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px", background: "#e3f2fd", color: "#1565c0", borderRadius: 3, verticalAlign: "middle" }}>✦ AI</span>}
+          </label>
+          {aiGenerating ? (
+            <div style={{ ...TEXTAREA_STYLE, minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
+              Generating AI content…
+            </div>
+          ) : (
+            <textarea
+              value={form.options}
+              onChange={(e) => setForm((f) => ({ ...f, options: e.target.value }))}
+              style={{ ...TEXTAREA_STYLE, minHeight: 80 }}
+              rows={4}
+              placeholder="Factory options and features — auto-filled by AI if enabled"
+            />
+          )}
+          {aiGenerated && !aiGenerating && form.options && (
+            <p style={{ fontSize: 11, color: "#1565c0", margin: "3px 0 0" }}>✦ Generated by AI — edit as needed</p>
+          )}
         </div>
 
         <div>

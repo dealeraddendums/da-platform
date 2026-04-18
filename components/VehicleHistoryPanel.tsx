@@ -19,8 +19,12 @@ function formatDate(iso: string) {
 function actionLabel(entry: VehicleAuditLogRow): string {
   switch (entry.action) {
     case "import": {
-      const via = entry.method === "csv" ? "CSV file" : entry.method === "vin_decoder" ? "VIN Decoder" : "manual entry";
-      return `Imported via ${via}`;
+      const m = entry.method ?? "";
+      if (m === "vin_decoder") return "Added via VIN Decoder";
+      if (m === "csv_import" || m === "csv") return "Imported via CSV/Excel";
+      if (m === "manual") return "Added manually";
+      if (m.startsWith("automatic")) return `Added by ETL feed (${m})`;
+      return "Imported";
     }
     case "edit": {
       const fields = entry.changes ? Object.keys(entry.changes) : [];

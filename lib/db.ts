@@ -459,6 +459,9 @@ export type DealerVehicleRow = {
   status: string;
   decode_source: string | null;
   decode_flagged: boolean;
+  description: string | null;
+  options: string | null;
+  created_by: string | null;
   date_added: string;
   updated_at: string;
 };
@@ -483,6 +486,9 @@ export type DealerVehicleInsert = {
   status?: string;
   decode_source?: string | null;
   decode_flagged?: boolean;
+  description?: string | null;
+  options?: string | null;
+  created_by?: string | null;
 };
 
 export type VehicleAuditLogRow = {

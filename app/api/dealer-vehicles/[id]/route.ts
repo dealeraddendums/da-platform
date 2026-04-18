@@ -61,6 +61,7 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     "stock_number", "vin", "year", "make", "model", "trim",
     "body_style", "exterior_color", "interior_color", "engine",
     "transmission", "drivetrain", "mileage", "msrp", "condition", "status",
+    "description", "options",
   ];
 
   const update: Record<string, unknown> = {};

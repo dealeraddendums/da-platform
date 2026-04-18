@@ -15,6 +15,8 @@ type MappedVehicle = {
   mileage?: number;
   msrp?: number | null;
   condition?: string;
+  description?: string | null;
+  options?: string | null;
 };
 
 /**
@@ -98,6 +100,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         status: "active",
         decode_source: "manual",
         decode_flagged: false,
+        description: veh.description?.trim() || null,
+        options: veh.options?.trim() || null,
+        created_by: "csv_import",
       });
     }
 
@@ -140,7 +145,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           vehicle_id: row.id as string,
           stock_number: deduped[i]?.stock_number ?? null,
           action: "import" as const,
-          method: "csv",
+          method: "csv_import",
           changed_by: claims.sub,
           changed_by_email: claims.email,
         }))
