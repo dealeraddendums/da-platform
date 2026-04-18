@@ -188,12 +188,12 @@ function PriceHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
 // ── Option form ────────────────────────────────────────────────────────────────
 
 function OptionForm({
-  form, setForm, showAdvanced, setShowAdvanced, showPriceHelp, setShowPriceHelp,
+  form, setForm, appliesTo, setAppliesTo, showPriceHelp, setShowPriceHelp,
 }: {
   form: FormData;
   setForm: React.Dispatch<React.SetStateAction<FormData>>;
-  showAdvanced: boolean;
-  setShowAdvanced: (v: boolean) => void;
+  appliesTo: "all" | "rules";
+  setAppliesTo: (v: "all" | "rules") => void;
   showPriceHelp: boolean;
   setShowPriceHelp: (v: boolean) => void;
 }) {
@@ -240,49 +240,61 @@ function OptionForm({
         </div>
       ))}
 
+      {/* Applies To toggle */}
       <div style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <label style={{ ...lbl, margin: 0 }}>Model</label>
-          <InNotIn value={form.models_not} onChange={v => f("models_not", v)} />
+        <label style={lbl}>Applies To</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          {([["all", "All Vehicles"], ["rules", "Assign with Rules"]] as const).map(([v, label]) => (
+            <button type="button" key={v} onClick={() => setAppliesTo(v)}
+              style={{
+                flex: 1, padding: "7px 0", borderRadius: 4,
+                border: `2px solid ${appliesTo === v ? "#1976d2" : "#e0e0e0"}`,
+                background: appliesTo === v ? "#e3f2fd" : "#fff",
+                color: appliesTo === v ? "#1976d2" : "#55595c",
+                fontWeight: 600, fontSize: 12, cursor: "pointer",
+              }}>
+              {label}
+            </button>
+          ))}
         </div>
-        <TagInput value={form.models} onChange={v => f("models", v)} placeholder="e.g. Civic, Accord…" />
       </div>
 
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <label style={{ ...lbl, margin: 0 }}>Trim</label>
-          <InNotIn value={form.trims_not} onChange={v => f("trims_not", v)} />
-        </div>
-        <TagInput value={form.trims} onChange={v => f("trims", v)} placeholder="e.g. EX, Touring…" />
-      </div>
+      {/* Rules section — only shown when "Assign with Rules" */}
+      {appliesTo === "rules" && (
+        <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: "14px 16px", marginBottom: 14, background: "#fafafa" }}>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <label style={{ ...lbl, margin: 0 }}>Model</label>
+              <InNotIn value={form.models_not} onChange={v => f("models_not", v)} />
+            </div>
+            <TagInput value={form.models} onChange={v => f("models", v)} placeholder="All models" />
+          </div>
 
-      {/* Advanced section */}
-      <div style={{ borderTop: "1px solid #e0e0e0", paddingTop: 12, marginBottom: 14 }}>
-        <button type="button" onClick={() => setShowAdvanced(!showAdvanced)}
-          style={{ background: "none", border: "none", cursor: "pointer", color: "#1976d2", fontSize: 12, fontWeight: 600, padding: 0 }}>
-          {showAdvanced ? "▾ Hide advanced" : "▸ Show advanced options"}
-        </button>
-      </div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <label style={{ ...lbl, margin: 0 }}>Trim</label>
+              <InNotIn value={form.trims_not} onChange={v => f("trims_not", v)} />
+            </div>
+            <TagInput value={form.trims} onChange={v => f("trims", v)} placeholder="All trims" />
+          </div>
 
-      {showAdvanced && (
-        <div>
           <div style={{ marginBottom: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <label style={{ ...lbl, margin: 0 }}>Make</label>
               <InNotIn value={form.makes_not} onChange={v => f("makes_not", v)} />
             </div>
-            <TagInput value={form.makes} onChange={v => f("makes", v)} placeholder="e.g. Honda, Toyota…" />
+            <TagInput value={form.makes} onChange={v => f("makes", v)} placeholder="All makes" />
           </div>
 
-          {row("Body Style", (
-            <TagInput value={form.body_styles} onChange={v => f("body_styles", v)} placeholder="e.g. Sedan, SUV, Truck…" />
+          {row("Style", (
+            <TagInput value={form.body_styles} onChange={v => f("body_styles", v)} placeholder="All styles" />
           ))}
 
           {row("Year", (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <select value={form.year_condition} onChange={e => f("year_condition", parseInt(e.target.value))}
                 style={{ ...inp, width: 130, flex: "none" }}>
-                <option value={0}>ALL years</option>
+                <option value={0}>All years</option>
                 <option value={1}>Equal to</option>
                 <option value={2}>Before</option>
                 <option value={3}>After</option>
@@ -298,7 +310,7 @@ function OptionForm({
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <select value={form.miles_condition} onChange={e => f("miles_condition", parseInt(e.target.value))}
                 style={{ ...inp, width: 130, flex: "none" }}>
-                <option value={0}>ALL mileage</option>
+                <option value={0}>All mileage</option>
                 <option value={1}>Under</option>
                 <option value={2}>Over</option>
               </select>
@@ -313,7 +325,7 @@ function OptionForm({
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <select value={form.msrp_condition} onChange={e => f("msrp_condition", parseInt(e.target.value))}
                 style={{ ...inp, width: 130, flex: "none" }}>
-                <option value={0}>ALL MSRP</option>
+                <option value={0}>All prices</option>
                 <option value={1}>Under</option>
                 <option value={2}>Over</option>
                 <option value={3}>Between</option>
@@ -331,20 +343,28 @@ function OptionForm({
               )}
             </div>
           ))}
+
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#333" }}>
+            <input type="checkbox" checked={form.show_models_only}
+              onChange={e => f("show_models_only", e.target.checked)}
+              style={{ width: 14, height: 14 }} />
+            Show only for specified models
+          </label>
+
+          <p style={{ fontSize: 11, color: "#78828c", marginTop: 10, marginBottom: 0 }}>
+            Leave any field empty to match all values for that field.
+          </p>
         </div>
       )}
 
+      {/* Always-visible bottom options */}
       <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-        {[
-          ["show_models_only", "Show only for specified models"],
-          ["separator_above", "Add separator above"],
-          ["separator_below", "Add separator below"],
-        ].map(([field, label]) => (
+        {(["separator_above", "separator_below"] as const).map((field) => (
           <label key={field} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#333" }}>
-            <input type="checkbox" checked={form[field as keyof FormData] as boolean}
-              onChange={e => f(field as keyof FormData, e.target.checked)}
+            <input type="checkbox" checked={form[field]}
+              onChange={e => f(field, e.target.checked)}
               style={{ width: 14, height: 14 }} />
-            {label}
+            {field === "separator_above" ? "Add separator above" : "Add separator below"}
           </label>
         ))}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
@@ -394,7 +414,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState<AddendumLibraryRow | null>(null);
   const [form, setForm] = useState<FormData>(BLANK);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [appliesTo, setAppliesTo] = useState<"all" | "rules">("all");
   const [showPriceHelp, setShowPriceHelp] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -423,7 +443,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
   function openAdd() {
     setEditItem(null);
     setForm(BLANK);
-    setShowAdvanced(false);
+    setAppliesTo("all");
     setFormError(null);
     setShowModal(true);
   }
@@ -431,8 +451,8 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
   function openEdit(item: AddendumLibraryRow) {
     setEditItem(item);
     setForm(rowToForm(item));
-    const hasAdvanced = !!(item.makes || item.body_styles || item.year_condition || item.miles_condition || item.msrp_condition);
-    setShowAdvanced(hasAdvanced);
+    const hasRules = !!(item.models || item.trims || item.makes || item.body_styles || item.year_condition || item.miles_condition || item.msrp_condition);
+    setAppliesTo(hasRules ? "rules" : "all");
     setFormError(null);
     setShowModal(true);
   }
@@ -442,7 +462,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
     setSaving(true);
     setFormError(null);
     try {
-      const payload = {
+      const base = {
         ...form,
         option_name: form.option_name.trim(),
         dealer_id: dealerId,
@@ -451,6 +471,9 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
         msrp1: form.msrp1 ? parseInt(form.msrp1) : null,
         msrp2: form.msrp2 ? parseInt(form.msrp2) : null,
       };
+      const payload = appliesTo === "all"
+        ? { ...base, models: "", models_not: false, trims: "", trims_not: false, makes: "", makes_not: false, body_styles: "", year_condition: 0, year_value: null, miles_condition: 0, miles_value: null, msrp_condition: 0, msrp1: null, msrp2: null, show_models_only: false }
+        : base;
       const url = editItem ? `/api/addendum-library/${editItem.id}` : "/api/addendum-library";
       const method = editItem ? "PATCH" : "POST";
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -701,7 +724,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
         >
           <OptionForm
             form={form} setForm={setForm}
-            showAdvanced={showAdvanced} setShowAdvanced={setShowAdvanced}
+            appliesTo={appliesTo} setAppliesTo={setAppliesTo}
             showPriceHelp={showPriceHelp} setShowPriceHelp={setShowPriceHelp}
           />
         </Modal>
