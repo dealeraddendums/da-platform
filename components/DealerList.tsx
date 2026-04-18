@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
+import { createClient } from "@/lib/supabase/client";
 
 type DealerListRow = DealerRow & {
   group_name: string | null;
@@ -37,6 +38,8 @@ export default function DealerList() {
   const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false" | "at_risk">("all");
   const [loading, setLoading] = useState(true);
   const [showNewForm, setShowNewForm] = useState(false);
+  const [impersonating, setImpersonating] = useState<string | null>(null);
+  const [impersonateError, setImpersonateError] = useState<{ dealerId: string; message: string } | null>(null);
 
   const fetchDealers = useCallback(async () => {
     setLoading(true);
@@ -81,6 +84,47 @@ export default function DealerList() {
   const totalPages = Math.ceil(total / PER_PAGE);
   const from = (page - 1) * PER_PAGE + 1;
   const to = Math.min(page * PER_PAGE, total);
+
+  async function handleImpersonate(d: DealerListRow) {
+    setImpersonating(d.dealer_id);
+    setImpersonateError(null);
+    const supabase = createClient();
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+    const res = await fetch("/api/admin/impersonate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dealer_id: d.dealer_id }),
+    });
+    const json = (await res.json()) as { token_hash?: string; dealer_name?: string; dealer_id?: string; error?: string };
+
+    if (!res.ok || !json.token_hash) {
+      setImpersonateError({ dealerId: d.dealer_id, message: json.error ?? "Failed to impersonate" });
+      setImpersonating(null);
+      return;
+    }
+
+    localStorage.setItem("da_impersonate", JSON.stringify({
+      dealer_name: json.dealer_name,
+      dealer_id: json.dealer_id,
+      original_access_token: currentSession?.access_token ?? "",
+      original_refresh_token: currentSession?.refresh_token ?? "",
+    }));
+
+    const { error: otpError } = await supabase.auth.verifyOtp({
+      token_hash: json.token_hash,
+      type: "magiclink",
+    });
+
+    if (otpError) {
+      localStorage.removeItem("da_impersonate");
+      setImpersonateError({ dealerId: d.dealer_id, message: otpError.message });
+      setImpersonating(null);
+      return;
+    }
+
+    window.location.href = "/dashboard";
+  }
 
   return (
     <div>
@@ -191,21 +235,42 @@ export default function DealerList() {
                     style={{ borderBottom: i < dealers.length - 1 ? "1px solid var(--border)" : "none" }}
                   >
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 group">
                         {risk === "critical" && (
                           <span title="No prints in 30 days — churn risk" style={{ color: "#ffa500", fontSize: 14, lineHeight: 1, cursor: "help", flexShrink: 0 }}>⚠</span>
                         )}
                         {risk === "low" && (
                           <span title="Low print activity" style={{ width: 7, height: 7, borderRadius: "50%", background: "#ffd54f", display: "inline-block", flexShrink: 0 }} />
                         )}
-                        <Link
-                          href={`/dealers/${d.id}`}
-                          className="font-medium"
-                          style={{ color: "var(--text-primary)" }}
+                        <button
+                          onClick={() => void handleImpersonate(d)}
+                          disabled={impersonating === d.dealer_id}
+                          title="Click to view as this dealer"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            cursor: impersonating === d.dealer_id ? "wait" : "pointer",
+                            color: "var(--text-primary)",
+                            fontWeight: 500,
+                            fontSize: "inherit",
+                            textDecoration: "none",
+                          }}
+                          className="hover:underline"
                         >
-                          {d.name}
-                        </Link>
+                          {impersonating === d.dealer_id ? "Loading…" : d.name}
+                        </button>
+                        <span
+                          className="opacity-0 group-hover:opacity-60"
+                          style={{ fontSize: 12, transition: "opacity 100ms", pointerEvents: "none" }}
+                          aria-hidden
+                        >
+                          👁
+                        </span>
                       </div>
+                      {impersonateError?.dealerId === d.dealer_id && (
+                        <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{impersonateError.message}</p>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>
                       {d.group_name ?? "—"}

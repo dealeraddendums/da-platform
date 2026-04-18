@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
+import ImpersonationBanner from "@/components/ImpersonationBanner";
 
 export default async function DashboardLayout({
   children,
@@ -35,6 +36,7 @@ export default async function DashboardLayout({
     <div className="flex h-screen overflow-hidden">
       <Sidebar role={role} />
       <div className="flex flex-col flex-1 overflow-hidden">
+        <ImpersonationBanner />
         <Topbar user={userDisplay} />
         <main
           className="flex-1 overflow-auto p-6"

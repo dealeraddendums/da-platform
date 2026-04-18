@@ -319,6 +319,22 @@ export type AddendumLibraryRow = {
 type AddendumLibraryInsert = Omit<AddendumLibraryRow, 'id' | 'created_at' | 'updated_at'>;
 type AddendumLibraryUpdate = Partial<Omit<AddendumLibraryRow, 'id' | 'dealer_id' | 'created_at' | 'updated_at'>>;
 
+export type AdminAuditRow = {
+  id: string;
+  admin_user_id: string;
+  action: string;
+  target_dealer_id: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
+
+type AdminAuditInsert = {
+  admin_user_id: string;
+  action: string;
+  target_dealer_id?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
 type AiContentCacheInsert = {
   vin: string;
   dealer_id: string;
@@ -448,6 +464,12 @@ export type Database = {
             referencedColumns: ["dealer_id"];
           }
         ];
+      };
+      admin_audit: {
+        Row: AdminAuditRow;
+        Insert: AdminAuditInsert;
+        Update: Record<string, never>;
+        Relationships: [];
       };
     };
     Views: { [_ in never]: never };
