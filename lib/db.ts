@@ -351,6 +351,93 @@ type AiContentCacheUpdate = {
   model_version?: string | null;
 };
 
+export type GroupOptionRow = {
+  id: string;
+  group_id: string;
+  option_name: string;
+  option_price: string;
+  sort_order: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type GroupOptionInsert = {
+  group_id: string;
+  option_name: string;
+  option_price?: string;
+  sort_order?: number;
+  active?: boolean;
+};
+
+type GroupOptionUpdate = {
+  option_name?: string;
+  option_price?: string;
+  sort_order?: number;
+  active?: boolean;
+  updated_at?: string;
+};
+
+export type GroupDisclaimerRow = {
+  id: string;
+  group_id: string;
+  state_code: string;
+  document_type: string;
+  disclaimer_text: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type GroupDisclaimerInsert = {
+  group_id: string;
+  state_code?: string;
+  document_type?: string;
+  disclaimer_text: string;
+  active?: boolean;
+};
+
+type GroupDisclaimerUpdate = {
+  state_code?: string;
+  document_type?: string;
+  disclaimer_text?: string;
+  active?: boolean;
+  updated_at?: string;
+};
+
+export type GroupTemplateRow = {
+  id: string;
+  group_id: string;
+  name: string;
+  document_type: 'addendum' | 'infosheet';
+  vehicle_types: string[];
+  template_json: Record<string, unknown>;
+  is_locked: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type GroupTemplateInsert = {
+  group_id: string;
+  name: string;
+  document_type: 'addendum' | 'infosheet';
+  vehicle_types?: string[];
+  template_json?: Record<string, unknown>;
+  is_locked?: boolean;
+  is_active?: boolean;
+};
+
+type GroupTemplateUpdate = {
+  name?: string;
+  document_type?: 'addendum' | 'infosheet';
+  vehicle_types?: string[];
+  template_json?: Record<string, unknown>;
+  is_locked?: boolean;
+  is_active?: boolean;
+  updated_at?: string;
+};
+
 export type DealerVehicleRow = {
   id: string;
   dealer_id: string;
@@ -542,6 +629,24 @@ export type Database = {
         Row: AdminAuditRow;
         Insert: AdminAuditInsert;
         Update: Record<string, never>;
+        Relationships: [];
+      };
+      group_options: {
+        Row: GroupOptionRow;
+        Insert: GroupOptionInsert;
+        Update: GroupOptionUpdate;
+        Relationships: [];
+      };
+      group_disclaimers: {
+        Row: GroupDisclaimerRow;
+        Insert: GroupDisclaimerInsert;
+        Update: GroupDisclaimerUpdate;
+        Relationships: [];
+      };
+      group_templates: {
+        Row: GroupTemplateRow;
+        Insert: GroupTemplateInsert;
+        Update: GroupTemplateUpdate;
         Relationships: [];
       };
       dealer_vehicles: {

@@ -3,7 +3,6 @@ import { renderW } from '@/components/builder/widgetRenderer';
 import type { Widget, PaperSize } from '@/components/builder/types';
 import { formatOptionPrice } from '@/lib/option-price';
 import type { VehicleRow } from '@/lib/vehicles';
-import type { VehicleOptionRow } from '@/lib/db';
 
 const PAPER_DIMS: Record<PaperSize, { w: number; h: number }> = {
   standard: { w: 408, h: 1056 },
@@ -11,13 +10,16 @@ const PAPER_DIMS: Record<PaperSize, { w: number; h: number }> = {
   infosheet: { w: 816, h: 1056 },
 };
 
+type AnyOption = { option_name: string; option_price: string; active?: boolean };
+
 export interface BuildPdfHtmlInput {
   widgets: Widget[];
   paperSize: PaperSize;
   fontScale: number;
   bgUrl: string;
   vehicle?: VehicleRow;
-  options?: VehicleOptionRow[];
+  options?: AnyOption[];
+  disclaimer?: string;
 }
 
 export function buildPdfHtml({
@@ -27,6 +29,7 @@ export function buildPdfHtml({
   bgUrl,
   vehicle,
   options,
+  disclaimer,
 }: BuildPdfHtmlInput): string {
   const paper = PAPER_DIMS[paperSize];
 
@@ -50,7 +53,7 @@ export function buildPdfHtml({
     }
 
     if (options !== undefined && w.type === 'options') {
-      d.items = options.filter(o => o.active).map(o => ({
+      d.items = options.filter(o => o.active !== false).map(o => ({
         name: o.option_name,
         desc: '',
         price: formatOptionPrice(o.option_price),
@@ -66,6 +69,10 @@ export function buildPdfHtml({
       return `<div style="position:absolute;left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px;overflow:hidden;z-index:10;">${inner}</div>`;
     })
     .join('\n');
+
+  const disclaimerHtml = disclaimer
+    ? `<div style="position:absolute;bottom:4px;left:6px;right:6px;z-index:20;font-size:7px;line-height:1.3;color:#666;font-family:-apple-system,Roboto,Arial,sans-serif;">${disclaimer.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`
+    : '';
 
   return `<!DOCTYPE html>
 <html>
@@ -83,6 +90,7 @@ body { width: ${paper.w}px; height: ${paper.h}px; overflow: hidden; background: 
 <div class="paper">
   <div class="frame"><img src="${bgUrl}" alt=""></div>
   ${widgetHtml}
+  ${disclaimerHtml}
 </div>
 </body>
 </html>`;

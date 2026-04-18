@@ -5,6 +5,8 @@ import { getPool } from "@/lib/aurora";
 import type { RowDataPacket } from "mysql2/promise";
 import { vehicleCondition } from "@/lib/vehicles";
 import type { VehicleRow } from "@/lib/vehicles";
+import { createAdminSupabaseClient } from "@/lib/db";
+import type { GroupOptionRow, GroupDisclaimerRow } from "@/lib/db";
 
 // ── Aurora row types ──────────────────────────────────────────────────────────
 
@@ -208,6 +210,87 @@ export async function getDealerOptionLibrary(
     sort_order: r.RE_ORDER,
     source: "default" as const,
   }));
+}
+
+// ── Group-level options + disclaimers ─────────────────────────────────────────
+
+export type LockedOption = {
+  id: string;
+  option_name: string;
+  option_price: string;
+  sort_order: number;
+  is_locked: true;
+};
+
+/**
+ * Returns active group options for the dealer identified by their Aurora dealer_id.
+ * Looks up the Supabase group_id via dealers.dealer_id or inventory_dealer_id.
+ */
+export async function getGroupOptionsForDealer(
+  auroraId: string
+): Promise<LockedOption[]> {
+  const admin = createAdminSupabaseClient();
+
+  // Find Supabase dealer row to get group_id
+  const { data: dealer } = await admin
+    .from("dealers")
+    .select("group_id")
+    .or(`dealer_id.eq.${auroraId},inventory_dealer_id.eq.${auroraId}`)
+    .maybeSingle<{ group_id: string | null }>();
+
+  if (!dealer?.group_id) return [];
+
+  const { data: rows } = await admin
+    .from("group_options")
+    .select("*")
+    .eq("group_id", dealer.group_id)
+    .eq("active", true)
+    .order("sort_order");
+
+  return (rows ?? []).map((r: GroupOptionRow) => ({
+    id: r.id,
+    option_name: r.option_name,
+    option_price: r.option_price,
+    sort_order: r.sort_order,
+    is_locked: true as const,
+  }));
+}
+
+/**
+ * Returns combined disclaimer text for a dealer's applicable group disclaimers.
+ * Matches by state_code ('ALL' or exact match) and document_type ('all' or exact).
+ */
+export async function getGroupDisclaimer(
+  auroraId: string,
+  dealerState: string | null,
+  docType: string
+): Promise<string | null> {
+  const admin = createAdminSupabaseClient();
+
+  const { data: dealer } = await admin
+    .from("dealers")
+    .select("group_id")
+    .or(`dealer_id.eq.${auroraId},inventory_dealer_id.eq.${auroraId}`)
+    .maybeSingle<{ group_id: string | null }>();
+
+  if (!dealer?.group_id) return null;
+
+  const { data: rows } = await admin
+    .from("group_disclaimers")
+    .select("*")
+    .eq("group_id", dealer.group_id)
+    .eq("active", true);
+
+  if (!rows?.length) return null;
+
+  const matched = (rows as GroupDisclaimerRow[]).filter((r) => {
+    const stateOk = r.state_code === "ALL" || (dealerState && r.state_code.toUpperCase() === dealerState.toUpperCase());
+    const typeOk = r.document_type === "all" || r.document_type === docType;
+    return stateOk && typeOk;
+  });
+
+  if (!matched.length) return null;
+  return matched.map((r) => r.disclaimer_text).join(" ");
 }
 
 // Re-export client-safe price helpers

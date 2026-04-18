@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow } from "@/lib/db";
 import GroupProfileCard from "@/components/GroupProfileCard";
+import GroupOptionsPanel from "@/components/GroupOptionsPanel";
 
 type Props = { params: { id: string } };
 
@@ -49,6 +50,9 @@ export default async function GroupPage({ params }: Props) {
         </nav>
       )}
       <GroupProfileCard group={group} canEdit={canEdit} isSuperAdmin={isSuperAdmin} />
+      {(isSuperAdmin || isGroupAdmin) && (
+        <GroupOptionsPanel groupId={params.id} />
+      )}
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   LAYOUT_INFOSHEET,
   makeWidget,
 } from "@/components/builder/constants";
+import { getGroupOptionsForDealer, getGroupDisclaimer } from "@/lib/options-engine";
 import type { Widget, PaperSize } from "@/components/builder/types";
 import type { VehicleRow } from "@/lib/vehicles";
 import type { RowDataPacket } from "mysql2";
@@ -94,7 +95,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .eq("active", true)
     .order("sort_order");
 
-  const options = optionRows ?? [];
+  // Prepend locked group options
+  const groupOpts = await getGroupOptionsForDealer(vehicleRow.DEALER_ID);
+  const options = [
+    ...groupOpts.map(g => ({ option_name: g.option_name, option_price: g.option_price, active: true })),
+    ...(optionRows ?? []),
+  ];
+
+  // Fetch applicable group disclaimer
+  const disclaimer = await getGroupDisclaimer(
+    vehicleRow.DEALER_ID,
+    (vehicleRow as Record<string, unknown>).DEALER_STATE as string | null,
+    docType
+  );
 
   // Build widget array — use provided or build default layout
   let widgets: Widget[];
@@ -161,6 +174,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     bgUrl,
     vehicle: vehicleRow,
     options,
+    disclaimer: disclaimer ?? undefined,
   });
 
   let pdfBuffer: Buffer;

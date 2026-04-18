@@ -16,6 +16,14 @@ type MatchedOption = {
   source?: string;
 };
 
+type GroupOption = {
+  id: string;
+  option_name: string;
+  option_price: string;
+  sort_order: number;
+  is_locked: true;
+};
+
 type LibraryOption = {
   default_id: number;
   option_name: string;
@@ -34,6 +42,7 @@ export default function AddendumEditor({ vehicle }: Props) {
   const dealerId = vehicle.DEALER_ID;
 
   const [options, setOptions] = useState<(VehicleOptionRow | MatchedOption)[]>([]);
+  const [groupOptions, setGroupOptions] = useState<GroupOption[]>([]);
   const [source, setSource] = useState<string>("loading");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -68,9 +77,10 @@ export default function AddendumEditor({ vehicle }: Props) {
     setError(null);
     try {
       const res = await fetch(`/api/options/${vehicleId}`);
-      const json = await res.json() as { data: (VehicleOptionRow | MatchedOption)[]; source: string };
+      const json = await res.json() as { data: (VehicleOptionRow | MatchedOption)[]; groupOptions?: GroupOption[]; source: string };
       if (!res.ok) throw new Error((json as { error?: string }).error ?? "Failed to load");
       setOptions(json.data ?? []);
+      setGroupOptions(json.groupOptions ?? []);
       setSource(json.source);
       setDirty(json.source === "matched"); // matched defaults need a save
     } catch (e) {
@@ -222,7 +232,7 @@ export default function AddendumEditor({ vehicle }: Props) {
 
   // ── Totals ───────────────────────────────────────────────────────────────────
 
-  const total = options.reduce((sum, o) => sum + parseOptionPriceValue(o.option_price), 0);
+  const total = [...groupOptions, ...options].reduce((sum, o) => sum + parseOptionPriceValue(o.option_price), 0);
   const msrp = vehicle.MSRP ? parseFloat(vehicle.MSRP) : null;
   const askingPrice = msrp != null ? msrp + total : null;
 
@@ -321,7 +331,7 @@ export default function AddendumEditor({ vehicle }: Props) {
           {/* Loading */}
           {loading ? (
             <div className="p-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading options…</div>
-          ) : options.length === 0 ? (
+          ) : groupOptions.length === 0 && options.length === 0 ? (
             <div className="p-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
               No options yet. Add from the library or create a custom option.
             </div>
@@ -336,6 +346,34 @@ export default function AddendumEditor({ vehicle }: Props) {
                 </tr>
               </thead>
               <tbody>
+                {/* Locked group options at top */}
+                {groupOptions.map((opt) => (
+                  <tr
+                    key={`group-${opt.id}`}
+                    style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}
+                  >
+                    <td className="px-3 py-2 text-center" style={{ color: "#1565c0", fontSize: 13 }}>
+                      🔒
+                    </td>
+                    <td className="px-3 py-2">
+                      <span style={{ color: "var(--text-secondary)" }}>{opt.option_name}</span>
+                      <span
+                        className="ml-2 text-xs px-1.5 py-0.5 rounded"
+                        style={{ background: "#e3f2fd", color: "#1565c0", fontSize: 10, fontWeight: 600 }}
+                      >
+                        Group
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <span className="font-medium" style={{ color: "var(--text-secondary)" }}>
+                        {formatOptionPrice(opt.option_price)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2"></td>
+                  </tr>
+                ))}
+
+                {/* Dealer editable options */}
                 {options.map((opt, idx) => {
                   const id = (opt as VehicleOptionRow).id ?? `idx-${idx}`;
                   const isEditing = editingId === String(id);
