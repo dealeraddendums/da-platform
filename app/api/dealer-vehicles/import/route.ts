@@ -3,103 +3,131 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerVehicleInsert } from "@/lib/db";
 
+type MappedVehicle = {
+  stock_number: string;
+  vin?: string | null;
+  year?: number | null;
+  make?: string | null;
+  model?: string | null;
+  trim?: string | null;
+  body_style?: string | null;
+  exterior_color?: string | null;
+  mileage?: number;
+  msrp?: number | null;
+  condition?: string;
+};
+
 /**
  * POST /api/dealer-vehicles/import
- * Bulk insert vehicles from a parsed file (client does the parsing).
- * Body: { rows: Array<Record<string, string>>, mapping: Record<string, string> }
- *   mapping keys are DA field names, values are source column headers.
- * Returns: { imported: number, skipped: number, errors: string[] }
- *
- * Restricted to dealer_admin / dealer_user only.
+ * Bulk upsert a pre-mapped batch of vehicles.
+ * Body: { mode: 'update' | 'replace', vehicles: MappedVehicle[], deleteFirst?: boolean }
+ *   mode=update: upsert (insert or update existing by stock_number)
+ *   mode=replace + deleteFirst=true: delete all dealer vehicles first, then insert
+ * Returns: { imported, skipped, total }
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const { claims, error } = await requireAuth();
-  if (error) return error;
-
-  if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id) {
-    return NextResponse.json({ error: "Not available for admin roles" }, { status: 403 });
-  }
-
-  const dealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
-  if (!dealerId) {
-    return NextResponse.json({ error: "No dealer assigned" }, { status: 403 });
-  }
-
-  let body: { rows?: unknown[]; mapping?: Record<string, string> };
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
+    const { claims, error } = await requireAuth();
+    if (error) return error;
 
-  const rows = body.rows ?? [];
-  const mapping = body.mapping ?? {};
-
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return NextResponse.json({ error: "No rows provided" }, { status: 422 });
-  }
-
-  function get(row: Record<string, string>, daField: string): string {
-    const col = mapping[daField];
-    return col ? (row[col] ?? "").trim() : "";
-  }
-
-  const inserts: DealerVehicleInsert[] = [];
-  const errors: string[] = [];
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i] as Record<string, string>;
-    const stock = get(row, "Stock Number");
-    if (!stock) {
-      errors.push(`Row ${i + 1}: missing Stock Number — skipped`);
-      continue;
+    if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id) {
+      return NextResponse.json({ error: "Not available for admin roles" }, { status: 403 });
     }
-    const msrpRaw = get(row, "MSRP").replace(/[$,]/g, "");
-    const mileageRaw = get(row, "Mileage").replace(/,/g, "");
-    inserts.push({
-      dealer_id: dealerId,
-      stock_number: stock,
-      vin: get(row, "VIN").toUpperCase() || null,
-      year: get(row, "Year") ? parseInt(get(row, "Year"), 10) : null,
-      make: get(row, "Make") || null,
-      model: get(row, "Model") || null,
-      trim: get(row, "Trim") || null,
-      body_style: get(row, "Body Style") || null,
-      exterior_color: get(row, "Color") || null,
-      mileage: mileageRaw ? parseInt(mileageRaw, 10) : 0,
-      msrp: msrpRaw ? parseFloat(msrpRaw) : null,
-      condition: get(row, "Condition") || "New",
-      status: "active",
-      decode_source: "manual",
-      decode_flagged: false,
-    });
-  }
 
-  if (inserts.length === 0) {
-    return NextResponse.json({ imported: 0, skipped: rows.length, errors });
-  }
+    const dealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
+    if (!dealerId) {
+      return NextResponse.json({ error: "No dealer assigned" }, { status: 403 });
+    }
 
-  const admin = createAdminSupabaseClient();
-  // Upsert in batches of 100; skip duplicates (ON CONFLICT DO NOTHING)
-  let imported = 0;
-  let skipped = 0;
-  const BATCH = 100;
+    let body: { mode?: string; vehicles?: unknown[]; deleteFirst?: boolean };
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    }
 
-  for (let i = 0; i < inserts.length; i += BATCH) {
-    const batch = inserts.slice(i, i + BATCH);
-    const { data, error: dbErr } = await admin
+    const mode = body.mode === "replace" ? "replace" : "update";
+    const vehicles = Array.isArray(body.vehicles) ? body.vehicles : [];
+    const deleteFirst = body.deleteFirst === true && mode === "replace";
+
+    if (vehicles.length === 0) {
+      return NextResponse.json({ error: "No vehicles provided" }, { status: 422 });
+    }
+
+    const admin = createAdminSupabaseClient();
+
+    if (deleteFirst) {
+      const { error: deleteErr } = await admin
+        .from("dealer_vehicles")
+        .delete()
+        .eq("dealer_id", dealerId);
+
+      if (deleteErr) {
+        console.error("[import] delete error:", deleteErr);
+        if (deleteErr.code === "42P01") {
+          return NextResponse.json(
+            { error: "Vehicle table not ready — please contact support" },
+            { status: 503 }
+          );
+        }
+        return NextResponse.json({ error: deleteErr.message }, { status: 500 });
+      }
+    }
+
+    let skipped = 0;
+    const inserts: DealerVehicleInsert[] = [];
+
+    for (const v of vehicles) {
+      const veh = v as MappedVehicle;
+      const stock = (veh.stock_number ?? "").trim();
+      if (!stock) { skipped++; continue; }
+
+      inserts.push({
+        dealer_id: dealerId,
+        stock_number: stock,
+        vin: veh.vin?.trim().toUpperCase() || null,
+        year: veh.year ?? null,
+        make: veh.make?.trim() || null,
+        model: veh.model?.trim() || null,
+        trim: veh.trim?.trim() || null,
+        body_style: veh.body_style?.trim() || null,
+        exterior_color: veh.exterior_color?.trim() || null,
+        mileage: veh.mileage ?? 0,
+        msrp: veh.msrp ?? null,
+        condition: veh.condition || "New",
+        status: "active",
+        decode_source: "manual",
+        decode_flagged: false,
+      });
+    }
+
+    if (inserts.length === 0) {
+      return NextResponse.json({ imported: 0, skipped, total: vehicles.length });
+    }
+
+    const { data, error: upsertErr } = await admin
       .from("dealer_vehicles")
-      .upsert(batch, { onConflict: "dealer_id,stock_number", ignoreDuplicates: true })
+      .upsert(inserts, { onConflict: "dealer_id,stock_number", ignoreDuplicates: false })
       .select("id");
 
-    if (dbErr) {
-      errors.push(`Batch ${Math.floor(i / BATCH) + 1}: ${dbErr.message}`);
-      skipped += batch.length;
-    } else {
-      imported += data?.length ?? 0;
-      skipped += batch.length - (data?.length ?? 0);
+    if (upsertErr) {
+      console.error("[import] upsert error:", upsertErr);
+      if (upsertErr.code === "42P01") {
+        return NextResponse.json(
+          { error: "Vehicle table not ready — please contact support" },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json({ error: upsertErr.message }, { status: 500 });
     }
-  }
 
-  return NextResponse.json({ imported, skipped, errors });
+    const imported = data?.length ?? 0;
+    skipped += inserts.length - imported;
+
+    return NextResponse.json({ imported, skipped, total: vehicles.length });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[import] unhandled error:", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }

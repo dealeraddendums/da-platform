@@ -15,8 +15,9 @@ type Props = {
 };
 
 type Tab = "vin" | "import";
+type ImportMode = "update" | "replace";
 
-const CONDITION_OPTIONS = ["New", "Used", "CPO"] as const;
+const CONDITION_OPTIONS = ["New", "Used", "Certified"] as const;
 
 const DA_IMPORT_FIELDS = [
   "Stock Number",
@@ -33,6 +34,10 @@ const DA_IMPORT_FIELDS = [
 ] as const;
 
 type DAField = (typeof DA_IMPORT_FIELDS)[number];
+
+const REQUIRED_IMPORT_FIELDS: readonly DAField[] = [
+  "Stock Number", "VIN", "Year", "Make", "Model", "MSRP",
+];
 
 const INPUT_STYLE: React.CSSProperties = {
   width: "100%",
@@ -53,6 +58,16 @@ const LABEL_STYLE: React.CSSProperties = {
   color: "var(--text-secondary)",
   marginBottom: 4,
 };
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function normalizeCondition(raw: string): string {
+  const v = (raw ?? "").trim().toUpperCase();
+  if (["N", "NEW"].includes(v)) return "New";
+  if (["U", "USED"].includes(v)) return "Used";
+  if (["C", "CPO", "CERTIFIED", "CERT"].includes(v)) return "Certified";
+  return raw.trim() || "New";
+}
 
 // ── Field helpers ─────────────────────────────────────────────────────────────
 
@@ -101,8 +116,10 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
   const [fileHeaders, setFileHeaders] = useState<string[]>([]);
   const [fileRows, setFileRows] = useState<Record<string, string>[]>([]);
   const [mapping, setMapping] = useState<Record<DAField, string>>({} as Record<DAField, string>);
+  const [importMode, setImportMode] = useState<ImportMode>("update");
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ imported: number; skipped: number } | null>(null);
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
+  const [importDone, setImportDone] = useState<{ imported: number; skipped: number; total: number } | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -119,7 +136,9 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
     setFileHeaders([]);
     setFileRows([]);
     setMapping({} as Record<DAField, string>);
-    setImportResult(null);
+    setImportMode("update");
+    setImportProgress(null);
+    setImportDone(null);
     setImportError(null);
   }
 
@@ -199,7 +218,7 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
 
   function parseFile(file: File) {
     setImportFile(file);
-    setImportResult(null);
+    setImportDone(null);
     setImportError(null);
 
     const reader = new FileReader();
@@ -242,21 +261,79 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
     if (!fileRows.length) return;
     setImporting(true);
     setImportError(null);
+    setImportProgress({ done: 0, total: fileRows.length });
+    setImportDone(null);
 
-    const res = await fetch("/api/dealer-vehicles/import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows: fileRows, mapping }),
-    });
-    const json = await res.json() as { imported?: number; skipped?: number; errors?: string[]; error?: string };
-    setImporting(false);
-
-    if (!res.ok) {
-      setImportError(json.error ?? "Import failed");
-      return;
+    function get(row: Record<string, string>, field: DAField): string {
+      const col = mapping[field];
+      return col ? (row[col] ?? "").trim() : "";
     }
 
-    setImportResult({ imported: json.imported ?? 0, skipped: json.skipped ?? 0 });
+    // Map all rows to typed vehicle objects; skip rows with no stock number
+    const mapped = fileRows
+      .map((row) => {
+        const stock = get(row, "Stock Number");
+        if (!stock) return null;
+        const msrpRaw = get(row, "MSRP").replace(/[$,]/g, "");
+        const mileageRaw = get(row, "Mileage").replace(/,/g, "");
+        return {
+          stock_number: stock,
+          vin: get(row, "VIN").toUpperCase() || undefined,
+          year: get(row, "Year") ? parseInt(get(row, "Year"), 10) : undefined,
+          make: get(row, "Make") || undefined,
+          model: get(row, "Model") || undefined,
+          trim: get(row, "Trim") || undefined,
+          body_style: get(row, "Body Style") || undefined,
+          exterior_color: get(row, "Color") || undefined,
+          mileage: mileageRaw ? parseInt(mileageRaw, 10) : 0,
+          msrp: msrpRaw ? parseFloat(msrpRaw) : undefined,
+          condition: normalizeCondition(get(row, "Condition")),
+        };
+      })
+      .filter((v): v is NonNullable<typeof v> => v !== null);
+
+    const BATCH = 50;
+    let totalImported = 0;
+    let totalSkipped = fileRows.length - mapped.length; // rows with no stock number
+
+    for (let i = 0; i < mapped.length; i += BATCH) {
+      const batch = mapped.slice(i, i + BATCH);
+      const isFirstBatch = i === 0;
+
+      try {
+        const res = await fetch("/api/dealer-vehicles/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: importMode,
+            vehicles: batch,
+            deleteFirst: importMode === "replace" && isFirstBatch,
+          }),
+        });
+
+        const json = await res.json() as { imported?: number; skipped?: number; error?: string };
+
+        if (!res.ok) {
+          setImportError(json.error ?? "Import failed");
+          setImporting(false);
+          setImportProgress(null);
+          return;
+        }
+
+        totalImported += json.imported ?? 0;
+        totalSkipped += json.skipped ?? 0;
+        setImportProgress({ done: Math.min(i + BATCH, mapped.length), total: mapped.length });
+      } catch {
+        setImportError("Network error during import");
+        setImporting(false);
+        setImportProgress(null);
+        return;
+      }
+    }
+
+    setImporting(false);
+    setImportProgress(null);
+    setImportDone({ imported: totalImported, skipped: totalSkipped, total: fileRows.length });
     onSaved?.();
   }
 
@@ -351,8 +428,11 @@ export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin",
               fileRows={fileRows}
               mapping={mapping}
               setMapping={setMapping}
+              importMode={importMode}
+              setImportMode={setImportMode}
               importing={importing}
-              importResult={importResult}
+              importProgress={importProgress}
+              importDone={importDone}
               importError={importError}
               dropRef={dropRef}
               fileInputRef={fileInputRef}
@@ -566,7 +646,8 @@ function VinTab({
 
 function ImportTab({
   importFile, fileHeaders, fileRows, mapping, setMapping,
-  importing, importResult, importError,
+  importMode, setImportMode,
+  importing, importProgress, importDone, importError,
   dropRef, fileInputRef, onFileDrop, onFileChange, onImport, onClose,
 }: {
   importFile: File | null;
@@ -574,8 +655,11 @@ function ImportTab({
   fileRows: Record<string, string>[];
   mapping: Record<DAField, string>;
   setMapping: React.Dispatch<React.SetStateAction<Record<DAField, string>>>;
+  importMode: ImportMode;
+  setImportMode: (m: ImportMode) => void;
   importing: boolean;
-  importResult: { imported: number; skipped: number } | null;
+  importProgress: { done: number; total: number } | null;
+  importDone: { imported: number; skipped: number; total: number } | null;
   importError: string | null;
   dropRef: React.RefObject<HTMLDivElement>;
   fileInputRef: React.RefObject<HTMLInputElement>;
@@ -584,6 +668,9 @@ function ImportTab({
   onImport: () => void;
   onClose: () => void;
 }) {
+  const missingRequired = REQUIRED_IMPORT_FIELDS.filter((f) => !mapping[f]);
+  const canImport = fileRows.length > 0 && missingRequired.length === 0 && !importing && !importDone;
+
   return (
     <div>
       {/* Drop zone */}
@@ -622,29 +709,94 @@ function ImportTab({
         </div>
       )}
 
+      {/* Import mode selector */}
+      {fileHeaders.length > 0 && !importDone && (
+        <div style={{ marginBottom: 16, padding: "12px 14px", background: "#f5f6f7", border: "1px solid var(--border)", borderRadius: 4 }}>
+          <p style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Import Mode
+          </p>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 10, cursor: "pointer" }}>
+            <input
+              type="radio"
+              name="importMode"
+              value="update"
+              checked={importMode === "update"}
+              onChange={() => setImportMode("update")}
+              style={{ marginTop: 3, flexShrink: 0 }}
+            />
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Update existing inventory</span>
+              <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "2px 0 0" }}>
+                Matches on stock number. Updates existing vehicles and adds new ones. Print history unchanged.
+              </p>
+            </div>
+          </label>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer" }}>
+            <input
+              type="radio"
+              name="importMode"
+              value="replace"
+              checked={importMode === "replace"}
+              onChange={() => setImportMode("replace")}
+              style={{ marginTop: 3, flexShrink: 0 }}
+            />
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Replace all inventory</span>
+              <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "2px 0 0" }}>
+                Deletes all current vehicles and replaces with this file.
+              </p>
+            </div>
+          </label>
+          {importMode === "replace" && (
+            <div style={{ marginTop: 10, padding: "8px 10px", background: "#ffebee", border: "1px solid #ffcdd2", borderRadius: 4, fontSize: 12, color: "#c62828" }}>
+              ⚠ This will delete all current vehicles and replace with the imported file. Print history is preserved.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Column mapper */}
-      {fileHeaders.length > 0 && (
+      {fileHeaders.length > 0 && !importDone && (
         <div style={{ marginBottom: 16 }}>
-          <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 10 }}>
+          <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
             Map columns from your file:
           </p>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
+            Fields marked <span style={{ color: "var(--error)" }}>*</span> are required.
+          </p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 16px" }}>
-            {DA_IMPORT_FIELDS.map((field) => (
-              <div key={field}>
-                <label style={LABEL_STYLE}>{field}{field === "Stock Number" ? " *" : ""}</label>
-                <select
-                  value={mapping[field] ?? ""}
-                  onChange={(e) => setMapping((m) => ({ ...m, [field]: e.target.value }))}
-                  style={{ ...INPUT_STYLE }}
-                >
-                  <option value="">— skip —</option>
-                  {fileHeaders.map((h) => (
-                    <option key={h} value={h}>{h}</option>
-                  ))}
-                </select>
-              </div>
-            ))}
+            {DA_IMPORT_FIELDS.map((field) => {
+              const required = REQUIRED_IMPORT_FIELDS.includes(field);
+              return (
+                <div key={field}>
+                  <label style={LABEL_STYLE}>
+                    {field}
+                    {required && <span style={{ color: "var(--error)", marginLeft: 2 }}>*</span>}
+                  </label>
+                  <select
+                    value={mapping[field] ?? ""}
+                    onChange={(e) => setMapping((m) => ({ ...m, [field]: e.target.value }))}
+                    style={{
+                      ...INPUT_STYLE,
+                      borderColor: required && !mapping[field] ? "#ff5252" : undefined,
+                    }}
+                  >
+                    <option value="">— skip —</option>
+                    {fileHeaders.map((h) => (
+                      <option key={h} value={h}>{h}</option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
           </div>
+        </div>
+      )}
+
+      {/* Required fields warning */}
+      {missingRequired.length > 0 && fileHeaders.length > 0 && !importDone && (
+        <div style={{ padding: "8px 12px", background: "#fff3e0", border: "1px solid #ffcc02", borderRadius: 4, fontSize: 13, color: "#e65100", marginBottom: 12 }}>
+          Please map all required fields before importing: <strong>{missingRequired.join(", ")}</strong>
         </div>
       )}
 
@@ -654,27 +806,52 @@ function ImportTab({
         </div>
       )}
 
-      {importResult && (
-        <div style={{ padding: "10px 12px", background: "#e8f5e9", border: "1px solid #c8e6c9", borderRadius: 4, fontSize: 13, color: "#2e7d32", marginBottom: 12 }}>
-          Import complete: <strong>{importResult.imported}</strong> vehicles added, <strong>{importResult.skipped}</strong> skipped (duplicate stock number).
+      {/* Progress display */}
+      {importing && importProgress && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 13, color: "#1565c0", fontWeight: 500 }}>
+              Importing... {importProgress.done} / {importProgress.total} vehicles
+            </span>
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              {importProgress.total > 0 ? Math.round(importProgress.done / importProgress.total * 100) : 0}%
+            </span>
+          </div>
+          <div style={{ height: 6, background: "#e3f2fd", borderRadius: 3, overflow: "hidden" }}>
+            <div style={{
+              height: "100%", background: "#1976d2", borderRadius: 3,
+              width: `${importProgress.total > 0 ? Math.round(importProgress.done / importProgress.total * 100) : 0}%`,
+              transition: "width 200ms ease",
+            }} />
+          </div>
+        </div>
+      )}
+
+      {/* Completion message */}
+      {importDone && (
+        <div style={{ padding: "12px 16px", background: "#e8f5e9", border: "1px solid #c8e6c9", borderRadius: 4, fontSize: 14, color: "#2e7d32", marginBottom: 16 }}>
+          ✓ Import complete — <strong>{importDone.imported}</strong> imported
+          {importDone.skipped > 0 && <>, <strong>{importDone.skipped}</strong> skipped (duplicate stock numbers)</>}
         </div>
       )}
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
         <button onClick={onClose} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
-          {importResult ? "Close" : "Cancel"}
+          {importDone ? "Done" : "Cancel"}
         </button>
-        {!importResult && fileRows.length > 0 && (
+        {!importDone && !importing && fileRows.length > 0 && (
           <button
             onClick={onImport}
-            disabled={importing || !mapping["Stock Number"]}
+            disabled={!canImport}
+            title={missingRequired.length > 0 ? "Please map all required fields before importing" : undefined}
             style={{
-              height: 36, padding: "0 16px", background: "#1976d2", color: "#fff",
-              border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600,
-              cursor: importing || !mapping["Stock Number"] ? "not-allowed" : "pointer",
+              height: 36, padding: "0 16px",
+              background: canImport ? "#1976d2" : "#bdbdbd",
+              color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600,
+              cursor: canImport ? "pointer" : "not-allowed",
             }}
           >
-            {importing ? "Importing..." : `Import ${fileRows.length} Vehicles`}
+            Import {fileRows.length} Vehicles
           </button>
         )}
       </div>
