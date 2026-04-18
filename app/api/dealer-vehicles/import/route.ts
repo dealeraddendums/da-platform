@@ -16,11 +16,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  if (claims.role === "super_admin" || claims.role === "group_admin") {
+  if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id) {
     return NextResponse.json({ error: "Not available for admin roles" }, { status: 403 });
   }
 
-  const dealerId = claims.dealer_id;
+  const dealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
   if (!dealerId) {
     return NextResponse.json({ error: "No dealer assigned" }, { status: 403 });
   }

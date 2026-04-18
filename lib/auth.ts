@@ -8,6 +8,7 @@ export type JwtClaims = {
   role: UserRole;
   dealer_id: string | null;
   group_id: string | null;
+  impersonating_dealer_id: string | null;
 };
 
 export type ServerProfile = {
@@ -74,6 +75,10 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
 
   if (error || !session) return null;
 
+  // Impersonation: super_admin can impersonate a dealer via app_metadata
+  const appMeta = session.user.app_metadata as Record<string, unknown> | undefined;
+  const impersonatingDealerId = (appMeta?.impersonating_dealer_id as string | null) ?? null;
+
   // Use profiles table as source of truth for role/dealer_id/group_id
   // so changes take effect immediately without requiring re-login.
   const admin = createAdminSupabaseClient();
@@ -89,6 +94,7 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
     role: ((profile?.role as UserRole) ?? "dealer_user"),
     dealer_id: profile?.dealer_id ?? null,
     group_id: profile?.group_id ?? null,
+    impersonating_dealer_id: impersonatingDealerId,
   };
 }
 

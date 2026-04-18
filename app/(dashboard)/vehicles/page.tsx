@@ -28,13 +28,21 @@ export default async function VehiclesPage() {
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user";
 
-  // For dealer roles, fetch account_type to determine data source
+  // Check for active impersonation (super_admin viewing as a dealer)
+  const appMeta = session.user.app_metadata as Record<string, unknown>;
+  const impersonatingDealerId = (appMeta?.impersonating_dealer_id as string | null) ?? null;
+
+  // Effective dealer context: real dealer role OR impersonating
+  const isDealerContext = role === "dealer_admin" || role === "dealer_user" || !!impersonatingDealerId;
+  const effectiveDealerId = impersonatingDealerId ?? profile?.dealer_id ?? null;
+
+  // Fetch account_type to determine data source (manual vs Aurora)
   let accountType: string | null = null;
-  if ((role === "dealer_admin" || role === "dealer_user") && profile?.dealer_id) {
+  if (isDealerContext && effectiveDealerId) {
     const { data: dealer } = await admin
       .from("dealers")
       .select("account_type")
-      .eq("dealer_id", profile.dealer_id)
+      .eq("dealer_id", effectiveDealerId)
       .single<{ account_type: string | null }>();
     accountType = dealer?.account_type ?? null;
   }
@@ -56,13 +64,15 @@ export default async function VehiclesPage() {
       );
     }
     fixedDealerId = profile.dealer_id;
+  } else if (impersonatingDealerId) {
+    fixedDealerId = impersonatingDealerId;
   }
 
-  const manual = (role === "dealer_admin" || role === "dealer_user") && isManualDealer(accountType);
+  const manual = isDealerContext && isManualDealer(accountType);
 
   return (
     <div>
-      {(role === "dealer_admin" || role === "dealer_user") && <VehicleSubNav />}
+      {isDealerContext && <VehicleSubNav />}
       {manual ? (
         <ManualVehicleInventory dealerId={fixedDealerId!} />
       ) : (

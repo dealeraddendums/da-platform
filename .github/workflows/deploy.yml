@@ -9,19 +9,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set up SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H ec2-54-167-226-23.compute-1.amazonaws.com >> ~/.ssh/known_hosts
 
       - name: Deploy to EC2
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ubuntu@ec2-54-167-226-23.compute-1.amazonaws.com '
+          ssh -i ~/.ssh/deploy_key ubuntu@ec2-54-167-226-23.compute-1.amazonaws.com '
             set -e
             cd /var/www/da-platform
             git pull origin main
-            npm ci --production=false
+            npm ci
             npm run build
             pm2 restart da-platform || pm2 start ecosystem.config.js
             echo "Deploy complete"

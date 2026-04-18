@@ -10,6 +10,8 @@ import type { DecodeResult } from "@/lib/vin-decoder";
 type Props = {
   dealerId: string;
   onSaved?: () => void;
+  initialTab?: Tab;
+  label?: string;
 };
 
 type Tab = "vin" | "import";
@@ -80,10 +82,10 @@ const EMPTY_FORM: FormState = {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function AddVehicleModal({ dealerId, onSaved }: Props) {
+export default function AddVehicleModal({ dealerId, onSaved, initialTab = "vin", label }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<Tab>("vin");
+  const [tab, setTab] = useState<Tab>(initialTab);
 
   // VIN tab state
   const [vinInput, setVinInput] = useState("");
@@ -107,7 +109,7 @@ export default function AddVehicleModal({ dealerId, onSaved }: Props) {
 
   function close() {
     setOpen(false);
-    setTab("vin");
+    setTab(initialTab);
     setVinInput("");
     setDecodeResult(null);
     setDecodeError(null);
@@ -261,14 +263,14 @@ export default function AddVehicleModal({ dealerId, onSaved }: Props) {
   if (!open) {
     return (
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => { setTab(initialTab); setOpen(true); }}
         style={{
           height: 36, padding: "0 16px", background: "#1976d2", color: "#fff",
           border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600,
           cursor: "pointer",
         }}
       >
-        + Add Vehicles
+        {label ?? "+ Add Vehicles"}
       </button>
     );
   }

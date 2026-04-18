@@ -193,10 +193,10 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
 
       {/* Filters */}
       {dealerId && (
-        <div className="card p-4 mb-4">
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* Search */}
-            <form onSubmit={handleSearch} className="flex items-center gap-2 flex-1 min-w-0">
+        <div className="card p-4 mb-4" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Search row */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <form onSubmit={handleSearch} style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
               <input
                 className="input"
                 style={{ maxWidth: 280 }}
@@ -218,62 +218,87 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
                 </button>
               )}
             </form>
+            {/* Status toggle (In Stock / All) */}
+            <div style={{ display: "flex", gap: 4 }}>
+              {(["active", "all"] as Status[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => { setStatus(s); setPage(1); }}
+                  style={{
+                    height: 30, padding: "0 12px", fontSize: 12, fontWeight: 500,
+                    borderRadius: 4, cursor: "pointer",
+                    background: status === s ? "var(--blue)" : "var(--bg-subtle)",
+                    color: status === s ? "#fff" : "var(--text-secondary)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  {s === "active" ? "In Stock" : "All Stock"}
+                </button>
+              ))}
+            </div>
+          </div>
 
-            {/* Condition filter */}
-            <div className="flex items-center gap-1">
+          {/* Row 1: Vehicle Type */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", width: 90, flexShrink: 0 }}>
+              Vehicle Type
+            </span>
+            <div style={{ display: "flex", gap: 4 }}>
               {(["all", "new", "used", "cpo"] as Condition[]).map((c) => (
                 <button
                   key={c}
                   type="button"
                   onClick={() => { setCondition(c); setPage(1); }}
-                  className="text-xs font-medium px-3 py-1.5 rounded"
                   style={{
+                    height: 30, padding: "0 14px", fontSize: 12, fontWeight: 500,
+                    borderRadius: 4, cursor: "pointer",
                     background: condition === c ? "var(--orange)" : "var(--bg-subtle)",
-                    color: condition === c ? "var(--text-on-orange)" : "var(--text-secondary)",
-                    border: "1px solid var(--border)",
+                    color: condition === c ? "#333" : "var(--text-secondary)",
+                    border: condition === c ? "1px solid #e69500" : "1px solid var(--border)",
                   }}
                 >
                   {c === "all" ? "All" : c === "new" ? "New" : c === "used" ? "Used" : "CPO"}
                 </button>
               ))}
             </div>
+          </div>
 
-            {/* Status filter */}
-            <div className="flex items-center gap-1">
-              {(["active", "all"] as Status[]).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => { setStatus(s); setPage(1); }}
-                  className="text-xs font-medium px-3 py-1.5 rounded"
-                  style={{
-                    background: status === s ? "var(--blue)" : "var(--bg-subtle)",
-                    color: status === s ? "#fff" : "var(--text-secondary)",
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  {s === "active" ? "In Stock" : "All"}
-                </button>
-              ))}
-            </div>
-
-            {/* Print filter */}
-            <div className="flex items-center gap-1">
+          {/* Row 2: Print Status */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", width: 90, flexShrink: 0 }}>
+              Print Status
+            </span>
+            <div style={{ display: "flex", gap: 4 }}>
               {(["all", "printed", "unprinted"] as PrintFilter[]).map((p) => (
                 <button
                   key={p}
                   type="button"
                   onClick={() => setPrintFilter(p)}
-                  className="text-xs font-medium px-3 py-1.5 rounded"
                   style={{
+                    height: 30, padding: "0 14px", fontSize: 12, fontWeight: 500,
+                    borderRadius: 4, cursor: "pointer",
                     background: printFilter === p ? "var(--success)" : "var(--bg-subtle)",
                     color: printFilter === p ? "#fff" : "var(--text-secondary)",
-                    border: "1px solid var(--border)",
+                    border: printFilter === p ? "1px solid #43a047" : "1px solid var(--border)",
                   }}
                 >
                   {p === "all" ? "All" : p === "printed" ? "Printed" : "Unprinted"}
                 </button>
               ))}
+              <button
+                type="button"
+                disabled
+                title="Coming soon — mobile app"
+                style={{
+                  height: 30, padding: "0 14px", fontSize: 12, fontWeight: 500,
+                  borderRadius: 4, cursor: "not-allowed",
+                  background: "var(--bg-subtle)", color: "var(--text-muted)",
+                  border: "1px solid var(--border)", opacity: 0.55,
+                }}
+              >
+                Queued
+              </button>
             </div>
           </div>
         </div>

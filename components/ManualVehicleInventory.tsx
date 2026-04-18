@@ -133,7 +133,7 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
         {q ? ` matching "${q}"` : ""}
       </p>
 
-      {error && (
+      {error && q && (
         <div style={{ padding: "10px 14px", background: "#ffebee", border: "1px solid #ffcdd2", borderRadius: 4, color: "#c62828", fontSize: 13, marginBottom: 12 }}>
           {error}
         </div>
@@ -143,11 +143,24 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
         {loading ? (
           <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 14 }}>Loading…</div>
         ) : vehicles.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center" }}>
-            <p style={{ color: "var(--text-muted)", fontSize: 14, marginBottom: 16 }}>
-              {q ? "No vehicles match your search." : "No vehicles added yet."}
-            </p>
-            {!q && <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} />}
+          <div style={{ padding: 60, textAlign: "center" }}>
+            {q ? (
+              <p style={{ color: "var(--text-muted)", fontSize: 14 }}>No vehicles match your search.</p>
+            ) : (
+              <>
+                <div style={{ fontSize: 40, marginBottom: 12, opacity: 0.25 }}>🚗</div>
+                <p style={{ color: "var(--text-primary)", fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+                  No vehicles yet
+                </p>
+                <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 24 }}>
+                  Add your first vehicle to get started.
+                </p>
+                <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+                  <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} label="+ Add Vehicle" />
+                  <AddVehicleModal dealerId={dealerId} onSaved={() => fetchVehicles()} initialTab="import" label="↑ Import Vehicles" />
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
