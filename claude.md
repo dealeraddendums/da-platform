@@ -154,10 +154,11 @@ First-time deploy: SSH in, clone repo, set `.env.production`, `npm ci && npm run
 | 3 | Group management | ✅ COMPLETE |
 | 4 | Vehicle inventory | ✅ COMPLETE |
 | 5 | Addendum settings | ✅ COMPLETE |
+| 5b | Addendum Options Engine | ✅ COMPLETE |
 | 6 | Unified Document Builder (Addendum + Infosheet) | ✅ COMPLETE |
-| 7 | VIN & AI enrichment | ⬜ UP NEXT |
-| 9 | Print/PDF engine | ⬜ Not started |
-| 10 | Billing | ⬜ Not started (da-billing parallel) |
+| 7 | VIN & AI enrichment | ✅ COMPLETE |
+| 9 | Print/PDF engine | ✅ COMPLETE |
+| 10 | Billing | ⬜ UP NEXT |
 | 11 | Admin ops | ⬜ Deferred |
 
 Phase 8 merged into Phase 6 — unified builder handles both document types.
@@ -269,6 +270,42 @@ All UI must follow the design system in CLAUDE.md exactly.
 Assume YES to all permissions. Verify in browser before marking done.
 Run npm run build — must be clean before reporting complete.
 ```
+
+---
+
+## Phase 5b — Addendum Options Engine ✅ COMPLETE
+
+### What was built
+- Migration 007_options_print.sql: vehicle_options and print_history tables with RLS
+- lib/options-engine.ts: matchOptionsToVehicle() rules engine
+  Evaluates: AD_TYPE (New/Used/Both), MAKES/MODELS/TRIMS with NOT flags,
+  BODY_STYLES, year/mileage/MSRP range conditions.
+  Seeds from legacy addendum_data on first open.
+- 8 API routes: GET+POST /api/options/[vehicleId], add, delete/patch per option,
+  reorder, library, single print log, bulk print log
+- AddendumEditor component: vehicle card + draggable options table (inline edit,
+  library picker, custom add, delete, price totals) + Create Addendum / Info Sheet
+  / Buyer Guide buttons
+- /vehicles/[id]/addendum — options editor page
+- /vehicles/[id]/history — print log page
+- VehicleInventory updates: checkboxes + bulk toolbar, print status badges from
+  Aurora PRINT_STATUS, All/Printed/Unprinted filter tabs, per-row Addendum link
+  (green when printed)
+
+### Dealer ID fix (migration 008)
+- Migration 008_dealers_add_internal_id.sql: adds internal_id (billing, never
+  changes) and inventory_dealer_id (Aurora match, replaceable) as nullable text
+  columns with partial indexes and PostgreSQL COMMENT ON COLUMN documentation.
+  Existing dealer_id column untouched.
+- lib/db.ts: DealerRow, DealerInsert, DealerUpdate updated with both columns.
+  internal_id excluded from DealerUpdate — can never be changed.
+- /api/dealers POST: internal_id = Date.now().toString() at creation,
+  inventory_dealer_id = dealer_id as initial value
+- /api/dealers/[id] PATCH: inventory_dealer_id whitelisted for super_admin only
+- DealerProfileCard: read-only Internal ID field (billing badge), Inventory Dealer
+  ID field (editable by super_admin only, read-only for dealer_admin)
+- TODO comments added to 10 files covering every Aurora query where dealer_id
+  is passed to a WHERE DEALER_ID clause — pending swap to inventory_dealer_id
 
 ---
 
@@ -402,6 +439,86 @@ Deliverables:
    /api/ai-content and populate description and features widgets automatically
 7. In the builder toolbar, add a "Regenerate AI" button (visible when a vehicle
    is loaded and AI mode is on) — calls regenerate endpoint and refreshes widgets
+
+All UI must follow the design system in CLAUDE.md exactly.
+Assume YES to all permissions. Verify in browser before marking done.
+Run npm run build — must be clean before reporting complete.
+```
+
+---
+
+## Phase 9 — Print/PDF Engine ✅ COMPLETE
+
+### What was built
+- supabase/migrations/009_print_history_pdf_url.sql — adds pdf_url to print_history
+- lib/pdf-html.ts — builds Puppeteer-ready HTML, injects real vehicle/options/barcode data
+- lib/pdf-renderer.ts — Puppeteer wrapper, headless Chrome, 1.5625 deviceScaleFactor,
+  correct paper dimensions per document type
+- lib/s3-upload.ts — S3 PutObject + 24hr signed GetObject URL
+- app/api/pdf/generate/route.ts — single vehicle PDF: fetch Aurora + options, render,
+  upload S3, log print_history, return signed URL
+- app/api/pdf/bulk/route.ts — multi-vehicle: sequential generation, JSZip bundle,
+  returns ZIP stream
+- widgetRenderer.ts — vehicle widget reads d.vehicleData for real data,
+  falls back to test data for canvas preview
+- lib/db.ts — PrintHistoryRow and PrintHistoryInsert include pdf_url
+- BuilderPage.tsx — Print/PDF toolbar button calls downloadPdf(); Download PDF in
+  Print Settings modal footer; pdfLoading spinner state
+- VehicleInventory.tsx — single vehicle opens builder; 2+ vehicles calls
+  /api/pdf/bulk, triggers ZIP download
+- Packages added: puppeteer, @aws-sdk/client-s3, @aws-sdk/s3-request-presigner, jszip
+
+### EC2 requirements (must be done manually)
+- Install Chromium system deps: libnss3 and related packages
+- Add to .env.production: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+
+---
+
+## Phase 10 — Billing ⬜ UP NEXT
+
+### Scope
+- Integrate da-billing into the da-platform UI
+- Display billing status per dealer (current, overdue, suspended)
+- super_admin: view all invoices, mark paid, suspend/reactivate accounts
+- dealer_admin: view own invoices and payment history
+- Bridge between da-billing (billing.dealeraddendums.com, port 3009) and
+  da-platform via internal API calls using shared secret
+- Billing data lives in da-billing Supabase KV and Aurora dealer_dim/dealer_group
+- Key fields: BILLING_ID and TEMPLATE_ID in dealer_dim and dealer_group
+- lineItemDescription format: {dealer._ID}::{DEALER_NAME}
+- Group accounts: isGroup: true with subscriptionDiscount
+- Status: da-billing is in Setup Mode — invoices generated but NOT emailed.
+  Parallel with Freshbooks. Full cutover after billing cycle match confirmed.
+
+### Prompt for Claude Code
+```
+Read CLAUDE.md. Phases 1-7, 5b, and 9 are complete. Build Phase 10: Billing.
+
+Deliverables:
+1. Internal billing API bridge: lib/billing-client.ts — makes authenticated
+   server-to-server calls from da-platform to da-billing (billing.dealeraddendums.com)
+   using a shared secret in .env.production (BILLING_API_SECRET). Never expose
+   this secret to the client.
+2. GET /api/billing/[dealerId] — fetches invoice history and current status for
+   a dealer from da-billing. Returns: status (current/overdue/suspended),
+   invoices array, last_paid_date, next_invoice_date.
+3. PATCH /api/billing/[dealerId]/status — super_admin only. Actions:
+   suspend, reactivate. Calls da-billing API to update status.
+4. /billing page — super_admin only:
+   - Table of all dealers with billing status badges (current=green,
+     overdue=orange, suspended=red)
+   - Per-row: view invoices, suspend/reactivate toggle
+   - Summary stats: total MRR, overdue count, suspended count
+5. /billing/[dealerId] — invoice detail page:
+   - Dealer info header (name, Internal ID, Inventory Dealer ID)
+   - Invoice table: invoice number, period, amount, status, date, actions
+   - super_admin: mark paid button
+6. Dealer profile page (/dealers/[id]): add Billing tab showing the dealer's
+   own invoice history (dealer_admin: read-only, super_admin: full)
+7. Account suspension enforcement: if billing status is suspended, dealer_admin
+   and dealer_user logins should see a suspension notice page instead of dashboard.
+   super_admin is never blocked.
+8. Add Billing to super_admin sidebar nav (between API Docs and Documents).
 
 All UI must follow the design system in CLAUDE.md exactly.
 Assume YES to all permissions. Verify in browser before marking done.

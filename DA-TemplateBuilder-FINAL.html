@@ -1,0 +1,2027 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Addendum Template Builder — DealerAddendums</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* DealerAddendums app colors — exact values from live CSS */
+  --bg:#3a6897;        /* page/canvas background */
+  --sur:#ffffff;       /* surface/card white */
+  --s2:#f5f6f7;        /* light surface */
+  --s3:#eef0f2;        /* lighter surface */
+  --bdr:#e0e0e0;       /* borders */
+  --bdrS:#c0c0c0;      /* stronger borders */
+  --t1:#333333;        /* primary text */
+  --t2:#55595c;        /* secondary text */
+  --t3:#78828c;        /* tertiary/muted text */
+  --acc:#1976d2;       /* primary blue (EDIT buttons) */
+  --accL:#e3f2fd;      /* blue tint */
+  --accH:#1565c0;      /* darker blue hover */
+  --ok:#4caf50;        /* success green (LOG IN buttons) */
+  --warn:#ffa500;      /* orange (nav bar) */
+  --red:#ff5252;       /* danger red (GROUP buttons) */
+  --navy:#2a2b3c;      /* topbar dark navy */
+  --mono:'DM Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t1);height:100vh;display:flex;flex-direction:column;overflow:hidden;font-size:13px;-webkit-font-smoothing:antialiased;}
+
+.topbar{height:50px;background:var(--navy);border-bottom:none;display:flex;align-items:center;justify-content:space-between;padding:0 16px;flex-shrink:0;gap:12px;}
+.logo{font-size:13px;font-weight:600;letter-spacing:-.01em;color:#ffffff;}.logo span{color:var(--warn);}
+.dv{width:1px;height:20px;background:var(--bdr);flex-shrink:0;}
+.tname{border:none;background:transparent;font-family:inherit;font-size:13px;font-weight:500;color:rgba(255,255,255,0.87);outline:none;width:210px;padding:4px 6px;border-radius:5px;}
+.tname:focus{background:rgba(255,255,255,0.12);box-shadow:0 0 0 2px var(--warn);}
+.type-seg{display:flex;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);border-radius:7px;padding:2px;gap:2px;}
+.type-btn{padding:4px 10px;border-radius:5px;font-size:11px;font-weight:600;border:none;background:transparent;cursor:pointer;color:rgba(255,255,255,0.7);font-family:inherit;transition:all .12s;}
+.type-btn.on{background:var(--warn);color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);}
+.tb-right{display:flex;align-items:center;gap:8px;}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:4px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid rgba(255,255,255,0.25);background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.87);font-family:inherit;transition:all .12s;white-space:nowrap;}
+.btn:hover{background:rgba(255,255,255,0.2);color:#fff;}
+.btn-p{background:#1976d2;color:#fff;border-color:#1976d2;}.btn-p:hover{background:#1565c0;}
+.btn-g{background:#4caf50;color:#fff;border-color:#4caf50;}.btn-g:hover{background:#43a047;}
+.spill{font-size:11px;color:#4caf50;display:flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(255,255,255,0.12);border-radius:20px;}
+
+.app{flex:1;display:flex;overflow:hidden;}
+
+/* PALETTE */
+.palette{width:190px;background:#ffffff;border-right:1px solid #e0e0e0;display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;}
+.pal-head{padding:10px 12px 8px;border-bottom:1px solid var(--bdr);}
+.pal-title{font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;}
+.pal-scroll{flex:1;overflow-y:auto;padding:8px 10px 20px;}
+.pal-scroll::-webkit-scrollbar{width:3px;}.pal-scroll::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:2px;}
+.pgroup{font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 5px;}
+.pgroup:first-child{margin-top:2px;}
+.wtile{display:flex;align-items:center;gap:7px;padding:7px 8px;border:1px solid var(--bdr);border-radius:7px;margin-bottom:3px;cursor:grab;background:var(--sur);transition:all .12s;user-select:none;}
+.wtile:hover{border-color:#1976d2;background:#e3f2fd;transform:translateX(2px);}
+.wtile:active{cursor:grabbing;opacity:.7;}
+.wtile.used{opacity:.22;pointer-events:none;filter:grayscale(1);}
+.wi{width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;}
+.wn{font-size:11px;font-weight:500;color:var(--t1);}.wh{font-size:10px;color:var(--t3);margin-top:1px;}
+
+/* CANVAS AREA */
+.canvas-area{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.cbar{height:40px;background:#ffa500;border-bottom:none;display:flex;align-items:center;padding:0 12px;gap:8px;flex-shrink:0;}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:pulse 2s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.7;transform:scale(1.2);}}
+.clabel{font-size:11px;font-weight:600;color:#333;text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px;}
+.znum{font-size:11px;font-family:var(--mono);color:#333;padding:3px 7px;background:rgba(255,255,255,0.4);border-radius:5px;border:1px solid rgba(0,0,0,0.15);min-width:40px;text-align:center;}
+.tb{width:26px;height:26px;border-radius:4px;border:1px solid transparent;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#333;font-size:12px;transition:all .12s;}
+.tb:hover{background:rgba(0,0,0,0.12);border-color:rgba(0,0,0,0.2);}
+.cscroll{flex:1;overflow:auto;display:flex;justify-content:center;align-items:flex-start;padding:32px 24px;background:#3a6897;}
+.cscroll::-webkit-scrollbar{width:6px;height:6px;}.cscroll::-webkit-scrollbar-thumb{background:#c0c0c0;border-radius:3px;}
+
+/* PAPER */
+.paper{
+  position:relative;
+  width:408px;height:1056px;
+  flex-shrink:0;
+  transform-origin:top center;
+  background:#ffffff;
+  box-shadow:0 12px 48px rgba(0,0,0,.22),0 2px 8px rgba(0,0,0,.1);
+  overflow:hidden;
+}
+/* Frame overlay — multiply removes white, keeps borders */
+.paper-frame{
+  position:absolute;inset:0;width:100%;height:100%;
+  object-fit:fill;pointer-events:none;
+  z-index:2;mix-blend-mode:multiply;display:block;
+}
+
+/* WIDGET — free-form positioned, resizable */
+.cw{
+  position:absolute;
+  z-index:10;
+  cursor:move;
+  user-select:none;
+}
+.cw:hover .cwo{opacity:1;}
+.cw.sel .cwo{opacity:1;border-color:#1976d2;box-shadow:0 0 0 1px #1976d2;}
+.cwo{
+  position:absolute;inset:-1px;
+  border:1.5px dashed rgba(37,99,235,.4);
+  border-radius:2px;opacity:0;
+  pointer-events:none;z-index:5;transition:border-color .12s;
+}
+.cw.sel .cwo{border-style:solid;}
+
+/* Widget label */
+.cwlbl{
+  position:absolute;top:-16px;left:0;
+  font-size:9px;font-weight:600;color:#1976d2;
+  background:#e3f2fd;padding:1px 5px;border-radius:3px;
+  display:none;white-space:nowrap;z-index:6;
+  border:1px solid rgba(37,99,235,.2);
+}
+.cw.sel .cwlbl{display:block;}
+
+/* Delete button */
+.cdel{
+  position:absolute;top:-8px;right:-8px;
+  width:18px;height:18px;
+  background:var(--red);border-radius:50%;border:2px solid #fff;
+  cursor:pointer;display:none;align-items:center;justify-content:center;
+  font-size:9px;color:#fff;font-weight:700;z-index:6;line-height:1;
+}
+.cw.sel .cdel{display:flex;}
+
+/* Resize handles — 8-point */
+.rh{
+  position:absolute;width:10px;height:10px;
+  background:var(--sur);border:1.5px solid var(--acc);
+  border-radius:2px;z-index:7;display:none;
+}
+.cw.sel .rh{display:block;}
+.rh-nw{top:-5px;left:-5px;cursor:nw-resize;}
+.rh-n{top:-5px;left:calc(50% - 5px);cursor:n-resize;}
+.rh-ne{top:-5px;right:-5px;cursor:ne-resize;}
+.rh-e{top:calc(50% - 5px);right:-5px;cursor:e-resize;}
+.rh-se{bottom:-5px;right:-5px;cursor:se-resize;}
+.rh-s{bottom:-5px;left:calc(50% - 5px);cursor:s-resize;}
+.rh-sw{bottom:-5px;left:-5px;cursor:sw-resize;}
+.rh-w{top:calc(50% - 5px);left:-5px;cursor:w-resize;}
+
+/* Widget inner content */
+.wcontent{width:100%;height:100%;overflow:visible;}
+
+/* Specific widget renders */
+.w-logo{padding:8px 0 6px;display:flex;align-items:center;}
+.wlogo-ph{font-size:20px;font-weight:800;color:#ccc;letter-spacing:-.02em;}
+.wlogo-img{max-width:100%;max-height:100%;object-fit:contain;display:block;}
+
+.w-vehicle{padding:5px 0;}
+.wvrow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:2px;}
+.wvf{font-size:10.5px;color:#444;}.wvf b{color:#1a1916;font-weight:600;}
+
+.w-msrp{padding:3px 0;}
+.wmsrp-row{display:flex;justify-content:space-between;align-items:baseline;}
+.wmsrp-lbl{font-size:11px;font-weight:700;color:#1a1916;}
+.wmsrp-val{font-size:11px;font-weight:700;color:#1a1916;font-family:var(--mono);}
+.wmsrp-div{height:1px;background:#1a1916;margin-top:3px;}
+
+.w-options{padding:3px 0;}
+.wopt-sec{font-size:10.5px;color:#555;margin-bottom:4px;}
+.wopt-row{display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0;}
+.wopt-row:last-child{border-bottom:none;}
+.wopt-name{font-size:10.5px;font-weight:700;color:#1a1916;}
+.wopt-desc{font-size:9px;color:#888;margin-top:1px;line-height:1.3;}
+.wopt-price{font-size:10.5px;font-weight:700;color:#1a1916;font-family:var(--mono);white-space:nowrap;padding-left:6px;flex-shrink:0;}
+
+.w-subtotal{padding:3px 0;display:flex;justify-content:flex-end;gap:12px;}
+.wsub-l{font-size:12px;font-weight:700;color:#1a1916;}
+.wsub-v{font-size:12px;font-weight:700;color:#1a1916;font-family:var(--mono);}
+
+.w-askbar{display:flex;justify-content:space-between;align-items:center;width:100%;height:100%;padding:0 4px;}
+.wask-lbl{font-size:12px;font-weight:800;color:#1a1916;letter-spacing:-.01em;}
+.wask-val{font-size:13px;font-weight:800;color:#1a1916;font-family:var(--mono);background:#fff;padding:2px 8px;border-radius:1px;min-width:110px;text-align:right;}
+.wask-sub{font-size:8px;color:rgba(0,0,0,.55);font-style:italic;margin-top:1px;}
+
+.w-dealer{padding:4px 0;}
+.wdlr{font-size:10px;color:#1a1916;line-height:1.65;font-weight:700;}
+
+.w-infobox img{width:100%;height:100%;object-fit:fill;display:block;mix-blend-mode:multiply;}
+
+.w-hbar{display:flex;align-items:center;justify-content:center;width:100%;height:100%;}
+.whbar-t{font-size:11px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:.06em;}
+.w-txt{padding:4px 0;}
+.w-sig{padding:6px 0;width:100%;}
+.wsig-inner{display:flex;gap:12px;}
+.wsig-f{flex:1;}
+.wsig-line{border-bottom:1px solid #1a1916;height:18px;margin-bottom:2px;}
+.wsig-lbl{font-size:8px;color:#888;}
+
+/* EDIT PANEL */
+.epanel{width:240px;background:#ffffff;border-left:1px solid #e0e0e0;display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;}
+.eph{padding:11px 13px 9px;border-bottom:1px solid var(--bdr);flex-shrink:0;}
+.eph-title{font-size:12px;font-weight:600;color:var(--t1);}
+.eph-sub{font-size:11px;color:var(--t3);margin-top:1px;}
+.epbody{flex:1;overflow-y:auto;}
+.epbody::-webkit-scrollbar{width:3px;}.epbody::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:2px;}
+.epw{padding:11px 13px;border-bottom:1px solid var(--bdr);}
+.eps{font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px;}
+.fd{margin-bottom:7px;}.fd:last-child{margin-bottom:0;}
+.fl{font-size:11px;color:var(--t2);margin-bottom:3px;}
+.fi{width:100%;padding:5px 8px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;font-family:inherit;color:var(--t1);background:var(--sur);outline:none;}
+.fi:focus{border-color:#1976d2;}
+.fsel{width:100%;padding:5px 8px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;font-family:inherit;color:var(--t1);background:var(--sur);outline:none;cursor:pointer;}
+.r2{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.r4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4px;}
+.tr{display:flex;align-items:center;justify-content:space-between;padding:3px 0;}
+.tl{font-size:11px;color:var(--t2);}
+.tog{position:relative;width:30px;height:17px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;position:absolute;}
+.togt{position:absolute;inset:0;background:#c0c0c0;border-radius:20px;transition:background .15s;cursor:pointer;}
+.tog input:checked+.togt{background:#1976d2;}
+.togth{position:absolute;top:2px;left:2px;width:13px;height:13px;background:#fff;border-radius:50%;transition:transform .15s;pointer-events:none;}
+.tog input:checked~.togth{transform:translateX(13px);}
+.swg{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
+.sw{width:22px;height:22px;border-radius:4px;border:1.5px solid transparent;cursor:pointer;transition:all .12s;}
+.sw:hover{transform:scale(1.1);}.sw.on{border-color:#1976d2;box-shadow:0 0 0 2px rgba(37,99,235,.2);}
+.delbtn{display:flex;align-items:center;gap:5px;padding:7px 10px;border-radius:4px;border:1px solid #ffcdd2;background:#ffebee;color:#ff5252;font-size:11px;font-weight:500;cursor:pointer;width:100%;justify-content:center;font-family:inherit;}
+.delbtn:hover{background:#FEE2E2;}
+.bg-list{max-height:200px;overflow-y:auto;border:1px solid var(--bdr);border-radius:7px;margin-bottom:8px;}
+.bg-list::-webkit-scrollbar{width:4px;}.bg-list::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:2px;}
+.bg-row{display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;transition:background .1s;border-bottom:1px solid var(--bdr);user-select:none;}
+.bg-row:last-child{border-bottom:none;}
+.bg-row:hover{background:var(--s2);}.bg-row.on{background:#e3f2fd;}
+.bg-thumb{width:18px;height:30px;border-radius:2px;object-fit:cover;flex-shrink:0;border:1px solid var(--bdr);}
+.bg-thumb-ph{width:18px;height:30px;border-radius:2px;flex-shrink:0;border:1px solid rgba(0,0,0,.15);display:flex;align-items:center;justify-content:center;font-size:8px;color:rgba(255,255,255,.8);font-weight:600;}
+.bg-name{font-size:11px;color:var(--t1);flex:1;}.bg-row.on .bg-name{color:#1976d2;font-weight:600;}
+.bg-check{color:#1976d2;font-size:11px;font-weight:700;opacity:0;}.bg-row.on .bg-check{opacity:1;}
+.ibt{display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--bdr);border-radius:6px;cursor:pointer;margin-bottom:3px;transition:all .12s;}
+.ibt:hover{border-color:#1976d2;background:#e3f2fd;}.ibt.on{border-color:#1976d2;background:#e3f2fd;}
+.ibt-name{font-size:11px;font-weight:500;color:var(--t1);}.ibt.on .ibt-name{color:#1976d2;font-weight:600;}
+.nosel{padding:20px 13px;text-align:center;}
+.nosel-icon{font-size:28px;margin-bottom:8px;opacity:.3;}.nosel-txt{font-size:11px;color:var(--t3);line-height:1.6;}
+
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:center;justify-content:center;}
+.modal{background:var(--sur);border-radius:12px;width:520px;box-shadow:0 20px 60px rgba(0,0,0,.2);overflow:hidden;}
+.modal-head{padding:20px 24px 16px;border-bottom:1px solid var(--bdr);}
+.modal-title{font-size:18px;font-weight:600;color:var(--t1);}
+.modal-body{padding:20px 24px;}
+.modal-row{display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--bdr);}
+.modal-row:last-child{border-bottom:none;}
+.modal-icon{width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;color:var(--t3);}
+.modal-label{font-size:14px;color:var(--t2);min-width:140px;display:flex;align-items:center;gap:6px;}
+.modal-control{flex:1;}
+.modal-sel{width:100%;padding:8px 12px;border:none;border-bottom:1px solid var(--bdrS);font-size:14px;font-family:inherit;color:var(--t1);background:transparent;outline:none;cursor:pointer;}
+.modal-sel:focus{border-bottom-color:#1976d2;}
+.help-dot{width:18px;height:18px;border-radius:50%;background:#1976d2;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;}
+.nudge-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.nudge-field{display:flex;align-items:center;gap:8px;}
+.nudge-lbl{font-size:13px;color:var(--t2);min-width:44px;}
+.nudge-in{width:70px;padding:5px 8px;border:none;border-bottom:1px solid var(--bdrS);font-size:14px;font-family:var(--mono);color:var(--t1);background:transparent;outline:none;text-align:center;}
+.nudge-in:focus{border-bottom-color:#1976d2;}
+.nudge-px{font-size:12px;color:var(--t3);}
+.modal-foot{padding:16px 24px;border-top:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;}
+.modal-foot-l{font-size:13px;font-weight:600;color:#1976d2;cursor:pointer;}
+.modal-foot-l:hover{text-decoration:underline;}
+.modal-foot-r{display:flex;gap:12px;}
+.mfbtn{padding:8px 18px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:none;font-family:inherit;}
+.mfbtn-close{background:transparent;color:var(--t1);}
+.mfbtn-close:hover{background:var(--s2);}
+.mfbtn-save{background:var(--ok);color:#fff;}
+.mfbtn-save:hover{background:#15803D;}
+
+.vtype-btn{
+  padding:7px 16px;border-radius:20px;font-size:12px;font-weight:600;
+  cursor:pointer;border:2px solid var(--bdr);background:var(--sur);
+  color:var(--t2);font-family:inherit;transition:all .15s;
+}
+.vtype-btn:hover{border-color:#1976d2;color:#1976d2;}
+.vtype-btn.on{background:#1976d2;color:#fff;border-color:#1976d2;}
+.vtype-btn[data-type="draft"].on{background:#78828c;border-color:#78828c;}
+.vtype-btn[data-type="all"].on{background:#4caf50;border-color:#4caf50;}
+
+
+/* Custom widget library */
+.pal-custom-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 12px 8px;border-top:1px solid var(--bdr);
+  margin-top:4px;
+}
+.pal-custom-title{font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;}
+.pal-custom-add{
+  width:20px;height:20px;border-radius:50%;background:#1976d2;color:#fff;
+  font-size:14px;border:none;cursor:pointer;display:flex;align-items:center;
+  justify-content:center;line-height:1;font-weight:700;flex-shrink:0;
+}
+.pal-custom-add:hover{background:#1565c0;}
+.scope-tabs{display:flex;gap:2px;padding:4px 10px;background:var(--s2);}
+.scope-tab{
+  font-size:10px;font-weight:600;padding:3px 8px;border-radius:3px;
+  cursor:pointer;color:var(--t3);border:none;background:transparent;font-family:inherit;
+  transition:all .1s;
+}
+.scope-tab.on{background:#1976d2;color:#fff;}
+.cwlib-item{
+  display:flex;align-items:center;gap:7px;padding:6px 10px;
+  border-bottom:1px solid var(--bdr);cursor:grab;
+  transition:background .1s;user-select:none;
+}
+.cwlib-item:last-child{border-bottom:none;}
+.cwlib-item:hover{background:var(--accL);}
+.cwlib-item:active{cursor:grabbing;opacity:.7;}
+.cwlib-scope{
+  font-size:9px;font-weight:700;padding:1px 5px;border-radius:10px;
+  flex-shrink:0;
+}
+.cwlib-scope.platform{background:#e3f2fd;color:#1976d2;}
+.cwlib-scope.group{background:#e8f5e9;color:#2e7d32;}
+.cwlib-scope.dealer{background:#fff3e0;color:#e65100;}
+.cwlib-name{font-size:11px;font-weight:500;color:var(--t1);}
+.cwlib-desc{font-size:9px;color:var(--t3);margin-top:1px;}
+.cwlib-actions{margin-left:auto;display:flex;gap:4px;opacity:0;}
+.cwlib-item:hover .cwlib-actions{opacity:1;}
+.cwlib-edit-btn{
+  width:18px;height:18px;border-radius:3px;border:1px solid var(--bdr);
+  background:var(--sur);cursor:pointer;font-size:10px;display:flex;
+  align-items:center;justify-content:center;
+}
+.cwlib-empty{padding:16px 12px;text-align:center;font-size:11px;color:var(--t3);line-height:1.6;}
+/* Custom widget builder modal */
+.cw-modal{background:var(--sur);border-radius:12px;width:600px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.25);}
+.cw-modal-head{padding:18px 24px 14px;border-bottom:1px solid var(--bdr);background:var(--navy);border-radius:12px 12px 0 0;}
+.cw-modal-title{font-size:16px;font-weight:600;color:#fff;}
+.cw-modal-body{padding:20px 24px;}
+.field-row{margin-bottom:16px;}
+.field-label{font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;display:block;}
+.scope-selector{display:flex;gap:8px;flex-wrap:wrap;}
+.scope-btn{
+  padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;
+  cursor:pointer;border:2px solid var(--bdr);background:var(--sur);
+  color:var(--t2);font-family:inherit;transition:all .15s;
+}
+.scope-btn:hover{border-color:#1976d2;color:#1976d2;}
+.scope-btn.on.platform{background:#1976d2;color:#fff;border-color:#1976d2;}
+.scope-btn.on.group{background:#2e7d32;color:#fff;border-color:#2e7d32;}
+.scope-btn.on.dealer{background:#e65100;color:#fff;border-color:#e65100;}
+.content-tabs{display:flex;gap:0;border-bottom:1px solid var(--bdr);margin-bottom:12px;}
+.content-tab{
+  padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer;
+  border:none;background:transparent;font-family:inherit;color:var(--t3);
+  border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .12s;
+}
+.content-tab.on{color:#1976d2;border-bottom-color:#1976d2;}
+.html-editor{
+  width:100%;min-height:120px;padding:8px 10px;
+  border:1px solid var(--bdr);border-radius:6px;
+  font-family:var(--mono);font-size:12px;color:var(--t1);
+  background:var(--s2);outline:none;resize:vertical;
+  line-height:1.5;
+}
+.html-editor:focus{border-color:#1976d2;background:var(--sur);}
+.var-chip{
+  display:inline-flex;align-items:center;gap:4px;padding:2px 8px;
+  background:#e3f2fd;color:#1976d2;border-radius:12px;font-size:10px;
+  font-weight:600;cursor:pointer;margin:2px;border:1px solid #bbdefb;
+}
+.var-chip:hover{background:#bbdefb;}
+.preview-box{
+  border:1px solid var(--bdr);border-radius:6px;padding:12px;
+  background:#f5f5f5;min-height:60px;
+}
+
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="logo">Dealer<span>Addendums</span></div>
+    <div class="dv"></div>
+    <input class="tname" value="Subaru of North Tampa — Standard">
+    <div class="type-seg">
+      <button class="type-btn on" onclick="setType(this)">New</button>
+      <button class="type-btn" onclick="setType(this)">Used</button>
+      <button class="type-btn" onclick="setType(this)">CPO</button>
+    </div>
+  </div>
+  <div class="tb-right">
+    <div class="spill" id="spill">
+      <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4.5" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 5.5l1.5 1.5L8 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Saved
+    </div>
+    <button class="btn btn-g" onclick="showPM()">&#128438; Print settings</button>
+    <button class="btn">All templates</button>
+    <button class="btn btn-p" onclick="showSaveModal()">Save template</button>
+  </div>
+</div>
+
+<div class="app">
+<!-- PALETTE -->
+<div class="palette">
+  <div class="pal-head"><div class="pal-title">Widgets — drag to canvas</div></div>
+  <div class="pal-scroll">
+    <div class="pgroup">Content</div>
+    <div class="wtile" id="pal-logo" draggable="true" ondragstart="pdrag(event,'logo')" onclick="addW('logo')"><div class="wi" style="background:#EFF4FF">&#127991;</div><div><div class="wn">Logo</div><div class="wh">Dealer brand</div></div></div>
+    <div class="wtile" id="pal-vehicle" draggable="true" ondragstart="pdrag(event,'vehicle')" onclick="addW('vehicle')"><div class="wi" style="background:#F0FDF4">&#128663;</div><div><div class="wn">Vehicle data</div><div class="wh">Stock, VIN, Year&hellip;</div></div></div>
+    <div class="wtile" id="pal-msrp" draggable="true" ondragstart="pdrag(event,'msrp')" onclick="addW('msrp')"><div class="wi" style="background:#FFFBEB">&#128178;</div><div><div class="wn">MSRP line</div><div class="wh">Label + price</div></div></div>
+    <div class="wtile" id="pal-options" draggable="true" ondragstart="pdrag(event,'options')" onclick="addW('options')"><div class="wi" style="background:#FDF4FF">&#128203;</div><div><div class="wn">Options table</div><div class="wh">Dealer adds</div></div></div>
+    <div class="wtile" id="pal-subtotal" draggable="true" ondragstart="pdrag(event,'subtotal')" onclick="addW('subtotal')"><div class="wi" style="background:#F0FDF4;font-size:11px;font-weight:700;color:#15803D">&Sigma;</div><div><div class="wn">Subtotal</div><div class="wh">Options total</div></div></div>
+    <div class="wtile" id="pal-askbar" draggable="true" ondragstart="pdrag(event,'askbar')" onclick="addW('askbar')"><div class="wi" style="background:#1a1916;color:#fff;font-size:10px;font-weight:700">$</div><div><div class="wn">Asking price bar</div><div class="wh">Total asking price</div></div></div>
+    <div class="wtile" id="pal-dealer" draggable="true" ondragstart="pdrag(event,'dealer')" onclick="addW('dealer')"><div class="wi" style="background:#FEF2F2">&#127962;</div><div><div class="wn">Dealer address</div><div class="wh">Contact info</div></div></div>
+    <div class="pgroup isgroup" style="display:none">Infosheet</div>
+    <div class="wtile iswidget" id="pal-description" style="display:none" draggable="true" ondragstart="pdrag(event,'description')" onclick="addW('description')"><div class="wi" style="background:#F3E5F5;font-size:11px">📝</div><div><div class="wn">Description</div><div class="wh">DB or AI text</div></div></div>
+    <div class="wtile iswidget" id="pal-features" style="display:none" draggable="true" ondragstart="pdrag(event,'features')" onclick="addW('features')"><div class="wi" style="background:#E8F5E9;font-size:11px">✦</div><div><div class="wn">Features list</div><div class="wh">2-col DB or AI</div></div></div>
+    <div class="wtile iswidget" id="pal-barcode" style="display:none" draggable="true" ondragstart="pdrag(event,'barcode')" onclick="addW('barcode')"><div class="wi" style="background:#FAFAFA;font-size:11px">▐▌</div><div><div class="wn">Barcode</div><div class="wh">VIN Code-128</div></div></div>
+    <div class="wtile iswidget" id="pal-qrcode" style="display:none" draggable="true" ondragstart="pdrag(event,'qrcode')" onclick="addW('qrcode')"><div class="wi" style="background:#FAFAFA;font-size:11px">⊞</div><div><div class="wn">QR Code</div><div class="wh">Vehicle page link</div></div></div>
+    <div class="pgroup">Structural</div>
+    <div class="wtile" id="pal-headerbar" draggable="true" ondragstart="pdrag(event,'headerbar')" onclick="addW('headerbar')"><div class="wi" style="background:#374151;color:#fff;font-size:9px">&#9644;</div><div><div class="wn">Header bar</div><div class="wh">Full-width text</div></div></div>
+    <div class="wtile" id="pal-customtext" draggable="true" ondragstart="pdrag(event,'customtext')" onclick="addW('customtext')"><div class="wi" style="background:#FDF4FF;font-size:13px;font-weight:700;color:#7C3AED">T</div><div><div class="wn">Custom text</div><div class="wh">Free content</div></div></div>
+    <div class="wtile" id="pal-sigline" draggable="true" ondragstart="pdrag(event,'sigline')" onclick="addW('sigline')"><div class="wi" style="background:#F5F4F0">&#9998;</div><div><div class="wn">Signature line</div><div class="wh">Buyer + date</div></div></div>
+    <div class="pgroup">Infobox</div>
+    <div class="wtile" id="pal-infobox" draggable="true" ondragstart="pdrag(event,'infobox')" onclick="addW('infobox')"><div class="wi" style="background:#1a1916;color:#fff">&#128230;</div><div><div class="wn">Infobox</div><div class="wh">EPA, QR, photo&hellip;</div></div></div>
+      <!-- Custom Widgets -->
+    <div class="pal-custom-head">
+      <div class="pal-custom-title">Custom Widgets</div>
+      <button class="pal-custom-add" onclick="showCWBuilder()" title="Create new custom widget">+</button>
+    </div>
+    <div class="scope-tabs">
+      <button class="scope-tab on" onclick="filterCWScope('all',this)">All</button>
+      <button class="scope-tab" onclick="filterCWScope('platform',this)">Platform</button>
+      <button class="scope-tab" onclick="filterCWScope('group',this)">Group</button>
+      <button class="scope-tab" onclick="filterCWScope('dealer',this)">Dealer</button>
+    </div>
+    <div id="cwlib-list" style="border-top:1px solid var(--bdr)"></div>
+  </div>
+</div>
+<div class="canvas-area">
+  <div class="cbar">
+    <div class="clabel"><div class="live-dot"></div>Canvas</div>
+    <button class="tb" onclick="doZ(-0.05)">&#8722;</button>
+    <div class="znum" id="znum">75%</div>
+    <button class="tb" onclick="doZ(0.05)">+</button>
+    <button class="tb" onclick="fitZ()">&#8859;</button>
+    <div class="dv"></div>
+    <button class="tb" onclick="undo()" title="Undo">&#8617;</button>
+    <button class="tb" onclick="redo()" title="Redo">&#8618;</button>
+    <div class="dv"></div>
+    <button class="tb" onclick="alignSel('left')" title="Align left">&#8676;</button>
+    <button class="tb" onclick="alignSel('center')" title="Center">&#8596;</button>
+    <button class="tb" onclick="alignSel('right')" title="Align right">&#8677;</button>
+    <div class="dv"></div>
+    <select id="paper-sel" onchange="setPaperW(this.value)" style="padding:4px 6px;border:1px solid rgba(0,0,0,0.2);border-radius:4px;font-size:11px;font-family:inherit;background:rgba(255,255,255,0.4);color:#333;cursor:pointer;outline:none;">
+      <option value="narrow">3.125&quot; &times; 11&quot; Narrow</option>
+      <option value="standard" selected>4.25&quot; &times; 11&quot; Standard</option>
+    
+      <option value="infosheet">8.5&quot; x 11&quot; Infosheet</option>
+    </select>
+    <select id="fsize-sel" onchange="setFontScale(+this.value)" style="padding:4px 6px;border:1px solid rgba(0,0,0,0.2);border-radius:4px;font-size:11px;font-family:inherit;background:rgba(255,255,255,0.4);color:#333;cursor:pointer;outline:none;">
+      <option value="0.8">Font: Small</option>
+      <option value="1.0" selected>Font: Medium</option>
+      <option value="1.2">Font: Large</option>
+      <option value="1.4">Font: X-Large</option>
+    </select>
+    <span style="font-size:11px;color:rgba(0,0,0,0.6);margin-left:auto;padding-right:4px">Drag to reposition &middot; Handles to resize</span>
+  </div>
+  <div class="cscroll" id="cscroll"
+    ondragover="event.preventDefault()"
+    ondrop="dropCanvas(event)">
+    <div class="paper" id="paper" onclick="clickPaper(event)">
+      <style id="font-scale-style">
+.vtype-btn{
+  padding:7px 16px;border-radius:20px;font-size:12px;font-weight:600;
+  cursor:pointer;border:2px solid var(--bdr);background:var(--sur);
+  color:var(--t2);font-family:inherit;transition:all .15s;
+}
+.vtype-btn:hover{border-color:#1976d2;color:#1976d2;}
+.vtype-btn.on{background:#1976d2;color:#fff;border-color:#1976d2;}
+.vtype-btn[data-type="draft"].on{background:#78828c;border-color:#78828c;}
+.vtype-btn[data-type="all"].on{background:#4caf50;border-color:#4caf50;}
+
+
+/* Custom widget library */
+.pal-custom-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 12px 8px;border-top:1px solid var(--bdr);
+  margin-top:4px;
+}
+.pal-custom-title{font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;}
+.pal-custom-add{
+  width:20px;height:20px;border-radius:50%;background:#1976d2;color:#fff;
+  font-size:14px;border:none;cursor:pointer;display:flex;align-items:center;
+  justify-content:center;line-height:1;font-weight:700;flex-shrink:0;
+}
+.pal-custom-add:hover{background:#1565c0;}
+.scope-tabs{display:flex;gap:2px;padding:4px 10px;background:var(--s2);}
+.scope-tab{
+  font-size:10px;font-weight:600;padding:3px 8px;border-radius:3px;
+  cursor:pointer;color:var(--t3);border:none;background:transparent;font-family:inherit;
+  transition:all .1s;
+}
+.scope-tab.on{background:#1976d2;color:#fff;}
+.cwlib-item{
+  display:flex;align-items:center;gap:7px;padding:6px 10px;
+  border-bottom:1px solid var(--bdr);cursor:grab;
+  transition:background .1s;user-select:none;
+}
+.cwlib-item:last-child{border-bottom:none;}
+.cwlib-item:hover{background:var(--accL);}
+.cwlib-item:active{cursor:grabbing;opacity:.7;}
+.cwlib-scope{
+  font-size:9px;font-weight:700;padding:1px 5px;border-radius:10px;
+  flex-shrink:0;
+}
+.cwlib-scope.platform{background:#e3f2fd;color:#1976d2;}
+.cwlib-scope.group{background:#e8f5e9;color:#2e7d32;}
+.cwlib-scope.dealer{background:#fff3e0;color:#e65100;}
+.cwlib-name{font-size:11px;font-weight:500;color:var(--t1);}
+.cwlib-desc{font-size:9px;color:var(--t3);margin-top:1px;}
+.cwlib-actions{margin-left:auto;display:flex;gap:4px;opacity:0;}
+.cwlib-item:hover .cwlib-actions{opacity:1;}
+.cwlib-edit-btn{
+  width:18px;height:18px;border-radius:3px;border:1px solid var(--bdr);
+  background:var(--sur);cursor:pointer;font-size:10px;display:flex;
+  align-items:center;justify-content:center;
+}
+.cwlib-empty{padding:16px 12px;text-align:center;font-size:11px;color:var(--t3);line-height:1.6;}
+/* Custom widget builder modal */
+.cw-modal{background:var(--sur);border-radius:12px;width:600px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.25);}
+.cw-modal-head{padding:18px 24px 14px;border-bottom:1px solid var(--bdr);background:var(--navy);border-radius:12px 12px 0 0;}
+.cw-modal-title{font-size:16px;font-weight:600;color:#fff;}
+.cw-modal-body{padding:20px 24px;}
+.field-row{margin-bottom:16px;}
+.field-label{font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;display:block;}
+.scope-selector{display:flex;gap:8px;flex-wrap:wrap;}
+.scope-btn{
+  padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;
+  cursor:pointer;border:2px solid var(--bdr);background:var(--sur);
+  color:var(--t2);font-family:inherit;transition:all .15s;
+}
+.scope-btn:hover{border-color:#1976d2;color:#1976d2;}
+.scope-btn.on.platform{background:#1976d2;color:#fff;border-color:#1976d2;}
+.scope-btn.on.group{background:#2e7d32;color:#fff;border-color:#2e7d32;}
+.scope-btn.on.dealer{background:#e65100;color:#fff;border-color:#e65100;}
+.content-tabs{display:flex;gap:0;border-bottom:1px solid var(--bdr);margin-bottom:12px;}
+.content-tab{
+  padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer;
+  border:none;background:transparent;font-family:inherit;color:var(--t3);
+  border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .12s;
+}
+.content-tab.on{color:#1976d2;border-bottom-color:#1976d2;}
+.html-editor{
+  width:100%;min-height:120px;padding:8px 10px;
+  border:1px solid var(--bdr);border-radius:6px;
+  font-family:var(--mono);font-size:12px;color:var(--t1);
+  background:var(--s2);outline:none;resize:vertical;
+  line-height:1.5;
+}
+.html-editor:focus{border-color:#1976d2;background:var(--sur);}
+.var-chip{
+  display:inline-flex;align-items:center;gap:4px;padding:2px 8px;
+  background:#e3f2fd;color:#1976d2;border-radius:12px;font-size:10px;
+  font-weight:600;cursor:pointer;margin:2px;border:1px solid #bbdefb;
+}
+.var-chip:hover{background:#bbdefb;}
+.preview-box{
+  border:1px solid var(--bdr);border-radius:6px;padding:12px;
+  background:#f5f5f5;min-height:60px;
+}
+
+</style>
+      <img class="paper-frame" id="paper-frame" src="https://new-addendum-backgrounds.s3.us-east-1.amazonaws.com/01_Addendum_Default.png" alt="frame">
+    </div>
+  </div>
+</div>
+
+<!-- EDIT PANEL -->
+<div class="epanel">
+  <div class="eph">
+    <div class="eph-title" id="ep-title">Canvas</div>
+    <div class="eph-sub" id="ep-sub">Click any widget to edit</div>
+  </div>
+  <div class="epbody" id="epbody">
+    <!-- Background section always visible -->
+    <div class="epw">
+      <div class="eps" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleBg()">Background image <span id="bgt" style="font-size:10px">&#9658;</span></div>
+      <div id="bgpanel" style="display:none">
+      <div class="bg-list" id="bg-list">
+        <div class="bg-row on" data-bg="default" onclick="setBg('default',this)">
+          <img class="bg-thumb" src="https://new-addendum-backgrounds.s3.us-east-1.amazonaws.com/01_Addendum_Default.png" alt="Default">
+          <span class="bg-name">Default</span>
+          <span class="bg-check">&#10003;</span>
+        </div>
+        <div class="bg-row" data-bg="c1" onclick="setBg('c1',this)"><div class="bg-thumb-ph" style="background:#111"></div><span class="bg-name">01 Black</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c2" onclick="setBg('c2',this)"><div class="bg-thumb-ph" style="background:#1e3a5f"></div><span class="bg-name">02 Blue</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c3" onclick="setBg('c3',this)"><div class="bg-thumb-ph" style="background:#7f1d1d"></div><span class="bg-name">03 Red</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c4" onclick="setBg('c4',this)"><div class="bg-thumb-ph" style="background:#14532d"></div><span class="bg-name">04 Green</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c5" onclick="setBg('c5',this)"><div class="bg-thumb-ph" style="background:#4c1d95"></div><span class="bg-name">05 Purple</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c6" onclick="setBg('c6',this)"><div class="bg-thumb-ph" style="background:#0f172a"></div><span class="bg-name">06 Navy</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c7" onclick="setBg('c7',this)"><div class="bg-thumb-ph" style="background:#78350f"></div><span class="bg-name">07 Gold</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c8" onclick="setBg('c8',this)"><div class="bg-thumb-ph" style="background:#6b7280"></div><span class="bg-name">08 Silver</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c9" onclick="setBg('c9',this)"><div class="bg-thumb-ph" style="background:#374151"></div><span class="bg-name">09 Charcoal</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c10" onclick="setBg('c10',this)"><div class="bg-thumb-ph" style="background:#134e4a"></div><span class="bg-name">10 Teal</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c11" onclick="setBg('c11',this)"><div class="bg-thumb-ph" style="background:#4a1942"></div><span class="bg-name">11 Maroon</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c12" onclick="setBg('c12',this)"><div class="bg-thumb-ph" style="background:#1e3a8a"></div><span class="bg-name">12 Cobalt</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c13" onclick="setBg('c13',this)"><div class="bg-thumb-ph" style="background:#334155"></div><span class="bg-name">13 Slate</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" data-bg="c14" onclick="setBg('c14',this)"><div class="bg-thumb-ph" style="background:#881337"></div><span class="bg-name">14 Rose</span><span class="bg-check">&#10003;</span></div>
+        <div class="bg-row" onclick="alert('Upload custom background\nFile: PNG-24 with transparency\nSize: 638x1650px at 150dpi')"><div class="bg-thumb-ph" style="background:var(--s3);color:var(--t3)">+</div><span class="bg-name">Upload custom&hellip;</span><span class="bg-check"></span></div>
+      </div>
+      <div class="fd">
+        <div class="fl">Load from URL (preserves transparency)</div>
+        <input class="fi" id="bg-url" value="https://new-addendum-backgrounds.s3.us-east-1.amazonaws.com/01_Addendum_Default.png" placeholder="https://s3.amazonaws.com/…/bg.png" style="font-size:11px;margin-bottom:4px">
+        <button class="btn btn-p" style="width:100%;justify-content:center" onclick="loadBgUrl()">Load background</button>
+      </div></div>
+    </div>
+    <!-- Widget edit section -->
+    <div id="wedit" style="display:none"></div>
+    <!-- No selection -->
+    <div class="epw" id="nosel">
+      <div class="nosel">
+        <div class="nosel-icon">&#9633;</div>
+        <div class="nosel-txt">Click any widget to edit its properties. All widgets are freely positionable and resizable.</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- PRINT MODAL -->
+<div class="modal-overlay" id="pm" style="display:none" onclick="if(event.target===this)hidePM()">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">New Addendum Settings</div></div>
+    <div class="modal-body">
+      <div style="background:var(--s2);border-radius:8px;padding:16px">
+        <div class="modal-row" style="padding-top:0">
+          <div class="modal-icon">&#8505;</div>
+          <div class="modal-label">Addendum Template</div>
+          <div class="modal-control"><select class="modal-sel"><option>Subaru of North Tampa</option><option>Subaru — Used</option><option>Standard Default</option></select></div>
+        </div>
+        <div class="modal-row">
+          <div class="modal-icon" style="font-size:18px;font-weight:700;font-family:serif">A</div>
+          <div class="modal-label">Font Size</div>
+          <div class="modal-control"><select class="modal-sel"><option>Small</option><option selected>Medium</option><option>Large</option><option>X-Large</option></select></div>
+        </div>
+        <div class="modal-row">
+          <div class="modal-icon">&#36;</div>
+          <div class="modal-label">MSRP Adjustment <span class="help-dot" title="Adds a fixed amount to MSRP before calculating total.">?</span></div>
+          <div class="modal-control"><select class="modal-sel"><option selected>None</option><option>+$500</option><option>+$1,000</option><option>+$2,000</option><option>Custom&hellip;</option></select></div>
+        </div>
+        <div class="modal-row" style="padding-bottom:0;flex-direction:column;align-items:flex-start;gap:12px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="modal-icon">&#9776;</div>
+            <div class="modal-label">Nudge Margins (px) <span class="help-dot" title="Fine-tune print alignment for your printer. Set once, applies to all prints.">?</span></div>
+          </div>
+          <div class="nudge-grid" style="width:100%;padding-left:42px">
+            <div class="nudge-field"><span class="nudge-lbl">Left:</span><input class="nudge-in" type="number" value="0"><span class="nudge-px">px</span></div>
+            <div class="nudge-field"><span class="nudge-lbl">Right:</span><input class="nudge-in" type="number" value="0"><span class="nudge-px">px</span></div>
+            <div class="nudge-field"><span class="nudge-lbl">Top:</span><input class="nudge-in" type="number" value="0"><span class="nudge-px">px</span></div>
+            <div class="nudge-field"><span class="nudge-lbl">Bottom:</span><input class="nudge-in" type="number" value="0"><span class="nudge-px">px</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <div class="modal-foot-l" onclick="alert('Opens template builder for a new template')">+ ADD TEMPLATE</div>
+      <div class="modal-foot-r">
+        <button class="mfbtn mfbtn-close" onclick="hidePM()">CLOSE</button>
+        <button class="mfbtn mfbtn-save" onclick="hidePM();toast('Print settings saved')">SAVE CHANGES</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-el" style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--t1);color:#fff;padding:8px 16px;border-radius:20px;font-size:12px;opacity:0;transition:all .2s;pointer-events:none;z-index:9999"></div>
+
+<script>
+// ── CONSTANTS ──
+const BG_DEFAULT = "https://new-addendum-backgrounds.s3.us-east-1.amazonaws.com/01_Addendum_Default.png";
+const IS_BG_DEFAULT = "https://new-infosheet-backgrounds.s3.us-east-1.amazonaws.com/BaseTemplate.png";
+const IB_DEFAULT = "https://new-infobox-images.s3.us-east-1.amazonaws.com/EPA_Infobox_Default.png";
+const SNAP = 4;  // grid snap in px
+const MIN_W = 40, MIN_H = 16;
+
+// Paper sizes
+const PAPERS = {
+  standard:  {w:408, h:1056},
+  narrow:    {w:300, h:1056},
+  infosheet: {w:816, h:1056},
+};
+
+// ── STATE ──
+let Z = 0.75;
+let selId = null;
+let dragType = null;
+let widgets = {};
+let nid = 1;
+let saveT = null;
+let fontScale = 1.0;
+let history = [];
+let histIdx = -1;
+let paperSize = 'standard';
+
+const paper = document.getElementById('paper');
+
+// ── DEFAULT DATA ──
+const DEFS = {
+  logo:       {label:'Your Logo', imgUrl:'https://new-dealer-logos.s3.us-east-1.amazonaws.com/default_logo.png', showName:false, dealerName:''},
+  vehicle:    {boxed:false, fields:['stock','vin','year','color','make','trim','model','mileage'], showHeader:true, fontSize:1.0, headerFontSize:1.0},
+  msrp:       {label:'Manufacturer Retail Price:', value:'$27,100.00', divider:true, fontSize:1.0},
+  options:    {sectionLabel:'Dealer Installed Options:', fontSize:1.0, items:[
+    {name:'Lifetime Warranty CERAMIC TINT',  desc:'', price:'$799.00'},
+    {name:'Door Edge & Cup Guards',           desc:'', price:'$199.00'},
+    {name:'Llumar Screen Protector',          desc:'', price:'$99.00'},
+    {name:'Subaru of North Tampa Advantage Package', desc:'First Aid Kit, Window Sunshade, Wheel Locks, Key Chain', price:'$399.00'},
+  ]},
+  subtotal:   {label:'Subtotal:', value:'$1,496.00', fontSize:1.0},
+  askbar:     {label:'Dealer Asking Price:', value:'$28,596.00', subtitle:'(Not the Manufacturer\'s Suggested Retail Price)', labelColor:'#ffffff', valueColor:'#000000', labelFontSize:1.0, valueFontSize:1.0},
+  dealer:     {text:'Subaru of North Tampa\n11111 N Florida Ave\nTampa FL 33612\n8137973114', fontSize:1.0},
+  headerbar:  {text:'PRE-OWNED VEHICLES', color:'#1a1916'},
+  customtext: {text:'Disclaimer:\nThe information contained in this pricing sheet is provided for general informational purposes only. While we make every effort to ensure accuracy, some data may be AI-generated and should not be relied upon as definitive or guaranteed. Actual vehicle pricing, availability, and condition may vary and are subject to verification. Prices are subject to change without notice. Buyers are encouraged to conduct their own research and inspections before making any purchasing decisions.', align:'left', fs:10},
+  sigline:    {l1:'Buyers Signature', l2:'Date'},
+  infobox:     {ibType:'epa', imgUrl:IB_DEFAULT},
+  description: {text:'2021 Toyota Tundra TRD Off Road Package — the right color combo: Cement over Black. Features include Blind Spot Monitors, Backup Camera, Bluetooth/Hands Free, 38-Gallon Tank, Alloy Wheels. Toyota Factory Certified with a 100K Mile Powertrain Warranty FREE to you.', aiMode:'db', fontSize:1.0},
+  features:    {items:[["SRS Upgrade Package", "TRD Off-Road Plus Package"], ["9 Speakers", "AM/FM radio: SiriusXM"], ["Radio data system", "Radio: Audio Plus AM/FM/HD Radio"], ["Air Conditioning", "Rear window defroster"], ["HomeLink Universal Transceiver", "Remote keyless entry"], ["Power windows", "Speed-sensing steering"], ["Steering wheel mounted audio", "Trail-Tuned Bilstein Shocks"], ["Traction control", "4-Wheel Disc Brakes"], ["Urethane Tilt/Telescopic Steering", "Dual front impact airbags"], ["ABS brakes", "Emergency communication system"], ["Dual front side impact airbags", "Front Door Smart Key System"], ["Front anti-roll bar", "Knee airbag"], ["Front wheel independent suspension", "Occupant sensing airbag"], ["Low tire pressure warning", "Push Button Starting System"], ["Overhead airbag", "Brake assist"], ["Remote Connect", "Exterior Parking Camera Rear"], ["Electronic Stability Control", "Delay-off headlights"], ["Auto High-beam Headlights", "Fully automatic headlights"], ["Front fog lights", "Panic alarm"], ["Anti-Theft Immobilizer w/Alarm", "Speed control"], ["Safety Connect", "Scan for more info"]], aiMode:'db', fontSize:1.0},
+  barcode:     {vin:'5TFDYS3F11MX956768', stock:'R956768'},
+  qrcode:      {url:'https://dealeraddendums.com/vehicle/5TFDYS3F11MX956768', label:'Scan for more info', size:120},
+};
+
+// Widget heights/widths for default layout
+// All positions are PAPER coordinates (not relative to any sub-div)
+// Paper is 408x1056, frame has 12px left/right margins, 48px top margin
+const LAYOUT = {
+  logo:     {x:32, y:48,  w:348, h:118},
+  vehicle:  {x:40, y:168, w:336, h:72},
+  msrp:     {x:40, y:248, w:332, h:32},
+  options:  {x:40, y:280, w:332, h:175},
+  subtotal: {x:40, y:608, w:332, h:28},
+  askbar:   {x:40, y:624, w:344, h:45},
+  dealer:   {x:40, y:676, w:336, h:80},
+  infobox:  {x:28, y:760, w:352, h:240},
+};
+;
+
+const LAYOUT_INFOSHEET = {
+  logo:        {x:64,  y:44,  w:440, h:130},
+  vehicle:     {x:72,  y:196, w:448, h:80},
+  description: {x:72,  y:324, w:628, h:116},
+  features:    {x:76,  y:440, w:664, h:288},
+  askbar:      {x:20,  y:792, w:728, h:56},
+  qrcode:      {x:528, y:180, w:120, h:120},
+  barcode:     {x:508, y:868, w:256, h:52},
+  dealer:      {x:536, y:68,  w:216, h:60},
+  customtext:  {x:40,  y:944, w:744, h:60},
+};
+
+// ── RENDER WIDGET ──
+function renderW(type, d, w, h) {
+  if(type === 'custom'){
+    const def = customWidgets.find(cw => cw.id === d.cwId);
+    if(!def) return '<div style="padding:8px;color:#999;font-size:11px">Widget not found</div>';
+    if(def.contentType === 'image') return '<img style="width:100%;height:100%;object-fit:fill;display:block;" src="'+def.html+'" alt="'+def.name+'">';
+    let h = d.html || def.html;
+    if(d.variables) Object.entries(d.variables).forEach(([k,v])=>{ h=h.replace(new RegExp('\\{\\{'+k+'\\}\\}','g'),v); });
+    return '<div style="width:100%;height:100%">'+h+'</div>';
+  }
+  if(type==='logo') {
+    if(d.imgUrl) return `<img style="width:100%;height:100%;object-fit:contain;object-position:left center;display:block;" src="${d.imgUrl}" alt="Logo">`;
+    return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#f2f1ed;border-radius:4px;"><span style="font-size:16px;font-weight:700;color:#bbb;">Your Logo</span></div>`;
+  }
+  if(type==='vehicle') {
+    const vd={stock:'STOCK_TEST1',vin:'2HGFC3B96HH362096',year:'2017',color:'White',make:'Honda',trim:'Touring',model:'Civic',mileage:'10'};
+    const lb={stock:'Stock:',vin:'VIN:',year:'Year:',color:'Color:',make:'Make:',trim:'Trim:',model:'Model:',mileage:'Mileage:'};
+    const flds=d.fields||Object.keys(vd);
+    const hdrFs=Math.round(14*(fontScale||1)*(d.headerFontSize||1));
+    const detFs=Math.round(10*(fontScale||1)*(d.fontSize||1));
+    const hdr=d.showHeader!==false?`<div style="font-size:${hdrFs}px;font-weight:800;color:#1a1916;line-height:1.2;margin-bottom:5px;letter-spacing:-.01em">${vd.year} ${vd.make} ${vd.model} ${vd.trim}</div>`:'';
+    const pairs=[]; for(let i=0;i<flds.length;i+=2) pairs.push([flds[i],flds[i+1]].filter(Boolean));
+    const rows=pairs.map(p=>`<div class="wvrow">${p.map(f=>`<div class="wvf" style="font-size:${detFs}px">${lb[f]||f} <b>${vd[f]||''}</b></div>`).join('')}</div>`).join('');
+    return `<div class="w-vehicle">${hdr}${rows}</div>`;
+  }
+  if(type==='msrp') {
+    const fs = Math.round(11*(fontScale||1)*(d.fontSize||1));
+    return `<div class="w-msrp"><div class="wmsrp-row"><span class="wmsrp-lbl" style="font-size:${fs}px">${d.label}</span><span class="wmsrp-val" style="font-size:${fs}px">${d.value}</span></div>${d.divider!==false?'<div class="wmsrp-div"></div>':''}</div>`;
+  }
+  if(type==='options'){
+    const fs=Math.round(10.5*(fontScale||1)*(d.fontSize||1));
+    const fsm=Math.round(9*(fontScale||1)*(d.fontSize||1));
+    return `<div class="w-options"><div class="wopt-sec" style="font-size:${fs}px">${d.sectionLabel}</div>${(d.items||[]).map(it=>`<div class="wopt-row"><div><div class="wopt-name" style="font-size:${fs}px">${it.name}</div>${it.desc?`<div class="wopt-desc" style="font-size:${fsm}px">${it.desc}</div>`:''}</div><div class="wopt-price" style="font-size:${fs}px">${it.price}</div></div>`).join('')}</div>`;
+  }
+  if(type==='subtotal'){
+    const fs=Math.round(12*(fontScale||1)*(d.fontSize||1));
+    return `<div class="w-subtotal"><span class="wsub-l" style="font-size:${fs}px">${d.label}</span><span class="wsub-v" style="font-size:${fs}px">${d.value}</span></div>`;
+  }
+  if(type==='askbar') return `<div class="w-askbar"><div><div class="wask-lbl" style="font-size:${Math.round(12*(fontScale||1)*(d.labelFontSize||1))}px;color:${d.labelColor||'#ffffff'}">${d.label}</div>${d.subtitle?`<div class="wask-sub" style="font-size:${Math.round(8*(fontScale||1)*(d.labelFontSize||1))}px;color:${d.labelColor||'#ffffff'}">${d.subtitle}</div>`:''}</div><div class="wask-val" style="font-size:${Math.round(13*(fontScale||1)*(d.valueFontSize||1))}px;color:${d.valueColor||'#000000'}">${d.value}</div></div>`;
+  if(type==='dealer'){
+    const fs=Math.round(10*(fontScale||1)*(d.fontSize||1));
+    return `<div class="w-dealer"><div class="wdlr" style="font-size:${fs}px">${(d.text||'').replace(/\n/g,'<br>')}</div></div>`;
+  }
+  if(type==='headerbar') return `<div class="w-hbar" style="background:${d.color||'#1a1916'}"><div class="whbar-t">${d.text||'HEADER'}</div></div>`;
+  if(type==='customtext') return `<div class="w-txt"><div style="font-size:${d.fs||10}px;text-align:${d.align||'left'};color:#555;line-height:1.5">${d.text||''}</div></div>`;
+  if(type==='sigline') return `<div class="w-sig"><div class="wsig-inner"><div class="wsig-f"><div class="wsig-line"></div><div class="wsig-lbl">${d.l1||'Buyers Signature'}</div></div><div class="wsig-f"><div class="wsig-line"></div><div class="wsig-lbl">${d.l2||'Date'}</div></div></div></div>`;
+  if(type==='infobox') return `<div class="w-infobox" style="width:100%;height:100%"><img src="${d.imgUrl||IB_DEFAULT}" style="width:100%;height:100%;object-fit:fill;display:block;mix-blend-mode:multiply" alt="Infobox"></div>`;
+  if(type==='description'){
+    const fs=Math.round(10*(fontScale||1)*(d.fontSize||1));
+    const ab=d.aiMode==='ai'
+      ?'<span style="font-size:8px;background:#e3f2fd;color:#1976d2;padding:1px 6px;border-radius:8px;font-weight:700;margin-left:5px">AI</span>'
+      :'<span style="font-size:8px;background:#f0f0f0;color:#78828c;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:5px">DB</span>';
+    return `<div style="padding:3px 0;height:100%;box-sizing:border-box;overflow:hidden">
+      <div style="font-size:8px;font-weight:700;color:#78828c;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;display:flex;align-items:center">Description${ab}</div>
+      <div style="font-size:${fs}px;color:#222;line-height:1.6">${d.text||'Vehicle description will appear here.'}</div>
+    </div>`;
+  }
+  if(type==='features'){
+    const fs=Math.round(9*(fontScale||1)*(d.fontSize||1));
+    const ab=d.aiMode==='ai'
+      ?'<span style="font-size:8px;background:#e3f2fd;color:#1976d2;padding:1px 6px;border-radius:8px;font-weight:700;margin-left:5px">AI</span>'
+      :'<span style="font-size:8px;background:#f0f0f0;color:#78828c;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:5px">DB</span>';
+    const items=d.items&&d.items.length?d.items:[['Feature','Feature']];
+    const rows=items.map(p=>`<div style="display:flex">
+      <div style="flex:1;font-size:${fs}px;color:#1a1916;padding:1.5px 4px 1.5px 0;border-bottom:1px solid #ececec;line-height:1.4">${p[0]||''}</div>
+      <div style="flex:1;font-size:${fs}px;color:#1a1916;padding:1.5px 0 1.5px 4px;border-bottom:1px solid #ececec;border-left:1px solid #ececec;line-height:1.4">${p[1]||''}</div>
+    </div>`).join('');
+    return `<div style="padding:3px 0;height:100%;box-sizing:border-box;overflow:hidden">
+      <div style="font-size:8px;font-weight:700;color:#78828c;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;display:flex;align-items:center">Features / Options${ab}</div>
+      <div style="border:1px solid #e0e0e0;border-radius:2px;overflow:hidden">${rows}</div>
+    </div>`;
+  }
+  if(type==='barcode'){
+    const vin=d.vin||'5TFDYS3F11MX956768';
+    const seed=vin.split('').map(c=>c.charCodeAt(0));
+    let bars='';
+    for(let i=0;i<3;i++) bars+='<div style="display:inline-block;width:2px;height:52px;background:#000;margin-right:1px;vertical-align:top"></div>';
+    seed.forEach(v=>{
+      const n=1+(v%2), w2=2+(v%3), s=1+((v*7)%2);
+      bars+=`<div style="display:inline-block;width:${n}px;height:52px;background:#000;margin-right:${s}px;vertical-align:top"></div>`;
+      bars+=`<div style="display:inline-block;width:${w2}px;height:52px;background:#000;margin-right:${s}px;vertical-align:top"></div>`;
+    });
+    for(let i=0;i<4;i++) bars+='<div style="display:inline-block;width:2px;height:52px;background:#000;margin-right:1px;vertical-align:top"></div>';
+    return `<div style="text-align:center;padding:4px 2px;background:#fff;height:100%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center">
+      <div style="line-height:0;padding:4px 6px;background:#fff;overflow:hidden">${bars}</div>
+      <div style="font-size:10px;font-family:monospace;margin-top:4px;letter-spacing:1px;color:#000">*${vin}*</div>
+    </div>`;
+  }
+  if(type==='qrcode'){
+    const url=encodeURIComponent(d.url||'https://dealeraddendums.com');
+    const label=d.label||'Scan for more info';
+    return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:4px;background:#fff;box-sizing:border-box">
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${url}&margin=2"
+           style="width:calc(100% - 4px);height:calc(100% - 20px);object-fit:contain;display:block" alt="QR Code">
+      <div style="font-size:9px;color:#555;margin-top:3px;text-align:center;font-weight:600">${label}</div>
+    </div>`;
+  }
+  return '';
+}
+
+// ── CREATE WIDGET ELEMENT ──
+function makeEl(id) {
+  const w = widgets[id];
+  const el = document.createElement('div');
+  el.className = 'cw';
+  el.id = id;
+  el.style.cssText = `left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px;`;
+  const WLBL = {logo:'Logo',vehicle:'Vehicle data',msrp:'MSRP',options:'Options',subtotal:'Subtotal',askbar:'Asking price',dealer:'Dealer address',headerbar:'Header bar',customtext:'Custom text',sigline:'Signature',infobox:'Infobox',custom:'Custom'};
+  el.innerHTML = `
+    <div class="cwo"></div>
+    <div class="cwlbl">${WLBL[w.type]||w.type}</div>
+    <div class="cdel" onclick="event.stopPropagation();delW('${id}')">&#10005;</div>
+    <div class="rh rh-nw" data-id="${id}" data-dir="nw"></div>
+    <div class="rh rh-n"  data-id="${id}" data-dir="n"></div>
+    <div class="rh rh-ne" data-id="${id}" data-dir="ne"></div>
+    <div class="rh rh-e"  data-id="${id}" data-dir="e"></div>
+    <div class="rh rh-se" data-id="${id}" data-dir="se"></div>
+    <div class="rh rh-s"  data-id="${id}" data-dir="s"></div>
+    <div class="rh rh-sw" data-id="${id}" data-dir="sw"></div>
+    <div class="rh rh-w"  data-id="${id}" data-dir="w"></div>
+    <div class="wcontent" id="wc_${id}">${renderW(w.type, w.d, w.w, w.h)}</div>
+  `;
+  // Drag to move
+  el.addEventListener('mousedown', e => {
+    if(e.target.classList.contains('rh') || e.target.classList.contains('cdel')) return;
+    e.preventDefault(); e.stopPropagation();
+    selW(id);
+    const pr = paper.getBoundingClientRect();
+    const ox = e.clientX - w.x * Z - pr.left;
+    const oy = e.clientY - w.y * Z - pr.top;
+    function mv(ev) {
+      const nx = snap(Math.max(0, Math.min(PAPERS[paperSize].w - w.w, (ev.clientX - pr.left - ox) / Z)));
+      const ny = snap(Math.max(0, Math.min(PAPERS[paperSize].h - w.h, (ev.clientY - pr.top - oy) / Z)));
+      w.x = nx; w.y = ny;
+      el.style.left = nx + 'px'; el.style.top = ny + 'px';
+      updPosInputs(id);
+      trigSave();
+    }
+    function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); saveHistory(); }
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
+  el.addEventListener('click', e => { e.stopPropagation(); selW(id); });
+  // Resize handles
+  el.querySelectorAll('.rh').forEach(rh => {
+    rh.addEventListener('mousedown', e => {
+      e.preventDefault(); e.stopPropagation();
+      const dir = rh.dataset.dir;
+      const sx = e.clientX, sy = e.clientY;
+      const ox = w.x, oy = w.y, ow = w.w, oh = w.h;
+      function mv(ev) {
+        const dx = (ev.clientX - sx) / Z;
+        const dy = (ev.clientY - sy) / Z;
+        let nx=ox, ny=oy, nw=ow, nh=oh;
+        if(dir.includes('e')) nw = snap(Math.max(MIN_W, ow + dx));
+        if(dir.includes('s')) nh = snap(Math.max(MIN_H, oh + dy));
+        if(dir.includes('w')) { nw = snap(Math.max(MIN_W, ow - dx)); nx = snap(ox + ow - nw); }
+        if(dir.includes('n')) { nh = snap(Math.max(MIN_H, oh - dy)); ny = snap(oy + oh - nh); }
+        w.x=nx; w.y=ny; w.w=nw; w.h=nh;
+        el.style.left=nx+'px'; el.style.top=ny+'px';
+        el.style.width=nw+'px'; el.style.height=nh+'px';
+        updPosInputs(id); trigSave();
+      }
+      function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); saveHistory(); }
+      document.addEventListener('mousemove', mv);
+      document.addEventListener('mouseup', up);
+    });
+  });
+  return el;
+}
+
+// ── ADD WIDGET ──
+function addW(type, x, y, w, h, silent) {
+  // Check unique widgets
+  const UNIQUE = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox','description','features','barcode','qrcode'];
+  if(UNIQUE.includes(type) && Object.values(widgets).some(wg=>wg.type===type)) {
+    toast('Widget already on canvas — only one per template'); return;
+  }
+  const id = 'w'+(nid++);
+  const def = LAYOUT[type] || {x:12, y:200, w:384, h:60};
+  const d = JSON.parse(JSON.stringify(DEFS[type]||{}));
+  widgets[id] = {id, type, x:x??def.x, y:y??def.y, w:w??def.w, h:h??def.h, d};
+  const el = makeEl(id);
+  paper.appendChild(el);
+  if(UNIQUE.includes(type)) document.getElementById('pal-'+type)?.classList.add('used');
+  if(!silent) { selW(id); saveHistory(); trigSave(); }
+}
+
+// ── INIT: load default layout ──
+function init() {
+  const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox'];
+  order.forEach(type => addW(type, undefined, undefined, undefined, undefined, true));
+  saveHistory();
+  applyZ();
+}
+
+// ── SELECT ──
+function selW(id) {
+  if(selId && selId !== id) document.getElementById(selId)?.classList.remove('sel');
+  selId = id;
+  document.getElementById(id)?.classList.add('sel');
+  if(widgets[id] && widgets[id].type === 'custom'){
+    renderCustomEP(id);
+  } else {
+    renderEP(id);
+  }
+}
+
+function clickPaper(e) {
+  if(e.target === paper || e.target === document.getElementById('paper-frame')) {
+    if(selId) document.getElementById(selId)?.classList.remove('sel');
+    selId = null;
+    document.getElementById('ep-title').textContent = 'Canvas';
+    document.getElementById('ep-sub').textContent = 'Click any widget to edit';
+    document.getElementById('wedit').style.display = 'none';
+    document.getElementById('nosel').style.display = '';
+  }
+}
+
+document.addEventListener('click', e => {
+  if(!e.target.closest('.cw') && !e.target.closest('.epanel')) {
+    if(selId) document.getElementById(selId)?.classList.remove('sel');
+    selId = null;
+    document.getElementById('ep-title').textContent = 'Canvas';
+    document.getElementById('ep-sub').textContent = 'Click any widget to edit';
+    document.getElementById('wedit').style.display = 'none';
+    document.getElementById('nosel').style.display = '';
+  }
+});
+
+// ── DELETE ──
+function delW(id) {
+  const type = widgets[id]?.type;
+  const UNIQUE = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox','description','features','barcode','qrcode'];
+  if(UNIQUE.includes(type)) document.getElementById('pal-'+type)?.classList.remove('used');
+  document.getElementById(id)?.remove();
+  delete widgets[id];
+  if(selId===id) {
+    selId=null;
+    document.getElementById('wedit').style.display='none';
+    document.getElementById('nosel').style.display='';
+  }
+  saveHistory(); trigSave();
+}
+
+// ── DRAG FROM PALETTE ──
+function pdrag(e, type) { dragType=type; e.dataTransfer.effectAllowed='copy'; }
+function dropCanvas(e) {
+  e.preventDefault(); if(!dragType) return;
+  const pr = paper.getBoundingClientRect();
+  const x = snap(Math.max(0,(e.clientX-pr.left)/Z-40));
+  const y = snap(Math.max(0,(e.clientY-pr.top)/Z-20));
+  if(dragType.startsWith('custom:')){
+    addCustomW(dragType.replace('custom:',''), x, y, false);
+  } else {
+    addW(dragType, x, y, undefined, undefined, false);
+  }
+  dragType = null;
+}
+
+// ── EDIT PANEL ──
+const EP_NAMES = {logo:'Logo',vehicle:'Vehicle data',msrp:'MSRP line',options:'Options table',subtotal:'Subtotal',askbar:'Asking price bar',dealer:'Dealer address',headerbar:'Header bar',customtext:'Custom text',sigline:'Signature line',infobox:'Infobox'};
+
+function renderEP(id) {
+  const w = widgets[id]; if(!w) return;
+  document.getElementById('ep-title').textContent = EP_NAMES[w.type]||w.type;
+  document.getElementById('ep-sub').textContent = `${Math.round(w.x)}, ${Math.round(w.y)} · ${Math.round(w.w)}×${Math.round(w.h)}`;
+  document.getElementById('nosel').style.display = 'none';
+  const we = document.getElementById('wedit'); we.style.display='';
+
+  let h = `<div class="epw">
+    <div class="eps">Position &amp; size</div>
+    <div class="r4" style="margin-bottom:6px">
+      <div><div class="fl" style="font-size:10px">X</div><input class="fi" type="number" id="px-x" value="${Math.round(w.x)}" oninput="updPos('${id}','x',+this.value)" style="font-family:var(--mono);font-size:11px;padding:4px 5px"></div>
+      <div><div class="fl" style="font-size:10px">Y</div><input class="fi" type="number" id="px-y" value="${Math.round(w.y)}" oninput="updPos('${id}','y',+this.value)" style="font-family:var(--mono);font-size:11px;padding:4px 5px"></div>
+      <div><div class="fl" style="font-size:10px">W</div><input class="fi" type="number" id="px-w" value="${Math.round(w.w)}" oninput="updPos('${id}','w',+this.value)" style="font-family:var(--mono);font-size:11px;padding:4px 5px"></div>
+      <div><div class="fl" style="font-size:10px">H</div><input class="fi" type="number" id="px-h" value="${Math.round(w.h)}" oninput="updPos('${id}','h',+this.value)" style="font-family:var(--mono);font-size:11px;padding:4px 5px"></div>
+    </div>
+  </div>`;
+
+  if(w.type==='logo') h+=`<div class="epw"><div class="eps">Logo</div>
+    <div class="fd"><div class="fl">Upload logo image</div>
+      <input type="file" id="logo-file" accept="image/*" onchange="uploadLogo('${id}',this)" style="font-size:11px;width:100%">
+    </div>
+    <div class="fd"><div class="fl">Or paste URL</div>
+      <input class="fi" id="logo-url" value="${w.d.imgUrl||''}" placeholder="https://…" oninput="u('${id}','imgUrl',this.value)" style="font-size:11px">
+    </div>
+    <div class="fd"><div class="fl">Placeholder text</div>
+      <input class="fi" value="${w.d.label||'Your Logo'}" oninput="u('${id}','label',this.value)">
+    </div></div>`;
+
+  else if(w.type==='vehicle') h+=`<div class="epw"><div class="eps">Fields to display</div>
+    ${['stock','vin','year','color','make','trim','model','mileage'].map(f=>`<div class="tr"><span class="tl" style="text-transform:capitalize">${f}</span><label class="tog"><input type="checkbox" checked onchange="trigSave()"><div class="togt"></div><div class="togth"></div></label></div>`).join('')}
+    <div class="tr" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)"><span class="tl">Bordered box style</span><label class="tog"><input type="checkbox" ${w.d.boxed?'checked':''} onchange="u('${id}','boxed',this.checked)"><div class="togt"></div><div class="togth"></div></label></div></div>    <div class="fd" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)"><div class="eps" style="margin-bottom:6px">Year Make Model Trim header</div><div class="tr"><span class="tl">Show header</span><label class="tog"><input type="checkbox" ${w.d.showHeader!==false?"checked":""} onchange="u('${id}','showHeader',this.checked)"><div class="togt"></div><div class="togth"></div></label></div>    <div class="fd" data-fkey="headerFontSize" data-base="14" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)"><div class="fl">Font size <span style="font-family:var(--mono);color:var(--acc)" class="fs-px">${Math.round(14*(fontScale||1)*(w.d.headerFontSize||1))}px</span></div><div style="display:flex;align-items:center;gap:8px;margin-top:4px"><button onclick="adjFont('${id}','headerFontSize',-0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:16px;cursor:pointer;line-height:1">-</button><div style="flex:1;text-align:center;font-size:11px;color:var(--t2)" class="fs-pct">${Math.round((w.d.headerFontSize||1)*100)}% of global</div><button onclick="adjFont('${id}','headerFontSize',0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:16px;cursor:pointer;line-height:1">+</button></div></div></div><div class="fd" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)"><div class="eps" style="margin-bottom:6px">Detail fields</div>    <div class="fd" data-fkey="fontSize" data-base="10.0" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)"><div class="fl">Font size <span style="font-family:var(--mono);color:var(--acc)" class="fs-px">${Math.round(10*(fontScale||1)*(w.d.fontSize||1))}px</span></div><div style="display:flex;align-items:center;gap:8px;margin-top:4px"><button onclick="adjFont('${id}','fontSize',-0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:16px;cursor:pointer;line-height:1">-</button><div style="flex:1;text-align:center;font-size:11px;color:var(--t2)" class="fs-pct">${Math.round((w.d.fontSize||1)*100)}% of global</div><button onclick="adjFont('${id}','fontSize',0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:16px;cursor:pointer;line-height:1">+</button></div></div></div>
+`;
+
+  else if(w.type==='msrp') h+=`<div class="epw"><div class="eps">MSRP line</div>
+    <div class="fd"><div class="fl">Label</div><input class="fi" value="${w.d.label}" oninput="u('${id}','label',this.value)"></div>
+    <div class="tr"><span class="tl">Divider line below</span><label class="tog"><input type="checkbox" ${w.d.divider!==false?'checked':''} onchange="u('${id}','divider',this.checked)"><div class="togt"></div><div class="togth"></div></label></div></div>    <div class="fd" data-fkey="fontSize" data-base="11.0" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)">
+      <div class="fl">MSRP font size <span style="font-family:var(--mono);color:var(--acc)" class="fs-px">${Math.round(11*(fontScale||1)*(w.d.fontSize||1))}px</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <button onclick="adjFont('${id}','fontSize',-0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
+        <div style="flex:1;text-align:center;font-size:11px;color:var(--t2)" class="fs-pct">${Math.round((w.d.fontSize||1)*100)}% of global</div>
+        <button onclick="adjFont('${id}','fontSize',0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+      </div>
+    </div>
+`;
+
+  else if(w.type==='options') h+=`<div class="epw"><div class="eps">Options table</div>
+    <div class="fd"><div class="fl">Section label</div><input class="fi" value="${w.d.sectionLabel}" oninput="u('${id}','sectionLabel',this.value)"></div>
+    <div style="font-size:10px;color:var(--t3);line-height:1.5;padding-top:4px">Option names and prices are set per vehicle in the addendum editor — not in the template.</div></div>    <div class="fd" data-fkey="fontSize" data-base="10.5" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)"><div class="fl">Font size <span style="font-family:var(--mono);color:var(--acc)" class="fs-px">${Math.round(10.5*(fontScale||1)*(w.d.fontSize||1))}px</span></div><div style="display:flex;align-items:center;gap:8px;margin-top:4px"><button onclick="adjFont('${id}','fontSize',-0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:16px;cursor:pointer;line-height:1">-</button><div style="flex:1;text-align:center;font-size:11px;color:var(--t2)" class="fs-pct">${Math.round((w.d.fontSize||1)*100)}% of global</div><button onclick="adjFont('${id}','fontSize',0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:16px;cursor:pointer;line-height:1">+</button></div></div>
+`;
+
+  else if(w.type==='subtotal') h+=`<div class="epw"><div class="eps">Subtotal</div>
+    <div class="fd"><div class="fl">Label</div><input class="fi" value="${w.d.label}" oninput="u('${id}','label',this.value)"></div></div>    <div class="fd" data-fkey="fontSize" data-base="12.0" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)"><div class="fl">Font size <span style="font-family:var(--mono);color:var(--acc)" class="fs-px">${Math.round(12*(fontScale||1)*(w.d.fontSize||1))}px</span></div><div style="display:flex;align-items:center;gap:8px;margin-top:4px"><button onclick="adjFont('${id}','fontSize',-0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:16px;cursor:pointer;line-height:1">-</button><div style="flex:1;text-align:center;font-size:11px;color:var(--t2)" class="fs-pct">${Math.round((w.d.fontSize||1)*100)}% of global</div><button onclick="adjFont('${id}','fontSize',0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:16px;cursor:pointer;line-height:1">+</button></div></div>
+`;
+
+  else if(w.type==='askbar') h+=`<div class="epw"><div class="eps">Asking price bar</div>
+    <div class="fd"><div class="fl">Label</div><input class="fi" value="${w.d.label}" oninput="u('${id}','label',this.value)"></div>
+    <div class="fd"><div class="fl">Subtitle (optional)</div><input class="fi" value="${w.d.subtitle||''}" oninput="u('${id}','subtitle',this.value)"></div></div>    <div class="fd"><div class="fl">Label &amp; subtitle color</div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <div style="display:flex;align-items:center;gap:4px;cursor:pointer" onclick="u('${id}','labelColor','#ffffff')">
+        <div style="width:24px;height:24px;background:#fff;border:2px solid ${w.d.labelColor==='#ffffff'?'#2563EB':'#ccc'};border-radius:3px;flex-shrink:0"></div>
+        <span style="font-size:11px;color:var(--t2)">White</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;cursor:pointer" onclick="u('${id}','labelColor','#000000')">
+        <div style="width:24px;height:24px;background:#000;border:2px solid ${w.d.labelColor==='#000000'?'#2563EB':'#ccc'};border-radius:3px;flex-shrink:0"></div>
+        <span style="font-size:11px;color:var(--t2)">Black</span>
+      </div>
+    </div></div>
+    <div class="fd"><div class="fl">Price value color</div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <div style="display:flex;align-items:center;gap:4px;cursor:pointer" onclick="u('${id}','valueColor','#ffffff')">
+        <div style="width:24px;height:24px;background:#fff;border:2px solid ${w.d.valueColor==='#ffffff'?'#2563EB':'#ccc'};border-radius:3px;flex-shrink:0"></div>
+        <span style="font-size:11px;color:var(--t2)">White</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;cursor:pointer" onclick="u('${id}','valueColor','#000000')">
+        <div style="width:24px;height:24px;background:#000;border:2px solid ${w.d.valueColor==='#000000'?'#2563EB':'#ccc'};border-radius:3px;flex-shrink:0"></div>
+        <span style="font-size:11px;color:var(--t2)">Black</span>
+      </div>
+    </div></div>
+      <div class="fd" data-fkey="labelFontSize" data-base="12" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)">
+      <div class="fl">Label font size <span style="font-family:var(--mono);color:var(--acc)" class="fs-px">${Math.round(12*(fontScale||1)*(w.d.labelFontSize||1))}px</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <button onclick="adjFont('${id}','labelFontSize',-0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
+        <div style="flex:1;text-align:center;font-size:11px;color:var(--t2)" class="fs-pct">${Math.round((w.d.labelFontSize||1)*100)}% of global</div>
+        <button onclick="adjFont('${id}','labelFontSize',0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+      </div>
+    </div>
+    <div class="fd" data-fkey="valueFontSize" data-base="13">
+      <div class="fl">Price value font size <span style="font-family:var(--mono);color:var(--acc)" class="fs-px">${Math.round(13*(fontScale||1)*(w.d.valueFontSize||1))}px</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <button onclick="adjFont('${id}','valueFontSize',-0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
+        <div style="flex:1;text-align:center;font-size:11px;color:var(--t2)" class="fs-pct">${Math.round((w.d.valueFontSize||1)*100)}% of global</div>
+        <button onclick="adjFont('${id}','valueFontSize',0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+      </div>
+    </div>
+`;
+
+
+  else if(w.type==='dealer') h+=`<div class="epw"><div class="eps">Dealer address</div>
+    <div class="fd"><textarea class="fi" rows="5" style="resize:none" oninput="u('${id}','text',this.value)">${w.d.text||''}</textarea></div></div>    <div class="fd" data-fkey="fontSize" data-base="10.0" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)"><div class="fl">Font size <span style="font-family:var(--mono);color:var(--acc)" class="fs-px">${Math.round(10*(fontScale||1)*(w.d.fontSize||1))}px</span></div><div style="display:flex;align-items:center;gap:8px;margin-top:4px"><button onclick="adjFont('${id}','fontSize',-0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:16px;cursor:pointer;line-height:1">-</button><div style="flex:1;text-align:center;font-size:11px;color:var(--t2)" class="fs-pct">${Math.round((w.d.fontSize||1)*100)}% of global</div><button onclick="adjFont('${id}','fontSize',0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:16px;cursor:pointer;line-height:1">+</button></div></div>
+`;
+
+  else if(w.type==='headerbar') h+=`<div class="epw"><div class="eps">Header bar</div>
+    <div class="fd"><div class="fl">Text</div><input class="fi" value="${w.d.text||''}" oninput="u('${id}','text',this.value)"></div>
+    <div class="eps" style="margin-top:8px">Color</div>
+    <div class="swg">${[['#1a1916','Black'],['#374151','Slate'],['#2563EB','Blue'],['#DC2626','Red'],['#15803D','Green'],['#7C3AED','Purple'],['#D97706','Gold']].map(([c,n])=>`<div class="sw${w.d.color===c?' on':''}" style="background:${c}" title="${n}" onclick="u('${id}','color','${c}')"></div>`).join('')}</div></div>`;
+
+  else if(w.type==='customtext') h+=`<div class="epw"><div class="eps">Custom text</div>
+    <div class="fd"><textarea class="fi" rows="3" style="resize:none" oninput="u('${id}','text',this.value)">${w.d.text||''}</textarea></div>
+    <div class="r2">
+      <div class="fd"><div class="fl">Alignment</div><select class="fsel" onchange="u('${id}','align',this.value)"><option value="left" ${w.d.align==='left'?'selected':''}>Left</option><option value="center" ${w.d.align==='center'?'selected':''}>Center</option><option value="right" ${w.d.align==='right'?'selected':''}>Right</option></select></div>
+      <div class="fd"><div class="fl">Font size</div><input class="fi" type="number" value="${w.d.fs||10}" min="7" max="24" oninput="u('${id}','fs',+this.value)"></div>
+    </div></div>`;
+
+  else if(w.type==='sigline') h+=`<div class="epw"><div class="eps">Signature line</div>
+    <div class="fd"><div class="fl">Left field</div><input class="fi" value="${w.d.l1||'Buyers Signature'}" oninput="u('${id}','l1',this.value)"></div>
+    <div class="fd"><div class="fl">Right field</div><input class="fi" value="${w.d.l2||'Date'}" oninput="u('${id}','l2',this.value)"></div></div>`;
+
+  else if(w.type==='infobox') {
+    const types=[['epa','EPA/DOT Fuel Economy'],['photo','Dynamic vehicle photo'],['autobutler','Auto Butler'],['buffnshine',"Buff N'Shine"],['qr','QR code'],['sms','SMS code'],['barcode','VIN barcode'],['qrsms','QR to SMS'],['upload','Upload custom']];
+    h+=`<div class="epw"><div class="eps">Infobox type</div>
+      ${types.map(([v,l])=>`<div class="ibt${w.d.ibType===v?' on':''}" onclick="setIBType('${id}','${v}')"><span class="ibt-name">${l}</span></div>`).join('')}
+      <div style="margin-top:8px;display:flex;gap:4px">
+        <button class="btn" style="flex:1;justify-content:center;font-size:11px" onclick="alert('Browse stock library')">Library</button>
+        <button class="btn" style="flex:1;justify-content:center;font-size:11px" onclick="alert('Upload custom infobox image')">&#8593; Upload</button>
+      </div>
+      <div class="fd" style="margin-top:8px"><div class="fl">Or load from URL</div>
+        <input class="fi" value="${w.d.imgUrl||''}" placeholder="https://…" oninput="u('${id}','imgUrl',this.value);refW('${id}')" style="font-size:11px">
+      </div></div>`;
+
+  } else if(w.type==='description'){
+    const fs = Math.round(10*(fontScale||1)*(w.d.fontSize||1));
+    h+=`<div class="epw"><div class="eps">Description</div>
+    <div class="fd"><div class="fl">Content source</div>
+    <div style="display:flex;gap:6px;margin-top:4px">
+      <button onclick="u('${id}','aiMode','db')" style="flex:1;padding:5px;border-radius:4px;border:2px solid ${w.d.aiMode==='db'?'#1976d2':'var(--bdr)'};background:${w.d.aiMode==='db'?'#e3f2fd':'var(--sur)'};cursor:pointer;font-size:11px;font-weight:600;color:${w.d.aiMode==='db'?'#1976d2':'var(--t2)'}">DB</button>
+      <button onclick="u('${id}','aiMode','ai')" style="flex:1;padding:5px;border-radius:4px;border:2px solid ${w.d.aiMode==='ai'?'#1976d2':'var(--bdr)'};background:${w.d.aiMode==='ai'?'#e3f2fd':'var(--sur)'};cursor:pointer;font-size:11px;font-weight:600;color:${w.d.aiMode==='ai'?'#1976d2':'var(--t2)'}">AI ✨</button>
+    </div></div>
+    <div class="fd" style="margin-top:6px"><div class="fl">Preview text</div><textarea class="fi" rows="4" style="resize:none;font-size:11px;line-height:1.5" oninput="u('${id}','text',this.value)">${w.d.text||''}</textarea></div>
+    <div class="fd" data-fkey="fontSize" data-base="10.0"><div class="fl">Font size <span style="font-family:var(--mono);color:var(--acc)" class="fs-px">${fs}px</span></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+      <button onclick="adjFont('${id}','fontSize',-0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:14px;cursor:pointer">−</button>
+      <div style="flex:1;text-align:center;font-size:11px;color:var(--t2)" class="fs-pct">${Math.round((w.d.fontSize||1)*100)}% of global</div>
+      <button onclick="adjFont('${id}','fontSize',0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:14px;cursor:pointer">+</button>
+    </div></div></div>`;
+  } else if(w.type==='features'){
+    const fs = Math.round(9.5*(fontScale||1)*(w.d.fontSize||1));
+    h+=`<div class="epw"><div class="eps">Features list</div>
+    <div class="fd"><div class="fl">Content source</div>
+    <div style="display:flex;gap:6px;margin-top:4px">
+      <button onclick="u('${id}','aiMode','db')" style="flex:1;padding:5px;border-radius:4px;border:2px solid ${w.d.aiMode==='db'?'#1976d2':'var(--bdr)'};background:${w.d.aiMode==='db'?'#e3f2fd':'var(--sur)'};cursor:pointer;font-size:11px;font-weight:600;color:${w.d.aiMode==='db'?'#1976d2':'var(--t2)'}">DB</button>
+      <button onclick="u('${id}','aiMode','ai')" style="flex:1;padding:5px;border-radius:4px;border:2px solid ${w.d.aiMode==='ai'?'#1976d2':'var(--bdr)'};background:${w.d.aiMode==='ai'?'#e3f2fd':'var(--sur)'};cursor:pointer;font-size:11px;font-weight:600;color:${w.d.aiMode==='ai'?'#1976d2':'var(--t2)'}">AI ✨</button>
+    </div></div>
+    <div style="font-size:10px;color:var(--t3);padding:6px 0;line-height:1.5">
+      ${w.d.aiMode==='ai'
+        ? 'Claude will generate the features list from vehicle data at print time. Items shown are a preview.'
+        : 'Features pulled from vehicle equipment database. 2-column layout auto-formatted.'}
+    </div>
+    <div class="fd" data-fkey="fontSize" data-base="10.0"><div class="fl">Font size <span style="font-family:var(--mono);color:var(--acc)" class="fs-px">${Math.round(fs)}px</span></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+      <button onclick="adjFont('${id}','fontSize',-0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:14px;cursor:pointer">−</button>
+      <div style="flex:1;text-align:center;font-size:11px;color:var(--t2)" class="fs-pct">${Math.round((w.d.fontSize||1)*100)}% of global</div>
+      <button onclick="adjFont('${id}','fontSize',0.1)" style="width:28px;height:28px;border:1px solid var(--bdr);border-radius:4px;background:var(--s2);font-size:14px;cursor:pointer">+</button>
+    </div></div></div>`;
+  } else if(w.type==='barcode'){
+    h+=`<div class="epw"><div class="eps">Barcode</div>
+    <div class="fd"><div class="fl">VIN (auto-populated at print time)</div>
+    <input class="fi" value="${w.d.vin||''}" oninput="u('${id}','vin',this.value)" style="font-family:var(--mono);font-size:12px" placeholder="VIN auto-filled from vehicle record"></div>
+    <div style="font-size:10px;color:var(--t3);line-height:1.5;padding:4px 0">Code-128 barcode generated at print time via JsBarcode. Preview shows approximate bar pattern.</div></div>`;
+  } else if(w.type==='qrcode'){
+    h+=`<div class="epw"><div class="eps">QR Code</div>
+    <div class="fd"><div class="fl">URL (auto-populated at print time)</div>
+    <input class="fi" value="${w.d.url||''}" oninput="u('${id}','url',this.value);refW('${id}')" style="font-size:11px" placeholder="https://..."></div>
+    <div class="fd"><div class="fl">Label text</div>
+    <input class="fi" value="${w.d.label||'Scan for more info'}" oninput="u('${id}','label',this.value);refW('${id}')"></div>
+    <div style="font-size:10px;color:var(--t3);line-height:1.5;padding:4px 0">QR code links to vehicle's detail page. URL auto-populated from vehicle record at print time.</div></div>`;
+  
+  }
+
+  h+=`<div class="epw"><button class="delbtn" onclick="delW('${id}')">&#10005; Remove widget</button></div>`;
+  we.innerHTML = h;
+}
+
+// ── UPDATE HELPERS ──
+function u(id, key, val) {
+  if(!widgets[id]) return;
+  widgets[id].d[key] = val;
+  refW(id); trigSave();
+}
+function refW(id) {
+  const w=widgets[id]; if(!w) return;
+  document.getElementById('wc_'+id).innerHTML = renderW(w.type, w.d, w.w, w.h);
+}
+function updPos(id, key, val) {
+  if(!widgets[id]||isNaN(val)) return;
+  const w=widgets[id];
+  w[key]=snap(val);
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.style.left=w.x+'px'; el.style.top=w.y+'px';
+  el.style.width=w.w+'px'; el.style.height=w.h+'px';
+  document.getElementById('ep-sub').textContent=`${Math.round(w.x)}, ${Math.round(w.y)} · ${Math.round(w.w)}×${Math.round(w.h)}`;
+  trigSave();
+}
+function updPosInputs(id) {
+  const w=widgets[id]; if(!w) return;
+  const fields={'px-x':w.x,'px-y':w.y,'px-w':w.w,'px-h':w.h};
+  Object.entries(fields).forEach(([fid,val])=>{const el=document.getElementById(fid);if(el)el.value=Math.round(val);});
+  document.getElementById('ep-sub').textContent=`${Math.round(w.x)}, ${Math.round(w.y)} · ${Math.round(w.w)}×${Math.round(w.h)}`;
+}
+function setIBType(id, type) {
+  widgets[id].d.ibType=type;
+  if(type==='epa') widgets[id].d.imgUrl=IB_DEFAULT;
+  else widgets[id].d.imgUrl='';
+  refW(id); renderEP(id); trigSave();
+}
+function uploadLogo(id, input) {
+  if(!input.files||!input.files[0]) return;
+  const reader=new FileReader();
+  reader.onload=e=>{u(id,'imgUrl',e.target.result);};
+  reader.readAsDataURL(input.files[0]);
+}
+
+// ── ALIGNMENT ──
+function alignSel(dir) {
+  if(!selId||!widgets[selId]) return;
+  const w=widgets[selId];
+  const pw=PAPERS[paperSize].w;
+  if(dir==='left') w.x=12;
+  else if(dir==='right') w.x=pw-w.w-12;
+  else if(dir==='center') w.x=snap((pw-w.w)/2);
+  const el=document.getElementById(selId);
+  if(el) el.style.left=w.x+'px';
+  updPosInputs(selId); trigSave();
+}
+
+// ── BACKGROUND ──
+function setBg(which, tile) {
+  document.querySelectorAll('.bg-row').forEach(r=>r.classList.remove('on'));
+  tile.classList.add('on');
+  const f=document.getElementById('paper-frame');
+  if(which==='default') f.src=BG_DEFAULT;
+  else toast('Background ′'+which+'′ — loads from S3 in production');
+  trigSave();
+}
+function loadBgUrl() {
+  const url=document.getElementById('bg-url').value.trim();
+  if(!url){toast('Enter a URL');return;}
+  const f=document.getElementById('paper-frame');
+  f.onerror=()=>toast('Could not load — check URL and CORS');
+  f.onload=()=>{toast('Background loaded');trigSave();};
+  f.src=url;
+}
+
+// ── HISTORY (undo/redo) ──
+function saveHistory() {
+  const state=JSON.stringify({widgets,nid});
+  history=history.slice(0,histIdx+1);
+  history.push(state);
+  histIdx=history.length-1;
+}
+function undo() {
+  if(histIdx<=0){toast('Nothing to undo');return;}
+  histIdx--;
+  restoreHistory();
+}
+function redo() {
+  if(histIdx>=history.length-1){toast('Nothing to redo');return;}
+  histIdx++;
+  restoreHistory();
+}
+function restoreHistory() {
+  const state=JSON.parse(history[histIdx]);
+  // Remove all current widgets
+  Object.keys(widgets).forEach(id=>document.getElementById(id)?.remove());
+  widgets={};
+  nid=state.nid;
+  // Restore palette
+  document.querySelectorAll('.wtile').forEach(t=>t.classList.remove('used'));
+  // Re-create widgets
+  const UNIQUE=['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox'];
+  Object.values(state.widgets).forEach(w=>{
+    widgets[w.id]=w;
+    const el=makeEl(w.id);
+    paper.appendChild(el);
+    if(UNIQUE.includes(w.type)) document.getElementById('pal-'+w.type)?.classList.add('used');
+  });
+  selId=null;
+  document.getElementById('wedit').style.display='none';
+  document.getElementById('nosel').style.display='';
+}
+
+// ── ZOOM ──
+function snap(v){return Math.round(v/SNAP)*SNAP;}
+function doZ(d){Z=Math.max(.25,Math.min(2,Z+d));applyZ();}
+function fitZ(){Z=0.75;applyZ();}
+function applyZ(){paper.style.transform=`scale(${Z})`;paper.style.transformOrigin='top center';document.getElementById('znum').textContent=Math.round(Z*100)+'%';}
+
+// ── PAPER SIZE ──
+function setPaperW(size){
+  const prev = paperSize;
+  paperSize = size;
+  const p = PAPERS[size];
+  paper.style.width  = p.w+'px';
+  paper.style.height = p.h+'px';
+  const frame = document.getElementById('paper-frame');
+  if(size==='infosheet'){
+    frame.src = IS_BG_DEFAULT;
+    document.getElementById('bg-url').value = IS_BG_DEFAULT;
+  } else if(prev==='infosheet'){
+    frame.src = BG_DEFAULT;
+    document.getElementById('bg-url').value = BG_DEFAULT;
+  }
+  if(size==='infosheet' && prev!=='infosheet'){
+    Object.keys(widgets).forEach(id=>{document.getElementById(id)?.remove();delete widgets[id];});
+    document.querySelectorAll('.wtile').forEach(t=>t.classList.remove('used'));
+    nid=1; loadInfosheetDefaults();
+    document.querySelectorAll('.iswidget,.isgroup').forEach(el=>el.style.display='');
+    ['pal-msrp','pal-options','pal-subtotal','pal-infobox'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+  } else if(prev==='infosheet' && size!=='infosheet'){
+    Object.keys(widgets).forEach(id=>{document.getElementById(id)?.remove();delete widgets[id];});
+    document.querySelectorAll('.wtile').forEach(t=>t.classList.remove('used'));
+    nid=1;
+    ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox'].forEach(t=>addW(t,undefined,undefined,undefined,undefined,true));
+    saveHistory();
+    document.querySelectorAll('.iswidget,.isgroup').forEach(el=>el.style.display='none');
+    ['pal-msrp','pal-options','pal-subtotal','pal-infobox'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});
+  }
+  trigSave();
+}
+
+function loadInfosheetDefaults(){
+  const order=['logo','vehicle','description','features','askbar','qrcode','barcode','dealer','customtext'];
+  order.forEach(type=>{const def=LAYOUT_INFOSHEET[type];if(!def)return;addW(type,def.x,def.y,def.w,def.h,true);});
+  // Infosheet-specific font overrides
+  Object.values(widgets).forEach(w=>{
+    if(w.type==='askbar'){w.d.labelFontSize=1.6;w.d.valueFontSize=1.9;const el=document.getElementById('wc_'+w.id);if(el)el.innerHTML=renderW(w.type,w.d);}
+    if(w.type==='vehicle'){w.d.headerFontSize=1.2;const el=document.getElementById('wc_'+w.id);if(el)el.innerHTML=renderW(w.type,w.d);}
+  });
+  saveHistory(); toast('Infosheet layout loaded');
+}
+
+// ── MISC ──
+function setType(btn){document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('on'));btn.classList.add('on');trigSave();}
+function showPM(){document.getElementById('pm').style.display='flex';}
+function hidePM(){document.getElementById('pm').style.display='none';}
+function trigSave(){
+  const el=document.getElementById('spill');
+  el.style.color='var(--warn)';
+  el.innerHTML=`<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4.5" stroke="currentColor" stroke-width="1.3" stroke-dasharray="3 2"/></svg> Saving&hellip;`;
+  clearTimeout(saveT);
+  saveT=setTimeout(()=>{
+    el.style.color='var(--ok)';
+    el.innerHTML=`<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4.5" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 5.5l1.5 1.5L8 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg> Saved`;
+  },700);
+}
+function toast(msg){const t=document.getElementById('toast-el');t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';setTimeout(()=>{t.style.opacity='0';t.style.transform='translateX(-50%) translateY(20px)';},2200);}
+
+function setFontScale(s) {
+  fontScale = s;
+  // Re-render all widgets so inline font sizes recalculate
+  Object.values(widgets).forEach(w => {
+    document.getElementById('wc_' + w.id).innerHTML = renderW(w.type, w.d);
+  });
+  // If a widget is selected, refresh the edit panel so px sizes update
+  if(selId) renderEP(selId);
+  trigSave();
+}
+
+function adjFont(id, key, delta) {
+  if(!widgets[id]) return;
+  const cur = parseFloat(widgets[id].d[key]) || 1.0;
+  const next = Math.round(Math.max(0.5, Math.min(3.0, cur + delta)) * 10) / 10;
+  widgets[id].d[key] = next;
+  // Re-render widget content on canvas
+  const wcEl = document.getElementById('wc_' + id);
+  if(wcEl) wcEl.innerHTML = renderW(widgets[id].type, widgets[id].d);
+  // Update readout spans in edit panel WITHOUT rebuilding the panel
+  // Avoids deselecting the widget by keeping the DOM intact
+  if(selId === id) updateFontReadouts(id);
+  trigSave();
+}
+
+function updateFontReadouts(id) {
+  // Update all font size readout spans and % labels in the edit panel
+  // by scanning for data-fkey attributes we've added to stepper containers
+  const epbody = document.getElementById('epbody');
+  if(!epbody) return;
+  const w = widgets[id]; if(!w) return;
+  // Find all stepper divs with data-fkey attribute
+  epbody.querySelectorAll('[data-fkey]').forEach(el => {
+    const fkey = el.dataset.fkey;
+    const base = parseFloat(el.dataset.base) || 10;
+    const val  = parseFloat(w.d[fkey]) || 1.0;
+    const px   = Math.round(base * (fontScale||1) * val);
+    const pct  = Math.round(val * 100);
+    const pxEl  = el.querySelector('.fs-px');
+    const pctEl = el.querySelector('.fs-pct');
+    if(pxEl)  pxEl.textContent = px + 'px';
+    if(pctEl) pctEl.textContent = pct + '% of global';
+  });
+}
+
+function toggleBg() {
+  const p = document.getElementById('bgpanel');
+  if(!p) return;
+  const open = p.style.display !== 'none';
+  p.style.display = open ? 'none' : 'block';
+  const icon = document.getElementById('bgt');
+  if(icon) icon.innerHTML = open ? '&#9658;' : '&#9660;';
+}
+
+
+document.addEventListener('keydown',e=>{
+  if((e.key==='Delete'||e.key==='Backspace')&&selId&&e.target.tagName!=='INPUT'&&e.target.tagName!=='TEXTAREA') delW(selId);
+  if(e.key==='Escape'){
+    if(document.getElementById('pm').style.display!=='none'){hidePM();return;}
+    if(selId){document.getElementById(selId)?.classList.remove('sel');selId=null;}
+  }
+  if(e.key==='Enter'&&document.getElementById('save-modal').style.display!=='none'&&e.target===document.getElementById('save-tname')){doSaveTemplate();return;}if(e.key==='z'&&(e.metaKey||e.ctrlKey)&&!e.shiftKey){e.preventDefault();undo();}
+  if((e.key==='z'&&(e.metaKey||e.ctrlKey)&&e.shiftKey)||(e.key==='y'&&e.ctrlKey)){e.preventDefault();redo();}
+  // Arrow key nudge: 1px, Shift=4px, Cmd/Ctrl=10px
+  if(selId&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)&&e.target.tagName!=='INPUT'&&e.target.tagName!=='TEXTAREA'){
+    e.preventDefault();
+    const step=e.metaKey||e.ctrlKey?10:e.shiftKey?4:1;
+    const w=widgets[selId]; if(!w) return;
+    if(e.key==='ArrowLeft')  w.x=Math.max(0,w.x-step);
+    if(e.key==='ArrowRight') w.x=Math.min(PAPERS[paperSize].w-w.w,w.x+step);
+    if(e.key==='ArrowUp')    w.y=Math.max(0,w.y-step);
+    if(e.key==='ArrowDown')  w.y=Math.min(PAPERS[paperSize].h-w.h,w.y+step);
+    const el=document.getElementById(selId);
+    el.style.left=w.x+'px'; el.style.top=w.y+'px';
+    updPosInputs(selId); trigSave();
+  }
+});
+
+init();
+
+// ── SAVE TEMPLATE MODAL ───────────────────────────────────────────────
+let selectedVtypes = new Set(['new']);
+
+function showSaveModal(){
+  // Pre-fill template name from topbar input
+  const nameEl = document.querySelector('.tname');
+  const savedName = nameEl ? nameEl.value : '';
+  document.getElementById('save-tname').value = savedName;
+
+  // Update summary
+  updateSaveSummary();
+
+  document.getElementById('save-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('save-tname').focus(), 100);
+}
+
+function hideSaveModal(){
+  document.getElementById('save-modal').style.display = 'none';
+}
+
+function toggleVtype(btn){
+  const type = btn.dataset.type;
+  // Deselect "All" and "Draft" if a specific type is picked
+  document.querySelectorAll('.vtype-btn[data-type="all"], .vtype-btn[data-type="draft"]')
+    .forEach(b => { b.classList.remove('on'); selectedVtypes.delete(b.dataset.type); });
+
+  if(selectedVtypes.has(type)){
+    selectedVtypes.delete(type);
+    btn.classList.remove('on');
+  } else {
+    selectedVtypes.add(type);
+    btn.classList.add('on');
+  }
+  // If none selected, default back to new
+  if(selectedVtypes.size === 0){
+    selectedVtypes.add('new');
+    document.querySelector('.vtype-btn[data-type="new"]').classList.add('on');
+  }
+  updateSaveSummary();
+}
+
+function toggleVtypeAll(btn){
+  const type = btn.dataset.type;
+  // Clear all other selections
+  document.querySelectorAll('.vtype-btn').forEach(b => b.classList.remove('on'));
+  selectedVtypes.clear();
+  selectedVtypes.add(type);
+  btn.classList.add('on');
+  updateSaveSummary();
+}
+
+function updateSaveSummary(){
+  const name = document.getElementById('save-tname').value.trim() || '(unnamed)';
+  document.getElementById('save-summary-name').textContent = name;
+
+  // Widget count
+  const wCount = Object.keys(widgets).length;
+  const wTypes = Object.values(widgets).map(w => w.type).join(', ');
+  document.getElementById('save-summary-widgets').textContent = wCount + ' widgets: ' + wTypes;
+
+  // Background
+  const activeBg = document.querySelector('.bg-row.on .bg-name');
+  document.getElementById('save-summary-bg').textContent = activeBg ? activeBg.textContent : 'Default';
+
+  // Type description
+  const types = Array.from(selectedVtypes);
+  let desc = '';
+  let noteDesc = '';
+  if(types.includes('draft')){
+    desc = 'Draft (not applied)';
+    noteDesc = 'This template will be saved but not applied to any vehicle type until you reassign it.';
+    document.getElementById('save-confirm-btn').textContent = 'Save as Draft';
+    document.getElementById('save-summary-type').style.color = '#78828c';
+  } else if(types.includes('all')){
+    desc = 'All vehicle types (New, Used, CPO)';
+    noteDesc = 'This template will apply to all new, used, and CPO vehicle addendums.';
+    document.getElementById('save-confirm-btn').textContent = 'Save Template';
+    document.getElementById('save-summary-type').style.color = '#4caf50';
+  } else {
+    desc = types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ');
+    noteDesc = 'This template will apply when printing <strong>' + desc + '</strong> vehicle addendums for this dealer.';
+    document.getElementById('save-confirm-btn').textContent = 'Save Template';
+    document.getElementById('save-summary-type').style.color = '#1976d2';
+  }
+  document.getElementById('save-summary-type').textContent = desc;
+  document.getElementById('vtype-desc').innerHTML = desc;
+  document.getElementById('vtype-note').innerHTML = noteDesc;
+}
+
+function doSaveTemplate(){
+  const name = document.getElementById('save-tname').value.trim();
+  if(!name){
+    document.getElementById('save-tname').focus();
+    document.getElementById('save-tname').style.border = '2px solid #ff5252';
+    setTimeout(() => document.getElementById('save-tname').style.border = '', 1500);
+    return;
+  }
+
+  // Update the topbar template name
+  const nameEl = document.querySelector('.tname');
+  if(nameEl) nameEl.value = name;
+
+  // Update type-seg buttons to reflect selection
+  const types = Array.from(selectedVtypes);
+  document.querySelectorAll('.type-btn').forEach(btn => {
+    const matches = types.includes('all') || types.includes(btn.textContent.toLowerCase());
+    btn.classList.toggle('on', matches);
+  });
+
+  hideSaveModal();
+
+  // Build save summary for toast
+  let typeLabel = types.includes('draft') ? 'Draft' :
+                  types.includes('all')   ? 'New + Used + CPO' :
+                  types.map(t => t.charAt(0).toUpperCase()+t.slice(1)).join(' + ');
+
+  toast('\u2713 Template saved: ' + name + ' [' + typeLabel + ']');
+  trigSave();
+}
+
+// Live update summary as user types template name
+document.addEventListener('DOMContentLoaded', () => {
+  const inp = document.getElementById('save-tname');
+  if(inp) inp.addEventListener('input', updateSaveSummary);
+});
+
+
+// ── CUSTOM WIDGET LIBRARY ─────────────────────────────────────────────
+// Registry: scope = 'platform' | 'group:{groupId}' | 'dealer:{dealerId}'
+let customWidgets = [
+  {
+    id: 'cw_lifetime_warranty',
+    name: 'Lifetime Powertrain Warranty',
+    desc: 'Dealer lifetime warranty block',
+    scope: 'platform',
+    category: 'content',
+    defaultW: 336, defaultH: 52,
+    contentType: 'html',
+    html: '<div style="padding:5px 0"><div style="font-size:11px;font-weight:800;color:#1a1916;text-transform:uppercase;letter-spacing:.02em">&#10003; FREE Lifetime Powertrain Warranty</div><div style="font-size:9px;color:#666;margin-top:2px">Covers engine, transmission &amp; drivetrain — see dealer for details</div></div>',
+    variables: [],
+  },
+  {
+    id: 'cw_not_msrp',
+    name: 'Not the MSRP Disclaimer',
+    desc: 'Federal disclaimer text',
+    scope: 'platform',
+    category: 'structural',
+    defaultW: 336, defaultH: 28,
+    contentType: 'html',
+    html: '<div style="font-size:9px;color:#555;text-align:center;padding:4px 0;font-style:italic">(This addendum has been added by the dealer, not the manufacturer, to reflect any additional charges for items added or services performed. This is not an authorized factory sticker.)</div>',
+    variables: [],
+  },
+  {
+    id: 'cw_market_adj',
+    name: 'Market Adjustment',
+    desc: 'Market adjustment line item',
+    scope: 'platform',
+    category: 'content',
+    defaultW: 336, defaultH: 36,
+    contentType: 'html',
+    html: '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-top:1px solid #eee"><div style="font-size:10.5px;font-weight:700;color:#1a1916">Market Adjustment</div><div style="font-size:10.5px;font-weight:700;color:#1a1916;font-family:monospace">{{market_adj_price}}</div></div>',
+    variables: ['market_adj_price'],
+  },
+];
+
+let cwEditingId = null;
+let cwScope = 'platform';
+let cwContentTab = 'html';
+let cwScopeFilter = 'all';
+
+function renderCWLib() {
+  const list = document.getElementById('cwlib-list');
+  const filtered = customWidgets.filter(w => {
+    if(cwScopeFilter === 'all') return true;
+    return w.scope === cwScopeFilter || w.scope.startsWith(cwScopeFilter + ':');
+  });
+  if(filtered.length === 0){
+    list.innerHTML = '<div class="cwlib-empty">No custom widgets yet.<br>Click + to create one.</div>';
+    return;
+  }
+  list.innerHTML = filtered.map(w => {
+    const scopeLabel = w.scope === 'platform' ? 'Platform' :
+                       w.scope.startsWith('group:') ? 'Group' : 'Dealer';
+    const scopeClass = w.scope === 'platform' ? 'platform' :
+                       w.scope.startsWith('group:') ? 'group' : 'dealer';
+    return `<div class="cwlib-item" draggable="true" data-cwid="${w.id}">` +
+           `<div style="flex:1;min-width:0">` +
+             `<div class="cwlib-name">${w.name}</div>` +
+             `<div class="cwlib-desc">${w.desc}</div>` +
+           `</div>` +
+           `<span class="cwlib-scope ${scopeClass}">${scopeLabel}</span>` +
+           `<div class="cwlib-actions">` +
+             `<button class="cwlib-edit-btn" onclick="event.stopPropagation();editCW(this.closest('.cwlib-item').dataset.cwid)" title="Edit">&#9998;</button>` +
+             `<button class="cwlib-edit-btn" style="color:#ff5252" onclick="event.stopPropagation();deleteCW(this.closest('.cwlib-item').dataset.cwid)" title="Delete">&#10005;</button>` +
+           '</div>' +
+         '</div>';
+  }).join('');
+}
+
+function filterCWScope(scope, btn){
+  cwScopeFilter = scope;
+  document.querySelectorAll('.scope-tab').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  renderCWLib();
+}
+
+function pdragCustom(e, cwId){ dragType = 'custom:' + cwId; e.dataTransfer.effectAllowed = 'copy'; }
+
+function addCustomW(cwId, x, y, silent){
+  const def = customWidgets.find(w => w.id === cwId);
+  if(!def) return;
+  const id = 'w' + (nid++);
+  const d = {cwId, html: def.html, variables: {}};
+  // pre-fill variable defaults
+  def.variables.forEach(v => d.variables[v] = '{{' + v + '}}');
+  widgets[id] = {id, type:'custom', x: x||40, y: y||200, w: def.defaultW, h: def.defaultH, d};
+  const el = makeEl(id);
+  paper.appendChild(el);
+  if(!silent){ selW(id); saveHistory(); trigSave(); }
+}
+
+
+
+
+
+// Edit panel for custom widgets
+function renderCustomEP(id){
+  const w = widgets[id]; if(!w) return;
+  const def = customWidgets.find(cw => cw.id === w.d.cwId);
+  if(!def) return;
+  document.getElementById('ep-title').textContent = def.name;
+  document.getElementById('ep-sub').textContent = `${Math.round(w.x)}, ${Math.round(w.y)} · ${Math.round(w.w)}×${Math.round(w.h)}`;
+  document.getElementById('nosel').style.display = 'none';
+  const we = document.getElementById('wedit'); we.style.display = '';
+
+  let h = `<div class="epw"><div class="eps">Position &amp; size</div>
+    <div class="r4" style="margin-bottom:6px">
+      <div><div class="fl" style="font-size:10px">X</div><input class="fi" type="number" id="px-x" value="${Math.round(w.x)}" oninput="updPos('${id}','x',+this.value)" style="font-family:var(--mono);font-size:11px;padding:4px 5px"></div>
+      <div><div class="fl" style="font-size:10px">Y</div><input class="fi" type="number" id="px-y" value="${Math.round(w.y)}" oninput="updPos('${id}','y',+this.value)" style="font-family:var(--mono);font-size:11px;padding:4px 5px"></div>
+      <div><div class="fl" style="font-size:10px">W</div><input class="fi" type="number" id="px-w" value="${Math.round(w.w)}" oninput="updPos('${id}','w',+this.value)" style="font-family:var(--mono);font-size:11px;padding:4px 5px"></div>
+      <div><div class="fl" style="font-size:10px">H</div><input class="fi" type="number" id="px-h" value="${Math.round(w.h)}" oninput="updPos('${id}','h',+this.value)" style="font-family:var(--mono);font-size:11px;padding:4px 5px"></div>
+    </div></div>`;
+
+  // Variable slots
+  if(def.variables && def.variables.length > 0){
+    h += `<div class="epw"><div class="eps">Variable slots</div>
+      <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.5">These values replace {{variable}} placeholders when printing.</div>
+      ${def.variables.map(v =>
+        `<div class="fd"><div class="fl">{{${v}}}</div><input class="fi" value="${w.d.variables[v]||''}" placeholder="Enter value or leave as {{${v}}}" oninput="updCWVar('${id}','${v}',this.value)"></div>`
+      ).join('')}
+    </div>`;
+  }
+
+  h += `<div class="epw" style="display:flex;gap:8px">
+    <button class="btn" style="flex:1;justify-content:center;font-size:11px" onclick="editCW('${def.id}')">&#9998; Edit widget definition</button>
+  </div>
+  <div class="epw"><button class="delbtn" onclick="delW('${id}')">&#10005; Remove widget</button></div>`;
+
+  we.innerHTML = h;
+}
+
+
+function updCWVar(id, varKey, val){
+  if(!widgets[id]) return;
+  widgets[id].d.variables[varKey] = val;
+  document.getElementById('wc_'+id).innerHTML = renderW('custom', widgets[id].d);
+  trigSave();
+}
+
+
+
+// ── CW BUILDER MODAL ─────────────────────────────────────────────────
+function showCWBuilder(editId){
+  cwEditingId = editId || null;
+  if(editId){
+    const def = customWidgets.find(w => w.id === editId);
+    if(!def) return;
+    document.getElementById('cw-modal-title').textContent = 'Edit Widget: ' + def.name;
+    document.getElementById('cw-save-btn').textContent = 'Save Changes';
+    document.getElementById('cw-name').value = def.name;
+    document.getElementById('cw-desc').value = def.desc;
+    document.getElementById('cw-w').value = def.defaultW;
+    document.getElementById('cw-h').value = def.defaultH;
+    document.getElementById('cw-category').value = def.category;
+    cwScope = def.scope.split(':')[0];
+    document.querySelectorAll('.scope-btn').forEach(b => {
+      b.classList.toggle('on', b.dataset.scope === cwScope);
+    });
+    if(def.contentType === 'image'){
+      setCWContentTab('image', document.querySelector('.content-tab:nth-child(2)'));
+      document.getElementById('cw-img-url').value = def.html;
+    } else {
+      setCWContentTab('html', document.querySelector('.content-tab:first-child'));
+      document.getElementById('cw-html').value = def.html;
+    }
+    updateCWPreview();
+  } else {
+    document.getElementById('cw-modal-title').textContent = 'Create Custom Widget';
+    document.getElementById('cw-save-btn').textContent = 'Create Widget';
+    document.getElementById('cw-name').value = '';
+    document.getElementById('cw-desc').value = '';
+    document.getElementById('cw-html').value = '';
+    document.getElementById('cw-img-url').value = '';
+    document.getElementById('cw-w').value = '336';
+    document.getElementById('cw-h').value = '60';
+    cwScope = 'platform';
+    document.querySelectorAll('.scope-btn').forEach(b => b.classList.remove('on'));
+    document.querySelector('.scope-btn[data-scope="platform"]').classList.add('on');
+    setCWContentTab('html', document.querySelector('.content-tab:first-child'));
+    document.getElementById('cw-preview').innerHTML = '<span style="font-size:11px;color:var(--t3)">Preview will appear here</span>';
+  }
+  updateCWScopeNote();
+  document.getElementById('cw-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('cw-name').focus(), 100);
+}
+
+function hideCWBuilder(){ document.getElementById('cw-modal').style.display = 'none'; }
+
+function setCWScope(btn){
+  cwScope = btn.dataset.scope;
+  document.querySelectorAll('.scope-btn').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  updateCWScopeNote();
+}
+
+function updateCWScopeNote(){
+  const notes = {
+    platform: 'Available to all 1,600+ dealers on the platform.',
+    group: 'Available to all dealers in the same group account.',
+    dealer: 'Available to this dealer only.'
+  };
+  document.getElementById('cw-scope-note').textContent = notes[cwScope] || '';
+  document.getElementById('cw-save-note').textContent = 'Saved to ' + cwScope + ' library';
+}
+
+function setCWContentTab(tab, btn){
+  cwContentTab = tab;
+  document.querySelectorAll('.content-tab').forEach(b => b.classList.remove('on'));
+  if(btn) btn.classList.add('on');
+  document.getElementById('cw-content-html').style.display = tab === 'html' ? 'block' : 'none';
+  document.getElementById('cw-content-image').style.display = tab === 'image' ? 'block' : 'none';
+}
+
+function insertVar(varName){
+  const ta = document.getElementById('cw-html');
+  const pos = ta.selectionStart;
+  const before = ta.value.substring(0, pos);
+  const after = ta.value.substring(pos);
+  ta.value = before + '{{' + varName + '}}' + after;
+  ta.focus();
+  ta.selectionStart = ta.selectionEnd = pos + varName.length + 4;
+  updateCWPreview();
+}
+
+function updateCWPreview(){
+  const htmlVal = document.getElementById('cw-html').value;
+  const imgUrl = document.getElementById('cw-img-url').value;
+  const preview = document.getElementById('cw-preview');
+  if(cwContentTab === 'image' && imgUrl){
+    preview.innerHTML = '<img src="'+imgUrl+'" style="max-width:100%;max-height:120px;object-fit:contain;display:block;">';
+  } else if(htmlVal) {
+    preview.innerHTML = '<div style="font-size:11px">' + htmlVal + '</div>';
+  } else {
+    preview.innerHTML = '<span style="font-size:11px;color:var(--t3)">Preview will appear here as you type HTML above</span>';
+  }
+}
+
+function saveCWWidget(){
+  const name = document.getElementById('cw-name').value.trim();
+  if(!name){
+    document.getElementById('cw-name').style.border = '2px solid #ff5252';
+    setTimeout(() => document.getElementById('cw-name').style.border = '', 1500);
+    return;
+  }
+  const content = cwContentTab === 'image'
+    ? document.getElementById('cw-img-url').value.trim()
+    : document.getElementById('cw-html').value.trim();
+
+  // Extract variables from {{variable}} patterns
+  const varMatches = (cwContentTab === 'html' ? content : '').match(/\{\{([^}]+)\}\}/g) || [];
+  const variables = [...new Set(varMatches.map(m => m.replace(/[{}]/g, '')))];
+
+  const def = {
+    id: cwEditingId || ('cw_' + Date.now()),
+    name,
+    desc: document.getElementById('cw-desc').value.trim(),
+    scope: cwScope,
+    category: document.getElementById('cw-category').value,
+    defaultW: parseInt(document.getElementById('cw-w').value) || 336,
+    defaultH: parseInt(document.getElementById('cw-h').value) || 60,
+    contentType: cwContentTab,
+    html: content,
+    variables,
+  };
+
+  if(cwEditingId){
+    const idx = customWidgets.findIndex(w => w.id === cwEditingId);
+    if(idx >= 0) customWidgets[idx] = def;
+    toast('\u2713 Widget updated: ' + name);
+  } else {
+    customWidgets.push(def);
+    toast('\u2713 Custom widget created: ' + name);
+  }
+
+  renderCWLib();
+  hideCWBuilder();
+}
+
+function editCW(cwId){ showCWBuilder(cwId); }
+
+function deleteCW(cwId){
+  if(!confirm('Delete this custom widget? It will be removed from the library but existing canvas instances remain.')) return;
+  customWidgets = customWidgets.filter(w => w.id !== cwId);
+  renderCWLib();
+  toast('Widget removed from library');
+}
+
+// Live preview as user types
+document.addEventListener('input', e => {
+  if(e.target.id === 'cw-html' || e.target.id === 'cw-img-url') updateCWPreview();
+});
+
+// Init — defer until DOM is ready
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', renderCWLib);
+} else {
+  renderCWLib();
+}
+
+</script>
+
+<!-- SAVE TEMPLATE MODAL -->
+<div class="modal-overlay" id="save-modal" style="display:none" onclick="if(event.target===this)hideSaveModal()">
+  <div class="modal" style="width:480px">
+    <div class="modal-head" style="background:var(--navy)">
+      <div class="modal-title" style="color:#fff;font-size:16px">Save Template</div>
+    </div>
+    <div class="modal-body" style="padding:24px">
+
+      <!-- Template name -->
+      <div style="margin-bottom:20px">
+        <label style="font-size:12px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px">Template Name</label>
+        <input id="save-tname" class="fi" style="font-size:15px;padding:8px 12px;border-radius:6px" placeholder="e.g. Subaru Standard, Used Cars — Black V5" value="">
+      </div>
+
+      <!-- Vehicle type -->
+      <div style="margin-bottom:20px">
+        <label style="font-size:12px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:8px">Apply to vehicle type</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap" id="vtype-btns">
+          <button class="vtype-btn on" data-type="new"    onclick="toggleVtype(this)">New</button>
+          <button class="vtype-btn"    data-type="used"   onclick="toggleVtype(this)">Used</button>
+          <button class="vtype-btn"    data-type="cpo"    onclick="toggleVtype(this)">CPO</button>
+          <button class="vtype-btn"    data-type="all"    onclick="toggleVtypeAll(this)">All</button>
+          <button class="vtype-btn"    data-type="draft"  onclick="toggleVtypeAll(this)">Save for later (Draft)</button>
+        </div>
+        <div id="vtype-note" style="font-size:11px;color:var(--t3);margin-top:8px;line-height:1.5">
+          This template will apply when printing <strong id="vtype-desc">New</strong> vehicle addendums for this dealer.
+        </div>
+      </div>
+
+      <!-- Summary -->
+      <div style="background:var(--s2);border-radius:8px;padding:12px 14px;font-size:12px;color:var(--t2);line-height:1.8">
+        <div><strong>Template:</strong> <span id="save-summary-name" style="color:var(--t1)">—</span></div>
+        <div><strong>Background:</strong> <span id="save-summary-bg" style="color:var(--t1)">Default</span></div>
+        <div><strong>Widgets:</strong> <span id="save-summary-widgets" style="color:var(--t1)">—</span></div>
+        <div><strong>Applies to:</strong> <span id="save-summary-type" style="color:#1976d2;font-weight:600">New</span></div>
+      </div>
+
+    </div>
+    <div class="modal-foot" style="border-top:1px solid var(--bdr)">
+      <div style="font-size:12px;color:var(--t3)">Templates are saved per dealer account</div>
+      <div class="modal-foot-r">
+        <button class="mfbtn mfbtn-close" onclick="hideSaveModal()">Cancel</button>
+        <button class="mfbtn mfbtn-save" onclick="doSaveTemplate()" id="save-confirm-btn">Save Template</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- CUSTOM WIDGET BUILDER MODAL -->
+<div class="modal-overlay" id="cw-modal" style="display:none" onclick="if(event.target===this)hideCWBuilder()">
+  <div class="cw-modal">
+    <div class="cw-modal-head">
+      <div class="cw-modal-title" id="cw-modal-title">Create Custom Widget</div>
+    </div>
+    <div class="cw-modal-body">
+
+      <div class="field-row">
+        <label class="field-label">Widget name</label>
+        <input id="cw-name" class="fi" style="font-size:14px;padding:8px 12px" placeholder="e.g. Crown Honda Advantage Package">
+      </div>
+
+      <div class="field-row">
+        <label class="field-label">Description (shown in palette)</label>
+        <input id="cw-desc" class="fi" placeholder="Brief description of what this widget shows">
+      </div>
+
+      <div class="field-row">
+        <label class="field-label">Scope — who can use this widget?</label>
+        <div class="scope-selector">
+          <button class="scope-btn on platform" data-scope="platform" onclick="setCWScope(this)">&#127760; Platform (all dealers)</button>
+          <button class="scope-btn group" data-scope="group" onclick="setCWScope(this)">&#127959; Group</button>
+          <button class="scope-btn dealer" data-scope="dealer" onclick="setCWScope(this)">&#127962; This dealer only</button>
+        </div>
+        <div id="cw-scope-note" style="font-size:11px;color:var(--t3);margin-top:6px">Available to all 1,600+ dealers on the platform.</div>
+      </div>
+
+      <div class="field-row">
+        <label class="field-label">Widget category</label>
+        <select id="cw-category" class="fsel" style="max-width:240px">
+          <option value="content">Content</option>
+          <option value="structural">Structural</option>
+          <option value="infobox">Infobox</option>
+        </select>
+      </div>
+
+      <div class="field-row">
+        <label class="field-label">Default size (px)</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;color:var(--t2)">W</span>
+            <input id="cw-w" class="fi" type="number" value="336" style="width:80px;font-family:var(--mono)">
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;color:var(--t2)">H</span>
+            <input id="cw-h" class="fi" type="number" value="60" style="width:80px;font-family:var(--mono)">
+          </div>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <label class="field-label">Widget content</label>
+        <div class="content-tabs">
+          <button class="content-tab on" onclick="setCWContentTab('html',this)">HTML</button>
+          <button class="content-tab" onclick="setCWContentTab('image',this)">Image URL</button>
+        </div>
+        <div id="cw-content-html">
+          <textarea id="cw-html" class="html-editor" placeholder="Enter widget HTML. Use {{variable_name}} for dynamic slots.
+Examples:
+  {{vehicle_price}} — replaced with vehicle's price
+  {{dealer_name}} — replaced with dealer name
+  {{msrp}} — replaced with MSRP value
+"></textarea>
+          <div style="margin-top:8px">
+            <div style="font-size:11px;color:var(--t2);margin-bottom:5px">Insert variable slot:</div>
+            <span class="var-chip" onclick="insertVar('vehicle_price')">{{vehicle_price}}</span>
+            <span class="var-chip" onclick="insertVar('dealer_name')">{{dealer_name}}</span>
+            <span class="var-chip" onclick="insertVar('msrp')">{{msrp}}</span>
+            <span class="var-chip" onclick="insertVar('asking_price')">{{asking_price}}</span>
+            <span class="var-chip" onclick="insertVar('stock_number')">{{stock_number}}</span>
+            <span class="var-chip" onclick="insertVar('year_make_model')">{{year_make_model}}</span>
+          </div>
+        </div>
+        <div id="cw-content-image" style="display:none">
+          <input id="cw-img-url" class="fi" placeholder="https://your-s3.amazonaws.com/widget-image.png" style="margin-bottom:8px">
+          <div style="font-size:11px;color:var(--t3)">Image will scale to the widget's width &times; height. Use PNG-24 with transparency for best results.</div>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <label class="field-label">Preview</label>
+        <div class="preview-box" id="cw-preview">
+          <span style="font-size:11px;color:var(--t3)">Preview will appear here as you type HTML above</span>
+        </div>
+      </div>
+
+    </div>
+    <div class="modal-foot">
+      <div style="font-size:12px;color:var(--t3)" id="cw-save-note">Saved to platform library</div>
+      <div class="modal-foot-r">
+        <button class="mfbtn mfbtn-close" onclick="hideCWBuilder()">Cancel</button>
+        <button class="mfbtn mfbtn-save" onclick="saveCWWidget()" id="cw-save-btn">Create Widget</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
