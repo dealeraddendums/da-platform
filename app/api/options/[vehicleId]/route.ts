@@ -68,6 +68,7 @@ export async function GET(
         default_id: r.id,
         option_name: r.option_name,
         option_price: r.item_price ?? "NC",
+        description: r.description ?? null,
         sort_order: r.sort_order ?? i,
         source: "default" as const,
       }));
@@ -158,7 +159,7 @@ export async function POST(
       return NextResponse.json({ error: "Invalid vehicleId" }, { status: 400 });
     }
 
-    type OptionInput = Pick<VehicleOptionRow, "option_name" | "option_price" | "sort_order" | "source">;
+    type OptionInput = Pick<VehicleOptionRow, "option_name" | "option_price" | "sort_order" | "source"> & { description?: string | null };
     const body = await req.json() as { options?: OptionInput[]; dealer_id?: string };
     if (!body.options || !Array.isArray(body.options)) {
       return NextResponse.json({ error: "options array required" }, { status: 400 });
@@ -178,6 +179,7 @@ export async function POST(
         dealer_id: effectiveDealerId,
         option_name: o.option_name,
         option_price: o.option_price ?? "NC",
+        description: o.description ?? null,
         sort_order: o.sort_order ?? i,
         source: o.source ?? "manual",
       }));
@@ -210,6 +212,7 @@ export async function POST(
       dealer_id: dealerId,
       option_name: o.option_name,
       option_price: o.option_price ?? "NC",
+      description: o.description ?? null,
       sort_order: o.sort_order ?? i,
       source: o.source ?? "manual",
     }));

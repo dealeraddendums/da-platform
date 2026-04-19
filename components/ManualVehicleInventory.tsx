@@ -17,11 +17,6 @@ type ListResponse = {
 };
 
 const PER_PAGE = 50;
-const DOC_LABELS: Record<string, string> = {
-  addendum: "Addendum",
-  infosheet: "Info Sheet",
-  buyer_guide: "Buyer Guide",
-};
 
 function conditionBadge(c: string) {
   const styles: Record<string, React.CSSProperties> = {
@@ -47,20 +42,19 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
 }
 
-function PrintBtn({ vehicleId, docType, printed }: { vehicleId: string; docType: string; printed: boolean }) {
+function PrintNowBtn({ vehicleId, everPrinted }: { vehicleId: string; everPrinted: boolean }) {
   return (
     <button
       onClick={() => { window.location.href = `/dealer-vehicles/${vehicleId}/addendum`; }}
       style={{
-        height: 28, padding: "0 9px", fontSize: 11, fontWeight: 600,
+        height: 28, padding: "0 11px", fontSize: 11, fontWeight: 600,
         borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap",
-        background: printed ? "#1976d2" : "#fff",
-        color: printed ? "#fff" : "#333",
-        border: printed ? "1px solid #1565c0" : "1px solid #c0c0c0",
+        background: everPrinted ? "#1976d2" : "#fff",
+        color: everPrinted ? "#fff" : "#333",
+        border: everPrinted ? "1px solid #1565c0" : "1px solid #c0c0c0",
       }}
-      title={`Open addendum editor for ${DOC_LABELS[docType]}`}
     >
-      {DOC_LABELS[docType]}
+      Print Now
     </button>
   );
 }
@@ -326,9 +320,8 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                   <SortTh label="Condition" col="condition" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <SortTh label="MSRP" col="msrp" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <SortTh label="Added" col="date_added" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-                  {/* Action columns */}
-                  {["", "", "Buyer Guide", "Info Sheet", "Addendum"].map((h, i) => (
-                    <th key={i} className="text-left px-3 py-2.5" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>
+                  {["Print Now", "Edit", "History"].map((h) => (
+                    <th key={h} className="text-left px-3 py-2.5" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -356,13 +349,7 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                       <td className="px-3 py-2 text-xs" style={{ color: "var(--text-secondary)" }}>{fmt(v.msrp)}</td>
                       <td className="px-3 py-2 text-xs" style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtDate(v.date_added)}</td>
                       <td className="px-3 py-2">
-                        <button
-                          onClick={() => setHistoryVehicle({ id: v.id, stock_number: v.stock_number })}
-                          style={{ height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, background: "#fff", color: "#555", border: "1px solid #c0c0c0", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
-                          title="View history"
-                        >
-                          ⏱
-                        </button>
+                        <PrintNowBtn vehicleId={v.id} everPrinted={printed.length > 0} />
                       </td>
                       <td className="px-3 py-2">
                         <button
@@ -373,13 +360,13 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                         </button>
                       </td>
                       <td className="px-3 py-2">
-                        <PrintBtn vehicleId={v.id} docType="buyer_guide" printed={printed.includes("buyer_guide")} />
-                      </td>
-                      <td className="px-3 py-2">
-                        <PrintBtn vehicleId={v.id} docType="infosheet" printed={printed.includes("infosheet")} />
-                      </td>
-                      <td className="px-3 py-2">
-                        <PrintBtn vehicleId={v.id} docType="addendum" printed={printed.includes("addendum")} />
+                        <button
+                          onClick={() => setHistoryVehicle({ id: v.id, stock_number: v.stock_number })}
+                          style={{ height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, background: "#fff", color: "#555", border: "1px solid #c0c0c0", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
+                          title="View print history"
+                        >
+                          History
+                        </button>
                       </td>
                     </tr>
                   );

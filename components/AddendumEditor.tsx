@@ -13,6 +13,7 @@ type MatchedOption = {
   default_id?: number;
   option_name: string;
   option_price: string;
+  description?: string | null;
   sort_order: number;
   source?: string;
 };
@@ -29,6 +30,7 @@ type LibraryOption = {
   default_id: number;
   option_name: string;
   option_price: string;
+  description?: string | null;
   sort_order: number;
 };
 
@@ -111,6 +113,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
           default_id: i,
           option_name: r.option_name,
           option_price: r.item_price,
+          description: (r as { description?: string | null }).description ?? null,
           sort_order: r.sort_order,
         }));
       } else {
@@ -129,6 +132,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
       default_id: opt.default_id,
       option_name: opt.option_name,
       option_price: opt.option_price,
+      description: opt.description ?? null,
       sort_order: options.length,
       source: "default",
     };
@@ -208,6 +212,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
           options: options.map((o, i) => ({
             option_name: o.option_name,
             option_price: o.option_price,
+            description: (o as MatchedOption).description ?? (o as VehicleOptionRow).description ?? null,
             sort_order: i,
             source: o.source ?? "manual",
           })),
@@ -398,7 +403,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
                         ⠿
                       </td>
 
-                      {/* Name */}
+                      {/* Name + description */}
                       <td className="px-3 py-2">
                         {isEditing ? (
                           <input
@@ -410,12 +415,22 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
                             onBlur={() => setEditingId(null)}
                           />
                         ) : (
-                          <span
-                            style={{ color: "var(--text-primary)", cursor: "text" }}
-                            onClick={() => setEditingId(String(id))}
-                          >
-                            {opt.option_name}
-                          </span>
+                          <div>
+                            <span
+                              style={{ color: "var(--text-primary)", cursor: "text" }}
+                              onClick={() => setEditingId(String(id))}
+                            >
+                              {opt.option_name}
+                            </span>
+                            {(() => {
+                              const desc = (opt as MatchedOption).description ?? (opt as VehicleOptionRow).description;
+                              return desc ? (
+                                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, paddingLeft: 8, lineHeight: 1.4 }}>
+                                  {desc}
+                                </div>
+                              ) : null;
+                            })()}
+                          </div>
                         )}
                       </td>
 

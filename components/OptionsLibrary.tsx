@@ -842,7 +842,8 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
           </div>
         ) : (
           <>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 780 }}>
               <thead>
                 <tr style={{ background: "#f5f6f7", borderBottom: "1px solid #e0e0e0" }}>
                   {reorderMode && <th style={{ width: 40, padding: "10px 8px" }} />}
@@ -925,6 +926,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
               </tbody>
             </table>
 
+            </div>
             {/* Pagination */}
             {!reorderMode && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderTop: "1px solid #e0e0e0", background: "#fafafa" }}>
