@@ -42,6 +42,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: {
     vehicleId?: number;
     dealerVehicleId?: string;
+    vehicleData?: VehicleRow;
     widgets?: Widget[];
     paperSize?: PaperSize;
     fontScale?: number;
@@ -214,30 +215,52 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
 
-  // Fetch vehicle + dealer info from Aurora
-  const pool = getPool();
-  const [rows] = await pool.query<VehicleDimRow[]>(
-    `SELECT v.id, v.DEALER_ID, v.VIN_NUMBER, v.STOCK_NUMBER, v.YEAR, v.MAKE,
-            v.MODEL, v.TRIM, v.EXT_COLOR, v.MILEAGE, v.MSRP, v.NEW_USED, v.CERTIFIED,
-            v.BODYSTYLE, v.OPTIONS, v.PHOTOS, v.DESCRIPTION,
-            v.STATUS, v.PRINT_STATUS, v.DATE_IN_STOCK, v.INT_COLOR,
-            v.ENGINE, v.FUEL, v.DRIVETRAIN, v.TRANSMISSION, v.HMPG, v.CMPG, v.MPG,
-            d.DEALER_NAME, d.DEALER_ADDRESS, d.DEALER_CITY, d.DEALER_STATE,
-            d.DEALER_ZIP, d.DEALER_PHONE, d.logo_url
-     FROM dealer_inventory v
-     LEFT JOIN dealer_dim d ON d.DEALER_ID = v.DEALER_ID
-     WHERE v.id = ? LIMIT 1`,
-    [vehicleId]
-  );
+  const effectiveDealerIdAurora = (claims as Record<string, unknown>).impersonating_dealer_id as string | null ?? claims.dealer_id;
 
-  if (!rows.length) {
-    return NextResponse.json({ error: "Vehicle not found" }, { status: 404 });
-  }
-  const vehicleRow = rows[0];
+  let vehicleRow: VehicleDimRow;
 
-  // TODO: verify this should use inventory_dealer_id (claims.dealer_id is Supabase; vehicleRow.DEALER_ID is Aurora)
-  if (claims.role === "dealer_admin" || claims.role === "dealer_user") {
-    if (vehicleRow.DEALER_ID !== claims.dealer_id) {
+  if (body.vehicleData) {
+    // Client already has vehicle data — fetch dealer from Supabase, skip Aurora
+    const vd = body.vehicleData;
+    if ((claims.role === "dealer_admin" || claims.role === "dealer_user") && effectiveDealerIdAurora && vd.DEALER_ID !== effectiveDealerIdAurora) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const { data: dealer } = await admin
+      .from("dealers")
+      .select("name, address, city, state, zip, phone, logo_url")
+      .eq("dealer_id", vd.DEALER_ID)
+      .maybeSingle();
+    vehicleRow = {
+      ...vd,
+      DEALER_NAME: dealer?.name ?? null,
+      DEALER_ADDRESS: dealer?.address ?? null,
+      DEALER_CITY: dealer?.city ?? null,
+      DEALER_STATE: dealer?.state ?? null,
+      DEALER_ZIP: dealer?.zip ?? null,
+      DEALER_PHONE: dealer?.phone ?? null,
+      logo_url: dealer?.logo_url ?? null,
+    } as VehicleDimRow;
+  } else {
+    // Fall back to Aurora (e.g. builder route)
+    const pool = getPool();
+    const [rows] = await pool.query<VehicleDimRow[]>(
+      `SELECT v.id, v.DEALER_ID, v.VIN_NUMBER, v.STOCK_NUMBER, v.YEAR, v.MAKE,
+              v.MODEL, v.TRIM, v.EXT_COLOR, v.MILEAGE, v.MSRP, v.NEW_USED, v.CERTIFIED,
+              v.BODYSTYLE, v.OPTIONS, v.PHOTOS, v.DESCRIPTION,
+              v.STATUS, v.PRINT_STATUS, v.DATE_IN_STOCK, v.INT_COLOR,
+              v.ENGINE, v.FUEL, v.DRIVETRAIN, v.TRANSMISSION, v.HMPG, v.CMPG, v.MPG,
+              d.DEALER_NAME, d.DEALER_ADDRESS, d.DEALER_CITY, d.DEALER_STATE,
+              d.DEALER_ZIP, d.DEALER_PHONE, d.logo_url
+       FROM dealer_inventory v
+       LEFT JOIN dealer_dim d ON d.DEALER_ID = v.DEALER_ID
+       WHERE v.id = ? LIMIT 1`,
+      [vehicleId]
+    );
+    if (!rows.length) {
+      return NextResponse.json({ error: "Vehicle not found" }, { status: 404 });
+    }
+    vehicleRow = rows[0];
+    if ((claims.role === "dealer_admin" || claims.role === "dealer_user") && effectiveDealerIdAurora && vehicleRow.DEALER_ID !== effectiveDealerIdAurora) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
   }

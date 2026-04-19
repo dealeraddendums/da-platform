@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { VehicleRow } from "@/lib/vehicles";
 
 type DocType = "addendum" | "infosheet" | "buyer_guide";
 
 type Props = {
   vehicleId?: number;
   dealerVehicleId?: string;
+  vehicle?: VehicleRow;
   docType: DocType;
   vehicleName: string;
   onClose: () => void;
@@ -28,6 +30,7 @@ const DOC_PAPER: Record<DocType, string> = {
 export default function PrintPreviewModal({
   vehicleId,
   dealerVehicleId,
+  vehicle,
   docType,
   vehicleName,
   onClose,
@@ -50,6 +53,7 @@ export default function PrintPreviewModal({
           body.dealerVehicleId = dealerVehicleId;
         } else {
           body.vehicleId = vehicleId;
+          if (vehicle) body.vehicleData = vehicle;
         }
 
         const res = await fetch("/api/pdf/generate", {
