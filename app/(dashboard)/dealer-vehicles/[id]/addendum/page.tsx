@@ -96,7 +96,7 @@ export default async function DealerVehicleAddendumPage({
         </p>
       </div>
 
-      <AddendumEditor vehicle={vehicle} />
+      <AddendumEditor vehicle={vehicle} dealerVehicleId={dv.id} />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import type { VehicleRow } from "@/lib/vehicles";
 import { vehicleCondition, parsePhotos } from "@/lib/vehicles";
 import { formatOptionPrice, parseOptionPriceValue } from "@/lib/option-price";
 import type { VehicleOptionRow } from "@/lib/db";
+import PrintPreviewModal from "@/components/PrintPreviewModal";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -33,11 +34,12 @@ type LibraryOption = {
 
 type Props = {
   vehicle: VehicleRow;
+  dealerVehicleId?: string;
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function AddendumEditor({ vehicle }: Props) {
+export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
   const vehicleId = vehicle.id;
   const dealerId = vehicle.DEALER_ID;
 
@@ -63,9 +65,8 @@ export default function AddendumEditor({ vehicle }: Props) {
   // Edit inline
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Print modal
+  // Print preview modal
   const [printDoc, setPrintDoc] = useState<"addendum" | "infosheet" | "buyer_guide" | null>(null);
-  const [printLogging, setPrintLogging] = useState(false);
 
   // Drag-and-drop
   const dragIdx = useRef<number | null>(null);
@@ -213,21 +214,8 @@ export default function AddendumEditor({ vehicle }: Props) {
   // ── Print ─────────────────────────────────────────────────────────────────────
 
   async function handlePrint(docType: "addendum" | "infosheet" | "buyer_guide") {
-    // Save first if dirty
     if (dirty) await saveOptions();
-    setPrintLogging(true);
-    try {
-      await fetch(`/api/print/${vehicleId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document_type: docType }),
-      });
-    } finally {
-      setPrintLogging(false);
-    }
-    // Open builder in new tab with doc type param
-    window.open(`/builder/${vehicleId}?doc_type=${docType}`, "_blank");
-    setPrintDoc(null);
+    setPrintDoc(docType);
   }
 
   // ── Totals ───────────────────────────────────────────────────────────────────
@@ -624,42 +612,15 @@ export default function AddendumEditor({ vehicle }: Props) {
         </Modal>
       )}
 
-      {/* ── Print confirm modal ────────────────────────────────────────────── */}
+      {/* ── Print preview modal ───────────────────────────────────────────── */}
       {printDoc && (
-        <Modal
-          title={`Create ${printDoc === "addendum" ? "Addendum" : printDoc === "infosheet" ? "Info Sheet" : "Buyer Guide"}`}
+        <PrintPreviewModal
+          vehicleId={dealerVehicleId ? undefined : vehicleId}
+          dealerVehicleId={dealerVehicleId}
+          docType={printDoc}
+          vehicleName={[vehicle.YEAR, vehicle.MAKE, vehicle.MODEL].filter(Boolean).join(" ") || "Vehicle"}
           onClose={() => setPrintDoc(null)}
-        >
-          <div className="p-4">
-            <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
-              This will open the document builder for{" "}
-              <strong>{[vehicle.YEAR, vehicle.MAKE, vehicle.MODEL].filter(Boolean).join(" ")}</strong>{" "}
-              in a new tab and log this print event.
-            </p>
-            {dirty && (
-              <p className="text-xs mb-3 p-2 rounded" style={{ background: "#fff8e1", color: "#e65100", border: "1px solid #ffe0b2" }}>
-                Unsaved option changes will be saved automatically before opening.
-              </p>
-            )}
-            <div className="flex gap-2 justify-end">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setPrintDoc(null)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={printLogging}
-                onClick={() => void handlePrint(printDoc)}
-              >
-                {printLogging ? "Opening…" : "Open Builder"}
-              </button>
-            </div>
-          </div>
-        </Modal>
+        />
       )}
     </div>
   );

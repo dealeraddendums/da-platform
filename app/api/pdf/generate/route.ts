@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { getPool } from "@/lib/aurora";
 import { createAdminSupabaseClient } from "@/lib/db";
+import type { VehicleAuditLogInsert } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf } from "@/lib/s3-upload";
@@ -39,7 +40,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (error) return error;
 
   let body: {
-    vehicleId: number;
+    vehicleId?: number;
+    dealerVehicleId?: string;
     widgets?: Widget[];
     paperSize?: PaperSize;
     fontScale?: number;
@@ -52,8 +54,160 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { vehicleId, widgets: inWidgets, paperSize = "standard", fontScale = 1.0, docType = "addendum" } = body;
+  const { vehicleId, dealerVehicleId, widgets: inWidgets, paperSize = "standard", fontScale = 1.0, docType = "addendum" } = body;
 
+  if (!dealerVehicleId && vehicleId === undefined) {
+    return NextResponse.json({ error: "vehicleId or dealerVehicleId required" }, { status: 400 });
+  }
+
+  const admin = createAdminSupabaseClient();
+
+  // ── Manual vehicle path (dealerVehicleId) ─────────────────────────────────────
+  if (dealerVehicleId) {
+    const { data: dv } = await admin
+      .from("dealer_vehicles")
+      .select("*")
+      .eq("id", dealerVehicleId)
+      .maybeSingle();
+    if (!dv) return NextResponse.json({ error: "Vehicle not found" }, { status: 404 });
+
+    const effectiveDealerId = (claims as Record<string, unknown>).impersonating_dealer_id as string | null ?? claims.dealer_id;
+    const isDealer = claims.role === "dealer_admin" || claims.role === "dealer_user";
+    if (isDealer && effectiveDealerId && dv.dealer_id !== effectiveDealerId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { data: dealer } = await admin
+      .from("dealers")
+      .select("name, address, city, state, zip, phone, logo_url")
+      .eq("id", dv.dealer_id)
+      .maybeSingle();
+
+    const vehicleRow = {
+      id: 0,
+      DEALER_ID: dv.dealer_id,
+      VIN_NUMBER: dv.vin ?? "",
+      STOCK_NUMBER: dv.stock_number,
+      YEAR: dv.year ? String(dv.year) : null,
+      MAKE: dv.make,
+      MODEL: dv.model,
+      TRIM: dv.trim,
+      BODYSTYLE: dv.body_style,
+      EXT_COLOR: dv.exterior_color,
+      INT_COLOR: dv.interior_color,
+      ENGINE: dv.engine,
+      FUEL: null,
+      DRIVETRAIN: dv.drivetrain,
+      TRANSMISSION: dv.transmission,
+      MILEAGE: dv.mileage ? String(dv.mileage) : null,
+      DATE_IN_STOCK: dv.date_added,
+      STATUS: "1",
+      MSRP: dv.msrp ? String(dv.msrp) : null,
+      NEW_USED: dv.condition === "Used" ? "Used" : "New",
+      CERTIFIED: dv.condition === "CPO" ? "Yes" : "No",
+      OPTIONS: null,
+      PHOTOS: null,
+      DESCRIPTION: dv.description,
+      PRINT_STATUS: "0",
+      HMPG: null,
+      CMPG: null,
+      MPG: null,
+      DEALER_NAME: dealer?.name ?? null,
+      DEALER_ADDRESS: dealer?.address ?? null,
+      DEALER_CITY: dealer?.city ?? null,
+      DEALER_STATE: dealer?.state ?? null,
+      DEALER_ZIP: dealer?.zip ?? null,
+      DEALER_PHONE: dealer?.phone ?? null,
+      logo_url: dealer?.logo_url ?? null,
+    } as VehicleDimRow;
+
+    const { data: optionRows } = await admin
+      .from("vehicle_options")
+      .select("*")
+      .eq("vehicle_id", 0)
+      .eq("dealer_id", dv.dealer_id)
+      .order("sort_order");
+
+    const groupOpts = await getGroupOptionsForDealer(dv.dealer_id);
+    const options = [
+      ...groupOpts.map(g => ({ option_name: g.option_name, option_price: g.option_price, active: true })),
+      ...(optionRows ?? []),
+    ];
+
+    const disclaimer = await getGroupDisclaimer(dv.dealer_id, dealer?.state ?? null, docType);
+
+    const isInfosheet = paperSize === "infosheet";
+    let widgets: Widget[];
+    if (inWidgets && inWidgets.length > 0) {
+      widgets = inWidgets;
+    } else {
+      const layout = isInfosheet ? LAYOUT_INFOSHEET : LAYOUT;
+      const order = isInfosheet
+        ? ["logo", "vehicle", "description", "features", "askbar", "qrcode", "barcode", "dealer", "customtext"]
+        : ["logo", "vehicle", "msrp", "options", "subtotal", "askbar", "dealer", "infobox"];
+      let nid = 1;
+      widgets = order
+        .filter(t => layout[t])
+        .map(t => {
+          const id = "w" + nid++;
+          const w = makeWidget(t, id, undefined, undefined, undefined, undefined, isInfosheet);
+          if (t === "msrp" && vehicleRow.MSRP) {
+            const msrp = parseFloat(vehicleRow.MSRP);
+            if (!isNaN(msrp)) w.d = { ...w.d, value: `$${msrp.toLocaleString()}` };
+          }
+          if (t === "dealer") {
+            const lines = [vehicleRow.DEALER_NAME, vehicleRow.DEALER_ADDRESS,
+              [vehicleRow.DEALER_CITY, vehicleRow.DEALER_STATE, vehicleRow.DEALER_ZIP].filter(Boolean).join(" "),
+              vehicleRow.DEALER_PHONE].filter(Boolean);
+            if (lines.length) w.d = { ...w.d, text: lines.join("\n") };
+          }
+          if (t === "logo" && vehicleRow.logo_url) w.d = { ...w.d, imgUrl: vehicleRow.logo_url };
+          if (t === "askbar") {
+            const msrp = vehicleRow.MSRP ? parseFloat(vehicleRow.MSRP) : 0;
+            const optTotal = options.reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
+            if (msrp + optTotal > 0) w.d = { ...w.d, value: `$${(msrp + optTotal).toLocaleString()}` };
+          }
+          if (t === "subtotal") {
+            const optTotal = options.reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
+            if (optTotal > 0) w.d = { ...w.d, value: `$${optTotal.toLocaleString()}` };
+          }
+          return w;
+        });
+    }
+
+    const bgUrl = body.bgUrl || (isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT);
+    const html = buildPdfHtml({ widgets, paperSize, fontScale, bgUrl, vehicle: vehicleRow, options, disclaimer: disclaimer ?? undefined });
+
+    let pdfBuffer: Buffer;
+    try {
+      pdfBuffer = await renderPdf(html, paperSize);
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : "PDF render failed" }, { status: 500 });
+    }
+
+    const timestamp = Date.now();
+    const s3Key = `manual/${dv.dealer_id}/${dealerVehicleId}/${timestamp}.pdf`;
+
+    let pdfUrl: string;
+    try {
+      pdfUrl = await uploadPdf(pdfBuffer, s3Key);
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : "S3 upload failed" }, { status: 500 });
+    }
+
+    await admin.from("vehicle_audit_log").insert({
+      dealer_id: dv.dealer_id,
+      vehicle_id: dealerVehicleId,
+      stock_number: dv.stock_number,
+      action: "print",
+      changed_by: claims.sub,
+      document_type: docType,
+    } as VehicleAuditLogInsert);
+
+    return NextResponse.json({ url: pdfUrl });
+  }
+
+  // ── Aurora vehicle path ───────────────────────────────────────────────────────
   if (!vehicleId) {
     return NextResponse.json({ error: "vehicleId required" }, { status: 400 });
   }
@@ -87,7 +241,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // Fetch options from Supabase (always use real saved options)
-  const admin = createAdminSupabaseClient();
   const { data: optionRows } = await admin
     .from("vehicle_options")
     .select("*")
