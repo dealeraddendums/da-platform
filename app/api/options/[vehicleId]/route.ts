@@ -55,11 +55,13 @@ export async function GET(
       }
 
       // No saved options — seed from dealer's Supabase addendum_library
+      // Skip applies_to='none' options — those are available in picker but don't auto-apply
       const { data: library } = await admin
         .from("addendum_library")
         .select("*")
         .eq("dealer_id", effectiveDealerId)
         .eq("active", true)
+        .neq("applies_to", "none")
         .order("sort_order", { ascending: true });
 
       const matched = (library ?? []).map((r, i) => ({

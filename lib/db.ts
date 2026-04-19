@@ -306,6 +306,7 @@ export type AddendumLibraryRow = {
   msrp_condition: number;
   msrp1: number | null;
   msrp2: number | null;
+  applies_to: "all" | "rules" | "none";
   sort_order: number;
   active: boolean;
   show_models_only: boolean;

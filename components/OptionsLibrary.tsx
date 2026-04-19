@@ -362,8 +362,8 @@ function OptionForm({
 }: {
   form: FormData;
   setForm: React.Dispatch<React.SetStateAction<FormData>>;
-  appliesTo: "all" | "rules";
-  setAppliesTo: (v: "all" | "rules") => void;
+  appliesTo: "all" | "rules" | "none";
+  setAppliesTo: (v: "all" | "rules" | "none") => void;
   showPriceHelp: boolean;
   setShowPriceHelp: (v: boolean) => void;
 }) {
@@ -445,22 +445,11 @@ function OptionForm({
         </button>
       </div>
 
-      {row("Type", (
-        <div style={{ display: "flex", gap: 8 }}>
-          {(["New", "Used", "Both"] as const).map(v => (
-            <button type="button" key={v} onClick={() => f("ad_type", v)}
-              style={{ flex: 1, padding: "6px 0", borderRadius: 4, border: `2px solid ${form.ad_type === v ? "#1976d2" : "#e0e0e0"}`, background: form.ad_type === v ? "#e3f2fd" : "#fff", color: form.ad_type === v ? "#1976d2" : "#55595c", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>
-              {v}
-            </button>
-          ))}
-        </div>
-      ))}
-
-      {/* Applies To toggle */}
+      {/* Applies To toggle — shown before Type since it controls visibility */}
       <div style={{ marginBottom: 14 }}>
         <label style={lbl}>Applies To</label>
         <div style={{ display: "flex", gap: 8 }}>
-          {([["all", "All Vehicles"], ["rules", "Assign with Rules"]] as const).map(([v, label]) => (
+          {([["all", "All Vehicles"], ["rules", "Assign with Rules"], ["none", "No Vehicles"]] as const).map(([v, label]) => (
             <button type="button" key={v} onClick={() => setAppliesTo(v)}
               style={{
                 flex: 1, padding: "7px 0", borderRadius: 4,
@@ -473,7 +462,24 @@ function OptionForm({
             </button>
           ))}
         </div>
+        {appliesTo === "none" && (
+          <p style={{ fontSize: 11, color: "#78828c", marginTop: 6, marginBottom: 0 }}>
+            This option will not auto-apply to any vehicle. It will appear in the &quot;+ From Library&quot; picker so dealers can add it manually.
+          </p>
+        )}
       </div>
+
+      {/* Type — only shown when auto-applying (all or rules) */}
+      {appliesTo !== "none" && row("Type", (
+        <div style={{ display: "flex", gap: 8 }}>
+          {(["New", "Used", "Both"] as const).map(v => (
+            <button type="button" key={v} onClick={() => f("ad_type", v)}
+              style={{ flex: 1, padding: "6px 0", borderRadius: 4, border: `2px solid ${form.ad_type === v ? "#1976d2" : "#e0e0e0"}`, background: form.ad_type === v ? "#e3f2fd" : "#fff", color: form.ad_type === v ? "#1976d2" : "#55595c", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>
+              {v}
+            </button>
+          ))}
+        </div>
+      ))}
 
       {/* Rules section — only shown when "Assign with Rules" */}
       {appliesTo === "rules" && (
@@ -645,7 +651,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState<AddendumLibraryRow | null>(null);
   const [form, setForm] = useState<FormData>(BLANK);
-  const [appliesTo, setAppliesTo] = useState<"all" | "rules">("all");
+  const [appliesTo, setAppliesTo] = useState<"all" | "rules" | "none">("all");
   const [showPriceHelp, setShowPriceHelp] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -682,8 +688,12 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
   function openEdit(item: AddendumLibraryRow) {
     setEditItem(item);
     setForm(rowToForm(item));
-    const hasRules = !!(item.models || item.trims || item.makes || item.body_styles || item.year_condition || item.miles_condition || item.msrp_condition);
-    setAppliesTo(hasRules ? "rules" : "all");
+    if (item.applies_to === "none") {
+      setAppliesTo("none");
+    } else {
+      const hasRules = !!(item.models || item.trims || item.makes || item.body_styles || item.year_condition || item.miles_condition || item.msrp_condition);
+      setAppliesTo(hasRules ? "rules" : "all");
+    }
     setFormError(null);
     setShowModal(true);
   }
@@ -702,9 +712,10 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
         msrp1: form.msrp1 ? parseInt(form.msrp1) : null,
         msrp2: form.msrp2 ? parseInt(form.msrp2) : null,
       };
-      const payload = appliesTo === "all"
-        ? { ...base, models: "", models_not: false, trims: "", trims_not: false, makes: "", makes_not: false, body_styles: "", year_condition: 0, year_value: null, miles_condition: 0, miles_value: null, msrp_condition: 0, msrp1: null, msrp2: null, show_models_only: false }
-        : base;
+      const clearRules = { models: "", models_not: false, trims: "", trims_not: false, makes: "", makes_not: false, body_styles: "", year_condition: 0, year_value: null, miles_condition: 0, miles_value: null, msrp_condition: 0, msrp1: null, msrp2: null, show_models_only: false };
+      const payload = appliesTo === "rules"
+        ? { ...base, applies_to: "rules" }
+        : { ...base, ...clearRules, applies_to: appliesTo };
       const url = editItem ? `/api/addendum-library/${editItem.id}` : "/api/addendum-library";
       const method = editItem ? "PATCH" : "POST";
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -753,14 +764,19 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
 
   // ── Helper renderers ──
 
-  function adTypeBadge(t: string) {
+  function adTypeBadge(item: AddendumLibraryRow) {
+    if (item.applies_to === "none") {
+      return (
+        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#fff3e0", color: "#e65100" }}>Manual Only</span>
+      );
+    }
     const styles: Record<string, React.CSSProperties> = {
       New:  { background: "#e8f5e9", color: "#2e7d32" },
       Used: { background: "#e3f2fd", color: "#1565c0" },
       Both: { background: "#f5f6f7", color: "#55595c" },
     };
     return (
-      <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, ...(styles[t] ?? styles.Both) }}>{t}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, ...(styles[item.ad_type] ?? styles.Both) }}>{item.ad_type}</span>
     );
   }
 
@@ -878,7 +894,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                           {item.description ? (item.description.length > 50 ? item.description.slice(0, 50) + "…" : item.description) : <span style={{ color: "#ccc" }}>—</span>}
                         </span>
                       </td>
-                      <td style={td}>{adTypeBadge(item.ad_type)}</td>
+                      <td style={td}>{adTypeBadge(item)}</td>
                       <td style={td}>{listPreview(item.models, item.models_not)}</td>
                       <td style={td}>{listPreview(item.trims, item.trims_not)}</td>
                       <td style={td}>

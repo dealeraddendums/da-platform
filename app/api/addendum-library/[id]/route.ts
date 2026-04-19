@@ -69,6 +69,7 @@ export async function PATCH(
   if (body.separator_above !== undefined) patch.separator_above = body.separator_above;
   if (body.separator_below !== undefined) patch.separator_below = body.separator_below;
   if (body.spaces !== undefined) patch.spaces = body.spaces;
+  if (body.applies_to !== undefined) patch.applies_to = body.applies_to;
 
   const { data, error: dbError } = await admin
     .from("addendum_library")

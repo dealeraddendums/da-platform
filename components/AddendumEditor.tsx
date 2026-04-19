@@ -102,9 +102,23 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
     if (library.length > 0) return;
     setLibraryLoading(true);
     try {
-      const res = await fetch(`/api/options/library?dealer_id=${encodeURIComponent(dealerId)}`);
-      const json = await res.json() as { data: LibraryOption[] };
-      setLibrary(json.data ?? []);
+      let items: LibraryOption[];
+      if (vehicleId === 0) {
+        // Manual vehicle: read from Supabase addendum_library (auth-scoped, no dealer_id param)
+        const res = await fetch("/api/addendum-library?per_page=100");
+        const json = await res.json() as { data?: Array<{ option_name: string; item_price: string; sort_order: number }> };
+        items = (json.data ?? []).map((r, i) => ({
+          default_id: i,
+          option_name: r.option_name,
+          option_price: r.item_price,
+          sort_order: r.sort_order,
+        }));
+      } else {
+        const res = await fetch(`/api/options/library?dealer_id=${encodeURIComponent(dealerId)}`);
+        const json = await res.json() as { data: LibraryOption[] };
+        items = json.data ?? [];
+      }
+      setLibrary(items);
     } finally {
       setLibraryLoading(false);
     }
