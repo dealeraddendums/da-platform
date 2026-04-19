@@ -57,6 +57,10 @@ export default function PrintPreviewModal({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
+        const ct = res.headers.get("content-type") ?? "";
+        if (!ct.includes("application/json")) {
+          throw new Error(`PDF generation failed (HTTP ${res.status})`);
+        }
         const json = await res.json() as { url?: string; error?: string };
         if (cancelled) return;
         if (!res.ok) throw new Error(json.error ?? "PDF generation failed");

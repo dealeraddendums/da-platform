@@ -212,6 +212,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "vehicleId required" }, { status: 400 });
   }
 
+  try {
+
   // Fetch vehicle + dealer info from Aurora
   const pool = getPool();
   const [rows] = await pool.query<VehicleDimRow[]>(
@@ -359,4 +361,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
 
   return NextResponse.json({ url: pdfUrl });
+
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "PDF generation failed";
+    console.error("[pdf/generate Aurora]", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
