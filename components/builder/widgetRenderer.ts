@@ -8,26 +8,26 @@ export function renderW(type: string, d: D, fontScale: number): string {
   if (type === 'logo') {
     if (d.imgUrl)
       return `<img style="width:100%;height:100%;object-fit:contain;object-position:left center;display:block;" src="${d.imgUrl}" alt="Logo">`;
-    return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#f2f1ed;border-radius:4px;"><span style="font-size:16px;font-weight:700;color:#bbb;">${d.label || 'Your Logo'}</span></div>`;
+    return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;border-radius:4px;"><span style="font-size:16px;font-weight:700;color:#bbb;">${d.label || 'Your Logo'}</span></div>`;
   }
 
   if (type === 'vehicle') {
     const vd = (d.vehicleData as Record<string, string>) || { stock: 'STOCK_TEST1', vin: '2HGFC3B96HH362096', year: '2017', color: 'White', make: 'Honda', trim: 'Touring', model: 'Civic', mileage: '10' };
     const lb: Record<string, string> = { stock: 'Stock:', vin: 'VIN:', year: 'Year:', color: 'Color:', make: 'Make:', trim: 'Trim:', model: 'Model:', mileage: 'Mileage:' };
     const flds = (d.fields as string[]) || Object.keys(vd);
-    const hdrFs = Math.round(14 * fs * ((d.headerFontSize as number) || 1));
-    const detFs = Math.round(10 * fs * ((d.fontSize as number) || 1));
+    const hdrFs = Math.round(13 * fs * ((d.headerFontSize as number) || 1));
+    const detFs = Math.round(9 * fs * ((d.fontSize as number) || 1));
     const hdr = d.showHeader !== false
-      ? `<div style="font-size:${hdrFs}px;font-weight:800;color:#1a1916;line-height:1.2;margin-bottom:5px;letter-spacing:-.01em">${vd.year} ${vd.make} ${vd.model} ${vd.trim}</div>`
+      ? `<div style="font-size:${hdrFs}px;font-weight:800;color:#1a1916;line-height:1.2;margin-bottom:3px;letter-spacing:-.01em">${vd.year} ${vd.make} ${vd.model} ${vd.trim}</div>`
       : '';
     const pairs: string[][] = [];
     for (let i = 0; i < flds.length; i += 2) pairs.push([flds[i], flds[i + 1]].filter(Boolean));
     const rows = pairs.map(p =>
-      `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:2px">${p.map(f =>
+      `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1px">${p.map(f =>
         `<div style="font-size:${detFs}px;color:#444">${lb[f] || f} <b style="color:#1a1916;font-weight:600">${(vd as Record<string,string>)[f] || ''}</b></div>`
       ).join('')}</div>`
     ).join('');
-    return `<div style="padding:5px 0">${hdr}${rows}</div>`;
+    return `<div style="padding:3px 0">${hdr}${rows}</div>`;
   }
 
   if (type === 'msrp') {
@@ -36,11 +36,11 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   if (type === 'options') {
-    const sz = Math.round(10.5 * fs * ((d.fontSize as number) || 1));
+    const sz = Math.round(10 * fs * ((d.fontSize as number) || 1));
     const szm = Math.round(9 * fs * ((d.fontSize as number) || 1));
     const items = (d.items as Array<{name:string;desc:string;price:string}>) || [];
     return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div>${items.map(it =>
-      `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0"><div><div style="font-size:${sz}px;font-weight:700;color:#1a1916">${it.name}</div>${it.desc ? `<div style="font-size:${szm}px;color:#888;margin-top:1px;line-height:1.3">${it.desc}</div>` : ''}</div><div style="font-size:${sz}px;font-weight:700;color:#1a1916;font-family:monospace;white-space:nowrap;padding-left:6px;flex-shrink:0">${it.price}</div></div>`
+      `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0"><div><div style="font-size:${sz}px;font-weight:700;color:#333">${it.name}</div>${it.desc ? `<div style="font-size:${szm}px;color:#666;padding-left:8px;margin-top:1px;line-height:1.3">${it.desc}</div>` : ''}</div><div style="font-size:${sz}px;font-weight:700;color:#333;font-family:monospace;white-space:nowrap;padding-left:6px;flex-shrink:0">${it.price}</div></div>`
     ).join('')}</div>`;
   }
 
@@ -55,7 +55,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const sfs = Math.round(8 * fs * ((d.labelFontSize as number) || 1));
     const lc = (d.labelColor as string) || '#ffffff';
     const vc = (d.valueColor as string) || '#000000';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;width:100%;height:100%;padding:0 4px"><div><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div>${d.subtitle ? `<div style="font-size:${sfs}px;color:${lc};font-style:italic;margin-top:1px">${d.subtitle}</div>` : ''}</div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;background:#fff;padding:2px 8px;border-radius:1px;min-width:110px;text-align:right">${d.value}</div></div>`;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;width:100%;height:100%;padding:0 4px"><div><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div>${d.subtitle ? `<div style="font-size:${sfs}px;color:${lc};font-style:italic;margin-top:1px">${d.subtitle}</div>` : ''}</div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:1px;min-width:110px;text-align:right">${d.value}</div></div>`;
   }
 
   if (type === 'dealer') {

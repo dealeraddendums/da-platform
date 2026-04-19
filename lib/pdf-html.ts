@@ -10,7 +10,7 @@ const PAPER_DIMS: Record<PaperSize, { w: number; h: number }> = {
   infosheet: { w: 816, h: 1056 },
 };
 
-type AnyOption = { option_name: string; option_price: string; active?: boolean };
+type AnyOption = { option_name: string; option_price: string; active?: boolean; description?: string | null };
 
 export interface BuildPdfHtmlInput {
   widgets: Widget[];
@@ -55,7 +55,7 @@ export function buildPdfHtml({
     if (options !== undefined && w.type === 'options') {
       d.items = options.filter(o => o.active !== false).map(o => ({
         name: o.option_name,
-        desc: '',
+        desc: o.description ?? '',
         price: formatOptionPrice(o.option_price),
       }));
     }
@@ -66,7 +66,7 @@ export function buildPdfHtml({
   const widgetHtml = enriched
     .map(w => {
       const inner = renderW(w.type, w.d, fontScale);
-      return `<div style="position:absolute;left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px;overflow:hidden;z-index:10;">${inner}</div>`;
+      return `<div style="position:absolute;left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px;overflow:hidden;z-index:10;background:transparent;">${inner}</div>`;
     })
     .join('\n');
 

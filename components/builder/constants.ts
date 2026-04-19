@@ -86,7 +86,7 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     value: '$28,596.00',
     subtitle: "(Not the Manufacturer's Suggested Retail Price)",
     labelColor: '#ffffff',
-    valueColor: '#000000',
+    valueColor: '#ffffff',
     labelFontSize: 1.0,
     valueFontSize: 1.0,
   },

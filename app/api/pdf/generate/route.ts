@@ -80,7 +80,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const { data: dealer } = await admin
       .from("dealers")
-      .select("name, address, city, state, zip, phone, logo_url")
+      .select("name, address, city, state, zip, phone, logo_url, dealer_id")
       .eq("id", dv.dealer_id)
       .maybeSingle();
 
@@ -130,9 +130,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .order("sort_order");
 
     const groupOpts = await getGroupOptionsForDealer(dv.dealer_id);
+
+    // Fetch descriptions from addendum_library (dealer_id is the Aurora text ID)
+    const libDealerId = dealer?.dealer_id ?? null;
+    const descMap = new Map<string, string>();
+    if (libDealerId) {
+      const { data: libRows } = await admin
+        .from("addendum_library")
+        .select("option_name, description")
+        .eq("dealer_id", libDealerId)
+        .eq("active", true);
+      (libRows ?? []).forEach(r => { if (r.description) descMap.set(r.option_name, r.description); });
+    }
+
     const options = [
-      ...groupOpts.map(g => ({ option_name: g.option_name, option_price: g.option_price, active: true })),
-      ...(optionRows ?? []),
+      ...groupOpts.map(g => ({ option_name: g.option_name, option_price: g.option_price, active: true as const, description: descMap.get(g.option_name) })),
+      ...(optionRows ?? []).map(r => ({ ...r, description: descMap.get(r.option_name) })),
     ];
 
     const disclaimer = await getGroupDisclaimer(dv.dealer_id, dealer?.state ?? null, docType);
@@ -279,9 +292,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Prepend locked group options
   const groupOpts = await getGroupOptionsForDealer(vehicleRow.DEALER_ID);
+
+  // Fetch descriptions from addendum_library using Aurora text dealer ID
+  const auroraDescMap = new Map<string, string>();
+  const { data: auroraLibRows } = await admin
+    .from("addendum_library")
+    .select("option_name, description")
+    .eq("dealer_id", vehicleRow.DEALER_ID)
+    .eq("active", true);
+  (auroraLibRows ?? []).forEach(r => { if (r.description) auroraDescMap.set(r.option_name, r.description); });
+
   const options = [
-    ...groupOpts.map(g => ({ option_name: g.option_name, option_price: g.option_price, active: true })),
-    ...(optionRows ?? []),
+    ...groupOpts.map(g => ({ option_name: g.option_name, option_price: g.option_price, active: true as const, description: auroraDescMap.get(g.option_name) })),
+    ...(optionRows ?? []).map(r => ({ ...r, description: auroraDescMap.get(r.option_name) })),
   ];
 
   // Fetch applicable group disclaimer
