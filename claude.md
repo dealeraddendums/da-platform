@@ -467,7 +467,7 @@ research and inspections before making any purchasing decisions.
 - Packages added: puppeteer, @aws-sdk/client-s3, @aws-sdk/s3-request-presigner, jszip
 
 ### EC2 requirements
-- Install Chromium system deps: libnss3 and related packages ⬜ (pending)
+- Install Chromium system deps: libnss3 and related packages ✅ (installed 2026-04-19)
 - AWS credentials: ✅ added to .env.production (IAM user da-platform-app)
 
 ---
