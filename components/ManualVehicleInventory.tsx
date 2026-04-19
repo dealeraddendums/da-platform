@@ -320,7 +320,7 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                   <SortTh label="Condition" col="condition" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <SortTh label="MSRP" col="msrp" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <SortTh label="Added" col="date_added" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-                  {["Print Now", "Edit", "History"].map((h) => (
+                  {["Edit", "History", "Print Now"].map((h) => (
                     <th key={h} className="text-left px-3 py-2.5" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -349,9 +349,6 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                       <td className="px-3 py-2 text-xs" style={{ color: "var(--text-secondary)" }}>{fmt(v.msrp)}</td>
                       <td className="px-3 py-2 text-xs" style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtDate(v.date_added)}</td>
                       <td className="px-3 py-2">
-                        <PrintNowBtn vehicleId={v.id} everPrinted={printed.length > 0} />
-                      </td>
-                      <td className="px-3 py-2">
                         <button
                           onClick={() => setEditingVehicle(v)}
                           style={{ height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, background: "#fff", color: "#333", border: "1px solid #c0c0c0", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
@@ -367,6 +364,9 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                         >
                           History
                         </button>
+                      </td>
+                      <td className="px-3 py-2">
+                        <PrintNowBtn vehicleId={v.id} everPrinted={printed.length > 0} />
                       </td>
                     </tr>
                   );

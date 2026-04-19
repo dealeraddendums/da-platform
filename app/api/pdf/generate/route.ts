@@ -65,10 +65,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // ── Dealer from Supabase ──────────────────────────────────────────────────
+    // dealer_vehicles.dealer_id is the TEXT dealer_id (matches dealers.dealer_id, not dealers.id UUID)
     const { data: dealer } = await admin
       .from("dealers")
       .select("dealer_id, name, address, city, state, zip, phone, logo_url")
-      .eq("id", dv.dealer_id)
+      .eq("dealer_id", dv.dealer_id)
       .maybeSingle();
 
     // dealer.dealer_id is the text ID used by group options / disclaimers
