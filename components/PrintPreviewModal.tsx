@@ -37,6 +37,7 @@ export default function PrintPreviewModal({
   onPrinted,
 }: Props) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [generating, setGenerating] = useState(true);
   const [genError, setGenError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -82,6 +83,15 @@ export default function PrintPreviewModal({
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!pdfUrl) return;
+    let objectUrl: string;
+    fetch(pdfUrl)
+      .then(r => r.blob())
+      .then(blob => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); });
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [pdfUrl]);
 
   const label = DOC_LABELS[docType];
   const filename = `${vehicleName.replace(/[^a-zA-Z0-9]+/g, "_")}_${label.replace(/\s+/g, "_")}.pdf`;
@@ -150,10 +160,10 @@ export default function PrintPreviewModal({
             </div>
           )}
 
-          {pdfUrl && !generating && (
+          {blobUrl && !generating && (
             <iframe
               ref={iframeRef}
-              src={pdfUrl}
+              src={blobUrl}
               style={{ width: "100%", height: "100%", border: "none", display: "block" }}
               title={`${label} Preview`}
             />
@@ -176,7 +186,7 @@ export default function PrintPreviewModal({
           >
             Cancel
           </button>
-          {pdfUrl && (
+          {pdfUrl && blobUrl && (
             <>
               <a
                 href={pdfUrl}
