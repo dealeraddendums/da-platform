@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 
 const TABS = [
   { label: "Inventory", href: "/vehicles" },
-  { label: "Addendum Options", href: "/options" },
 ];
 
 export default function VehicleSubNav() {
