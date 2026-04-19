@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { VehicleRow } from "@/lib/vehicles";
 
 type DocType = "addendum" | "infosheet" | "buyer_guide";
@@ -39,6 +39,7 @@ export default function PrintPreviewModal({
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [generating, setGenerating] = useState(true);
   const [genError, setGenError] = useState<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,6 +152,7 @@ export default function PrintPreviewModal({
 
           {pdfUrl && !generating && (
             <iframe
+              ref={iframeRef}
               src={pdfUrl}
               style={{ width: "100%", height: "100%", border: "none", display: "block" }}
               title={`${label} Preview`}
@@ -189,7 +191,7 @@ export default function PrintPreviewModal({
                 Download PDF
               </a>
               <button
-                onClick={() => window.open(pdfUrl, "_blank")}
+                onClick={() => iframeRef.current?.contentWindow?.print()}
                 style={{
                   height: 36, padding: "0 16px", background: "#1976d2", color: "#fff",
                   border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600,
