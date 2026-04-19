@@ -6,8 +6,7 @@ const BUCKET = 'dealer-addendums';
 
 function getClient(): S3Client {
   return new S3Client({
-    region: process.env.AWS_REGION || 'us-east-1',
-    followRegionRedirects: true,
+    region: process.env.PDF_S3_REGION || process.env.AWS_REGION || 'us-west-1',
     credentials: {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
