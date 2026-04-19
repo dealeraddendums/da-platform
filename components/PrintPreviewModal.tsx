@@ -201,7 +201,11 @@ export default function PrintPreviewModal({
                 Download PDF
               </a>
               <button
-                onClick={() => iframeRef.current?.contentWindow?.print()}
+                onClick={() => {
+                  if (!blobUrl) return;
+                  const w = window.open(blobUrl);
+                  if (w) setTimeout(() => w.print(), 500);
+                }}
                 style={{
                   height: 36, padding: "0 16px", background: "#1976d2", color: "#fff",
                   border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600,
