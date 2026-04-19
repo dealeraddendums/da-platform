@@ -240,10 +240,11 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
 
   const cond = vehicleCondition(vehicle);
   const photos = parsePhotos(vehicle.PHOTOS ?? null);
+  const appliedNames = new Set(options.map(o => o.option_name.toLowerCase().trim()));
   const filteredLibrary = library.filter(
     (o) =>
-      !librarySearch ||
-      o.option_name.toLowerCase().includes(librarySearch.toLowerCase())
+      !appliedNames.has(o.option_name.toLowerCase().trim()) &&
+      (!librarySearch || o.option_name.toLowerCase().includes(librarySearch.toLowerCase()))
   );
 
   // ── Render ───────────────────────────────────────────────────────────────────
