@@ -203,8 +203,11 @@ export default function PrintPreviewModal({
               <button
                 onClick={() => {
                   if (!blobUrl) return;
-                  const w = window.open(blobUrl);
-                  if (w) setTimeout(() => w.print(), 500);
+                  const w = window.open(blobUrl, '_blank');
+                  if (w) setTimeout(() => {
+                    w.print();
+                    w.addEventListener('afterprint', () => w.close());
+                  }, 500);
                 }}
                 style={{
                   height: 36, padding: "0 16px", background: "#1976d2", color: "#fff",
