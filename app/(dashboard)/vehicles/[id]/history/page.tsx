@@ -1,8 +1,6 @@
 import { redirect, notFound } from "next/navigation";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
-import { getPool } from "@/lib/aurora";
-import type { VehicleRowPacket } from "@/lib/aurora";
-import type { PrintHistoryRow } from "@/lib/db";
+import type { VehicleAuditLogRow } from "@/lib/db";
 
 export const metadata = { title: "Print History — DA Platform" };
 
@@ -24,19 +22,16 @@ export default async function HistoryPage({
     redirect(`/login?next=/vehicles/${params.id}/history`);
   }
 
-  const vehicleId = parseInt(params.id, 10);
-  if (isNaN(vehicleId)) notFound();
-
-  const pool = getPool();
-  const [rows] = await pool.execute<VehicleRowPacket[]>(
-    "SELECT id, DEALER_ID, YEAR, MAKE, MODEL, TRIM, VIN_NUMBER FROM dealer_inventory WHERE id = ? LIMIT 1",
-    [vehicleId]
-  );
-  if (!rows.length) notFound();
-
-  const v = rows[0];
-
   const admin = createAdminSupabaseClient();
+
+  const { data: dv } = await admin
+    .from("dealer_vehicles")
+    .select("id, dealer_id, year, make, model, trim, vin, stock_number")
+    .eq("id", params.id)
+    .maybeSingle();
+
+  if (!dv) notFound();
+
   const { data: profile } = await admin
     .from("profiles")
     .select("role, dealer_id")
@@ -44,16 +39,19 @@ export default async function HistoryPage({
     .single<{ role: string; dealer_id: string | null }>();
 
   if (profile?.role === "dealer_admin" || profile?.role === "dealer_user") {
-    if (profile.dealer_id && v.DEALER_ID !== profile.dealer_id) {
+    if (profile.dealer_id && dv.dealer_id !== profile.dealer_id) {
       redirect("/vehicles");
     }
   }
 
   const { data: history } = await admin
-    .from("print_history")
+    .from("vehicle_audit_log")
     .select("*")
-    .eq("vehicle_id", vehicleId)
+    .eq("vehicle_id", params.id)
+    .eq("action", "print")
     .order("created_at", { ascending: false });
+
+  const vehicleName = [dv.year, dv.make, dv.model].filter(Boolean).join(" ");
 
   return (
     <div>
@@ -61,14 +59,12 @@ export default async function HistoryPage({
         <div className="flex items-center gap-2 mb-1">
           <a href="/vehicles" className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>Inventory</a>
           <span className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>›</span>
-          <a href={`/vehicles/${vehicleId}/addendum`} className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-            {[v.YEAR, v.MAKE, v.MODEL].filter(Boolean).join(" ")}
-          </a>
+          <span className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>{vehicleName}</span>
           <span className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>›</span>
           <span className="text-sm" style={{ color: "var(--text-inverse)" }}>Print History</span>
         </div>
         <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Print History</h1>
-        <p className="text-sm mt-0.5 font-mono" style={{ color: "rgba(255,255,255,0.6)" }}>{v.VIN_NUMBER}</p>
+        <p className="text-sm mt-0.5 font-mono" style={{ color: "rgba(255,255,255,0.6)" }}>{dv.vin}</p>
       </div>
 
       <div className="card overflow-hidden">
@@ -92,13 +88,13 @@ export default async function HistoryPage({
               </tr>
             </thead>
             <tbody>
-              {(history as PrintHistoryRow[]).map((row, i) => (
+              {(history as VehicleAuditLogRow[]).map((row, i) => (
                 <tr
                   key={row.id}
                   style={{ borderBottom: i < history.length - 1 ? "1px solid var(--border)" : "none" }}
                 >
                   <td className="px-4 py-3">
-                    <DocBadge type={row.document_type} />
+                    <DocBadge type={row.document_type ?? "addendum"} />
                   </td>
                   <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
                     {new Date(row.created_at).toLocaleString("en-US", {

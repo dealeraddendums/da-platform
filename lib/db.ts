@@ -240,6 +240,7 @@ export type VehicleOptionRow = {
   dealer_id: string;
   option_name: string;
   option_price: string;
+  description: string | null;
   sort_order: number;
   active: boolean;
   source: "default" | "manual";

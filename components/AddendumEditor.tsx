@@ -34,7 +34,7 @@ type LibraryOption = {
 
 type Props = {
   vehicle: VehicleRow;
-  dealerVehicleId?: string;
+  dealerVehicleId: string;
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -630,9 +630,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
       {/* ── Print preview modal ───────────────────────────────────────────── */}
       {printDoc && (
         <PrintPreviewModal
-          vehicleId={dealerVehicleId ? undefined : vehicleId}
           dealerVehicleId={dealerVehicleId}
-          vehicle={dealerVehicleId ? undefined : vehicle}
           docType={printDoc}
           vehicleName={[vehicle.YEAR, vehicle.MAKE, vehicle.MODEL].filter(Boolean).join(" ") || "Vehicle"}
           onClose={() => setPrintDoc(null)}
