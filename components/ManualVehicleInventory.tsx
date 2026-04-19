@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from "react";
 import AddVehicleModal from "./AddVehicleModal";
 import EditVehicleModal from "./EditVehicleModal";
 import VehicleHistoryPanel from "./VehicleHistoryPanel";
-import PrintPreviewModal from "./PrintPreviewModal";
 import type { DealerVehicleRow } from "@/lib/db";
 
 type Props = { dealerId: string };
@@ -48,10 +47,10 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
 }
 
-function PrintBtn({ docType, printed, onPrint }: { docType: string; printed: boolean; onPrint: () => void }) {
+function PrintBtn({ vehicleId, docType, printed }: { vehicleId: string; docType: string; printed: boolean }) {
   return (
     <button
-      onClick={onPrint}
+      onClick={() => { window.location.href = `/dealer-vehicles/${vehicleId}/addendum`; }}
       style={{
         height: 28, padding: "0 9px", fontSize: 11, fontWeight: 600,
         borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap",
@@ -59,7 +58,7 @@ function PrintBtn({ docType, printed, onPrint }: { docType: string; printed: boo
         color: printed ? "#fff" : "#333",
         border: printed ? "1px solid #1565c0" : "1px solid #c0c0c0",
       }}
-      title={`Create ${DOC_LABELS[docType]}`}
+      title={`Open addendum editor for ${DOC_LABELS[docType]}`}
     >
       {DOC_LABELS[docType]}
     </button>
@@ -118,7 +117,6 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
   const [historyVehicle, setHistoryVehicle] = useState<{ id: string; stock_number: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [printTarget, setPrintTarget] = useState<{ vehicle: DealerVehicleRow; docType: "addendum" | "infosheet" | "buyer_guide" } | null>(null);
 
   const fetchVehicles = useCallback(async () => {
     setLoading(true);
@@ -375,13 +373,13 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
                         </button>
                       </td>
                       <td className="px-3 py-2">
-                        <PrintBtn docType="buyer_guide" printed={printed.includes("buyer_guide")} onPrint={() => setPrintTarget({ vehicle: v, docType: "buyer_guide" })} />
+                        <PrintBtn vehicleId={v.id} docType="buyer_guide" printed={printed.includes("buyer_guide")} />
                       </td>
                       <td className="px-3 py-2">
-                        <PrintBtn docType="infosheet" printed={printed.includes("infosheet")} onPrint={() => setPrintTarget({ vehicle: v, docType: "infosheet" })} />
+                        <PrintBtn vehicleId={v.id} docType="infosheet" printed={printed.includes("infosheet")} />
                       </td>
                       <td className="px-3 py-2">
-                        <PrintBtn docType="addendum" printed={printed.includes("addendum")} onPrint={() => setPrintTarget({ vehicle: v, docType: "addendum" })} />
+                        <PrintBtn vehicleId={v.id} docType="addendum" printed={printed.includes("addendum")} />
                       </td>
                     </tr>
                   );
@@ -429,23 +427,6 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
           vehicleId={historyVehicle.id}
           stockNumber={historyVehicle.stock_number}
           onClose={() => setHistoryVehicle(null)}
-        />
-      )}
-
-      {/* Print preview modal */}
-      {printTarget && (
-        <PrintPreviewModal
-          dealerVehicleId={printTarget.vehicle.id}
-          docType={printTarget.docType}
-          vehicleName={[printTarget.vehicle.year, printTarget.vehicle.make, printTarget.vehicle.model].filter(Boolean).join(" ") || printTarget.vehicle.stock_number}
-          onClose={() => setPrintTarget(null)}
-          onPrinted={() => {
-            const { vehicle: v, docType } = printTarget;
-            setPrintedTypes(prev => ({
-              ...prev,
-              [v.id]: [...(prev[v.id] ?? []).filter(t => t !== docType), docType],
-            }));
-          }}
         />
       )}
 
