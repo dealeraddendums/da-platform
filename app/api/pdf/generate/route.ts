@@ -64,7 +64,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient();
 
   // ── Manual vehicle path (dealerVehicleId) ─────────────────────────────────────
-  if (dealerVehicleId) {
+  if (dealerVehicleId) { try {
     const { data: dv } = await admin
       .from("dealer_vehicles")
       .select("*")
@@ -206,7 +206,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } as VehicleAuditLogInsert);
 
     return NextResponse.json({ url: pdfUrl });
-  }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "PDF generation failed";
+    console.error("[pdf/generate manual]", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  } }
 
   // ── Aurora vehicle path ───────────────────────────────────────────────────────
   if (!vehicleId) {
