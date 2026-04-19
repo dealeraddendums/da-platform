@@ -293,14 +293,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Prepend locked group options
   const groupOpts = await getGroupOptionsForDealer(vehicleRow.DEALER_ID);
 
-  // Fetch descriptions from addendum_library using Aurora text dealer ID
+  // Fetch descriptions from Supabase addendum_library using claims dealer_id
   const auroraDescMap = new Map<string, string>();
-  const { data: auroraLibRows } = await admin
-    .from("addendum_library")
-    .select("option_name, description")
-    .eq("dealer_id", vehicleRow.DEALER_ID)
-    .eq("active", true);
-  (auroraLibRows ?? []).forEach(r => { if (r.description) auroraDescMap.set(r.option_name, r.description); });
+  if (effectiveDealerIdAurora) {
+    const { data: auroraLibRows } = await admin
+      .from("addendum_library")
+      .select("option_name, description")
+      .eq("dealer_id", effectiveDealerIdAurora)
+      .eq("active", true);
+    (auroraLibRows ?? []).forEach(r => { if (r.description) auroraDescMap.set(r.option_name, r.description); });
+  }
 
   const options = [
     ...groupOpts.map(g => ({ option_name: g.option_name, option_price: g.option_price, active: true as const, description: auroraDescMap.get(g.option_name) })),
