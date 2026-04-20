@@ -73,6 +73,15 @@ function listMatches(
   return notFlag ? !inList : inList;
 }
 
+/** Check if a vehicle condition matches a Supabase library row's ad_types array. */
+export function matchesAdTypes(
+  adTypes: string[] | null | undefined,
+  vehicleCond: "New" | "Used" | "CPO"
+): boolean {
+  if (!adTypes || adTypes.length === 0) return true;
+  return adTypes.includes(vehicleCond);
+}
+
 function matchesCondition(row: DefaultRow, vehicle: VehicleRow): boolean {
   const cond = vehicleCondition(vehicle);
 

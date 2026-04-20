@@ -294,6 +294,7 @@ export type AddendumLibraryRow = {
   item_price: string;
   description: string;
   ad_type: string;
+  ad_types: string[] | null;
   makes: string;
   makes_not: boolean;
   models: string;
@@ -321,6 +322,49 @@ export type AddendumLibraryRow = {
 
 type AddendumLibraryInsert = Omit<AddendumLibraryRow, 'id' | 'created_at' | 'updated_at'>;
 type AddendumLibraryUpdate = Partial<Omit<AddendumLibraryRow, 'id' | 'dealer_id' | 'created_at' | 'updated_at'>>;
+
+export type AddendumHistoryRow = {
+  id: string;
+  legacy_id: number | null;
+  vehicle_id: number | null;
+  vin: string | null;
+  dealer_id: string | null;
+  item_name: string;
+  item_description: string | null;
+  item_price: string | null;
+  active: string | null;
+  creation_date: string | null;
+  separator_above: number | null;
+  separator_below: number | null;
+  separator_spaces: number | null;
+  order_by: number | null;
+  editable: number | null;
+  source: string | null;
+  imported_at: string;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type AddendumHistoryInsert = {
+  item_name: string;
+  legacy_id?: number | null;
+  vehicle_id?: number | null;
+  vin?: string | null;
+  dealer_id?: string | null;
+  item_description?: string | null;
+  item_price?: string | null;
+  active?: string | null;
+  creation_date?: string | null;
+  separator_above?: number | null;
+  separator_below?: number | null;
+  separator_spaces?: number | null;
+  order_by?: number | null;
+  editable?: number | null;
+  source?: string | null;
+  imported_at?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
 
 export type AdminAuditRow = {
   id: string;
@@ -719,6 +763,12 @@ export type Database = {
             referencedColumns: ["dealer_id"];
           }
         ];
+      };
+      addendum_history: {
+        Row: AddendumHistoryRow;
+        Insert: AddendumHistoryInsert;
+        Update: Partial<Omit<AddendumHistoryRow, 'id'>>;
+        Relationships: [];
       };
       admin_audit: {
         Row: AdminAuditRow;

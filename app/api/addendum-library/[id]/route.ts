@@ -49,6 +49,7 @@ export async function PATCH(
   if (body.item_price !== undefined) patch.item_price = body.item_price;
   if (body.description !== undefined) patch.description = body.description;
   if (body.ad_type !== undefined) patch.ad_type = body.ad_type;
+  if (body.ad_types !== undefined) patch.ad_types = body.ad_types;
   if (body.makes !== undefined) patch.makes = body.makes;
   if (body.makes_not !== undefined) patch.makes_not = body.makes_not;
   if (body.models !== undefined) patch.models = body.models;

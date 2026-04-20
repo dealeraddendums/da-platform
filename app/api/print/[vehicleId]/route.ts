@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import type { AddendumHistoryInsert } from "@/lib/db";
 import { getPool } from "@/lib/aurora";
 import type { VehicleRowPacket } from "@/lib/aurora";
 
@@ -26,6 +27,8 @@ export async function POST(
   const body = await req.json() as {
     document_type?: string;
     template_id?: string;
+    options?: { option_name: string; option_price?: string }[];
+    vin?: string;
   };
 
   const docType = body.document_type as "addendum" | "infosheet" | "buyer_guide";
@@ -64,6 +67,28 @@ export async function POST(
     .single();
 
   if (err) return NextResponse.json({ error: err.message }, { status: 500 });
+
+  // Write per-option addendum_history rows
+  if (body.options && body.options.length > 0) {
+    const today = new Date().toISOString().split("T")[0];
+    const historyRows: AddendumHistoryInsert[] = body.options.map((o, i) => ({
+      legacy_id:    null,
+      vehicle_id:   vehicleId,
+      vin:          body.vin ?? null,
+      dealer_id:    dealerId,
+      item_name:    o.option_name,
+      item_description: null,
+      item_price:   o.option_price ?? null,
+      active:       "Yes",
+      creation_date: today,
+      order_by:     i,
+      source:       "platform",
+      created_at:   new Date().toISOString(),
+      updated_at:   new Date().toISOString(),
+    }));
+    await admin.from("addendum_history").insert(historyRows);
+  }
+
   return NextResponse.json({ data });
 }
 

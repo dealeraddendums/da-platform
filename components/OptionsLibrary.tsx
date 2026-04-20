@@ -10,7 +10,7 @@ type FormData = {
   option_name: string;
   item_price: string;
   description: string;
-  ad_type: "New" | "Used" | "Both";
+  ad_types: string[];
   models: string;
   models_not: boolean;
   trims: string;
@@ -32,7 +32,7 @@ type FormData = {
 };
 
 const BLANK: FormData = {
-  option_name: "", item_price: "", description: "", ad_type: "Both",
+  option_name: "", item_price: "", description: "", ad_types: ["New", "Used"],
   models: "", models_not: false, trims: "", trims_not: false,
   makes: "", makes_not: false, body_styles: "",
   year_condition: 0, year_value: "",
@@ -44,7 +44,10 @@ const BLANK: FormData = {
 function rowToForm(r: AddendumLibraryRow): FormData {
   return {
     option_name: r.option_name, item_price: r.item_price, description: r.description,
-    ad_type: (r.ad_type as FormData["ad_type"]) || "Both",
+    ad_types: r.ad_types && r.ad_types.length > 0 ? r.ad_types
+      : r.ad_type === "New" ? ["New"]
+      : r.ad_type === "Used" ? ["Used"]
+      : ["New", "Used"],
     models: r.models, models_not: r.models_not,
     trims: r.trims, trims_not: r.trims_not,
     makes: r.makes, makes_not: r.makes_not,
@@ -472,12 +475,29 @@ function OptionForm({
       {/* Type — only shown when auto-applying (all or rules) */}
       {appliesTo !== "none" && row("Type", (
         <div style={{ display: "flex", gap: 8 }}>
-          {(["New", "Used", "Both"] as const).map(v => (
-            <button type="button" key={v} onClick={() => f("ad_type", v)}
-              style={{ flex: 1, padding: "6px 0", borderRadius: 4, border: `2px solid ${form.ad_type === v ? "#1976d2" : "#e0e0e0"}`, background: form.ad_type === v ? "#e3f2fd" : "#fff", color: form.ad_type === v ? "#1976d2" : "#55595c", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>
-              {v}
-            </button>
-          ))}
+          {([
+            { val: "New",  active: "#e8f5e9", activeText: "#2e7d32", activeBorder: "#4caf50" },
+            { val: "Used", active: "#e3f2fd", activeText: "#1565c0", activeBorder: "#1976d2" },
+            { val: "CPO",  active: "#fff3e0", activeText: "#e65100", activeBorder: "#ffa500" },
+          ]).map(({ val, active, activeText, activeBorder }) => {
+            const on = form.ad_types.includes(val);
+            return (
+              <button type="button" key={val}
+                onClick={() => {
+                  const next = on
+                    ? form.ad_types.length > 1 ? form.ad_types.filter(x => x !== val) : form.ad_types
+                    : [...form.ad_types, val];
+                  f("ad_types", next);
+                }}
+                style={{ flex: 1, padding: "6px 0", borderRadius: 4, fontWeight: 600, fontSize: 12, cursor: "pointer",
+                  border: `2px solid ${on ? activeBorder : "#e0e0e0"}`,
+                  background: on ? active : "#fff",
+                  color: on ? activeText : "#55595c",
+                }}>
+                {val}
+              </button>
+            );
+          })}
         </div>
       ))}
 
@@ -773,10 +793,19 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
     const styles: Record<string, React.CSSProperties> = {
       New:  { background: "#e8f5e9", color: "#2e7d32" },
       Used: { background: "#e3f2fd", color: "#1565c0" },
-      Both: { background: "#f5f6f7", color: "#55595c" },
+      CPO:  { background: "#fff3e0", color: "#e65100" },
     };
+    const types: string[] = item.ad_types && item.ad_types.length > 0
+      ? item.ad_types
+      : item.ad_type === "New" ? ["New"]
+      : item.ad_type === "Used" ? ["Used"]
+      : ["New", "Used"];
     return (
-      <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, ...(styles[item.ad_type] ?? styles.Both) }}>{item.ad_type}</span>
+      <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {types.map(t => (
+          <span key={t} style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, ...(styles[t] ?? { background: "#f5f6f7", color: "#55595c" }) }}>{t}</span>
+        ))}
+      </span>
     );
   }
 

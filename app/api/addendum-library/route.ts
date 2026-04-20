@@ -98,6 +98,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       item_price: body.item_price ?? "",
       description: body.description ?? "",
       ad_type: body.ad_type ?? "Both",
+      ad_types: body.ad_types ?? ["New", "Used"],
       makes: body.makes ?? "",
       makes_not: body.makes_not ?? false,
       models: body.models ?? "",

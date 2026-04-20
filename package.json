@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "sync:nhtsa": "npx tsx scripts/sync-nhtsa.ts"
+    "sync:nhtsa": "npx tsx scripts/sync-nhtsa.ts",
+    "import:addendum-history": "npx tsx scripts/import-addendum-history.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",

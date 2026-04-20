@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { VehicleAuditLogInsert } from "@/lib/db";
+import type { VehicleAuditLogInsert, AddendumHistoryInsert } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf } from "@/lib/s3-upload";
@@ -216,6 +216,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       changed_by: claims.sub,
       document_type: docType,
     } as VehicleAuditLogInsert);
+
+    // ── Write per-option history rows ─────────────────────────────────────────
+    const today = new Date().toISOString().split("T")[0];
+    const historyRows: AddendumHistoryInsert[] = options.map((o, i) => ({
+      legacy_id:    null,
+      vehicle_id:   null,
+      vin:          dv.vin ?? null,
+      dealer_id:    dv.dealer_id,
+      item_name:    "option_name" in o ? o.option_name : (o as { option_name: string }).option_name,
+      item_description: null,
+      item_price:   "option_price" in o ? (o as { option_price: string }).option_price : null,
+      active:       "Yes",
+      creation_date: today,
+      order_by:     i,
+      source:       "platform",
+      created_at:   new Date().toISOString(),
+      updated_at:   new Date().toISOString(),
+    }));
+    if (historyRows.length > 0) {
+      await admin.from("addendum_history").insert(historyRows);
+    }
 
     return NextResponse.json({ url: pdfUrl });
 
