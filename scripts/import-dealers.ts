@@ -86,7 +86,13 @@ interface AuroraDealer extends mysql.RowDataPacket {
 
 function toTs(v: Date | string | null): string | null {
   if (!v) return null;
-  return v instanceof Date ? v.toISOString() : String(v);
+  if (v instanceof Date) {
+    return isNaN(v.getTime()) ? null : v.toISOString();
+  }
+  const s = String(v);
+  if (!s || s.startsWith("0000")) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
