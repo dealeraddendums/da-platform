@@ -22,7 +22,7 @@ export default async function DealersPage() {
     ?? "dealer_user";
 
   if (role === "super_admin" || role === "group_admin") {
-    return <DealerList />;
+    return <DealerList role={role} />;
   }
 
   // dealer_admin / dealer_user: redirect to own dealer profile

@@ -43,17 +43,30 @@ export type GroupRow = {
   active: boolean;
   account_type: string;
   internal_id: string | null;
+  legacy_id: number | null;
   primary_contact: string | null;
   primary_contact_email: string | null;
   phone: string | null;
+  email: string | null;
   address: string | null;
   city: string | null;
   state: string | null;
   zip: string | null;
   country: string;
+  billing_id: string | null;
+  template_id: string | null;
+  group_fee: string | null;
   billing_contact: string | null;
   billing_email: string | null;
   billing_phone: string | null;
+  billing_address: string | null;
+  billing_city: string | null;
+  billing_state: string | null;
+  billing_zip: string | null;
+  billing_country: string | null;
+  billing_date: string | null;
+  hubspot_company_id: string | null;
+  feed_supplier: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -63,17 +76,31 @@ type GroupInsert = {
   active?: boolean;
   account_type?: string;
   internal_id?: string | null;
+  legacy_id?: number | null;
   primary_contact?: string | null;
   primary_contact_email?: string | null;
   phone?: string | null;
+  email?: string | null;
   address?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
   country?: string;
+  billing_id?: string | null;
+  template_id?: string | null;
+  group_fee?: string | null;
   billing_contact?: string | null;
   billing_email?: string | null;
   billing_phone?: string | null;
+  billing_address?: string | null;
+  billing_city?: string | null;
+  billing_state?: string | null;
+  billing_zip?: string | null;
+  billing_country?: string | null;
+  billing_date?: string | null;
+  hubspot_company_id?: string | null;
+  feed_supplier?: string | null;
+  created_at?: string | null;
 };
 
 export type GroupUpdate = {
@@ -83,14 +110,26 @@ export type GroupUpdate = {
   primary_contact?: string | null;
   primary_contact_email?: string | null;
   phone?: string | null;
+  email?: string | null;
   address?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
   country?: string;
+  billing_id?: string | null;
+  template_id?: string | null;
+  group_fee?: string | null;
   billing_contact?: string | null;
   billing_email?: string | null;
   billing_phone?: string | null;
+  billing_address?: string | null;
+  billing_city?: string | null;
+  billing_state?: string | null;
+  billing_zip?: string | null;
+  billing_country?: string | null;
+  billing_date?: string | null;
+  hubspot_company_id?: string | null;
+  feed_supplier?: string | null;
 };
 
 export type DealerRow = {
@@ -100,10 +139,16 @@ export type DealerRow = {
   internal_id: string | null;
   /** Inventory supplier-assigned ID. Matches Aurora DEALER_ID for inventory queries. */
   inventory_dealer_id: string | null;
+  legacy_id: number | null;
   name: string;
   active: boolean;
   account_type: string;
   group_id: string | null;
+  dealer_group_legacy: string | null;
+  billing_id: string | null;
+  template_id: string | null;
+  feed_source: string | null;
+  etl_job: string | null;
   primary_contact: string | null;
   primary_contact_email: string | null;
   phone: string | null;
@@ -113,6 +158,26 @@ export type DealerRow = {
   state: string | null;
   zip: string | null;
   country: string;
+  billing_street: string | null;
+  billing_city: string | null;
+  billing_state: string | null;
+  billing_zip: string | null;
+  billing_country: string | null;
+  sub_billing_to: string | null;
+  billing_to: string | null;
+  referred_by: string | null;
+  make1: string | null;
+  make2: string | null;
+  make3: string | null;
+  make4: string | null;
+  make5: string | null;
+  lat: string | null;
+  lng: string | null;
+  hubspot_company_id: string | null;
+  agent_name: string | null;
+  email_report: number | null;
+  report_send_to: string | null;
+  last30: number | null;
   makes: string[];
   created_at: string;
   updated_at: string;
@@ -120,12 +185,18 @@ export type DealerRow = {
 
 type DealerInsert = {
   dealer_id: string;
+  name: string;
   internal_id?: string | null;
   inventory_dealer_id?: string | null;
-  name: string;
+  legacy_id?: number | null;
   active?: boolean;
   account_type?: string;
   group_id?: string | null;
+  dealer_group_legacy?: string | null;
+  billing_id?: string | null;
+  template_id?: string | null;
+  feed_source?: string | null;
+  etl_job?: string | null;
   primary_contact?: string | null;
   primary_contact_email?: string | null;
   phone?: string | null;
@@ -135,7 +206,28 @@ type DealerInsert = {
   state?: string | null;
   zip?: string | null;
   country?: string;
+  billing_street?: string | null;
+  billing_city?: string | null;
+  billing_state?: string | null;
+  billing_zip?: string | null;
+  billing_country?: string | null;
+  sub_billing_to?: string | null;
+  billing_to?: string | null;
+  referred_by?: string | null;
+  make1?: string | null;
+  make2?: string | null;
+  make3?: string | null;
+  make4?: string | null;
+  make5?: string | null;
+  lat?: string | null;
+  lng?: string | null;
+  hubspot_company_id?: string | null;
+  agent_name?: string | null;
+  email_report?: number | null;
+  report_send_to?: string | null;
+  last30?: number | null;
   makes?: string[];
+  created_at?: string | null;
 };
 
 export type DealerUpdate = {
@@ -145,6 +237,11 @@ export type DealerUpdate = {
   active?: boolean;
   account_type?: string;
   group_id?: string | null;
+  dealer_group_legacy?: string | null;
+  billing_id?: string | null;
+  template_id?: string | null;
+  feed_source?: string | null;
+  etl_job?: string | null;
   primary_contact?: string | null;
   primary_contact_email?: string | null;
   phone?: string | null;
@@ -154,6 +251,26 @@ export type DealerUpdate = {
   state?: string | null;
   zip?: string | null;
   country?: string;
+  billing_street?: string | null;
+  billing_city?: string | null;
+  billing_state?: string | null;
+  billing_zip?: string | null;
+  billing_country?: string | null;
+  sub_billing_to?: string | null;
+  billing_to?: string | null;
+  referred_by?: string | null;
+  make1?: string | null;
+  make2?: string | null;
+  make3?: string | null;
+  make4?: string | null;
+  make5?: string | null;
+  lat?: string | null;
+  lng?: string | null;
+  hubspot_company_id?: string | null;
+  agent_name?: string | null;
+  email_report?: number | null;
+  report_send_to?: string | null;
+  last30?: number | null;
   makes?: string[];
 };
 
@@ -364,6 +481,12 @@ export type AddendumHistoryInsert = {
   imported_at?: string;
   created_at?: string | null;
   updated_at?: string | null;
+};
+
+export type AdminSettingsRow = {
+  key: string;
+  value: string | null;
+  updated_at: string;
 };
 
 export type AdminAuditRow = {
@@ -768,6 +891,12 @@ export type Database = {
         Row: AddendumHistoryRow;
         Insert: AddendumHistoryInsert;
         Update: Partial<Omit<AddendumHistoryRow, 'id'>>;
+        Relationships: [];
+      };
+      admin_settings: {
+        Row: AdminSettingsRow;
+        Insert: { key: string; value?: string | null; updated_at?: string };
+        Update: { value?: string | null; updated_at?: string };
         Relationships: [];
       };
       admin_audit: {
