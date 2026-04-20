@@ -467,6 +467,36 @@ export type DealerVehicleRow = {
   created_by: string | null;
   date_added: string;
   updated_at: string;
+  // Extended fields matching legacy dealer_inventory schema (migration 020)
+  doors: string | null;
+  fuel: string | null;
+  photos: string | null;
+  date_in_stock: string | null;
+  vdp_link: string | null;
+  status_code: string | null;
+  warranty_expires: string | null;
+  insp_numb: string | null;
+  msrp_adjustment: string | null;
+  discounted_price: string | null;
+  internet_price: string | null;
+  cdjr_price: string | null;
+  certified: string | null;
+  hmpg: string | null;
+  cmpg: string | null;
+  mpg: string | null;
+  print_status: number | null;
+  print_date: string | null;
+  print_guide: number | null;
+  print_info: number | null;
+  print_queue: number | null;
+  print_user: string | null;
+  print_flag: number | null;
+  print_sms: number | null;
+  options_added: number | null;
+  re_order: number | null;
+  edit_status: number | null;
+  edit_date: string | null;
+  input_date: string | null;
 };
 
 export type DealerVehicleInsert = {
@@ -492,6 +522,36 @@ export type DealerVehicleInsert = {
   description?: string | null;
   options?: string | null;
   created_by?: string | null;
+  // Extended fields (migration 020)
+  doors?: string | null;
+  fuel?: string | null;
+  photos?: string | null;
+  date_in_stock?: string | null;
+  vdp_link?: string | null;
+  status_code?: string | null;
+  warranty_expires?: string | null;
+  insp_numb?: string | null;
+  msrp_adjustment?: string | null;
+  discounted_price?: string | null;
+  internet_price?: string | null;
+  cdjr_price?: string | null;
+  certified?: string | null;
+  hmpg?: string | null;
+  cmpg?: string | null;
+  mpg?: string | null;
+  print_status?: number | null;
+  print_date?: string | null;
+  print_guide?: number | null;
+  print_info?: number | null;
+  print_queue?: number | null;
+  print_user?: string | null;
+  print_flag?: number | null;
+  print_sms?: number | null;
+  options_added?: number | null;
+  re_order?: number | null;
+  edit_status?: number | null;
+  edit_date?: string | null;
+  input_date?: string | null;
 };
 
 export type VehicleAuditLogRow = {

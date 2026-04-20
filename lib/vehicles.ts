@@ -31,6 +31,27 @@ export type VehicleRow = {
   CMPG: string | null;
   MPG: string | null;
   UPDATE_DATE?: string | null;
+  // Extended fields — populated from dealer_vehicles (migration 020) or Aurora
+  DOORS?: string | null;
+  VDP_LINK?: string | null;
+  WARRANTY_EXPIRES?: string | null;
+  INSP_NUMB?: string | null;
+  MSRP_ADJUSTMENT?: string | null;
+  DISCOUNTED_PRICE?: string | null;
+  INTERNET_PRICE?: string | null;
+  CDJR_PRICE?: string | null;
+  PRINT_DATE?: string | null;
+  PRINT_GUIDE?: string | null;
+  PRINT_INFO?: string | null;
+  PRINT_QUEUE?: string | null;
+  PRINT_USER?: string | null;
+  PRINT_FLAG?: string | null;
+  PRINT_SMS?: string | null;
+  OPTIONS_ADDED?: string | null;
+  RE_ORDER?: string | null;
+  EDIT_STATUS?: string | null;
+  EDIT_DATE?: string | null;
+  INPUT_DATE?: string | null;
 };
 
 /** Parse pipe-separated PHOTOS string to array of URLs. */
