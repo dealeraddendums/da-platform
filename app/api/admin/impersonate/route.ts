@@ -32,16 +32,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
 
-  const { data: targetProfile } = await admin
+  const { data: profileRows } = await admin
     .from("profiles")
-    .select("id, email")
+    .select("id, email, role")
     .eq("dealer_id", dealer_id)
-    .eq("role", "dealer_admin")
-    .maybeSingle();
+    .in("role", ["dealer_admin", "dealer_user", "dealer_restricted"]);
+
+  const profiles = profileRows ?? [];
+  const targetProfile =
+    profiles.find((p) => p.role === "dealer_admin") ??
+    profiles[0] ??
+    null;
 
   if (!targetProfile) {
     return NextResponse.json(
-      { error: "No dealer_admin account exists for this dealer. Use the New Dealer form to create one." },
+      { error: "No dealer user account exists for this dealer. Use the New Dealer form to create one." },
       { status: 404 }
     );
   }

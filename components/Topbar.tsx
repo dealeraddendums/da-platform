@@ -10,6 +10,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   group_user: "Group User",
   dealer_admin: "Dealer Admin",
   dealer_user: "Dealer User",
+  dealer_restricted: "Dealer User",
 };
 
 type Props = {

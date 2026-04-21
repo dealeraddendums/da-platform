@@ -7,7 +7,8 @@ export type UserRole =
   | "group_admin"
   | "group_user"
   | "dealer_admin"
-  | "dealer_user";
+  | "dealer_user"
+  | "dealer_restricted";
 
 export type ProfileRow = {
   id: string;
