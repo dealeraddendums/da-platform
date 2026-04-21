@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
 
 type Props = {
@@ -219,6 +220,49 @@ function GroupDealers({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [impersonating, setImpersonating] = useState<string | null>(null);
+  const [impersonateError, setImpersonateError] = useState<{ dealerId: string; message: string } | null>(null);
+
+  async function handleImpersonate(d: DealerRow) {
+    setImpersonating(d.dealer_id);
+    setImpersonateError(null);
+    const supabase = createClient();
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+    const res = await fetch("/api/admin/impersonate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dealer_id: d.dealer_id }),
+    });
+    const json = (await res.json()) as { token_hash?: string; dealer_name?: string; dealer_id?: string; error?: string };
+
+    if (!res.ok || !json.token_hash) {
+      setImpersonateError({ dealerId: d.dealer_id, message: json.error ?? "Failed to impersonate" });
+      setImpersonating(null);
+      return;
+    }
+
+    localStorage.setItem("da_impersonate", JSON.stringify({
+      dealer_name: json.dealer_name,
+      dealer_id: json.dealer_id,
+      original_access_token: currentSession?.access_token ?? "",
+      original_refresh_token: currentSession?.refresh_token ?? "",
+    }));
+
+    const { error: otpError } = await supabase.auth.verifyOtp({
+      token_hash: json.token_hash,
+      type: "magiclink",
+    });
+
+    if (otpError) {
+      localStorage.removeItem("da_impersonate");
+      setImpersonateError({ dealerId: d.dealer_id, message: otpError.message });
+      setImpersonating(null);
+      return;
+    }
+
+    window.location.href = "/dashboard";
+  }
 
   const fetchDealers = useCallback(async () => {
     setLoading(true);
@@ -296,8 +340,34 @@ function GroupDealers({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin
             {dealers.map((d, i) => (
               <tr key={d.id} style={{ borderBottom: i < dealers.length - 1 ? "1px solid var(--border)" : "none" }}>
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--text-muted)" }}>{d.dealer_id}</td>
-                <td className="px-4 py-3 font-medium" style={{ color: "var(--text-primary)" }}>
-                  <Link href={`/dealers/${d.id}`} style={{ color: "var(--blue)" }}>{d.name}</Link>
+                <td className="px-4 py-3 font-medium">
+                  <div className="flex items-center gap-1.5 group">
+                    <button
+                      onClick={() => void handleImpersonate(d)}
+                      disabled={impersonating === d.dealer_id}
+                      title="Log in as this dealer"
+                      style={{
+                        background: "none", border: "none", padding: 0,
+                        fontWeight: 500, color: "var(--text-primary)",
+                        cursor: impersonating === d.dealer_id ? "wait" : "pointer",
+                        fontSize: "inherit",
+                      }}
+                      className="hover:underline"
+                    >
+                      {impersonating === d.dealer_id ? "…" : d.name}
+                    </button>
+                    <Link
+                      href={`/dealers/${d.id}`}
+                      title="View dealer profile"
+                      className="opacity-0 group-hover:opacity-50"
+                      style={{ fontSize: 13, lineHeight: 1, color: "var(--text-muted)", transition: "opacity 100ms", textDecoration: "none" }}
+                    >
+                      📋
+                    </Link>
+                  </div>
+                  {impersonateError?.dealerId === d.dealer_id && (
+                    <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{impersonateError.message}</p>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
