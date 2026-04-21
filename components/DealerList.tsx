@@ -42,11 +42,14 @@ function subscriptionLabel(accountType: string | null): string {
   return SUBSCRIPTION_LABELS[accountType] ?? accountType;
 }
 
-function fmtCreated(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (isNaN(d.getTime()) || d.getFullYear() < 2000) return "—";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+const MIN_DATE = new Date("2015-01-01").getTime();
+
+function fmtCreated(legacyId: number | null | undefined): string {
+  if (!legacyId || legacyId <= 0) return "Very old";
+  const ms = legacyId * 1000;
+  if (ms < MIN_DATE || ms > Date.now()) return "Very old";
+  const d = new Date(ms);
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
 }
 
 export default function DealerList({ role = "dealer_user" }: { role?: string }) {
@@ -402,7 +405,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                       {d.last_30_prints.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
-                      {fmtCreated(d.created_at)}
+                      {fmtCreated(d.legacy_id)}
                     </td>
                   </tr>
                 );

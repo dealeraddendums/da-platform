@@ -24,7 +24,9 @@ async function getPrintCounts(admin: ReturnType<typeof createAdminSupabaseClient
 }
 
 type SortableCol = "name" | "active" | "account_type" | "created_at" | "lifetime_prints" | "last_30_prints" | "group_name";
+// Use legacy_id for "created" sort — it's the Aurora _ID (sequential int) and more reliable than created_at
 const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "created_at"]);
+const DB_SORT_COL_MAP: Partial<Record<SortableCol, string>> = { created_at: "legacy_id" };
 
 /**
  * GET /api/dealers
@@ -76,9 +78,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (active === "true") query = query.eq("active", true);
   else if (active === "false") query = query.eq("active", false);
 
-  // Apply DB-level ordering for sortable DB columns; fall back to created_at desc
-  const dbSortCol = DB_SORT_COLS.has(sortCol) ? sortCol : "created_at";
-  query = query.order(dbSortCol, { ascending: sortDir }).range(from, from + perPage - 1);
+  // Apply DB-level ordering; "created_at" sorts by legacy_id (Aurora _ID, sequential)
+  const dbSortCol = DB_SORT_COLS.has(sortCol)
+    ? (DB_SORT_COL_MAP[sortCol] ?? sortCol)
+    : "legacy_id";
+  query = query.order(dbSortCol, { ascending: sortDir, nullsFirst: false }).range(from, from + perPage - 1);
 
   const { data, error: dbError, count } = await query;
   if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });

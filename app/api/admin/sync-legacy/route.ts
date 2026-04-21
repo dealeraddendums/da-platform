@@ -160,7 +160,7 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
       dealersImported += rows.length;
     }
 
-    // ── Link dealers → groups via dealer_group_legacy ────────────────────────
+    // ── Link dealers → groups via dealer_group_legacy (case-insensitive) ───────
     await admin.from("dealers")
       .select("id, dealer_group_legacy")
       .not("dealer_group_legacy", "is", null)
@@ -168,11 +168,16 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
       .then(async ({ data: unlinked }) => {
         if (!unlinked?.length) return;
         const { data: groups } = await admin.from("groups").select("id, name");
-        const nameToId = new Map((groups ?? []).map(g => [g.name, g.id]));
-        const updates = (unlinked).filter(d => d.dealer_group_legacy && nameToId.has(d.dealer_group_legacy)).map(d => ({
-          id: d.id,
-          group_id: nameToId.get(d.dealer_group_legacy!)!,
-        }));
+        // Case-insensitive, trimmed match to handle Aurora data inconsistencies
+        const nameToId = new Map(
+          (groups ?? []).map(g => [g.name.toLowerCase().trim(), g.id])
+        );
+        const updates = (unlinked)
+          .filter(d => d.dealer_group_legacy && nameToId.has(d.dealer_group_legacy.toLowerCase().trim()))
+          .map(d => ({
+            id: d.id,
+            group_id: nameToId.get(d.dealer_group_legacy!.toLowerCase().trim())!,
+          }));
         for (const u of updates) {
           await admin.from("dealers").update({ group_id: u.group_id }).eq("id", u.id);
         }
