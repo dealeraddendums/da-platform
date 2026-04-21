@@ -57,14 +57,26 @@ const STAT_LABEL = {
   marginBottom: 6,
 };
 
-// ── super_admin view (unchanged) ──────────────────────────────────────────────
+// ── super_admin view ──────────────────────────────────────────────────────────
 
-function SuperAdminView({ name }: { name: string | null }) {
+function SuperAdminView({
+  name,
+  dealerCount,
+  groupCount,
+  userCount,
+  addendumMonth,
+}: {
+  name: string | null;
+  dealerCount: number;
+  groupCount: number;
+  userCount: number;
+  addendumMonth: number;
+}) {
   const cards = [
-    { label: "Dealers", value: "—", note: "All accounts" },
-    { label: "Groups", value: "—", note: "Dealer groups" },
-    { label: "Documents", value: "—", note: "Phase 6" },
-    { label: "Users", value: "—", note: "Coming soon" },
+    { label: "Active Dealers", value: dealerCount.toLocaleString(), note: "WHERE active = true" },
+    { label: "Groups", value: groupCount.toLocaleString(), note: "Dealer groups" },
+    { label: "Active Users", value: userCount.toLocaleString(), note: "Platform accounts" },
+    { label: "Addendums This Month", value: addendumMonth.toLocaleString(), note: "print_history" },
   ];
   return (
     <div>
@@ -78,7 +90,7 @@ function SuperAdminView({ name }: { name: string | null }) {
         {cards.map((c) => (
           <div key={c.label} className="card p-4">
             <p style={STAT_LABEL}>{c.label}</p>
-            <p className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>{c.value}</p>
+            <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{c.value}</p>
             <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{c.note}</p>
           </div>
         ))}
@@ -348,9 +360,34 @@ export default async function DashboardPage() {
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user") as UserRole;
 
-  // ── super_admin: unchanged ─────────────────────────────────────────────────
+  // ── super_admin ────────────────────────────────────────────────────────────
   if (role === "super_admin") {
-    return <SuperAdminView name={profile?.full_name ?? null} />;
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const [
+      { count: dealerCount },
+      { count: groupCount },
+      { count: userCount },
+      { count: addendumMonth },
+    ] = await Promise.all([
+      admin.from("dealers").select("*", { count: "exact", head: true }).eq("active", true),
+      admin.from("groups").select("*", { count: "exact", head: true }),
+      admin.from("profiles").select("*", { count: "exact", head: true }).eq("active", true),
+      admin.from("print_history").select("*", { count: "exact", head: true })
+        .gte("created_at", startOfMonth.toISOString()),
+    ]);
+
+    return (
+      <SuperAdminView
+        name={profile?.full_name ?? null}
+        dealerCount={dealerCount ?? 0}
+        groupCount={groupCount ?? 0}
+        userCount={userCount ?? 0}
+        addendumMonth={addendumMonth ?? 0}
+      />
+    );
   }
 
   // ── group_admin ────────────────────────────────────────────────────────────

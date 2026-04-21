@@ -49,6 +49,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/settings") ||
     pathname.startsWith("/users") ||
     pathname.startsWith("/reports") ||
+    pathname.startsWith("/billing") ||
     pathname === "/reset-password";
 
   // Redirect unauthenticated users away from protected routes
