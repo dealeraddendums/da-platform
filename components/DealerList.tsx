@@ -28,6 +28,27 @@ function churnRisk(d: DealerListRow): "critical" | "low" | "none" {
 
 const PER_PAGE = 25;
 
+type SortCol = "name" | "group_name" | "active" | "account_type" | "lifetime_prints" | "last_30_prints" | "created_at";
+
+const SUBSCRIPTION_LABELS: Record<string, string> = {
+  "Monthly Subscription Manual":         "Manual",
+  "Monthly Subscription Automatic Web":  "Auto Web",
+  "Monthly Subscription Automatic DMS":  "Auto DMS",
+  "Trial":                               "Trial",
+};
+
+function subscriptionLabel(accountType: string | null): string {
+  if (!accountType) return "—";
+  return SUBSCRIPTION_LABELS[accountType] ?? accountType;
+}
+
+function fmtCreated(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime()) || d.getFullYear() < 2000) return "—";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 export default function DealerList({ role = "dealer_user" }: { role?: string }) {
   const router = useRouter();
   const [dealers, setDealers] = useState<DealerListRow[]>([]);
@@ -35,7 +56,9 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const [searchInput, setSearchInput] = useState("");
-  const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false" | "at_risk">("all");
+  const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false" | "at_risk">("true");
+  const [sortCol, setSortCol] = useState<SortCol>("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
   const [showNewForm, setShowNewForm] = useState(false);
   const [impersonating, setImpersonating] = useState<string | null>(null);
@@ -49,6 +72,8 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
     const params = new URLSearchParams({
       page: String(page),
       per_page: String(PER_PAGE),
+      sort: sortCol,
+      sort_dir: sortDir,
     });
     if (q) params.set("q", q);
     if (activeFilter === "at_risk") {
@@ -67,7 +92,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
     } finally {
       setLoading(false);
     }
-  }, [page, q, activeFilter]);
+  }, [page, q, activeFilter, sortCol, sortDir]);
 
   useEffect(() => { void fetchDealers(); }, [fetchDealers]);
 
@@ -89,6 +114,16 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
   function handleFilterChange(value: "all" | "true" | "false" | "at_risk") {
     setPage(1);
     setActiveFilter(value);
+  }
+
+  function handleSort(col: SortCol) {
+    setPage(1);
+    if (sortCol === col) {
+      setSortDir((d) => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortCol(col);
+      setSortDir("desc");
+    }
   }
 
   async function handleSync() {
@@ -281,19 +316,31 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
           </div>
         ) : dealers.length === 0 ? (
           <div className="p-8 text-center" style={{ color: "var(--text-muted)" }}>
-            {q || activeFilter !== "all" ? "No dealers match your filters." : "No dealers yet."}
+            {q || activeFilter !== "all" ? "No dealers match your filters." : "No active dealers yet."}
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-                {["Dealer Name", "Group", "Status", "Billing", "Lifetime Prints", "Last 30 Days", "Created", ""].map((h) => (
+                {([
+                  { label: "Dealer Name",      col: "name" as SortCol },
+                  { label: "Group",            col: "group_name" as SortCol },
+                  { label: "Status",           col: "active" as SortCol },
+                  { label: "Subscription",     col: "account_type" as SortCol },
+                  { label: "Lifetime Prints",  col: "lifetime_prints" as SortCol },
+                  { label: "Last 30 Days",     col: "last_30_prints" as SortCol },
+                  { label: "Created",          col: "created_at" as SortCol },
+                ]).map(({ label, col }) => (
                   <th
-                    key={h}
+                    key={col}
                     className="text-left px-4 py-2.5 font-semibold"
-                    style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}
+                    style={{ color: sortCol === col ? "var(--text-primary)" : "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}
+                    onClick={() => handleSort(col)}
                   >
-                    {h}
+                    {label}{" "}
+                    <span style={{ opacity: sortCol === col ? 1 : 0.3 }}>
+                      {sortCol === col ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
                   </th>
                 ))}
               </tr>
@@ -314,31 +361,26 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                         {risk === "low" && (
                           <span title="Low print activity" style={{ width: 7, height: 7, borderRadius: "50%", background: "#ffd54f", display: "inline-block", flexShrink: 0 }} />
                         )}
+                        <Link
+                          href={`/dealers/${d.id}`}
+                          style={{ fontWeight: 500, color: "var(--text-primary)" }}
+                          className="hover:underline hover:text-blue-600"
+                        >
+                          {d.name || `Dealer ${d.dealer_id}`}
+                        </Link>
                         <button
                           onClick={() => void handleImpersonate(d)}
                           disabled={impersonating === d.dealer_id}
-                          title="Click to view as this dealer"
-                          style={{
-                            background: "none",
-                            border: "none",
-                            padding: 0,
-                            cursor: impersonating === d.dealer_id ? "wait" : "pointer",
-                            color: "var(--text-primary)",
-                            fontWeight: 500,
-                            fontSize: "inherit",
-                            textDecoration: "none",
-                          }}
-                          className="hover:underline"
-                        >
-                          {impersonating === d.dealer_id ? "Loading…" : d.name}
-                        </button>
-                        <span
+                          title="Log in as this dealer"
                           className="opacity-0 group-hover:opacity-60"
-                          style={{ fontSize: 12, transition: "opacity 100ms", pointerEvents: "none" }}
-                          aria-hidden
+                          style={{
+                            background: "none", border: "none", padding: 0,
+                            cursor: impersonating === d.dealer_id ? "wait" : "pointer",
+                            fontSize: 14, lineHeight: 1, transition: "opacity 100ms",
+                          }}
                         >
-                          👁
-                        </span>
+                          {impersonating === d.dealer_id ? "…" : "👁"}
+                        </button>
                       </div>
                       {impersonateError?.dealerId === d.dealer_id && (
                         <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{impersonateError.message}</p>
@@ -350,7 +392,9 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                     <td className="px-4 py-3">
                       <StatusBadge active={d.active} />
                     </td>
-                    <td className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>—</td>
+                    <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
+                      {subscriptionLabel(d.account_type)}
+                    </td>
                     <td className="px-4 py-3 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
                       {d.lifetime_prints.toLocaleString()}
                     </td>
@@ -358,12 +402,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                       {d.last_30_prints.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
-                      {new Date(d.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Link href={`/dealers/${d.id}`} className="text-xs font-medium" style={{ color: "var(--blue)" }}>
-                        View →
-                      </Link>
+                      {fmtCreated(d.created_at)}
                     </td>
                   </tr>
                 );

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { DealerRow, DealerUpdate } from "@/lib/db";
+import type { DealerUpdate } from "@/lib/db";
+
+// Strip HTML tags from dealer names imported from Aurora
+function sanitizeName(name: string | null | undefined): string {
+  if (!name) return "";
+  return name.replace(/<[^>]*>/g, "").trim();
+}
 
 async function getPrintCounts(admin: ReturnType<typeof createAdminSupabaseClient>, dealerIds: string[]) {
   if (dealerIds.length === 0) return { lifetime: {} as Record<string, number>, recent: {} as Record<string, number> };
@@ -17,10 +23,13 @@ async function getPrintCounts(admin: ReturnType<typeof createAdminSupabaseClient
   return { lifetime, recent };
 }
 
+type SortableCol = "name" | "active" | "account_type" | "created_at" | "lifetime_prints" | "last_30_prints" | "group_name";
+const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "created_at"]);
+
 /**
  * GET /api/dealers
  * Paginated dealer list. super_admin only.
- * Query params: q, active (true|false), at_risk (true), page, per_page
+ * Query params: q, active (true|false), at_risk (true), page, per_page, sort, sort_dir
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { error } = await requireSuperAdmin();
@@ -35,8 +44,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const perPage = Math.min(100, Math.max(1, parseInt(searchParams.get("per_page") ?? "25", 10)));
   const from = (page - 1) * perPage;
 
+  const sortCol = (searchParams.get("sort") ?? "created_at") as SortableCol;
+  const sortDir = searchParams.get("sort_dir") === "asc" ? true : false; // ascending = true
+
   if (atRisk) {
-    // Fetch all active dealers, compute print counts, filter to at-risk, paginate in memory
     let allQuery = admin.from("dealers").select("*, groups(name)").eq("active", true).limit(2500);
     if (q) allQuery = allQuery.or(`name.ilike.%${q}%,dealer_id.ilike.%${q}%`);
     const { data: allDealers, error: allErr } = await allQuery;
@@ -48,6 +59,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const atRiskList = (allDealers ?? [])
       .map((d: Record<string, unknown>) => ({
         ...d,
+        name: sanitizeName(d.name as string),
         group_name: (d.groups as { name: string } | null)?.name ?? null,
         lifetime_prints: lifetime[d.dealer_id as string] ?? 0,
         last_30_prints: recent[d.dealer_id as string] ?? 0,
@@ -55,42 +67,47 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .filter((d) => d.lifetime_prints >= 50 && d.last_30_prints === 0)
       .sort((a, b) => b.lifetime_prints - a.lifetime_prints);
 
-    return NextResponse.json({
-      data: atRiskList.slice(from, from + perPage),
-      total: atRiskList.length,
-      page,
-      per_page: perPage,
-    });
+    return NextResponse.json({ data: atRiskList.slice(from, from + perPage), total: atRiskList.length, page, per_page: perPage });
   }
 
-  // Normal paginated query with group name join
+  // Build main query — DB sort for indexed columns only
   let query = admin.from("dealers").select("*, groups(name)", { count: "exact" });
   if (q) query = query.or(`name.ilike.%${q}%,dealer_id.ilike.%${q}%,city.ilike.%${q}%,primary_contact.ilike.%${q}%`);
   if (active === "true") query = query.eq("active", true);
   else if (active === "false") query = query.eq("active", false);
 
-  const { data, error: dbError, count } = await query
-    .order("name", { ascending: true })
-    .range(from, from + perPage - 1);
+  // Apply DB-level ordering for sortable DB columns; fall back to created_at desc
+  const dbSortCol = DB_SORT_COLS.has(sortCol) ? sortCol : "created_at";
+  query = query.order(dbSortCol, { ascending: sortDir }).range(from, from + perPage - 1);
 
+  const { data, error: dbError, count } = await query;
   if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
 
   const dealerIds = (data ?? []).map((d: Record<string, unknown>) => d.dealer_id as string);
   const { lifetime, recent } = await getPrintCounts(admin, dealerIds);
 
-  const enriched = (data ?? []).map((d: Record<string, unknown>) => ({
+  let enriched = (data ?? []).map((d: Record<string, unknown>) => ({
     ...d,
+    name: sanitizeName(d.name as string),
     group_name: (d.groups as { name: string } | null)?.name ?? null,
     lifetime_prints: lifetime[d.dealer_id as string] ?? 0,
     last_30_prints: recent[d.dealer_id as string] ?? 0,
-  })).sort((a, b) => b.last_30_prints - a.last_30_prints);
+  }));
 
-  return NextResponse.json({
-    data: enriched,
-    total: count ?? 0,
-    page,
-    per_page: perPage,
-  });
+  // In-memory sort for computed/joined columns
+  if (sortCol === "lifetime_prints") {
+    enriched = enriched.sort((a, b) => sortDir ? a.lifetime_prints - b.lifetime_prints : b.lifetime_prints - a.lifetime_prints);
+  } else if (sortCol === "last_30_prints") {
+    enriched = enriched.sort((a, b) => sortDir ? a.last_30_prints - b.last_30_prints : b.last_30_prints - a.last_30_prints);
+  } else if (sortCol === "group_name") {
+    enriched = enriched.sort((a, b) => {
+      const ga = a.group_name ?? "";
+      const gb = b.group_name ?? "";
+      return sortDir ? ga.localeCompare(gb) : gb.localeCompare(ga);
+    });
+  }
+
+  return NextResponse.json({ data: enriched, total: count ?? 0, page, per_page: perPage });
 }
 
 /**
@@ -119,34 +136,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const { dealer_id, name, username, password, sendNotify, ...rest } = body;
   if (!dealer_id || !name) {
-    return NextResponse.json(
-      { error: "dealer_id and name are required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "dealer_id and name are required" }, { status: 400 });
   }
 
-  // internal_id = never-changing billing ID, set once at creation
-  // inventory_dealer_id = supplier-assigned ID, starts equal to dealer_id then replaced when feed goes live
   const internalId = Date.now().toString();
-
   const admin = createAdminSupabaseClient();
   const insertPayload = { dealer_id, name, internal_id: internalId, inventory_dealer_id: dealer_id, ...rest };
   let { data, error: dbError } = await admin.from("dealers").insert(insertPayload).select().single();
 
-  // If account_type column doesn't exist yet (migration pending), retry without it
   if (dbError && dbError.message.includes("account_type")) {
     const { account_type: _drop, ...payloadWithoutAccountType } = insertPayload as typeof insertPayload & { account_type?: string };
     ({ data, error: dbError } = await admin.from("dealers").insert(payloadWithoutAccountType).select().single());
   }
 
   if (dbError) {
-    if (dbError.code === "23505") {
-      return NextResponse.json({ error: "Dealer ID already exists" }, { status: 409 });
-    }
+    if (dbError.code === "23505") return NextResponse.json({ error: "Dealer ID already exists" }, { status: 409 });
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
 
-  // Optionally create a dealer_admin auth user
   if (username?.trim() && password?.trim()) {
     const rawUsername = username.trim();
     const authEmail = rawUsername.includes("@") ? rawUsername : `${rawUsername}@dealeraddendums.com`;
@@ -159,11 +166,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
 
     if (authError) {
-      // Dealer was created — return it with a warning about user creation failure
-      return NextResponse.json(
-        { data, warning: `Dealer created but user account failed: ${authError.message}` },
-        { status: 201 }
-      );
+      return NextResponse.json({ data, warning: `Dealer created but user account failed: ${authError.message}` }, { status: 201 });
     }
 
     await admin.from("profiles").upsert({
@@ -175,8 +178,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  return NextResponse.json(
-    { data, emailSent: sendNotify ? true : false },
-    { status: 201 }
-  );
+  return NextResponse.json({ data, emailSent: sendNotify ? true : false }, { status: 201 });
 }
