@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -13,17 +13,9 @@ type GroupsResponse = {
   page: number;
   per_page: number;
 };
-type SortCol = "name" | "active" | "dealer_count" | "account_type" | "billing_contact" | "created_at";
+type SortCol = "name" | "active" | "dealer_count" | "account_type" | "billing_contact";
 
 const PER_PAGE = 25;
-const MIN_DATE = new Date("2015-01-01").getTime();
-
-function fmtCreated(legacyId: number | null | undefined): string {
-  if (!legacyId) return "Very old";
-  const ms = legacyId * 1000;
-  if (ms < MIN_DATE || ms > Date.now()) return "Very old";
-  return new Date(ms).toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" });
-}
 
 function subscriptionLabel(accountType: string | null | undefined): string {
   if (!accountType) return "—";
@@ -41,31 +33,18 @@ export default function GroupList() {
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const [searchInput, setSearchInput] = useState("");
-  const [dateRange, setDateRange] = useState<"all" | "week" | "30d" | "90d" | "year">("all");
-  const [sortCol, setSortCol] = useState<SortCol>("created_at");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [sortCol, setSortCol] = useState<SortCol>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [loading, setLoading] = useState(true);
   const [showNewForm, setShowNewForm] = useState(false);
 
-  // Impersonation via group → dealer dropdown
-  const [openImpersonateGroupId, setOpenImpersonateGroupId] = useState<string | null>(null);
+  // Dealer count hover popover + impersonation
+  const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
+  const [loadingGroupId, setLoadingGroupId] = useState<string | null>(null);
   const [groupDealers, setGroupDealers] = useState<Record<string, { id: string; dealer_id: string; name: string }[]>>({});
-  const [loadingDealers, setLoadingDealers] = useState<string | null>(null);
   const [impersonating, setImpersonating] = useState<string | null>(null);
   const [impersonateError, setImpersonateError] = useState<string | null>(null);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    if (!openImpersonateGroupId) return;
-    function close(e: MouseEvent) {
-      const target = e.target as HTMLElement;
-      if (!target.closest("[data-impersonate-dropdown]")) {
-        setOpenImpersonateGroupId(null);
-      }
-    }
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [openImpersonateGroupId]);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchGroups = useCallback(async () => {
     setLoading(true);
@@ -76,17 +55,6 @@ export default function GroupList() {
       sort_dir: sortDir,
     });
     if (q) params.set("q", q);
-    if (dateRange !== "all") {
-      const now = Date.now();
-      const secAgo = (ms: number) => String(Math.floor((now - ms) / 1000));
-      if (dateRange === "week") params.set("legacy_id_gte", secAgo(7 * 86400 * 1000));
-      if (dateRange === "30d")  params.set("legacy_id_gte", secAgo(30 * 86400 * 1000));
-      if (dateRange === "90d")  params.set("legacy_id_gte", secAgo(90 * 86400 * 1000));
-      if (dateRange === "year") {
-        const jan1 = new Date(new Date().getFullYear(), 0, 1).getTime();
-        params.set("legacy_id_gte", String(Math.floor(jan1 / 1000)));
-      }
-    }
 
     try {
       const res = await fetch(`/api/groups?${params.toString()}`);
@@ -98,7 +66,7 @@ export default function GroupList() {
     } finally {
       setLoading(false);
     }
-  }, [page, q, dateRange, sortCol, sortDir]);
+  }, [page, q, sortCol, sortDir]);
 
   useEffect(() => { void fetchGroups(); }, [fetchGroups]);
 
@@ -114,18 +82,19 @@ export default function GroupList() {
       setSortDir((d) => d === "asc" ? "desc" : "asc");
     } else {
       setSortCol(col);
-      setSortDir("desc");
+      setSortDir(col === "name" ? "asc" : "desc");
     }
   }
 
-  async function handleImpersonateGroupClick(groupId: string) {
-    if (openImpersonateGroupId === groupId) {
-      setOpenImpersonateGroupId(null);
-      return;
+  async function startHover(groupId: string, dealerCount: number) {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
     }
+    setHoveredGroupId(groupId);
     setImpersonateError(null);
-    if (!groupDealers[groupId]) {
-      setLoadingDealers(groupId);
+    if (dealerCount > 0 && !groupDealers[groupId]) {
+      setLoadingGroupId(groupId);
       try {
         const res = await fetch(`/api/groups/${groupId}/dealers`);
         const json = (await res.json()) as { data?: DealerRow[] };
@@ -134,10 +103,20 @@ export default function GroupList() {
           [groupId]: (json.data ?? []).map((d) => ({ id: d.id, dealer_id: d.dealer_id, name: d.name })),
         }));
       } finally {
-        setLoadingDealers(null);
+        setLoadingGroupId(null);
       }
     }
-    setOpenImpersonateGroupId(groupId);
+  }
+
+  function endHover() {
+    hoverTimerRef.current = setTimeout(() => setHoveredGroupId(null), 150);
+  }
+
+  function cancelEndHover() {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
   }
 
   async function handleImpersonate(dealerId: string) {
@@ -186,10 +165,6 @@ export default function GroupList() {
   const toRow = Math.min(page * PER_PAGE, total);
 
   function subtitle() {
-    if (dateRange === "week") return `${total} group${total !== 1 ? "s" : ""} joined this week`;
-    if (dateRange === "30d") return `${total} group${total !== 1 ? "s" : ""} in last 30 days`;
-    if (dateRange === "90d") return `${total} group${total !== 1 ? "s" : ""} in last 90 days`;
-    if (dateRange === "year") return `${total} group${total !== 1 ? "s" : ""} joined this year`;
     return total > 0 ? `${total} group${total !== 1 ? "s" : ""}` : "No groups yet";
   }
 
@@ -199,7 +174,6 @@ export default function GroupList() {
     { label: "Dealers",         col: "dealer_count" },
     { label: "Subscription",    col: "account_type" },
     { label: "Billing Contact", col: "billing_contact" },
-    { label: "Created",         col: "created_at" },
   ];
 
   return (
@@ -232,55 +206,28 @@ export default function GroupList() {
 
       {/* Filters */}
       <div className="card p-4 mb-4">
-        <div className="flex items-center gap-3 flex-wrap mb-3">
-          <form onSubmit={handleSearch} className="flex items-center gap-2 flex-1 min-w-0">
-            <input
-              className="input flex-1 min-w-0"
-              style={{ maxWidth: 320 }}
-              placeholder="Search by name, billing contact…"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-            />
-            <button type="submit" className="btn btn-secondary" style={{ flexShrink: 0 }}>
-              Search
-            </button>
-            {q && (
-              <button
-                type="button"
-                className="text-sm"
-                style={{ color: "var(--text-muted)" }}
-                onClick={() => { setSearchInput(""); setQ(""); setPage(1); }}
-              >
-                Clear
-              </button>
-            )}
-          </form>
-        </div>
-        {/* Date range */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-medium" style={{ color: "var(--text-muted)", flexShrink: 0 }}>Joined:</span>
-          {([
-            { label: "All Time",    value: "all" },
-            { label: "This Week",   value: "week" },
-            { label: "Last 30 Days",value: "30d" },
-            { label: "Last 90 Days",value: "90d" },
-            { label: "This Year",   value: "year" },
-          ] as const).map(({ label, value }) => (
+        <form onSubmit={handleSearch} className="flex items-center gap-2 flex-1 min-w-0">
+          <input
+            className="input flex-1 min-w-0"
+            style={{ maxWidth: 320 }}
+            placeholder="Search by name, billing contact…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+          <button type="submit" className="btn btn-secondary" style={{ flexShrink: 0 }}>
+            Search
+          </button>
+          {q && (
             <button
-              key={value}
               type="button"
-              onClick={() => { setDateRange(value); setPage(1); }}
-              className="text-xs font-medium px-3 py-1.5 rounded"
-              style={{
-                background: dateRange === value ? "var(--blue)" : "var(--bg-subtle)",
-                color: dateRange === value ? "#fff" : "var(--text-secondary)",
-                border: "1px solid var(--border)",
-              }}
+              className="text-sm"
+              style={{ color: "var(--text-muted)" }}
+              onClick={() => { setSearchInput(""); setQ(""); setPage(1); }}
             >
-              {label}
+              Clear
             </button>
-          ))}
-        </div>
+          )}
+        </form>
       </div>
 
       {/* Table */}
@@ -291,7 +238,7 @@ export default function GroupList() {
           </div>
         ) : groups.length === 0 ? (
           <div className="p-8 text-center" style={{ color: "var(--text-muted)" }}>
-            {q || dateRange !== "all" ? "No groups match your filters." : "No groups yet."}
+            {q ? "No groups match your search." : "No groups yet."}
           </div>
         ) : (
           <table className="w-full text-sm">
@@ -323,77 +270,15 @@ export default function GroupList() {
                   key={g.id}
                   style={{ borderBottom: i < groups.length - 1 ? "1px solid var(--border)" : "none" }}
                 >
-                  {/* Name + impersonation */}
+                  {/* Name */}
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5 group">
-                      <Link
-                        href={`/groups/${g.id}`}
-                        style={{ fontWeight: 500, color: "var(--text-primary)" }}
-                        className="hover:underline"
-                      >
-                        {g.name}
-                      </Link>
-                      {/* 👁 impersonation trigger */}
-                      <div className="relative" data-impersonate-dropdown>
-                        <button
-                          onClick={() => void handleImpersonateGroupClick(g.id)}
-                          disabled={loadingDealers === g.id}
-                          title="Log in as a dealer in this group"
-                          className="opacity-0 group-hover:opacity-60"
-                          style={{
-                            background: "none", border: "none", padding: 0,
-                            cursor: loadingDealers === g.id ? "wait" : "pointer",
-                            fontSize: 14, lineHeight: 1, transition: "opacity 100ms",
-                          }}
-                        >
-                          {loadingDealers === g.id ? "…" : "👁"}
-                        </button>
-                        {openImpersonateGroupId === g.id && (
-                          <div
-                            style={{
-                              position: "absolute", top: "100%", left: 0, zIndex: 50,
-                              background: "#fff", border: "1px solid var(--border)",
-                              borderRadius: 4, boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
-                              minWidth: 220, maxHeight: 280, overflowY: "auto",
-                            }}
-                          >
-                            {(groupDealers[g.id] ?? []).length === 0 ? (
-                              <div className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>
-                                No dealers in this group
-                              </div>
-                            ) : (
-                              <>
-                                <div className="px-3 py-2 text-xs font-semibold" style={{ color: "var(--text-muted)", borderBottom: "1px solid var(--border)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                                  Log in as dealer
-                                </div>
-                                {(groupDealers[g.id] ?? []).map((d) => (
-                                  <button
-                                    key={d.dealer_id}
-                                    onClick={() => void handleImpersonate(d.dealer_id)}
-                                    disabled={impersonating === d.dealer_id}
-                                    style={{
-                                      display: "block", width: "100%", textAlign: "left",
-                                      padding: "8px 12px", background: "none", border: "none",
-                                      cursor: impersonating === d.dealer_id ? "wait" : "pointer",
-                                      fontSize: 13, color: "var(--text-primary)",
-                                      borderBottom: "1px solid var(--border)",
-                                    }}
-                                    className="hover:bg-gray-50"
-                                  >
-                                    {impersonating === d.dealer_id ? "…" : d.name || d.dealer_id}
-                                  </button>
-                                ))}
-                              </>
-                            )}
-                            {impersonateError && (
-                              <div className="px-3 py-2 text-xs" style={{ color: "var(--error)", borderTop: "1px solid var(--border)" }}>
-                                {impersonateError}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <Link
+                      href={`/groups/${g.id}`}
+                      style={{ fontWeight: 500, color: "var(--text-primary)" }}
+                      className="hover:underline"
+                    >
+                      {g.name}
+                    </Link>
                   </td>
 
                   {/* Status */}
@@ -410,9 +295,60 @@ export default function GroupList() {
                     </span>
                   </td>
 
-                  {/* Dealer count */}
-                  <td className="px-4 py-3 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-                    {g.dealer_count > 0 ? g.dealer_count.toLocaleString() : <span style={{ color: "var(--text-muted)" }}>0</span>}
+                  {/* Dealer count — hover popover */}
+                  <td className="px-4 py-3 text-sm font-medium" style={{ position: "relative" }}>
+                    <span
+                      onMouseEnter={() => void startHover(g.id, g.dealer_count)}
+                      onMouseLeave={endHover}
+                      style={{ color: "#1976d2", cursor: "pointer", fontWeight: 500 }}
+                    >
+                      {g.dealer_count.toLocaleString()}
+                    </span>
+                    {hoveredGroupId === g.id && (
+                      <div
+                        onMouseEnter={cancelEndHover}
+                        onMouseLeave={endHover}
+                        style={{
+                          position: "absolute", top: "100%", left: 0, zIndex: 50,
+                          background: "#fff", border: "1px solid #e0e0e0",
+                          borderRadius: 6, boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+                          minWidth: 260, maxHeight: 300, overflowY: "auto",
+                          fontSize: 14,
+                        }}
+                      >
+                        <div style={{ padding: "10px 14px", borderBottom: "1px solid #e0e0e0", fontWeight: 600, color: "#333", whiteSpace: "nowrap" }}>
+                          {g.name} — {g.dealer_count} dealer{g.dealer_count !== 1 ? "s" : ""}
+                        </div>
+                        {loadingGroupId === g.id ? (
+                          <div style={{ padding: "10px 14px", color: "var(--text-muted)" }}>Loading…</div>
+                        ) : (groupDealers[g.id] ?? []).length === 0 ? (
+                          <div style={{ padding: "10px 14px", color: "var(--text-muted)" }}>No dealers in this group</div>
+                        ) : (
+                          (groupDealers[g.id] ?? []).map((d) => (
+                            <button
+                              key={d.dealer_id}
+                              onClick={() => void handleImpersonate(d.dealer_id)}
+                              disabled={impersonating === d.dealer_id}
+                              style={{
+                                display: "block", width: "100%", textAlign: "left",
+                                padding: "8px 14px", background: "none", border: "none",
+                                borderBottom: "1px solid #f0f0f0",
+                                cursor: impersonating === d.dealer_id ? "wait" : "pointer",
+                                fontSize: 14, color: "#333",
+                              }}
+                              className="hover:bg-gray-50"
+                            >
+                              {impersonating === d.dealer_id ? "…" : d.name || d.dealer_id}
+                            </button>
+                          ))
+                        )}
+                        {impersonateError && (
+                          <div style={{ padding: "8px 14px", fontSize: 12, color: "var(--error)", borderTop: "1px solid #e0e0e0" }}>
+                            {impersonateError}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </td>
 
                   {/* Subscription */}
@@ -427,13 +363,6 @@ export default function GroupList() {
                   <td className="px-4 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>
                     {g.billing_contact || <span style={{ color: "var(--text-muted)" }}>—</span>}
                   </td>
-
-                  {/* Created */}
-                  <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
-                    {fmtCreated(g.legacy_id)}
-                  </td>
-
-                  <td className="px-4 py-3" />
                 </tr>
               ))}
             </tbody>
