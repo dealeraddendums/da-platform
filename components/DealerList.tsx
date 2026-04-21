@@ -411,26 +411,29 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                         {risk === "low" && (
                           <span title="Low print activity" style={{ width: 7, height: 7, borderRadius: "50%", background: "#ffd54f", display: "inline-block", flexShrink: 0 }} />
                         )}
-                        <Link
-                          href={`/dealers/${d.id}`}
-                          style={{ fontWeight: 500, color: "var(--text-primary)" }}
-                          className="hover:underline hover:text-blue-600"
-                        >
-                          {d.name || `Dealer ${d.dealer_id}`}
-                        </Link>
                         <button
                           onClick={() => void handleImpersonate(d)}
                           disabled={impersonating === d.dealer_id}
                           title="Log in as this dealer"
-                          className="opacity-0 group-hover:opacity-60"
                           style={{
                             background: "none", border: "none", padding: 0,
+                            fontWeight: 500, color: "var(--text-primary)",
                             cursor: impersonating === d.dealer_id ? "wait" : "pointer",
-                            fontSize: 14, lineHeight: 1, transition: "opacity 100ms",
+                            fontSize: "inherit", textDecoration: "underline",
+                            textDecorationColor: "transparent", transition: "text-decoration-color 100ms",
                           }}
+                          className="hover:underline"
                         >
-                          {impersonating === d.dealer_id ? "…" : "👁"}
+                          {impersonating === d.dealer_id ? "…" : (d.name || `Dealer ${d.dealer_id}`)}
                         </button>
+                        <Link
+                          href={`/dealers/${d.id}`}
+                          title="View dealer profile"
+                          className="opacity-0 group-hover:opacity-50"
+                          style={{ fontSize: 13, lineHeight: 1, color: "var(--text-muted)", transition: "opacity 100ms", textDecoration: "none" }}
+                        >
+                          📋
+                        </Link>
                       </div>
                       {impersonateError?.dealerId === d.dealer_id && (
                         <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{impersonateError.message}</p>
