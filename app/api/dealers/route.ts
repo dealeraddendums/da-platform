@@ -48,10 +48,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const sortCol = (searchParams.get("sort") ?? "created_at") as SortableCol;
   const sortDir = searchParams.get("sort_dir") === "asc" ? true : false; // ascending = true
+  const legacyIdGte = searchParams.get("legacy_id_gte");
 
   if (atRisk) {
     let allQuery = admin.from("dealers").select("*, groups(name)").eq("active", true).limit(2500);
     if (q) allQuery = allQuery.or(`name.ilike.%${q}%,dealer_id.ilike.%${q}%`);
+    if (legacyIdGte) allQuery = allQuery.gte("legacy_id", parseInt(legacyIdGte, 10));
     const { data: allDealers, error: allErr } = await allQuery;
     if (allErr) return NextResponse.json({ error: allErr.message }, { status: 500 });
 
@@ -77,6 +79,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (q) query = query.or(`name.ilike.%${q}%,dealer_id.ilike.%${q}%,city.ilike.%${q}%,primary_contact.ilike.%${q}%`);
   if (active === "true") query = query.eq("active", true);
   else if (active === "false") query = query.eq("active", false);
+  if (legacyIdGte) query = query.gte("legacy_id", parseInt(legacyIdGte, 10));
 
   // Apply DB-level ordering; "created_at" sorts by legacy_id (Aurora _ID, sequential)
   const dbSortCol = DB_SORT_COLS.has(sortCol)

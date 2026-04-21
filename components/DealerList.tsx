@@ -65,6 +65,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
   const [q, setQ] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false" | "at_risk">("true");
+  const [dateRange, setDateRange] = useState<"all" | "week" | "30d" | "90d" | "year">("all");
   const [sortCol, setSortCol] = useState<SortCol>("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
@@ -89,6 +90,17 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
     } else if (activeFilter !== "all") {
       params.set("active", activeFilter);
     }
+    if (dateRange !== "all") {
+      const now = Date.now();
+      const secAgo = (ms: number) => String(Math.floor((now - ms) / 1000));
+      if (dateRange === "week")  params.set("legacy_id_gte", secAgo(7 * 86400 * 1000));
+      if (dateRange === "30d")   params.set("legacy_id_gte", secAgo(30 * 86400 * 1000));
+      if (dateRange === "90d")   params.set("legacy_id_gte", secAgo(90 * 86400 * 1000));
+      if (dateRange === "year") {
+        const jan1 = new Date(new Date().getFullYear(), 0, 1).getTime();
+        params.set("legacy_id_gte", String(Math.floor(jan1 / 1000)));
+      }
+    }
 
     try {
       const res = await fetch(`/api/dealers?${params.toString()}`);
@@ -100,7 +112,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
     } finally {
       setLoading(false);
     }
-  }, [page, q, activeFilter, sortCol, sortDir]);
+  }, [page, q, activeFilter, dateRange, sortCol, sortDir]);
 
   useEffect(() => { void fetchDealers(); }, [fetchDealers]);
 
@@ -217,7 +229,15 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
             Dealers
           </h1>
           <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.6)" }}>
-            {total > 0 ? `${total} dealer${total !== 1 ? "s" : ""}` : "No dealers yet"}
+            {total > 0
+              ? dateRange === "all"
+                ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""}`
+                : dateRange === "week"  ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined in the last 7 days`
+                : dateRange === "30d"   ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined in the last 30 days`
+                : dateRange === "90d"   ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined in the last 90 days`
+                : `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined this year`
+              : "No dealers match your filters"
+            }
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
@@ -293,7 +313,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
             </button>
           )}
         </form>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 mb-2">
           {(["all", "true", "false", "at_risk"] as const).map((v) => {
             const label = v === "all" ? "All" : v === "true" ? "Active" : v === "false" ? "Inactive" : "⚠ At Risk";
             const isAtRisk = v === "at_risk";
@@ -307,6 +327,28 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                   background: activeFilter === v ? (isAtRisk ? "#ffa500" : "var(--blue)") : "var(--bg-subtle)",
                   color: activeFilter === v ? (isAtRisk ? "#333" : "#fff") : "var(--text-secondary)",
                   border: `1px solid ${activeFilter === v ? (isAtRisk ? "#ffa500" : "var(--blue)") : "var(--border)"}`,
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-xs mr-1" style={{ color: "var(--text-muted)" }}>Joined:</span>
+          {(["all", "week", "30d", "90d", "year"] as const).map((v) => {
+            const label = v === "all" ? "All Time" : v === "week" ? "This Week" : v === "30d" ? "Last 30 Days" : v === "90d" ? "Last 90 Days" : "This Year";
+            const active = dateRange === v;
+            return (
+              <button
+                key={v}
+                type="button"
+                onClick={() => { setDateRange(v); setPage(1); }}
+                className="text-xs font-medium px-3 py-1.5 rounded"
+                style={{
+                  background: active ? "#1565c0" : "var(--bg-subtle)",
+                  color: active ? "#fff" : "var(--text-secondary)",
+                  border: `1px solid ${active ? "#1565c0" : "var(--border)"}`,
                 }}
               >
                 {label}
