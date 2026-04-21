@@ -5,30 +5,54 @@ import type { UserRole } from "@/lib/db";
 
 /**
  * GET /api/users
- * List all users belonging to the authenticated dealer.
+ * super_admin: all users with pagination/search/role filter.
+ * dealer_admin: own dealer's users only.
+ * Params: page, limit, search, role
  */
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  const supabase = createServerSupabaseClient();
-  const dealerId = claims.dealer_id;
+  const { searchParams } = new URL(req.url);
+  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
+  const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10)));
+  const search = searchParams.get("search")?.trim() ?? "";
+  const roleFilter = searchParams.get("role")?.trim() ?? "";
 
-  if (!dealerId) {
-    return NextResponse.json({ users: [] });
+  const admin = createAdminSupabaseClient();
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+
+  let query = admin
+    .from("profiles")
+    .select(
+      "id, email, full_name, role, dealer_id, phone, active, force_password_reset, last_login, created_at",
+      { count: "exact" }
+    )
+    .order("created_at", { ascending: false })
+    .range(from, to);
+
+  // Scope by dealer for non-super_admin
+  if (claims.role !== "super_admin") {
+    if (!claims.dealer_id) return NextResponse.json({ users: [], total: 0, role: claims.role });
+    query = query.eq("dealer_id", claims.dealer_id);
   }
 
-  const { data, error: dbError } = await supabase
-    .from("profiles")
-    .select("id, dealer_id, role, email, full_name, created_at")
-    .eq("dealer_id", dealerId)
-    .order("created_at", { ascending: false });
+  if (search) {
+    query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+  }
+
+  if (roleFilter) {
+    query = query.eq("role", roleFilter as UserRole);
+  }
+
+  const { data, error: dbError, count } = await query;
 
   if (dbError) {
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
 
-  return NextResponse.json({ users: data });
+  return NextResponse.json({ users: data ?? [], total: count ?? 0, role: claims.role });
 }
 
 /**

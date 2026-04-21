@@ -12,7 +12,8 @@
     "import:addendum-history": "npx tsx scripts/import-addendum-history.ts",
     "import:dealers": "npx tsx scripts/import-dealers.ts",
     "import:groups": "npx tsx scripts/import-groups.ts",
-    "sync:legacy": "npx tsx scripts/import-groups.ts && npx tsx scripts/import-dealers.ts"
+    "import:users": "npx tsx scripts/import-users.ts",
+    "sync:legacy": "npx tsx scripts/import-groups.ts && npx tsx scripts/import-dealers.ts && npx tsx scripts/import-users.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",

@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 export type UserRole =
   | "super_admin"
   | "group_admin"
+  | "group_user"
   | "dealer_admin"
   | "dealer_user";
 
@@ -15,6 +16,16 @@ export type ProfileRow = {
   role: UserRole;
   dealer_id: string | null;
   group_id: string | null;
+  legacy_user_id: number | null;
+  phone: string | null;
+  user_image: string | null;
+  hubspot_contact_id: string | null;
+  force_password_reset: boolean;
+  last_login: string | null;
+  last_activity: string | null;
+  email_report: number | null;
+  report_send_to: string | null;
+  active: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -26,6 +37,16 @@ type ProfileInsert = {
   role?: UserRole;
   dealer_id?: string | null;
   group_id?: string | null;
+  legacy_user_id?: number | null;
+  phone?: string | null;
+  user_image?: string | null;
+  hubspot_contact_id?: string | null;
+  force_password_reset?: boolean;
+  last_login?: string | null;
+  last_activity?: string | null;
+  email_report?: number | null;
+  report_send_to?: string | null;
+  active?: boolean;
 };
 
 type ProfileUpdate = {
@@ -34,6 +55,15 @@ type ProfileUpdate = {
   role?: UserRole;
   dealer_id?: string | null;
   group_id?: string | null;
+  phone?: string | null;
+  user_image?: string | null;
+  hubspot_contact_id?: string | null;
+  force_password_reset?: boolean;
+  last_login?: string | null;
+  last_activity?: string | null;
+  email_report?: number | null;
+  report_send_to?: string | null;
+  active?: boolean;
   updated_at?: string;
 };
 
@@ -489,6 +519,39 @@ export type AdminSettingsRow = {
   updated_at: string;
 };
 
+export type UserPermissionsRow = {
+  id: string;
+  role: string;
+  can_view_inventory: boolean;
+  can_add_vehicles: boolean;
+  can_edit_vehicles: boolean;
+  can_delete_vehicles: boolean;
+  can_print_addendums: boolean;
+  can_print_infosheets: boolean;
+  can_use_builder: boolean;
+  can_view_options_library: boolean;
+  can_edit_options_library: boolean;
+  can_view_templates: boolean;
+  can_edit_templates: boolean;
+  can_view_reports: boolean;
+  can_export_data: boolean;
+  can_view_settings: boolean;
+  can_edit_settings: boolean;
+  can_manage_users: boolean;
+  can_view_dealers: boolean;
+  can_edit_dealers: boolean;
+  can_view_groups: boolean;
+  can_edit_groups: boolean;
+  can_impersonate_dealers: boolean;
+  can_view_billing: boolean;
+  can_use_ai_content: boolean;
+  can_manage_api_keys: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type UserPermissionsUpdate = Partial<Omit<UserPermissionsRow, 'id' | 'role' | 'created_at'>>;
+
 export type AdminAuditRow = {
   id: string;
   admin_user_id: string;
@@ -897,6 +960,12 @@ export type Database = {
         Row: AdminSettingsRow;
         Insert: { key: string; value?: string | null; updated_at?: string };
         Update: { value?: string | null; updated_at?: string };
+        Relationships: [];
+      };
+      user_permissions: {
+        Row: UserPermissionsRow;
+        Insert: Omit<UserPermissionsRow, 'id' | 'created_at' | 'updated_at'>;
+        Update: UserPermissionsUpdate;
         Relationships: [];
       };
       admin_audit: {

@@ -7,6 +7,7 @@ import type { UserRole } from "@/lib/db";
 const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super Admin",
   group_admin: "Group Admin",
+  group_user: "Group User",
   dealer_admin: "Dealer Admin",
   dealer_user: "Dealer User",
 };

@@ -35,6 +35,8 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const isAuthRoute = pathname === "/login" || pathname === "/signup";
+  const isResetRoute = pathname === "/reset-password";
+  const isApiAuth = pathname.startsWith("/api/auth/");
   const isProtected =
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/dealers") ||
@@ -44,7 +46,10 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/builder") ||
     pathname.startsWith("/vehicles") ||
     pathname.startsWith("/templates") ||
-    pathname.startsWith("/settings");
+    pathname.startsWith("/settings") ||
+    pathname.startsWith("/users") ||
+    pathname.startsWith("/reports") ||
+    pathname === "/reset-password";
 
   // Redirect unauthenticated users away from protected routes
   if (isProtected && !session) {
@@ -53,8 +58,21 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // Redirect authenticated users away from auth pages
+  // Force password reset: redirect to /reset-password before any other access
+  if (session && session.user.app_metadata?.force_password_reset === true) {
+    if (!isResetRoute && !isApiAuth) {
+      return NextResponse.redirect(new URL("/reset-password", request.url));
+    }
+    return response;
+  }
+
+  // Redirect authenticated users (without forced reset) away from auth pages
   if (isAuthRoute && session) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  // Redirect authenticated users away from reset-password (not needed)
+  if (isResetRoute && session) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
