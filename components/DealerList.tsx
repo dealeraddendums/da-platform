@@ -437,8 +437,8 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      {d.group_name
-                        ? <span style={{ color: "var(--text-secondary)" }}>{d.group_name}</span>
+                      {d.group_name && d.group_id
+                        ? <Link href={`/groups/${d.group_id}`} style={{ color: "var(--blue)" }} className="hover:underline">{d.group_name}</Link>
                         : isExternalGroup(d.dealer_group_legacy)
                           ? <span title="External group — not a DA customer" style={{ color: "var(--text-muted)", cursor: "help", borderBottom: "1px dashed var(--border-strong)" }}>{d.dealer_group_legacy}</span>
                           : <span style={{ color: "var(--text-muted)" }}>—</span>

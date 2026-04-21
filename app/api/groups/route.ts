@@ -3,10 +3,14 @@ import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow, GroupUpdate } from "@/lib/db";
 
+type SortableCol = "name" | "active" | "account_type" | "dealer_count" | "created_at" | "billing_contact";
+const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "billing_contact", "created_at"]);
+const DB_SORT_COL_MAP: Partial<Record<SortableCol, string>> = { created_at: "legacy_id" };
+
 /**
  * GET /api/groups
  * Paginated group list. super_admin only.
- * Query params: q, active (true|false), page, per_page
+ * Query params: q, page, per_page, sort, sort_dir, legacy_id_gte
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { error } = await requireSuperAdmin();
@@ -15,35 +19,50 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient();
   const { searchParams } = req.nextUrl;
   const q = searchParams.get("q") ?? "";
-  const active = searchParams.get("active");
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
   const perPage = Math.min(100, Math.max(1, parseInt(searchParams.get("per_page") ?? "25", 10)));
   const from = (page - 1) * perPage;
+  const sortCol = (searchParams.get("sort") ?? "created_at") as SortableCol;
+  const sortDir = searchParams.get("sort_dir") === "asc" ? true : false;
+  const legacyIdGte = searchParams.get("legacy_id_gte");
 
   let query = admin.from("groups").select("*", { count: "exact" });
+  if (q) query = query.or(`name.ilike.%${q}%,billing_contact.ilike.%${q}%,primary_contact.ilike.%${q}%`);
+  if (legacyIdGte) query = query.gte("legacy_id", parseInt(legacyIdGte, 10));
 
-  if (q) {
-    query = query.or(
-      `name.ilike.%${q}%,city.ilike.%${q}%,primary_contact.ilike.%${q}%`
+  const dbSortCol = DB_SORT_COLS.has(sortCol)
+    ? (DB_SORT_COL_MAP[sortCol] ?? sortCol)
+    : "legacy_id";
+  query = query.order(dbSortCol, { ascending: sortDir, nullsFirst: false }).range(from, from + perPage - 1);
+
+  const { data, error: dbError, count } = await query;
+  if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
+
+  // Count dealers per group
+  const groupIds = (data ?? []).map((g: Record<string, unknown>) => g.id as string);
+  const dealerCounts: Record<string, number> = {};
+  if (groupIds.length > 0) {
+    const { data: dealerRows } = await admin
+      .from("dealers")
+      .select("group_id")
+      .in("group_id", groupIds);
+    for (const r of dealerRows ?? []) {
+      if (r.group_id) dealerCounts[r.group_id] = (dealerCounts[r.group_id] ?? 0) + 1;
+    }
+  }
+
+  let enriched = (data ?? []).map((g: Record<string, unknown>) => ({
+    ...g,
+    dealer_count: dealerCounts[g.id as string] ?? 0,
+  }));
+
+  if (sortCol === "dealer_count") {
+    enriched = enriched.sort((a, b) =>
+      sortDir ? a.dealer_count - b.dealer_count : b.dealer_count - a.dealer_count
     );
   }
-  if (active === "true") query = query.eq("active", true);
-  else if (active === "false") query = query.eq("active", false);
 
-  const { data, error: dbError, count } = await query
-    .order("name", { ascending: true })
-    .range(from, from + perPage - 1);
-
-  if (dbError) {
-    return NextResponse.json({ error: dbError.message }, { status: 500 });
-  }
-
-  return NextResponse.json({
-    data: (data as GroupRow[]) ?? [],
-    total: count ?? 0,
-    page,
-    per_page: perPage,
-  });
+  return NextResponse.json({ data: enriched, total: count ?? 0, page, per_page: perPage });
 }
 
 /**
