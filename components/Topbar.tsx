@@ -35,23 +35,13 @@ export default function Topbar({ user }: Props) {
 
   return (
     <header
-      className="flex items-center justify-between px-6 flex-shrink-0"
+      className="flex items-center justify-end px-6 flex-shrink-0"
       style={{
         height: 56,
         background: "var(--navy)",
         borderBottom: "1px solid rgba(255,255,255,0.08)",
       }}
     >
-      {/* Left */}
-      <div className="flex items-center gap-3">
-        <span
-          className="font-semibold text-sm"
-          style={{ color: "var(--text-inverse)" }}
-        >
-          DealerAddendums
-        </span>
-      </div>
-
       {/* Right */}
       <div className="flex items-center gap-4">
         {/* Role badge */}

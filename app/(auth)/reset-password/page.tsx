@@ -58,12 +58,13 @@ export default function ResetPasswordPage() {
       >
         {/* Logo */}
         <div className="flex items-center gap-2 mb-6">
-          <div
-            className="w-8 h-8 rounded flex items-center justify-center font-bold text-white text-sm"
-            style={{ background: "var(--orange)" }}
-          >
-            D
-          </div>
+          <img
+            src="/images/da-logo.png"
+            alt="DA"
+            width={32}
+            height={32}
+            style={{ borderRadius: "50%" }}
+          />
           <span className="font-semibold text-base" style={{ color: "var(--text-primary)" }}>
             DA Platform
           </span>

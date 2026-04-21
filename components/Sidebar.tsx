@@ -201,12 +201,13 @@ export default function Sidebar({ role = "dealer_user" }: { role?: UserRole | "g
         className="flex items-center gap-2 px-4 h-14 flex-shrink-0"
         style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
       >
-        <div
-          className="w-7 h-7 rounded flex items-center justify-center font-bold text-sm text-white flex-shrink-0"
-          style={{ background: "var(--orange)" }}
-        >
-          D
-        </div>
+        <img
+          src="/images/da-logo.png"
+          alt="DA"
+          width={36}
+          height={36}
+          style={{ borderRadius: "50%", flexShrink: 0 }}
+        />
         <span
           className="font-semibold text-sm truncate"
           style={{ color: "var(--text-inverse)" }}

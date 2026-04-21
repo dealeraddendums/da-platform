@@ -57,13 +57,14 @@ export default function SignupPage() {
     <div className="w-full max-w-sm">
       {/* Logo */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 mb-2">
-          <div
-            className="w-8 h-8 rounded flex items-center justify-center text-white font-bold text-lg"
-            style={{ background: "var(--orange)" }}
-          >
-            D
-          </div>
+        <div className="inline-flex items-center gap-2">
+          <img
+            src="/images/da-logo.png"
+            alt="DA"
+            width={32}
+            height={32}
+            style={{ borderRadius: "50%" }}
+          />
           <span
             className="text-xl font-semibold"
             style={{ color: "var(--text-inverse)" }}
@@ -71,9 +72,6 @@ export default function SignupPage() {
             DA Platform
           </span>
         </div>
-        <p className="text-sm" style={{ color: "rgba(255,255,255,0.65)" }}>
-          DealerAddendums
-        </p>
       </div>
 
       <div className="card p-8">
