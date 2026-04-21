@@ -59,31 +59,42 @@ const STAT_LABEL = {
 
 // ── super_admin view ──────────────────────────────────────────────────────────
 
+function greeting(hour: number, firstName: string | null): string {
+  const salutation =
+    hour >= 5 && hour < 12 ? "Good morning" :
+    hour >= 12 && hour < 17 ? "Good afternoon" :
+    "Good evening";
+  return firstName ? `${salutation}, ${firstName}.` : `${salutation}.`;
+}
+
 function SuperAdminView({
   name,
+  hour,
   dealerCount,
   groupCount,
   userCount,
   addendumMonth,
 }: {
   name: string | null;
+  hour: number;
   dealerCount: number;
   groupCount: number;
   userCount: number;
   addendumMonth: number;
 }) {
+  const firstName = name ? name.split(" ")[0] : null;
   const cards = [
-    { label: "Active Dealers", value: dealerCount.toLocaleString(), note: "WHERE active = true" },
-    { label: "Groups", value: groupCount.toLocaleString(), note: "Dealer groups" },
-    { label: "Active Users", value: userCount.toLocaleString(), note: "Platform accounts" },
-    { label: "Addendums This Month", value: addendumMonth.toLocaleString(), note: "print_history" },
+    { label: "Active Dealers",      value: dealerCount.toLocaleString(),    note: "Active accounts" },
+    { label: "Groups",              value: groupCount.toLocaleString(),      note: "Dealer groups" },
+    { label: "Active Users",        value: userCount.toLocaleString(),       note: "Platform accounts" },
+    { label: "Addendums This Month",value: addendumMonth.toLocaleString(),   note: "Printed this month" },
   ];
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Dashboard</h1>
         <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.6)" }}>
-          Welcome back{name ? `, ${name}` : ""}.
+          {greeting(hour, firstName)}
         </p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -382,6 +393,7 @@ export default async function DashboardPage() {
     return (
       <SuperAdminView
         name={profile?.full_name ?? null}
+        hour={new Date().getHours()}
         dealerCount={dealerCount ?? 0}
         groupCount={groupCount ?? 0}
         userCount={userCount ?? 0}
