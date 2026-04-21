@@ -13,18 +13,10 @@ type GroupsResponse = {
   page: number;
   per_page: number;
 };
-type SortCol = "name" | "active" | "dealer_count" | "account_type" | "billing_contact";
+type SortCol = "name" | "active" | "dealer_count" | "billing_contact";
 
 const PER_PAGE = 25;
 
-function subscriptionLabel(accountType: string | null | undefined): string {
-  if (!accountType) return "—";
-  if (accountType.includes("Manual")) return "Manual";
-  if (accountType.includes("Automatic Web")) return "Auto Web";
-  if (accountType.includes("Automatic DMS")) return "Auto DMS";
-  if (accountType === "Trial") return "Trial";
-  return accountType;
-}
 
 export default function GroupList() {
   const router = useRouter();
@@ -172,7 +164,6 @@ export default function GroupList() {
     { label: "Group Name",      col: "name" },
     { label: "Status",          col: "active" },
     { label: "Dealers",         col: "dealer_count" },
-    { label: "Subscription",    col: "account_type" },
     { label: "Billing Contact", col: "billing_contact" },
   ];
 
@@ -349,14 +340,6 @@ export default function GroupList() {
                         )}
                       </div>
                     )}
-                  </td>
-
-                  {/* Subscription */}
-                  <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
-                    {g.group_fee && g.group_fee !== "0"
-                      ? <span style={{ color: "var(--text-secondary)" }}>{g.group_fee}</span>
-                      : <span style={{ color: "var(--text-muted)" }}>{subscriptionLabel(g.account_type)}</span>
-                    }
                   </td>
 
                   {/* Billing Contact */}
