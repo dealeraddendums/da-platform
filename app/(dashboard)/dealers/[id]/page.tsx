@@ -30,9 +30,17 @@ export default async function DealerPage({ params }: Props) {
   const isSuperAdmin = role === "super_admin";
   const isDealerAdmin = role === "dealer_admin";
 
-  const { data } = await admin.from("dealers").select("*").eq("id", params.id).single();
-  const dealer = data as DealerRow | null;
+  const { data: rawDealer } = await admin
+    .from("dealers")
+    .select("*, groups(id, name)")
+    .eq("id", params.id)
+    .single();
+  const dealer = rawDealer as DealerRow | null;
   if (!dealer) notFound();
+
+  const group = rawDealer
+    ? ((rawDealer as Record<string, unknown>).groups as { id: string; name: string } | null)
+    : null;
 
   // dealer_admin / dealer_user may only view their own dealer
   if (!isSuperAdmin && role !== "group_admin") {
@@ -50,7 +58,7 @@ export default async function DealerPage({ params }: Props) {
           </Link>
         </nav>
       )}
-      <DealerProfileCard dealer={dealer} canEdit={canEdit} isSuperAdmin={isSuperAdmin} />
+      <DealerProfileCard dealer={dealer} group={group} canEdit={canEdit} isSuperAdmin={isSuperAdmin} />
     </div>
   );
 }

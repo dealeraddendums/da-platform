@@ -19,6 +19,11 @@ type DealersResponse = {
   per_page: number;
 };
 
+function isExternalGroup(val: string | null | undefined): val is string {
+  if (!val || val.trim() === "") return false;
+  return isNaN(Number(val));
+}
+
 function churnRisk(d: DealerListRow): "critical" | "low" | "none" {
   if (d.lifetime_prints < 10) return "none";
   if (d.lifetime_prints >= 50 && d.last_30_prints === 0) return "critical";
@@ -389,8 +394,13 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                         <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{impersonateError.message}</p>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>
-                      {d.group_name ?? "—"}
+                    <td className="px-4 py-3 text-sm">
+                      {d.group_name
+                        ? <span style={{ color: "var(--text-secondary)" }}>{d.group_name}</span>
+                        : isExternalGroup(d.dealer_group_legacy)
+                          ? <span title="External group — not a DA customer" style={{ color: "var(--text-muted)", cursor: "help", borderBottom: "1px dashed var(--border-strong)" }}>{d.dealer_group_legacy}</span>
+                          : <span style={{ color: "var(--text-muted)" }}>—</span>
+                      }
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge active={d.active} />
@@ -490,6 +500,7 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
     dealer_id: String(Date.now()),
     account_type: "Monthly Subscription Manual",
     franchise: "",
+    dealer_group: "",
     primary_contact: "",
     primary_contact_email: "",
     username: "",
@@ -524,6 +535,7 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
       dealer_id: fields.dealer_id.trim(),
       name: fields.name.trim(),
       account_type: fields.account_type,
+      dealer_group_legacy: fields.dealer_group.trim() || null,
       makes: fields.franchise ? [fields.franchise] : [],
       primary_contact: fields.primary_contact.trim() || null,
       primary_contact_email: fields.primary_contact_email.trim() || null,
@@ -594,7 +606,18 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
           </div>
         </div>
 
-        {/* Row 2: Franchise Brand, Contact Name, Contact Email */}
+        {/* Row 2: Dealer Group */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Dealer Group</label>
+            <input className="input" value={fields.dealer_group} onChange={set("dealer_group")} placeholder="e.g. 43 or Jeff Wyler" />
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+              Enter a DA Group ID (number) to link to a DA group account, or a group name for informational purposes only.
+            </p>
+          </div>
+        </div>
+
+        {/* Row 3: Franchise Brand, Contact Name, Contact Email */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="label">Franchise Brand</label>
@@ -613,7 +636,7 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
           </div>
         </div>
 
-        {/* Row 3: Username, Password, Confirm Password */}
+        {/* Row 4: Username, Password, Confirm Password */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="label">Username (login email)</label>
@@ -630,7 +653,7 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
           </div>
         </div>
 
-        {/* Row 4: Address, City, State, Zip, Phone */}
+        {/* Row 5: Address, City, State, Zip, Phone */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="label">Address</label>

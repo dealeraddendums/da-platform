@@ -1,13 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 
 type Props = {
   dealer: DealerRow;
+  group: { id: string; name: string } | null;
   canEdit: boolean;
   isSuperAdmin: boolean;
 };
+
+function isExternalGroup(val: string | null | undefined): val is string {
+  if (!val || val.trim() === "") return false;
+  return isNaN(Number(val));
+}
 
 type FormData = {
   name: string;
@@ -39,7 +46,7 @@ function dealerToForm(d: DealerRow): FormData {
   };
 }
 
-export default function DealerProfileCard({ dealer: initialDealer, canEdit, isSuperAdmin }: Props) {
+export default function DealerProfileCard({ dealer: initialDealer, group, canEdit, isSuperAdmin }: Props) {
   const [dealer, setDealer] = useState(initialDealer);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<FormData>(dealerToForm(initialDealer));
@@ -261,6 +268,30 @@ export default function DealerProfileCard({ dealer: initialDealer, canEdit, isSu
                   title="Matches Aurora DEALER_ID for inventory queries."
                 >
                   {dealer.inventory_dealer_id ?? <span style={{ color: "var(--text-muted)" }}>—</span>}
+                </span>
+              </div>
+            )}
+
+            {/* DA Group */}
+            <div className="flex items-start justify-between gap-4">
+              <span className="text-sm" style={{ color: "var(--text-secondary)", flexShrink: 0 }}>DA Group</span>
+              <span className="text-sm font-medium text-right">
+                {group
+                  ? <Link href={`/groups/${group.id}`} style={{ color: "var(--blue)" }}>{group.name}</Link>
+                  : <span style={{ color: "var(--text-muted)" }}>None</span>
+                }
+              </span>
+            </div>
+
+            {/* External / self-reported group — only shown if dealer_group_legacy is non-numeric */}
+            {isExternalGroup(dealer.dealer_group_legacy) && (
+              <div className="flex items-start justify-between gap-4">
+                <div style={{ flexShrink: 0 }}>
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Dealer Group</span>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>Self-reported, not a DA account</p>
+                </div>
+                <span className="text-sm font-medium text-right" style={{ color: "var(--text-primary)" }}>
+                  {dealer.dealer_group_legacy}
                 </span>
               </div>
             )}
