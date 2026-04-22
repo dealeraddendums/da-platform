@@ -185,7 +185,7 @@ const nav: NavEntry[] = [
     ),
   },
   {
-    label: "ETL Mapping",
+    label: "ETL Server",
     href: "/feeds/etl",
     roles: ["super_admin"],
     icon: (

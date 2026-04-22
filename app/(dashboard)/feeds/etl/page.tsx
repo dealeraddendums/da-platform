@@ -2,9 +2,9 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 
-export const metadata = { title: "ETL Mapping — DA Platform" };
+export const metadata = { title: "ETL Server — DA Platform" };
 
-export default async function EtlMappingPage() {
+export default async function EtlServerPage() {
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect("/login");
