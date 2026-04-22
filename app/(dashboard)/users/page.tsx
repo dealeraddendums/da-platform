@@ -17,6 +17,7 @@ type UserRow = {
   active: boolean;
   force_password_reset: boolean;
   last_login: string | null;
+  last_sign_in_at: string | null;
   created_at: string;
 };
 
@@ -690,7 +691,7 @@ export default function UsersPage() {
                     {u.active ? "Active" : "Inactive"}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text-muted)" }}>{formatDate(u.last_login)}</td>
+                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text-muted)" }}>{formatDate(u.last_sign_in_at)}</td>
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-1 justify-end">
                     {/* Edit */}

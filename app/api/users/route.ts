@@ -38,25 +38,36 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const rows = profiles ?? [];
 
+  const userIds   = rows.map(r => r.id);
   const dealerIds = Array.from(new Set(rows.filter(p => p.dealer_id).map(p => p.dealer_id as string)));
   const groupIds  = Array.from(new Set(rows.filter(p => p.group_id).map(p => p.group_id  as string)));
 
-  const [dealerRes, groupRes] = await Promise.all([
+  // Fetch last_sign_in_at from auth.users (service role can access auth schema)
+  type AuthUserRow = { id: string; last_sign_in_at: string | null };
+  const authUsersQuery = userIds.length > 0
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ? (admin as any).schema("auth").from("users").select("id, last_sign_in_at").in("id", userIds) as Promise<{ data: AuthUserRow[] | null }>
+    : Promise.resolve({ data: [] as AuthUserRow[] });
+
+  const [dealerRes, groupRes, authUsersRes] = await Promise.all([
     dealerIds.length > 0
       ? admin.from("dealers").select("dealer_id, name").in("dealer_id", dealerIds)
       : Promise.resolve({ data: [] as { dealer_id: string; name: string }[] }),
     groupIds.length > 0
       ? admin.from("groups").select("id, name").in("id", groupIds)
       : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    authUsersQuery,
   ]);
 
-  const dealerMap = new Map((dealerRes.data ?? []).map(d => [d.dealer_id, d.name]));
-  const groupMap  = new Map((groupRes.data  ?? []).map(g => [g.id,        g.name]));
+  const dealerMap     = new Map((dealerRes.data     ?? []).map(d => [d.dealer_id, d.name]));
+  const groupMap      = new Map((groupRes.data      ?? []).map(g => [g.id,        g.name]));
+  const lastSignInMap = new Map((authUsersRes.data   ?? []).map(u => [u.id,        u.last_sign_in_at]));
 
   const users = rows.map(p => ({
     ...p,
-    dealer_name: p.dealer_id ? (dealerMap.get(p.dealer_id) ?? null) : null,
-    group_name:  p.group_id  ? (groupMap.get(p.group_id)   ?? null) : null,
+    dealer_name:     p.dealer_id ? (dealerMap.get(p.dealer_id)     ?? null) : null,
+    group_name:      p.group_id  ? (groupMap.get(p.group_id)       ?? null) : null,
+    last_sign_in_at: lastSignInMap.get(p.id) ?? null,
   }));
 
   return NextResponse.json({ users, total: count ?? 0 });
