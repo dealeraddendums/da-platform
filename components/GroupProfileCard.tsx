@@ -234,9 +234,9 @@ function GroupDealers({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dealer_id: d.dealer_id }),
     });
-    const json = (await res.json()) as { token_hash?: string; dealer_name?: string; dealer_id?: string; error?: string };
+    const json = (await res.json()) as { access_token?: string; refresh_token?: string; dealer_name?: string; dealer_id?: string; error?: string };
 
-    if (!res.ok || !json.token_hash) {
+    if (!res.ok || !json.access_token || !json.refresh_token) {
       setImpersonateError({ dealerId: d.dealer_id, message: json.error ?? "Failed to impersonate" });
       setImpersonating(null);
       return;
@@ -249,14 +249,14 @@ function GroupDealers({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin
       original_refresh_token: currentSession?.refresh_token ?? "",
     }));
 
-    const { error: otpError } = await supabase.auth.verifyOtp({
-      token_hash: json.token_hash,
-      type: "magiclink",
+    const { error: setError } = await supabase.auth.setSession({
+      access_token: json.access_token,
+      refresh_token: json.refresh_token,
     });
 
-    if (otpError) {
+    if (setError) {
       localStorage.removeItem("da_impersonate");
-      setImpersonateError({ dealerId: d.dealer_id, message: otpError.message });
+      setImpersonateError({ dealerId: d.dealer_id, message: setError.message });
       setImpersonating(null);
       return;
     }

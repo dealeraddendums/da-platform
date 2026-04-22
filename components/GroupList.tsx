@@ -122,9 +122,9 @@ export default function GroupList() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dealer_id: dealerId }),
     });
-    const json = (await res.json()) as { token_hash?: string; dealer_name?: string; dealer_id?: string; error?: string };
+    const json = (await res.json()) as { access_token?: string; refresh_token?: string; dealer_name?: string; dealer_id?: string; error?: string };
 
-    if (!res.ok || !json.token_hash) {
+    if (!res.ok || !json.access_token || !json.refresh_token) {
       setImpersonateError(json.error ?? "Failed to impersonate");
       setImpersonating(null);
       return;
@@ -137,14 +137,14 @@ export default function GroupList() {
       original_refresh_token: currentSession?.refresh_token ?? "",
     }));
 
-    const { error: otpError } = await supabase.auth.verifyOtp({
-      token_hash: json.token_hash,
-      type: "magiclink",
+    const { error: setError } = await supabase.auth.setSession({
+      access_token: json.access_token,
+      refresh_token: json.refresh_token,
     });
 
-    if (otpError) {
+    if (setError) {
       localStorage.removeItem("da_impersonate");
-      setImpersonateError(otpError.message);
+      setImpersonateError(setError.message);
       setImpersonating(null);
       return;
     }

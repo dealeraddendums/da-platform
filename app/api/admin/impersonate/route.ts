@@ -5,8 +5,11 @@ import { createAdminSupabaseClient } from "@/lib/db";
 /**
  * POST /api/admin/impersonate
  * super_admin only. Finds the dealer_admin user for a given dealer_id,
- * generates a magic-link token they can exchange for a real session client-side,
+ * exchanges a magic-link token server-side for a real access/refresh token pair,
  * and logs the event to admin_audit.
+ *
+ * Client receives access_token + refresh_token and calls setSession() directly —
+ * no client-side verifyOtp() needed, which avoids SSR cookie timing issues.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireSuperAdmin();
@@ -51,6 +54,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // Generate a magic-link token via the admin API
   const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
     type: "magiclink",
     email: targetProfile.email,
@@ -58,6 +62,43 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   if (linkError || !linkData) {
     return NextResponse.json({ error: linkError?.message ?? "Failed to generate link" }, { status: 500 });
+  }
+
+  // Exchange the token server-side so the client gets real access/refresh tokens.
+  // Using setSession() client-side is far more reliable than verifyOtp() for SSR apps.
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+  const verifyRes = await fetch(`${supabaseUrl}/auth/v1/verify`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": supabaseAnonKey,
+    },
+    body: JSON.stringify({
+      token_hash: linkData.properties.hashed_token,
+      type: "magiclink",
+    }),
+  });
+
+  if (!verifyRes.ok) {
+    const errText = await verifyRes.text().catch(() => "unknown");
+    return NextResponse.json({ error: `Token exchange failed: ${errText}` }, { status: 500 });
+  }
+
+  const sessionData = await verifyRes.json() as {
+    access_token?: string;
+    refresh_token?: string;
+    error?: string;
+    error_description?: string;
+    msg?: string;
+  };
+
+  if (!sessionData.access_token || !sessionData.refresh_token) {
+    return NextResponse.json(
+      { error: sessionData.error_description ?? sessionData.msg ?? "No session returned from token exchange" },
+      { status: 500 }
+    );
   }
 
   // Log impersonation event — fire and forget, don't block on failure
@@ -69,7 +110,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
 
   return NextResponse.json({
-    token_hash: linkData.properties.hashed_token,
+    access_token: sessionData.access_token,
+    refresh_token: sessionData.refresh_token,
     dealer_name: dealer.name,
     dealer_id: dealer.dealer_id,
   });
