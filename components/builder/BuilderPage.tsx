@@ -599,7 +599,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   const usedTypes = new Set(Object.values(widgets).map(w => w.type));
 
   return (
-    <div style={{ fontFamily: "'DM Sans', 'Roboto', sans-serif", display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', fontSize: 13, background: '#3a6897', color: '#333' }}>
+    <div style={{ fontFamily: "'Roboto', -apple-system, sans-serif", display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', fontSize: 13, background: '#3a6897', color: '#333' }}>
 
       {/* TOPBAR */}
       <div style={{ height: 50, background: '#2a2b3c', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', flexShrink: 0, gap: 12 }}>
@@ -616,7 +616,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
             onBlur={e => (e.target.style.background = 'transparent')}
           />
           {/* Vehicle type badges */}
-          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 7, padding: 2, gap: 2 }}>
+          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, padding: 2, gap: 2 }}>
             {['New','Used','CPO'].map(t => (
               <button key={t} style={{ padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, border: 'none', background: 'transparent', cursor: 'pointer', color: 'rgba(255,255,255,0.7)', fontFamily: 'inherit' }}
                 onClick={() => showToast('Vehicle type saved with template')}>
@@ -685,7 +685,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
                           onClick={() => !used && addWidget(tile.type)}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 7,
-                            padding: '7px 8px', border: '1px solid #e0e0e0', borderRadius: 7,
+                            padding: '7px 8px', border: '1px solid #e0e0e0', borderRadius: 4,
                             marginBottom: 3, cursor: used ? 'default' : 'grab',
                             background: '#fff', opacity: used ? 0.22 : 1,
                             filter: used ? 'grayscale(1)' : 'none',
@@ -712,38 +712,38 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Canvas bar */}
           {!previewMode && (
-            <div style={{ height: 40, background: '#ffa500', display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8, flexShrink: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#333', textTransform: 'uppercase', letterSpacing: '.06em', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ height: 40, background: '#2a2b3c', display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8, flexShrink: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.85)', textTransform: 'uppercase', letterSpacing: '.06em', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#4caf50' }} />Canvas
               </div>
               <Tb onClick={() => doZoom(-0.05)}>−</Tb>
-              <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#333', padding: '3px 7px', background: 'rgba(255,255,255,0.4)', borderRadius: 5, border: '1px solid rgba(0,0,0,0.15)', minWidth: 40, textAlign: 'center' }}>
+              <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#333', padding: '3px 7px', background: 'rgba(255,255,255,0.9)', borderRadius: 4, border: '1px solid rgba(255,255,255,0.25)', minWidth: 40, textAlign: 'center' }}>
                 {Math.round(Z * 100)}%
               </div>
               <Tb onClick={() => doZoom(0.05)}>+</Tb>
               <Tb onClick={() => { setZ(0.75); ZRef.current = 0.75; }}>⊙</Tb>
-              <div style={{ width: 1, height: 20, background: '#e0e0e0' }} />
+              <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.2)' }} />
               <Tb onClick={undo} title="Undo">↩</Tb>
               <Tb onClick={redo} title="Redo">↪</Tb>
-              <div style={{ width: 1, height: 20, background: '#e0e0e0' }} />
+              <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.2)' }} />
               <Tb onClick={() => align('left')} title="Align left">⇤</Tb>
               <Tb onClick={() => align('center')} title="Center">↔</Tb>
               <Tb onClick={() => align('right')} title="Align right">⇥</Tb>
-              <div style={{ width: 1, height: 20, background: '#e0e0e0' }} />
+              <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.2)' }} />
               <select value={paperSize} onChange={e => switchPaperSize(e.target.value as PaperSize)}
-                style={{ padding: '4px 6px', border: '1px solid rgba(0,0,0,0.2)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.4)', color: '#333', cursor: 'pointer', outline: 'none' }}>
+                style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>
                 <option value="narrow">3.125&quot; × 11&quot; Narrow</option>
                 <option value="standard">4.25&quot; × 11&quot; Standard</option>
                 <option value="infosheet">8.5&quot; × 11&quot; Infosheet</option>
               </select>
               <select value={fontScale} onChange={e => setFontScale(+e.target.value)}
-                style={{ padding: '4px 6px', border: '1px solid rgba(0,0,0,0.2)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.4)', color: '#333', cursor: 'pointer', outline: 'none' }}>
+                style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>
                 <option value="0.8">Font: Small</option>
                 <option value="1.0">Font: Medium</option>
                 <option value="1.2">Font: Large</option>
                 <option value="1.4">Font: X-Large</option>
               </select>
-              <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.6)', marginLeft: 'auto', paddingRight: 4 }}>Drag to reposition · Handles to resize</span>
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginLeft: 'auto', paddingRight: 4 }}>Drag to reposition · Handles to resize</span>
             </div>
           )}
 
@@ -858,7 +858,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
                 </div>
                 {bgOpen && (
                   <div style={{ marginTop: 8 }}>
-                    <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e0e0e0', borderRadius: 7, marginBottom: 8 }}>
+                    <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e0e0e0', borderRadius: 6, marginBottom: 8 }}>
                       <div
                         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', background: bgUrl === BG_DEFAULT || bgUrl === IS_BG_DEFAULT ? '#e3f2fd' : '#fff', borderBottom: '1px solid #e0e0e0' }}
                         onClick={() => { const u = isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT; setBgUrl(u); setBgInputVal(u); }}
@@ -916,7 +916,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
       {/* PRINT SETTINGS MODAL */}
       {showPrint && (
         <Modal onClose={() => setShowPrint(false)} title="Print Settings">
-          <div style={{ background: '#f5f6f7', borderRadius: 8, padding: 16 }}>
+          <div style={{ background: '#f5f6f7', borderRadius: 6, padding: 16 }}>
             <ModalRow icon="ℹ" label="AI Content">
               <div style={{ display: 'flex', gap: 6 }}>
                 {(['default','db','ai'] as const).map(v => (
@@ -992,7 +992,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
                 })}
               </div>
             </div>
-            <div style={{ background: '#f5f6f7', borderRadius: 8, padding: '12px 14px', fontSize: 12, color: '#55595c', lineHeight: 1.8 }}>
+            <div style={{ background: '#f5f6f7', borderRadius: 6, padding: '12px 14px', fontSize: 12, color: '#55595c', lineHeight: 1.8 }}>
               <div><strong>Template:</strong> <span style={{ color: '#333' }}>{saveTname || templateName || '—'}</span></div>
               <div><strong>Widgets:</strong> <span style={{ color: '#333' }}>{Object.keys(widgets).length} widgets</span></div>
               <div><strong>Applies to:</strong> <span style={{ color: '#1976d2', fontWeight: 600 }}>{Array.from(saveVtypes).map(v => v.charAt(0).toUpperCase() + v.slice(1)).join(', ')}</span></div>
@@ -1044,7 +1044,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
 
 function Tb({ onClick, title, children }: { onClick: () => void; title?: string; children: React.ReactNode }) {
   return (
-    <button onClick={onClick} title={title} style={{ width: 26, height: 26, borderRadius: 4, border: '1px solid transparent', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#333', fontSize: 12 }}>
+    <button onClick={onClick} title={title} style={{ width: 26, height: 26, borderRadius: 4, border: '1px solid transparent', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.85)', fontSize: 12 }}>
       {children}
     </button>
   );
@@ -1058,7 +1058,7 @@ function Modal({ onClose, title, children }: { onClose: () => void; title: strin
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: '#fff', borderRadius: 12, width: 520, boxShadow: '0 8px 32px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
+      <div style={{ background: '#fff', borderRadius: 6, width: 520, boxShadow: '0 8px 32px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #e0e0e0', background: '#2a2b3c' }}>
           <div style={{ fontSize: 16, fontWeight: 600, color: '#fff' }}>{title}</div>
         </div>
