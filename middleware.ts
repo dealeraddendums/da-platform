@@ -60,7 +60,9 @@ export async function middleware(request: NextRequest) {
   }
 
   // Force password reset: redirect to /reset-password before any other access
-  if (session && session.user.app_metadata?.force_password_reset === true) {
+  // Skip this redirect during super_admin impersonation sessions
+  const isImpersonating = request.cookies.get("da_impersonating")?.value === "1";
+  if (session && session.user.app_metadata?.force_password_reset === true && !isImpersonating) {
     if (!isResetRoute && !isApiAuth) {
       return NextResponse.redirect(new URL("/reset-password", request.url));
     }

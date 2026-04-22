@@ -32,6 +32,7 @@ export default function ImpersonationBanner() {
       refresh_token: state.original_refresh_token,
     });
     localStorage.removeItem("da_impersonate");
+    document.cookie = "da_impersonating=; path=/; max-age=0; SameSite=Lax";
     window.location.href = "/dealers";
   }
 

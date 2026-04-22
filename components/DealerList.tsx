@@ -209,6 +209,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
       return;
     }
 
+    document.cookie = "da_impersonating=1; path=/; max-age=86400; SameSite=Lax";
     window.location.href = "/dashboard";
   }
 

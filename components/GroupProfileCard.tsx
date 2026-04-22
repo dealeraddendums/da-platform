@@ -261,6 +261,7 @@ function GroupDealers({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin
       return;
     }
 
+    document.cookie = "da_impersonating=1; path=/; max-age=86400; SameSite=Lax";
     window.location.href = "/dashboard";
   }
 
