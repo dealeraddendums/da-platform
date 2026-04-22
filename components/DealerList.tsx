@@ -435,12 +435,12 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                         >
                           📋
                         </Link>
-                        {role === "super_admin" && (
+                        {role === "super_admin" && d.hubspot_url && (
                           <a
-                            href={`https://app.hubspot.com/contacts/search?query=${encodeURIComponent(d.name || d.dealer_id)}`}
+                            href={d.hubspot_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            title="Search in HubSpot"
+                            title="Open in HubSpot"
                             onClick={e => e.stopPropagation()}
                             style={{ height: 22, padding: "0 8px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: "#ff7a59", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", flexShrink: 0, lineHeight: 1 }}
                           >

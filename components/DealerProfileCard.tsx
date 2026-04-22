@@ -29,6 +29,7 @@ type FormData = {
   zip: string;
   country: string;
   makes: string; // comma-separated in the form
+  hubspot_url: string;
 };
 
 function dealerToForm(d: DealerRow): FormData {
@@ -44,6 +45,7 @@ function dealerToForm(d: DealerRow): FormData {
     zip: d.zip ?? "",
     country: d.country,
     makes: (d.makes ?? []).join(", "),
+    hubspot_url: d.hubspot_url ?? "",
   };
 }
 
@@ -81,6 +83,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
       ...(isSuperAdmin && form.inventory_dealer_id.trim()
         ? { inventory_dealer_id: form.inventory_dealer_id.trim() }
         : {}),
+      ...(isSuperAdmin ? { hubspot_url: form.hubspot_url.trim() || null } : {}),
       primary_contact: form.primary_contact.trim() || null,
       primary_contact_email: form.primary_contact_email.trim() || null,
       phone: form.phone.trim() || null,
@@ -328,6 +331,46 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
               onChange={set("phone")}
               view={dealer.phone}
             />
+            {/* HubSpot URL — super_admin only */}
+            {(isSuperAdmin || dealer.hubspot_url) && (
+              editing && isSuperAdmin ? (
+                <div>
+                  <label className="label">HubSpot URL</label>
+                  <input
+                    className="input"
+                    type="url"
+                    value={form.hubspot_url}
+                    onChange={set("hubspot_url")}
+                    placeholder="https://app.hubspot.com/contacts/..."
+                  />
+                </div>
+              ) : (
+                <div className="flex items-start justify-between gap-4">
+                  <span className="text-sm" style={{ color: "var(--text-secondary)", flexShrink: 0 }}>HubSpot</span>
+                  <span className="text-sm font-medium text-right">
+                    {dealer.hubspot_url
+                      ? (
+                        <a
+                          href={dealer.hubspot_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#ff7a59", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 3 }}
+                          className="hover:underline"
+                        >
+                          Open record
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, opacity: 0.65 }}>
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                            <polyline points="15 3 21 3 21 9" />
+                            <line x1="10" y1="14" x2="21" y2="3" />
+                          </svg>
+                        </a>
+                      )
+                      : <span style={{ color: "var(--text-muted)" }}>—</span>
+                    }
+                  </span>
+                </div>
+              )
+            )}
           </div>
         </div>
 

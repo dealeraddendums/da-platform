@@ -205,6 +205,7 @@ export type DealerRow = {
   lat: string | null;
   lng: string | null;
   hubspot_company_id: string | null;
+  hubspot_url: string | null;
   agent_name: string | null;
   email_report: number | null;
   report_send_to: string | null;
@@ -253,6 +254,7 @@ type DealerInsert = {
   lat?: string | null;
   lng?: string | null;
   hubspot_company_id?: string | null;
+  hubspot_url?: string | null;
   agent_name?: string | null;
   email_report?: number | null;
   report_send_to?: string | null;
@@ -298,6 +300,7 @@ export type DealerUpdate = {
   lat?: string | null;
   lng?: string | null;
   hubspot_company_id?: string | null;
+  hubspot_url?: string | null;
   agent_name?: string | null;
   email_report?: number | null;
   report_send_to?: string | null;
