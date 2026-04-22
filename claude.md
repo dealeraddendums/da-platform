@@ -1,5 +1,5 @@
 # DealerAddendums Platform — CLAUDE.md
-## Last updated: 2026-04-18
+## Last updated: 2026-04-22
 
 ---
 
@@ -165,6 +165,8 @@ First-time deploy: SSH in, clone repo, set `.env.production`, `npm ci && npm run
 | 9 | Print/PDF engine | ✅ COMPLETE |
 | 10 | Billing | ⬜ UP NEXT |
 | 11 | Admin ops | ⬜ Deferred |
+| 12 | Enterprise White Label | ⬜ Not started |
+| 13 | Dealer Migration & Onboarding | ⬜ Not started |
 
 Phase 8 merged into Phase 6 — unified builder handles both document types.
 
@@ -178,10 +180,33 @@ Phase 8 merged into Phase 6 — unified builder handles both document types.
 - Protected routes via middleware — unauthenticated → /login
 - Dashboard shell (/dashboard) — 220px navy sidebar, 56px topbar, role badge, sign-out
 - Profiles table + auto-create trigger on signup
-- Roles: super_admin, group_admin, dealer_admin, dealer_user
+- Roles: super_admin, group_admin, dealer_admin, dealer_user, dealer_restricted
 - RLS policies on all tables
 - lib/auth.ts, lib/db.ts, lib/supabase/* — all created
 - Migrations: 001_profiles.sql, 001_users_table.sql, 002_jwt_hook.sql
+
+### Roles
+- `super_admin` — full platform access, impersonation, all dealers/groups
+- `group_admin` — scoped to own group and its member dealers
+- `dealer_admin` — full access to own dealer account
+- `dealer_user` — read/print access within own dealer
+- `dealer_restricted` — same as dealer_user, displayed as "Dealer User" in topbar badge
+
+### UserRole type (lib/db.ts)
+All five roles are in the `UserRole` union. `ROLE_LABELS` in `Topbar.tsx` covers all five.
+`dealer_restricted` was added 2026-04-21 after discovery of legacy profiles using this value.
+
+### Impersonation system (added 2026-04-21)
+`POST /api/admin/impersonate` — super_admin only.
+- Accepts `dealer_id`, finds all profiles for that dealer with role in
+  `[dealer_admin, dealer_user, dealer_restricted]`, prefers `dealer_admin`
+- Generates Supabase magic-link token, returns `token_hash` + dealer info
+- Client calls `supabase.auth.verifyOtp({ token_hash, type: 'magiclink' })`,
+  stores original session in `localStorage` as `impersonation_return_session`,
+  then redirects to `/dashboard`
+- Logs event to `admin_audit` table (fire-and-forget)
+- SQL run 2026-04-21: normalized ~3,400 legacy profiles from `dealer_restricted`
+  → `dealer_admin` so impersonation always finds a target
 
 ---
 
@@ -196,6 +221,14 @@ Phase 8 merged into Phase 6 — unified builder handles both document types.
 - /dealers — super_admin: paginated table + New Dealer form
 - /dealers — dealer_admin/user: auto-redirect to own profile
 - /dealers/[id] — view/edit profile, super_admin toggles Active/Inactive
+
+### Dealers list UI (updated 2026-04-21)
+- **Dealer name click → impersonation**: clicking the name immediately impersonates
+  that dealer (calls `/api/admin/impersonate`, then `verifyOtp` + redirect)
+- **📋 icon on row hover** → opens dealer profile `/dealers/[id]` (icon fades in
+  via `group-hover:opacity-50`, no hover delay)
+- **GROUP column**: group name is a blue `<Link href="/groups/[group_id]">` — clicking
+  navigates to that group's profile page
 
 ---
 
@@ -212,6 +245,26 @@ Phase 8 merged into Phase 6 — unified builder handles both document types.
 - /groups — super_admin: paginated table + New Group form
 - /groups — group_admin: auto-redirect to own group
 - /groups/[id] — view/edit + member dealers, live dealer search for assignment
+
+### Groups list UI (rebuilt 2026-04-21)
+Final column order: **Group Name | Status | Dealers | Billing Contact**
+
+- **Group Name**: `<Link href="/groups/[id]">` — blue link, navigates to group profile
+- **Status**: Active/Inactive badge
+- **Dealers**: blue count, hover → popover listing member dealers by name.
+  Popover fetches from `/api/groups/[id]/dealers` on first hover (cached in state).
+  Each dealer name in the popover is an impersonate button (calls `/api/admin/impersonate`).
+  Popover uses 150ms close-delay timer so mouse can travel from count to popover.
+- **Billing Contact**: plain text field
+- Default sort: A-Z by name. Sortable columns: Name, Status, Dealers, Billing Contact.
+- `/api/groups` supports `sort`, `sort_dir` params; dealer count computed via separate
+  profile query and sorted in-memory; `nullsFirst: false` pushes nulls to end.
+- Removed: Created column, Subscription column, date range filter.
+
+### Group profile member dealers table (updated 2026-04-21)
+Same impersonation UX as Dealers list:
+- Dealer name click → impersonates that dealer
+- 📋 icon on row hover → opens `/dealers/[id]`
 
 ---
 
@@ -242,39 +295,21 @@ AURORA_DATABASE, AURORA_PORT
 
 ---
 
-## Phase 5 — Addendum Settings ⬜ UP NEXT
+## Phase 5 — Addendum Settings ✅ COMPLETE
 
-### Scope
-- dealer_settings table: default_template_id, ai_content_default (bool), printer nudge margins
-- Template records table: name, document_type (addendum/infosheet), vehicle_types[], 
-  template_json (the widget layout), dealer_id, created_at
-- Print settings per dealer/printer: nudge_left, nudge_right, nudge_top, nudge_bottom (px)
-- /settings — dealer settings page: AI toggle, default template picker
-- /templates — list dealer's saved templates, create/edit/delete
-- This phase lays the data foundation that Phase 6 (builder) saves into
-
-### Prompt for Claude Code
-```
-Read CLAUDE.md. Phases 1-4 are complete. Build Phase 5: Addendum Settings.
-
-Deliverables:
-1. Migration: dealer_settings table (dealer_id FK, ai_content_default bool,
-   nudge_left/right/top/bottom int, updated_at)
-2. Migration: templates table (id, dealer_id FK, name, document_type enum 
-   'addendum'|'infosheet', vehicle_types text[], template_json jsonb, 
-   is_active bool, created_at, updated_at) with RLS
-3. GET/PATCH /api/settings — dealer's own settings (dealer_admin+)
-4. GET/POST /api/templates — list/create templates for dealer
-5. GET/PATCH/DELETE /api/templates/[id] — single template CRUD
-6. /settings page — AI content toggle (DB/AI), default template picker per vehicle type
-   (New/Used/CPO), printer nudge margin inputs
-7. /templates page — list templates as cards (name, document type badge, vehicle types,
-   last updated), New Template button (placeholder for Phase 6 builder)
-
-All UI must follow the design system in CLAUDE.md exactly.
-Assume YES to all permissions. Verify in browser before marking done.
-Run npm run build — must be clean before reporting complete.
-```
+### What was built
+- Migration 005: dealer_settings table (dealer_id FK, ai_content_default bool,
+  nudge_left/right/top/bottom int, updated_at) with RLS
+- Migration 006: templates table (id, dealer_id FK, name, document_type enum
+  'addendum'|'infosheet', vehicle_types text[], template_json jsonb,
+  is_active bool, created_at, updated_at) with RLS
+- GET/PATCH /api/settings — dealer's own settings (dealer_admin+)
+- GET/POST /api/templates — list/create templates for dealer
+- GET/PATCH/DELETE /api/templates/[id] — single template CRUD
+- /settings page — AI content toggle (DB/AI), default template picker per vehicle type
+  (New/Used/CPO), printer nudge margin inputs (left/right/top/bottom px)
+- /templates page — template cards (name, document type badge, vehicle types, last updated),
+  New Template button, delete with confirm, dealer picker for super_admin/group_admin
 
 ---
 
@@ -429,6 +464,18 @@ research and inspections before making any purchasing decisions.
 - app/builder/[vehicleId]/page.tsx — pre-loaded builder with Aurora vehicle data + dealer scope check
 - VehicleDetail "Open in Builder" button wired to /builder/[vehicleId]
 
+### Design system corrections (2026-04-22)
+- Font stack: Roboto/-apple-system only (DM Sans removed)
+- Canvas toolbar: background changed from `#ffa500` (orange) to `#2a2b3c` (navy);
+  all text/icon colors updated to white (`rgba(255,255,255,0.85)`)
+- Toolbar dividers: `#e0e0e0` → `rgba(255,255,255,0.2)` to be visible on navy
+- Toolbar selects: opaque white background, correct border color
+- Modal border-radius: 12 → 6
+- Palette tile border-radius: 7 → 4
+- Background list panel border-radius: 7 → 6
+- Print settings inner wrapper border-radius: 8 → 6
+- Save template summary border-radius: 8 → 6
+
 ---
 
 ## Phase 7 — VIN & AI Enrichment ✅ COMPLETE
@@ -572,3 +619,178 @@ Never cite as current or pending law.
 - Coding: Phase 7+ under supervision
 - Training: 7-session curriculum, Session 1 complete
 - Do not pull from customer success to write code if it compromises QA
+
+---
+
+## Phase 12 — Enterprise White Label ⬜ NOT STARTED
+
+### Business context
+Large enterprise groups (Dealer General ~190 dealers, DARCARS, Hendrick,
+etc.) want a fully branded experience so their dealers are loyal to the
+group, not aware of DealerAddendums. Target: 5 groups at launch, priced
+as enterprise tier add-on ($200-500/month per white-label domain).
+
+### Architecture
+All custom domains point to the da-platform EC2. Middleware reads
+req.headers.host, looks up the group by domain, and injects branding
+into every page. One codebase serves unlimited white-label portals.
+
+### Scope
+1. group_branding table:
+   group_id, custom_domain, logo_url, favicon_url, primary_color,
+   accent_color, login_bg_url, welcome_message, support_email,
+   portal_name, is_active
+
+2. Middleware domain detection:
+   - Read req.headers.host on every request
+   - Look up group_branding WHERE custom_domain = host
+   - Inject branding context into session/headers
+   - Fall back to DA branding if no match
+
+3. Branded login page:
+   - Dynamic per domain — group logo, colors, background
+   - No DA branding visible
+   - Custom welcome message
+   - Same auth flow underneath
+
+4. Sidebar/topbar:
+   - Swap DA logo for group logo when on white-label domain
+   - Apply primary_color to nav accents
+   - Show portal_name instead of "DA Platform"
+
+5. Complete isolation:
+   - Group users and dealers only see their group's data
+   - RLS enforced at DB level (already built)
+   - No cross-group data leakage
+
+6. nginx configuration:
+   - Per-domain SSL certificates via Let's Encrypt (certbot)
+   - Server block per custom domain pointing to port 3000
+   - Or wildcard cert for *.dealeraddendums.com subdomains
+
+7. DNS setup instructions per group:
+   - CNAME or A record pointing to ec2-54-167-226-23
+   - SSL provisioning checklist
+
+8. Super admin management:
+   - /admin/white-label page — list all white-label domains
+   - Add/edit/remove domains and branding per group
+   - Preview branded login page before going live
+
+### Prompt for Claude Code
+Read CLAUDE.md. Build Phase 12: Enterprise White Label.
+[Full prompt to be written when ready to build]
+
+### Target groups for launch
+- Dealer General (~190 dealers, ~$13,000/month)
+- DARCARS
+- Hendrick Automotive
+- 2 additional TBD
+
+---
+
+## Phase 13 — Dealer Migration & Onboarding ⬜ NOT STARTED
+
+### Business context
+~1,980 dealers need to migrate from the legacy PHP platform to the new
+da-platform. Some will self-service, some will be migrated manually by
+DA staff, and a few may stay on legacy for several months. The legacy
+platform (Amran's responsibility) will poll a DA API to check migration
+status and show appropriate banners/messages.
+
+### Migration states per dealer
+Add migration_status column to dealers table:
+  'legacy'        — still on old platform (default for all imported dealers)
+  'invited'       — banner shown, dealer has been notified
+  'migrating'     — dealer clicked Upgrade, migration in progress
+  'migrated'      — fully on new platform
+  'opted_out'     — dealer chose to stay on legacy temporarily
+
+### What migration does
+1. Copy addendum_defaults from Aurora → Supabase vehicle_options library
+   for that dealer (preserves all options, rules, prices, descriptions)
+2. Set migration_status = 'migrated' on dealer record
+3. Send welcome email via Mandrill:
+   - Subject: "Your new DealerAddendums platform is ready"
+   - Body: login URL, temp password reminder (Welcome2DA!), quick start guide
+4. Billing: no change — dealer is already in DA Billing
+
+### What migration does NOT do
+- Touch Freshbooks — already fully migrated to DA Billing
+- Move vehicles — ETL2 handles automatically once running
+- Force immediate login — dealer logs in on their own schedule
+
+### API endpoints for legacy platform (Amran consumes these)
+
+GET /api/migration/status?dealer_id=[inventory_dealer_id]
+  Returns:
+  {
+    dealer_id: string,
+    migration_status: 'legacy'|'invited'|'migrating'|'migrated'|'opted_out',
+    platform_url: 'https://ec2-54-167-226-23.compute-1.amazonaws.com',
+    invited_at: string|null,
+    migrated_at: string|null,
+    message: string  — human readable, for legacy platform to display
+  }
+  Auth: API key in X-DA-API-Key header (shared secret, stored in .env)
+  No auth required for GET — dealer_id is the only identifier needed
+
+POST /api/migration/invite
+  Body: { dealer_id: string }
+  Marks dealer as 'invited', records invited_at timestamp
+  Triggers welcome email via Mandrill
+  Auth: super_admin JWT or API key
+
+POST /api/migration/complete
+  Body: { dealer_id: string }
+  Runs full migration:
+    1. Copies addendum_defaults → vehicle_options for this dealer
+    2. Sets migration_status = 'migrated', records migrated_at
+    3. Sends confirmation email
+  Auth: super_admin JWT or API key
+
+POST /api/migration/opt-out
+  Body: { dealer_id: string, reason: string }
+  Sets migration_status = 'opted_out'
+  Auth: super_admin JWT or API key
+
+### Legacy platform integration (Amran's responsibility)
+Poll GET /api/migration/status on each dealer login.
+Show banner based on migration_status:
+  'legacy':   no banner (or soft "New platform coming soon" message)
+  'invited':  "Your new platform is ready! Click here to get started →"
+  'migrating': "Your migration is in progress..."
+  'migrated': "You've moved to the new platform. Log in at [url] →"
+  'opted_out': no banner
+
+### Super admin migration dashboard
+/admin/migration page:
+  - Stats: Legacy | Invited | Migrated | Opted Out counts
+  - Table of all dealers with migration_status filter
+  - Per dealer: Invite, Migrate Now, Opt Out buttons
+  - Bulk invite: select multiple dealers → send invitations
+  - Progress bar: X of 1980 dealers migrated
+
+### Self-service upgrade flow (dealer-initiated)
+When a dealer clicks "Upgrade Now" on the legacy banner:
+  POST /api/migration/complete with their dealer_id
+  Redirects to new platform login page
+
+### Prompt for Claude Code
+Read CLAUDE.md. Build Phase 13: Dealer Migration & Onboarding.
+
+Deliverables:
+1. Migration 028: add migration_status, invited_at, migrated_at columns
+   to dealers table. Default: 'legacy' for all existing dealers.
+2. GET /api/migration/status — public endpoint, API key auth
+3. POST /api/migration/invite — mark invited, send Mandrill email
+4. POST /api/migration/complete — run full migration for dealer
+5. POST /api/migration/opt-out — mark opted out
+6. Mandrill email templates: welcome email and confirmation email
+7. /admin/migration page — migration dashboard with stats and bulk tools
+8. Options migration: copy Aurora addendum_defaults → Supabase
+   vehicle_options for the migrating dealer (read Aurora, write Supabase)
+
+All UI must follow the design system in CLAUDE.md exactly.
+Assume YES to all permissions.
+Run npm run build — must be clean before reporting complete.
