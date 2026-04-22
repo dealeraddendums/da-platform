@@ -1,117 +1,123 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient, createAdminSupabaseClient } from "@/lib/db";
+import { requireSuperAdmin } from "@/lib/auth";
+import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 
 /**
- * GET /api/users
- * super_admin: all users with pagination/search/role filter.
- * dealer_admin: own dealer's users only.
- * Params: page, limit, search, role
+ * GET /api/users — super_admin only.
+ * Returns paginated profiles with dealer_name + group_name resolved.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const { claims, error } = await requireAuth();
+  const { error } = await requireSuperAdmin();
   if (error) return error;
 
   const { searchParams } = new URL(req.url);
-  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
+  const page  = Math.max(1, parseInt(searchParams.get("page")  ?? "1",  10));
   const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10)));
-  const search = searchParams.get("search")?.trim() ?? "";
-  const roleFilter = searchParams.get("role")?.trim() ?? "";
+  const search     = searchParams.get("search")?.trim() ?? "";
+  const roleFilter = searchParams.get("role")?.trim()   ?? "";
 
   const admin = createAdminSupabaseClient();
   const from = (page - 1) * limit;
-  const to = from + limit - 1;
+  const to   = from + limit - 1;
 
-  let query = admin
+  let q = admin
     .from("profiles")
     .select(
-      "id, email, full_name, role, dealer_id, phone, active, force_password_reset, last_login, created_at",
+      "id, email, full_name, role, dealer_id, group_id, active, force_password_reset, last_login, created_at",
       { count: "exact" }
     )
-    .order("created_at", { ascending: false })
+    .order("full_name", { ascending: true, nullsFirst: false })
     .range(from, to);
 
-  // Scope by dealer for non-super_admin
-  if (claims.role !== "super_admin") {
-    if (!claims.dealer_id) return NextResponse.json({ users: [], total: 0, role: claims.role });
-    query = query.eq("dealer_id", claims.dealer_id);
-  }
+  if (search)     q = q.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+  if (roleFilter) q = q.eq("role", roleFilter as UserRole);
 
-  if (search) {
-    query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
-  }
+  const { data: profiles, count, error: dbErr } = await q;
+  if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
 
-  if (roleFilter) {
-    query = query.eq("role", roleFilter as UserRole);
-  }
+  const rows = profiles ?? [];
 
-  const { data, error: dbError, count } = await query;
+  const dealerIds = Array.from(new Set(rows.filter(p => p.dealer_id).map(p => p.dealer_id as string)));
+  const groupIds  = Array.from(new Set(rows.filter(p => p.group_id).map(p => p.group_id  as string)));
 
-  if (dbError) {
-    return NextResponse.json({ error: dbError.message }, { status: 500 });
-  }
+  const [dealerRes, groupRes] = await Promise.all([
+    dealerIds.length > 0
+      ? admin.from("dealers").select("dealer_id, name").in("dealer_id", dealerIds)
+      : Promise.resolve({ data: [] as { dealer_id: string; name: string }[] }),
+    groupIds.length > 0
+      ? admin.from("groups").select("id, name").in("id", groupIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+  ]);
 
-  return NextResponse.json({ users: data ?? [], total: count ?? 0, role: claims.role });
+  const dealerMap = new Map((dealerRes.data ?? []).map(d => [d.dealer_id, d.name]));
+  const groupMap  = new Map((groupRes.data  ?? []).map(g => [g.id,        g.name]));
+
+  const users = rows.map(p => ({
+    ...p,
+    dealer_name: p.dealer_id ? (dealerMap.get(p.dealer_id) ?? null) : null,
+    group_name:  p.group_id  ? (groupMap.get(p.group_id)   ?? null) : null,
+  }));
+
+  return NextResponse.json({ users, total: count ?? 0 });
 }
 
 /**
- * POST /api/users
- * Create a sub-user for the authenticated dealer.
+ * POST /api/users — super_admin only.
+ * Creates a new auth user + profile.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const { claims, error } = await requireAuth();
+  const { error } = await requireSuperAdmin();
   if (error) return error;
 
-  let body: { email?: string; full_name?: string; role?: UserRole };
+  let body: {
+    email?: string;
+    full_name?: string;
+    role?: UserRole;
+    dealer_id?: string | null;
+    group_id?: string | null;
+    password?: string;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { email, full_name, role } = body;
-  if (!email || !full_name) {
-    return NextResponse.json(
-      { error: "email and full_name are required" },
-      { status: 400 }
-    );
-  }
-
-  const dealerId = claims.dealer_id;
+  const { email, full_name, role, dealer_id, group_id, password } = body;
+  if (!email?.trim())    return NextResponse.json({ error: "Email is required"     }, { status: 400 });
+  if (!full_name?.trim()) return NextResponse.json({ error: "Full name is required" }, { status: 400 });
+  if (!password)         return NextResponse.json({ error: "Password is required"  }, { status: 400 });
 
   const admin = createAdminSupabaseClient();
 
-  const { data: authData, error: authError } = await admin.auth.admin.createUser(
-    {
-      email,
-      email_confirm: true,
-      app_metadata: {
-        role: role ?? "dealer_user",
-        dealer_id: dealerId,
-      },
-    }
-  );
+  const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+    email: email.trim(),
+    password,
+    email_confirm: true,
+    user_metadata:  { full_name: full_name.trim() },
+    app_metadata:   { role: role ?? "dealer_admin" },
+  });
 
-  if (authError) {
-    return NextResponse.json({ error: authError.message }, { status: 400 });
-  }
+  if (authErr) return NextResponse.json({ error: authErr.message }, { status: 400 });
 
-  const { data: profile, error: profileError } = await admin
+  // Upsert so this works whether the DB trigger fired first or not
+  const { data: profile, error: profileErr } = await admin
     .from("profiles")
-    .insert({
-      id: authData.user.id,
-      dealer_id: dealerId,
-      role: role ?? "dealer_user",
-      email,
-      full_name,
-    })
+    .upsert({
+      id:        authData.user.id,
+      email:     email.trim(),
+      full_name: full_name.trim(),
+      role:      role ?? "dealer_admin",
+      dealer_id: dealer_id ?? null,
+      group_id:  group_id  ?? null,
+    }, { onConflict: "id" })
     .select()
     .single();
 
-  if (profileError) {
-    await admin.auth.admin.deleteUser(authData.user.id);
-    return NextResponse.json({ error: profileError.message }, { status: 500 });
+  if (profileErr) {
+    void admin.auth.admin.deleteUser(authData.user.id);
+    return NextResponse.json({ error: profileErr.message }, { status: 500 });
   }
 
   return NextResponse.json({ user: profile }, { status: 201 });
