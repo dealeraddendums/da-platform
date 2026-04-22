@@ -39,7 +39,7 @@ export default async function DashboardLayout({
         <ImpersonationBanner />
         <Topbar user={userDisplay} />
         <main
-          className="flex-1 overflow-auto p-6"
+          className="flex-1 overflow-auto p-6 relative"
           style={{ background: "var(--bg-app)" }}
         >
           {children}
