@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { HubSpotEmail } from "@/components/HubSpotEmail";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -433,7 +434,7 @@ function EditUserModal({ user, onClose, onSuccess }: {
       <form onSubmit={e => void submit(e)}>
         <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #e0e0e0" }}>
           <h2 style={{ fontSize: 18, fontWeight: 600, color: "#333", margin: 0 }}>Edit User</h2>
-          <p style={{ fontSize: 12, color: "#78828c", margin: "4px 0 0" }}>{user.email}</p>
+          <div style={{ marginTop: 4 }}><HubSpotEmail email={user.email} showDash={false} /></div>
         </div>
         <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
@@ -680,7 +681,7 @@ export default function UsersPage() {
                     )}
                   </div>
                 </td>
-                <td className="px-4 py-2.5" style={{ color: "var(--text-secondary)" }}>{u.email}</td>
+                <td className="px-4 py-2.5"><HubSpotEmail email={u.email} showDash={false} /></td>
                 <td className="px-4 py-2.5"><RoleBadge role={u.role} /></td>
                 <td className="px-4 py-2.5 text-sm" style={{ color: "var(--text-secondary)" }}>{dealerGroupCell(u)}</td>
                 <td className="px-4 py-2.5">

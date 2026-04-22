@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { HubSpotEmail } from "@/components/HubSpotEmail";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
 
 type Props = {
@@ -176,7 +177,7 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
           <div className="space-y-4">
             <Field label="Group Name" value={form.name} editing={editing} required onChange={set("name")} view={group.name} />
             <Field label="Primary Contact" value={form.primary_contact} editing={editing} onChange={set("primary_contact")} view={group.primary_contact} />
-            <Field label="Email" value={form.primary_contact_email} editing={editing} type="email" onChange={set("primary_contact_email")} view={group.primary_contact_email} />
+            <Field label="Email" value={form.primary_contact_email} editing={editing} type="email" onChange={set("primary_contact_email")} view={group.primary_contact_email} isEmail />
             <Field label="Phone" value={form.phone} editing={editing} onChange={set("phone")} view={group.phone} />
           </div>
         </div>
@@ -513,9 +514,10 @@ type FieldProps = {
   type?: string;
   required?: boolean;
   maxLength?: number;
+  isEmail?: boolean;
 };
 
-function Field({ label, value, view, editing, onChange, type = "text", required, maxLength }: FieldProps) {
+function Field({ label, value, view, editing, onChange, type = "text", required, maxLength, isEmail }: FieldProps) {
   if (editing) {
     return (
       <div>
@@ -528,7 +530,9 @@ function Field({ label, value, view, editing, onChange, type = "text", required,
     <div className="flex items-start justify-between gap-4">
       <span className="text-sm flex-shrink-0" style={{ color: "var(--text-secondary)" }}>{label}</span>
       <span className="text-sm font-medium text-right" style={{ color: "var(--text-primary)" }}>
-        {view || <span style={{ color: "var(--text-muted)" }}>—</span>}
+        {isEmail
+          ? <HubSpotEmail email={view} />
+          : (view || <span style={{ color: "var(--text-muted)" }}>—</span>)}
       </span>
     </div>
   );

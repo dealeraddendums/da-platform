@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
+import { HubSpotEmail } from "@/components/HubSpotEmail";
 
 type Props = {
   dealer: DealerRow;
@@ -318,6 +319,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
               type="email"
               onChange={set("primary_contact_email")}
               view={dealer.primary_contact_email}
+              isEmail
             />
             <Field
               label="Phone"
@@ -446,9 +448,10 @@ type FieldProps = {
   type?: string;
   required?: boolean;
   maxLength?: number;
+  isEmail?: boolean;
 };
 
-function Field({ label, value, view, editing, onChange, type = "text", required, maxLength }: FieldProps) {
+function Field({ label, value, view, editing, onChange, type = "text", required, maxLength, isEmail }: FieldProps) {
   if (editing) {
     return (
       <div>
@@ -470,7 +473,9 @@ function Field({ label, value, view, editing, onChange, type = "text", required,
         {label}
       </span>
       <span className="text-sm font-medium text-right" style={{ color: "var(--text-primary)" }}>
-        {view || <span style={{ color: "var(--text-muted)" }}>—</span>}
+        {isEmail
+          ? <HubSpotEmail email={view} />
+          : (view || <span style={{ color: "var(--text-muted)" }}>—</span>)}
       </span>
     </div>
   );
