@@ -24,6 +24,14 @@ function isExternalGroup(val: string | null | undefined): val is string {
   return isNaN(Number(val));
 }
 
+function decodeHtml(str: string | null | undefined): string {
+  if (!str) return "";
+  if (typeof window === "undefined") return str;
+  const el = document.createElement("textarea");
+  el.innerHTML = str;
+  return el.value;
+}
+
 function churnRisk(d: DealerListRow): "critical" | "low" | "none" {
   if (d.lifetime_prints < 10) return "none";
   if (d.lifetime_prints >= 50 && d.last_30_prints === 0) return "critical";
@@ -394,6 +402,14 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                     </span>
                   </th>
                 ))}
+                {role === "super_admin" && (
+                  <th
+                    className="text-center px-4 py-2.5 font-semibold"
+                    style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", width: 110, whiteSpace: "nowrap" }}
+                  >
+                    HubSpot
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -425,7 +441,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                           }}
                           className="hover:underline"
                         >
-                          {impersonating === d.dealer_id ? "…" : (d.name || `Dealer ${d.dealer_id}`)}
+                          {impersonating === d.dealer_id ? "…" : decodeHtml(d.name || `Dealer ${d.dealer_id}`)}
                         </button>
                         <Link
                           href={`/dealers/${d.id}`}
@@ -435,18 +451,6 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                         >
                           📋
                         </Link>
-                        {role === "super_admin" && d.hubspot_url && (
-                          <a
-                            href={d.hubspot_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title="Open in HubSpot"
-                            onClick={e => e.stopPropagation()}
-                            style={{ height: 22, padding: "0 8px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: "#ff7a59", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", flexShrink: 0, lineHeight: 1 }}
-                          >
-                            HubSpot ↗
-                          </a>
-                        )}
                       </div>
                       {impersonateError?.dealerId === d.dealer_id && (
                         <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{impersonateError.message}</p>
@@ -475,6 +479,11 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                     <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
                       {fmtCreated(d.legacy_id)}
                     </td>
+                    {role === "super_admin" && (
+                      <td className="px-4 py-3 text-center">
+                        {d.hubspot_url && <HubSpotPill href={d.hubspot_url} />}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -511,6 +520,34 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
         </div>
       )}
     </div>
+  );
+}
+
+function HubSpotPill({ href }: { href: string }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open in HubSpot"
+      onClick={e => e.stopPropagation()}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: "inline-flex", alignItems: "center",
+        height: 22, padding: "0 8px", borderRadius: 20,
+        fontSize: 11, fontWeight: 500,
+        background: "transparent",
+        border: `1px solid ${hovered ? "#ff7a59" : "#c0c0c0"}`,
+        color: hovered ? "#ff7a59" : "#78828c",
+        textDecoration: "none",
+        transition: "border-color 120ms, color 120ms",
+        whiteSpace: "nowrap",
+      }}
+    >
+      HubSpot ↗
+    </a>
   );
 }
 
