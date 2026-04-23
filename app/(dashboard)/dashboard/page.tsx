@@ -17,7 +17,6 @@ export const metadata = { title: "Dashboard — DA Platform" };
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 type CountRow = RowDataPacket & { total: number };
-type DealerCountRow = RowDataPacket & { DEALER_ID: string; total: number };
 
 type VehicleShort = RowDataPacket & {
   id: number;
@@ -490,7 +489,7 @@ export default async function DashboardPage() {
     );
   }
 
-  // Fetch dealer's account_type to determine inventory source
+  // Fetch account_type to determine rendering (manual vs Aurora)
   const { data: dealerRow } = await admin
     .from("dealers")
     .select("account_type")
@@ -499,42 +498,38 @@ export default async function DashboardPage() {
   const accountType = dealerRow?.account_type ?? null;
   const manual = isManualDealer(accountType);
 
-  // ── Manual dealer: show Supabase-backed inventory ─────────────────────────
+  // ── Stats — always Supabase ───────────────────────────────────────────────
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const todayUTC = new Date(); todayUTC.setUTCHours(0, 0, 0, 0);
+
+  const [{ count: totalVehiclesCount }, { count: printedTodayCount }, { count: printed30Count }] = await Promise.all([
+    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId).eq("status", "active"),
+    admin.from("print_history").select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId).gte("created_at", todayUTC.toISOString()),
+    admin.from("print_history").select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId).gte("created_at", thirtyDaysAgo),
+  ]);
+
+  const totalVehicles = totalVehiclesCount ?? 0;
+  const printedToday = printedTodayCount ?? 0;
+  const printed30 = printed30Count ?? 0;
+  const unprintedCount = Math.max(0, totalVehicles - printed30);
+
+  // ── Manual dealer ─────────────────────────────────────────────────────────
   if (manual) {
-    const { count: totalManual } = await admin
-      .from("dealer_vehicles")
-      .select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId)
-      .eq("status", "active");
-
-    const { count: unprintedManual } = await admin
-      .from("dealer_vehicles")
-      .select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId)
-      .eq("status", "active")
-      .eq("decode_flagged", false);
-
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const todayUTC = new Date(); todayUTC.setUTCHours(0, 0, 0, 0);
-    const [printedTodayRes, printed30Res] = await Promise.all([
-      admin.from("print_history").select("*", { count: "exact", head: true })
-        .eq("dealer_id", dealerId).gte("created_at", todayUTC.toISOString()),
-      admin.from("print_history").select("*", { count: "exact", head: true })
-        .eq("dealer_id", dealerId).gte("created_at", thirtyDaysAgo),
-    ]);
-
     const manualStats = [
-      { label: "Total Vehicles", value: totalManual ?? 0 },
-      { label: "Printed Today", value: printedTodayRes.count ?? 0 },
-      { label: "Printed Last 30 Days", value: printed30Res.count ?? 0 },
+      { label: "Total Vehicles", value: totalVehicles },
+      { label: "Unprinted", value: unprintedCount },
+      { label: "Printed Today", value: printedToday },
+      { label: "Printed Last 30 Days", value: printed30 },
     ];
-
     return (
       <div>
         <div className="mb-5">
           <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Dashboard</h1>
         </div>
-        <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
           {manualStats.map((s) => (
             <div key={s.label} className="card p-3">
               <p style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "var(--text-muted)", marginBottom: 6 }}>{s.label}</p>
@@ -547,39 +542,17 @@ export default async function DashboardPage() {
     );
   }
 
-  // ── Aurora dealer: existing work queue ────────────────────────────────────
+  // ── Aurora dealer: recent vehicles list from Aurora, stats already computed ─
   const pool = getPool();
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const todayUTC = new Date();
-  todayUTC.setUTCHours(0, 0, 0, 0);
+  const [recentVehicles] = await pool.execute<VehicleShort[]>(
+    "SELECT id, STOCK_NUMBER, YEAR, MAKE, MODEL, TRIM, MSRP, DATE_IN_STOCK FROM vehicles WHERE DEALER_ID = ? AND STATUS = '1' ORDER BY DATE_IN_STOCK DESC LIMIT 20",
+    [dealerId]
+  );
 
-  const [[totalRows], [recentVehicles]] = await Promise.all([
-    pool.execute<CountRow[]>(
-      "SELECT COUNT(*) as total FROM vehicles WHERE DEALER_ID = ? AND STATUS = '1'",
-      [dealerId]
-    ),
-    pool.execute<VehicleShort[]>(
-      "SELECT id, STOCK_NUMBER, YEAR, MAKE, MODEL, TRIM, MSRP, DATE_IN_STOCK FROM vehicles WHERE DEALER_ID = ? AND STATUS = '1' ORDER BY DATE_IN_STOCK DESC LIMIT 20",
-      [dealerId]
-    ),
-  ]);
-
-  const totalVehicles = totalRows[0]?.total ?? 0;
   const vehicleIds = recentVehicles.map((v) => v.id);
-
-  const [printedTodayRes, printed30Res, printedAllRes, vehiclePrintsRes] = await Promise.all([
-    admin.from("print_history").select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId).gte("created_at", todayUTC.toISOString()),
-    admin.from("print_history").select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId).gte("created_at", thirtyDaysAgo),
-    admin.from("print_history").select("vehicle_id").eq("dealer_id", dealerId).limit(50000),
-    vehicleIds.length > 0
-      ? admin.from("print_history").select("vehicle_id, document_type").in("vehicle_id", vehicleIds)
-      : Promise.resolve({ data: [] as Array<{ vehicle_id: number; document_type: string }> }),
-  ]);
-
-  const printedVehicleSet = new Set((printedAllRes.data ?? []).map((r) => r.vehicle_id as number));
-  const unprintedCount = Math.max(0, totalVehicles - printedVehicleSet.size);
+  const vehiclePrintsRes = vehicleIds.length > 0
+    ? await admin.from("print_history").select("vehicle_id, document_type").in("vehicle_id", vehicleIds)
+    : { data: [] as Array<{ vehicle_id: number; document_type: string }> };
 
   const printTypes: Record<number, Set<string>> = {};
   for (const r of vehiclePrintsRes.data ?? []) {
@@ -592,8 +565,8 @@ export default async function DashboardPage() {
     <DealerView
       totalVehicles={totalVehicles}
       unprintedCount={unprintedCount}
-      printedToday={printedTodayRes.count ?? 0}
-      printed30={printed30Res.count ?? 0}
+      printedToday={printedToday}
+      printed30={printed30}
       vehicles={recentVehicles}
       printTypes={printTypes}
     />
