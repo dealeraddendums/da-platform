@@ -4,7 +4,10 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { getPool } from "@/lib/aurora";
 import type { RowDataPacket } from "mysql2/promise";
 
-const toTs = (v: Date | null) => v ? v.toISOString() : null;
+const toTs = (v: Date | null) => {
+  if (!v) return null;
+  try { return v.toISOString(); } catch { return null; }
+};
 
 /**
  * POST /api/admin/sync-legacy
