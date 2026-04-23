@@ -519,6 +519,36 @@ research and inspections before making any purchasing decisions.
 
 ---
 
+## Phase 9b — Vehicle Archive ✅ COMPLETE
+
+### What was built
+- Migration 032_vehicle_archive.sql:
+  - `dealer_vehicles_archive`: mirror of dealer_vehicles + archived_at + archive_reason
+  - `vehicle_audit_log_archive`: mirror of vehicle_audit_log without FK constraints
+  - Expanded vehicle_audit_log CHECK to include 'archived' and 'restored_from_archive'
+- POST /api/cron/archive-vehicles: protected by x-cron-secret header
+  - Finds status='inactive' vehicles with updated_at > 6 months old
+  - Batch of 500: copy to archive → copy audit trail → log 'archived' → delete
+  - Idempotent: checks archive table before copying, upserts audit entries by id
+- GET /api/admin/vehicle-archive?dealer_id=X: list archived vehicles (super_admin only)
+- POST /api/admin/vehicle-archive: action='restore' — moves vehicle back to dealer_vehicles
+  - Checks stock_number conflict, logs 'restored_from_archive' to vehicle_audit_log
+- ManualVehicleInventory: "View Archive" button visible to super_admin only
+  - Modal: Stock#, Year/Make/Model, VIN, Deactivated date, Archived date, Restore button
+
+### CRON_SECRET
+- Set in .env.local (dev) and must be set in .env.production on EC2
+- Value in .env.local: `da_cron_7f3a9e2b1c8d4f6e0a5b9c3d7e1f2a4b`
+- Use a different, strong random value in production
+
+### EasyCron setup
+- URL: http://ec2-54-167-226-23.compute-1.amazonaws.com/api/cron/archive-vehicles
+- Header: x-cron-secret: [production CRON_SECRET value]
+- Schedule: 0 3 * * 0 (3 AM UTC every Sunday)
+- Method: POST
+
+---
+
 ## Phase 10 — Billing ⬜ UP NEXT
 
 ### Scope
