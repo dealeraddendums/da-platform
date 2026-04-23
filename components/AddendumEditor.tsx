@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { VehicleRow } from "@/lib/vehicles";
-import { vehicleCondition, parsePhotos } from "@/lib/vehicles";
+import { vehicleCondition } from "@/lib/vehicles";
 import { formatOptionPrice, parseOptionPriceValue } from "@/lib/option-price";
 import type { VehicleOptionRow } from "@/lib/db";
 import PrintPreviewModal from "@/components/PrintPreviewModal";
@@ -244,7 +244,6 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
   const askingPrice = msrp != null ? msrp + total : null;
 
   const cond = vehicleCondition(vehicle);
-  const photos = parsePhotos(vehicle.PHOTOS ?? null);
   const appliedNames = new Set(options.map(o => o.option_name.toLowerCase().trim()));
   const filteredLibrary = library.filter(
     (o) =>
@@ -257,43 +256,62 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
   return (
     <div style={{ display: "flex", gap: 20, alignItems: "flex-start", minHeight: 600 }}>
 
-      {/* ── Left: Vehicle card ────────────────────────────────────────────── */}
-      <div className="card" style={{ width: 220, flexShrink: 0, overflow: "hidden" }}>
-        {photos[0] && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={photos[0]}
-            alt=""
-            style={{ width: "100%", height: 140, objectFit: "cover", display: "block" }}
-          />
-        )}
-        <div className="p-4">
-          <div className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
-            {[vehicle.YEAR, vehicle.MAKE, vehicle.MODEL].filter(Boolean).join(" ")}
-          </div>
-          {vehicle.TRIM && (
-            <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>{vehicle.TRIM}</div>
-          )}
-
-          <div className="mt-3 space-y-1.5">
-            <InfoRow label="VIN" value={vehicle.VIN_NUMBER} mono />
-            {vehicle.STOCK_NUMBER && <InfoRow label="Stock" value={`#${vehicle.STOCK_NUMBER}`} mono />}
-            <InfoRow label="Condition" value={cond} />
-            {vehicle.EXT_COLOR && <InfoRow label="Color" value={vehicle.EXT_COLOR} />}
-            {vehicle.MILEAGE && (
-              <InfoRow label="Miles" value={parseInt(vehicle.MILEAGE, 10).toLocaleString()} />
-            )}
-            {msrp != null && (
-              <InfoRow label="MSRP" value={`$${msrp.toLocaleString()}`} />
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Center: Options table ─────────────────────────────────────────── */}
+      {/* ── Left: Options editor ──────────────────────────────────────────── */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="card" style={{ overflow: "hidden" }}>
-          {/* Header */}
+          {/* Vehicle summary */}
+          <div className="px-4 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
+                  {[vehicle.YEAR, vehicle.MAKE, vehicle.MODEL].filter(Boolean).join(" ")}
+                  {vehicle.TRIM && (
+                    <span className="font-normal ml-1.5 text-xs" style={{ color: "var(--text-muted)" }}>
+                      {vehicle.TRIM}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                  {vehicle.VIN_NUMBER && (
+                    <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
+                      {vehicle.VIN_NUMBER}
+                    </span>
+                  )}
+                  {vehicle.STOCK_NUMBER && (
+                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                      #{vehicle.STOCK_NUMBER}
+                    </span>
+                  )}
+                  {vehicle.EXT_COLOR && (
+                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>{vehicle.EXT_COLOR}</span>
+                  )}
+                  {vehicle.MILEAGE && (
+                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                      {parseInt(vehicle.MILEAGE, 10).toLocaleString()} mi
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <span
+                  className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                  style={{
+                    background: cond === "New" ? "#e8f5e9" : cond === "CPO" ? "#e3f2fd" : "#f5f6f7",
+                    color: cond === "New" ? "#2e7d32" : cond === "CPO" ? "#1565c0" : "#55595c",
+                  }}
+                >
+                  {cond}
+                </span>
+                {msrp != null && (
+                  <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                    ${msrp.toLocaleString()}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Options header */}
           <div
             className="px-4 py-3 flex items-center justify-between"
             style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}
@@ -656,25 +674,6 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
-
-function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex justify-between gap-2 text-xs">
-      <span style={{ color: "var(--text-muted)", flexShrink: 0 }}>{label}</span>
-      <span
-        style={{
-          color: "var(--text-secondary)",
-          fontFamily: mono ? "monospace" : undefined,
-          fontSize: mono ? 11 : undefined,
-          textAlign: "right",
-          wordBreak: "break-all",
-        }}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (

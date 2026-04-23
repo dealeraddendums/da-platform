@@ -42,50 +42,25 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
 }
 
-function PrintNowBtn({ vehicleId, everPrinted, onPrinted }: {
+function PrintNowBtn({ vehicleId, everPrinted }: {
   vehicleId: string;
   everPrinted: boolean;
-  onPrinted?: () => void;
 }) {
-  const [printing, setPrinting] = useState(false);
-
-  async function handlePrint() {
-    setPrinting(true);
-    try {
-      const res = await fetch("/api/pdf/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealerVehicleId: vehicleId, docType: "addendum" }),
-      });
-      const json = await res.json() as { url?: string; error?: string };
-      if (json.url) {
-        window.open(json.url, "_blank");
-        onPrinted?.();
-      } else {
-        alert(json.error ?? "PDF generation failed");
-      }
-    } catch {
-      alert("Network error — PDF generation failed");
-    } finally {
-      setPrinting(false);
-    }
-  }
-
   return (
-    <button
-      onClick={handlePrint}
-      disabled={printing}
+    <a
+      href={`/vehicles/${vehicleId}/addendum`}
       style={{
+        display: "inline-block",
         height: 28, padding: "0 11px", fontSize: 11, fontWeight: 600,
-        borderRadius: 4, cursor: printing ? "not-allowed" : "pointer", whiteSpace: "nowrap",
+        borderRadius: 4, whiteSpace: "nowrap", textDecoration: "none",
+        lineHeight: "28px",
         background: everPrinted ? "#1976d2" : "#fff",
         color: everPrinted ? "#fff" : "#333",
         border: everPrinted ? "1px solid #1565c0" : "1px solid #c0c0c0",
-        opacity: printing ? 0.7 : 1,
       }}
     >
-      {printing ? "Generating…" : "Print Now"}
-    </button>
+      Print Now
+    </a>
   );
 }
 
@@ -437,7 +412,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
                         </button>
                       </td>
                       <td className="px-3 py-2">
-                        <PrintNowBtn vehicleId={v.id} everPrinted={printed.length > 0} onPrinted={fetchVehicles} />
+                        <PrintNowBtn vehicleId={v.id} everPrinted={printed.length > 0} />
                       </td>
                     </tr>
                   );
