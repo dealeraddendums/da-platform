@@ -13,6 +13,15 @@ const DEFAULTS = {
   default_template_new: null,
   default_template_used: null,
   default_template_cpo: null,
+  default_addendum_new: null,
+  default_addendum_used: null,
+  default_addendum_cpo: null,
+  default_infosheet_new: null,
+  default_infosheet_used: null,
+  default_infosheet_cpo: null,
+  default_buyersguide_new: null,
+  default_buyersguide_used: null,
+  default_buyersguide_cpo: null,
 };
 
 async function resolveDealerId(
@@ -90,6 +99,15 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     ...("default_template_new" in body && { default_template_new: body.default_template_new ?? null }),
     ...("default_template_used" in body && { default_template_used: body.default_template_used ?? null }),
     ...("default_template_cpo" in body && { default_template_cpo: body.default_template_cpo ?? null }),
+    ...("default_addendum_new" in body && { default_addendum_new: body.default_addendum_new ?? null }),
+    ...("default_addendum_used" in body && { default_addendum_used: body.default_addendum_used ?? null }),
+    ...("default_addendum_cpo" in body && { default_addendum_cpo: body.default_addendum_cpo ?? null }),
+    ...("default_infosheet_new" in body && { default_infosheet_new: body.default_infosheet_new ?? null }),
+    ...("default_infosheet_used" in body && { default_infosheet_used: body.default_infosheet_used ?? null }),
+    ...("default_infosheet_cpo" in body && { default_infosheet_cpo: body.default_infosheet_cpo ?? null }),
+    ...("default_buyersguide_new" in body && { default_buyersguide_new: body.default_buyersguide_new ?? null }),
+    ...("default_buyersguide_used" in body && { default_buyersguide_used: body.default_buyersguide_used ?? null }),
+    ...("default_buyersguide_cpo" in body && { default_buyersguide_cpo: body.default_buyersguide_cpo ?? null }),
   };
 
   const admin = createAdminSupabaseClient();

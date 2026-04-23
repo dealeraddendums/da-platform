@@ -21,7 +21,18 @@ const SETTING_DEFAULTS: Omit<DealerSettingsRow, "dealer_id" | "updated_at"> = {
   default_template_new: null,
   default_template_used: null,
   default_template_cpo: null,
+  default_addendum_new: null,
+  default_addendum_used: null,
+  default_addendum_cpo: null,
+  default_infosheet_new: null,
+  default_infosheet_used: null,
+  default_infosheet_cpo: null,
+  default_buyersguide_new: null,
+  default_buyersguide_used: null,
+  default_buyersguide_cpo: null,
 };
+
+type DocTab = "addendum" | "infosheet" | "buyers_guide";
 
 export default function SettingsForm({ fixedDealerId, role, groupId, initialSettings }: Props) {
   const [dealerId, setDealerId] = useState<string | null>(fixedDealerId);
@@ -43,10 +54,20 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
           default_template_new: initialSettings.default_template_new,
           default_template_used: initialSettings.default_template_used,
           default_template_cpo: initialSettings.default_template_cpo,
+          default_addendum_new: initialSettings.default_addendum_new ?? null,
+          default_addendum_used: initialSettings.default_addendum_used ?? null,
+          default_addendum_cpo: initialSettings.default_addendum_cpo ?? null,
+          default_infosheet_new: initialSettings.default_infosheet_new ?? null,
+          default_infosheet_used: initialSettings.default_infosheet_used ?? null,
+          default_infosheet_cpo: initialSettings.default_infosheet_cpo ?? null,
+          default_buyersguide_new: initialSettings.default_buyersguide_new ?? null,
+          default_buyersguide_used: initialSettings.default_buyersguide_used ?? null,
+          default_buyersguide_cpo: initialSettings.default_buyersguide_cpo ?? null,
         }
       : { ...SETTING_DEFAULTS }
   );
 
+  const [docTab, setDocTab] = useState<DocTab>("addendum");
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
@@ -100,6 +121,15 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
         default_template_new: sJson.data.default_template_new,
         default_template_used: sJson.data.default_template_used,
         default_template_cpo: sJson.data.default_template_cpo,
+        default_addendum_new: sJson.data.default_addendum_new ?? null,
+        default_addendum_used: sJson.data.default_addendum_used ?? null,
+        default_addendum_cpo: sJson.data.default_addendum_cpo ?? null,
+        default_infosheet_new: sJson.data.default_infosheet_new ?? null,
+        default_infosheet_used: sJson.data.default_infosheet_used ?? null,
+        default_infosheet_cpo: sJson.data.default_infosheet_cpo ?? null,
+        default_buyersguide_new: sJson.data.default_buyersguide_new ?? null,
+        default_buyersguide_used: sJson.data.default_buyersguide_used ?? null,
+        default_buyersguide_cpo: sJson.data.default_buyersguide_cpo ?? null,
       });
     }
     setTemplates(tJson.data ?? []);
@@ -247,40 +277,73 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
       </div>
 
       {/* Default Templates */}
-      <div className="card p-5 mb-4">
-        <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
-          Default Templates
-        </p>
-        {(["new", "used", "cpo"] as const).map((type) => {
-          const key = `default_template_${type}` as keyof typeof settings;
-          const label = type === "new" ? "New Vehicles" : type === "used" ? "Used Vehicles" : "CPO Vehicles";
-          return (
-            <div key={type} className="flex items-center gap-3 mb-3">
-              <label className="text-sm w-28 flex-shrink-0" style={{ color: "var(--text-secondary)" }}>
-                {label}
-              </label>
-              <select
-                className="input flex-1"
-                value={(settings[key] as string | null) ?? ""}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, [key]: e.target.value || null }))
-                }
-              >
-                <option value="">— No default —</option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name} ({t.document_type})
-                  </option>
-                ))}
-              </select>
-            </div>
-          );
-        })}
-        {templates.length === 0 && (
-          <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-            No templates saved yet. Create templates on the Templates page.
+      <div className="card mb-4" style={{ overflow: "hidden" }}>
+        <div className="p-5 pb-0">
+          <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+            Default Templates
           </p>
-        )}
+          {/* Tabs */}
+          <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 20, gap: 0 }}>
+            {([ ["addendum", "Addendum"], ["infosheet", "Infosheet"], ["buyers_guide", "Buyer's Guide"] ] as [DocTab, string][]).map(([tab, label]) => (
+              <button
+                key={tab}
+                onClick={() => setDocTab(tab)}
+                style={{
+                  padding: "8px 18px",
+                  fontSize: 13,
+                  fontWeight: docTab === tab ? 600 : 400,
+                  color: docTab === tab ? "var(--blue)" : "var(--text-secondary)",
+                  background: "none",
+                  border: "none",
+                  borderBottom: docTab === tab ? "2px solid var(--blue)" : "2px solid transparent",
+                  marginBottom: -1,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-5 pb-5">
+          {docTab === "buyers_guide" ? (
+            <p className="text-sm" style={{ color: "var(--text-muted)", fontStyle: "italic" }}>
+              Buyer&apos;s Guide templates are coming soon. Create them in the Builder once support is added.
+            </p>
+          ) : (
+            <>
+              {(["new", "used", "cpo"] as const).map((vtype) => {
+                const key = `default_${docTab === "addendum" ? "addendum" : "infosheet"}_${vtype}` as keyof typeof settings;
+                const label = vtype === "new" ? "New Vehicles" : vtype === "used" ? "Used Vehicles" : "CPO Vehicles";
+                const filtered = templates.filter((t) => t.document_type === docTab);
+                return (
+                  <div key={vtype} className="flex items-center gap-3 mb-3">
+                    <label className="text-sm w-28 flex-shrink-0" style={{ color: "var(--text-secondary)" }}>
+                      {label}
+                    </label>
+                    <select
+                      className="input flex-1"
+                      value={(settings[key] as string | null) ?? ""}
+                      onChange={(e) => setSettings((s) => ({ ...s, [key]: e.target.value || null }))}
+                    >
+                      <option value="">— No default —</option>
+                      {filtered.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+              {templates.filter((t) => t.document_type === docTab).length === 0 && (
+                <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                  No {docTab} templates saved yet. Create them in the Builder.
+                </p>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Printer Nudge Margins */}

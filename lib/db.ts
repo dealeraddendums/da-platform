@@ -345,6 +345,15 @@ export type DealerSettingsRow = {
   default_template_new: string | null;
   default_template_used: string | null;
   default_template_cpo: string | null;
+  default_addendum_new: string | null;
+  default_addendum_used: string | null;
+  default_addendum_cpo: string | null;
+  default_infosheet_new: string | null;
+  default_infosheet_used: string | null;
+  default_infosheet_cpo: string | null;
+  default_buyersguide_new: string | null;
+  default_buyersguide_used: string | null;
+  default_buyersguide_cpo: string | null;
   updated_at: string;
 };
 
@@ -358,6 +367,15 @@ type DealerSettingsInsert = {
   default_template_new?: string | null;
   default_template_used?: string | null;
   default_template_cpo?: string | null;
+  default_addendum_new?: string | null;
+  default_addendum_used?: string | null;
+  default_addendum_cpo?: string | null;
+  default_infosheet_new?: string | null;
+  default_infosheet_used?: string | null;
+  default_infosheet_cpo?: string | null;
+  default_buyersguide_new?: string | null;
+  default_buyersguide_used?: string | null;
+  default_buyersguide_cpo?: string | null;
 };
 
 export type DealerSettingsUpdate = {
@@ -369,6 +387,15 @@ export type DealerSettingsUpdate = {
   default_template_new?: string | null;
   default_template_used?: string | null;
   default_template_cpo?: string | null;
+  default_addendum_new?: string | null;
+  default_addendum_used?: string | null;
+  default_addendum_cpo?: string | null;
+  default_infosheet_new?: string | null;
+  default_infosheet_used?: string | null;
+  default_infosheet_cpo?: string | null;
+  default_buyersguide_new?: string | null;
+  default_buyersguide_used?: string | null;
+  default_buyersguide_cpo?: string | null;
   updated_at?: string;
 };
 

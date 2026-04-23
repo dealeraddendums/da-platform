@@ -67,6 +67,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   const [customWidgets, setCustomWidgets] = useState<CustomWidgetDef[]>(DEFAULT_CUSTOM_WIDGETS);
   const [saveVtypes, setSaveVtypes] = useState<Set<string>>(new Set(['new']));
   const [saveTname, setSaveTname] = useState('');
+  const [saveDocType, setSaveDocType] = useState<'addendum' | 'infosheet'>('addendum');
   const [nudge, setNudge] = useState({ left: 0, right: 0, top: 0, bottom: 0 });
   const [printAiOverride, setPrintAiOverride] = useState<'db'|'ai'|'default'>('default');
 
@@ -534,11 +535,10 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
     const name = saveTname.trim() || templateName;
     if (!name) return;
     const isDraft = saveVtypes.has('draft');
-    const docType = paperSize === 'infosheet' ? 'infosheet' : 'addendum';
     const vtypes = Array.from(saveVtypes).filter(v => v !== 'draft');
     const body = {
       name,
-      document_type: docType,
+      document_type: saveDocType,
       vehicle_types: vtypes.length ? vtypes : ['new'],
       template_json: { widgets: widgetsRef.current, nid, bgUrl, fontScale, paperSize },
       is_active: !isDraft,
@@ -553,10 +553,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
 
       if (!isDraft && saved?.id) {
         const isAll = saveVtypes.has('all');
+        const dtKey = saveDocType === 'infosheet' ? 'infosheet' : 'addendum';
         const settingsPatch: Record<string, string> = {};
-        if (isAll || saveVtypes.has('new'))  settingsPatch.default_template_new  = saved.id;
-        if (isAll || saveVtypes.has('used')) settingsPatch.default_template_used = saved.id;
-        if (isAll || saveVtypes.has('cpo'))  settingsPatch.default_template_cpo  = saved.id;
+        if (isAll || saveVtypes.has('new'))  settingsPatch[`default_${dtKey}_new`]  = saved.id;
+        if (isAll || saveVtypes.has('used')) settingsPatch[`default_${dtKey}_used`] = saved.id;
+        if (isAll || saveVtypes.has('cpo'))  settingsPatch[`default_${dtKey}_cpo`]  = saved.id;
         if (Object.keys(settingsPatch).length > 0) {
           await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settingsPatch) });
           const label = isAll ? 'All' : vtypes.map(v => v.charAt(0).toUpperCase() + v.slice(1)).join('/');
@@ -568,7 +569,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
     } catch {
       showToast('Save failed — try again');
     }
-  }, [saveTname, templateName, paperSize, saveVtypes, nid, bgUrl, fontScale, showToast]);
+  }, [saveTname, templateName, saveDocType, saveVtypes, nid, bgUrl, fontScale, showToast]);
 
   // ── Load templates list ────────────────────────────────────────────
   const openTemplates = useCallback(async () => {
@@ -659,7 +660,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
           )}
           <button onClick={() => setShowPrint(true)} style={tbBtn}>🖨 Print settings</button>
           <button onClick={openTemplates} style={tbBtn}>All templates</button>
-          <button onClick={() => { setSaveTname(templateName); setShowSave(true); }} style={{ ...tbBtn, background: '#1976d2', borderColor: '#1976d2' }}>Save template</button>
+          <button onClick={() => { setSaveTname(templateName); setSaveDocType(paperSize === 'infosheet' ? 'infosheet' : 'addendum'); setShowSave(true); }} style={{ ...tbBtn, background: '#1976d2', borderColor: '#1976d2' }}>Save template</button>
           <button
             onClick={() => void downloadPdf()}
             disabled={pdfLoading}
@@ -982,6 +983,17 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
                 autoFocus />
             </div>
             <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#55595c', textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 6 }}>Document Type</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {([['addendum', 'Addendum'], ['infosheet', 'Infosheet']] as const).map(([dt, dl]) => (
+                  <button key={dt} onClick={() => setSaveDocType(dt)}
+                    style={{ padding: '7px 16px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: `2px solid ${saveDocType === dt ? '#1976d2' : '#e0e0e0'}`, background: saveDocType === dt ? '#1976d2' : '#fff', color: saveDocType === dt ? '#fff' : '#55595c', fontFamily: 'inherit' }}>
+                    {dl}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom: 20 }}>
               <label style={{ fontSize: 12, fontWeight: 600, color: '#55595c', textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 8 }}>Apply to vehicle type</label>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {[['new','New'],['used','Used'],['cpo','CPO'],['all','All'],['draft','Save for later (Draft)']].map(([v,l]) => {
@@ -1008,6 +1020,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
             </div>
             <div style={{ background: '#f5f6f7', borderRadius: 6, padding: '12px 14px', fontSize: 12, color: '#55595c', lineHeight: 1.8 }}>
               <div><strong>Template:</strong> <span style={{ color: '#333' }}>{saveTname || templateName || '—'}</span></div>
+              <div><strong>Document type:</strong> <span style={{ color: '#333' }}>{saveDocType === 'infosheet' ? 'Infosheet' : 'Addendum'}</span></div>
               <div><strong>Widgets:</strong> <span style={{ color: '#333' }}>{Object.keys(widgets).length} widgets</span></div>
               <div><strong>Applies to:</strong> <span style={{ color: '#1976d2', fontWeight: 600 }}>{Array.from(saveVtypes).map(v => v.charAt(0).toUpperCase() + v.slice(1)).join(', ')}</span></div>
             </div>
