@@ -575,7 +575,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   const openTemplates = useCallback(async () => {
     try {
       const r = await fetch('/api/templates');
-      if (r.ok) { setSavedTemplates(await r.json()); }
+      if (r.ok) { const j = await r.json(); setSavedTemplates(j.data ?? []); }
     } catch {}
     setShowOpenModal(true);
   }, []);
@@ -658,14 +658,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
               {aiLoading ? '⟳ Generating…' : '✦ Regenerate AI'}
             </button>
           )}
-          <button onClick={() => setShowPrint(true)} style={tbBtn}>🖨 Print settings</button>
           <button onClick={openTemplates} style={tbBtn}>All templates</button>
           <button onClick={() => { setSaveTname(templateName); setSaveDocType(paperSize === 'infosheet' ? 'infosheet' : 'addendum'); setShowSave(true); }} style={{ ...tbBtn, background: '#1976d2', borderColor: '#1976d2' }}>Save template</button>
-          <button
-            onClick={() => void downloadPdf()}
-            disabled={pdfLoading}
-            style={{ ...tbBtn, background: pdfLoading ? 'rgba(76,175,80,0.6)' : '#4caf50', borderColor: '#4caf50', opacity: pdfLoading ? 0.7 : 1 }}
-          >{pdfLoading ? '⟳ Generating…' : '⬛ Print / PDF'}</button>
         </div>
       </div>
 
