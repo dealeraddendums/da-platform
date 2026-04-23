@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { VehicleAuditLogInsert, AddendumHistoryInsert } from "@/lib/db";
+import type { VehicleAuditLogInsert, AddendumHistoryInsert, DealerSettingsRow } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf } from "@/lib/s3-upload";
@@ -135,12 +135,66 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       MPG: null,
     };
 
+    // ── Load dealer's saved default template from dealer_settings ────────────
+    // Only runs when no widgets were supplied by the caller (i.e. Print Now,
+    // not a Builder print which passes its own widget layout).
+    let savedTemplateWidgets: Widget[] | null = null;
+    let savedTemplateBgUrl: string | undefined;
+    let savedTemplateFontScale: number | undefined;
+    let savedTemplatePaperSize: PaperSize | undefined;
+
+    if (!inWidgets || inWidgets.length === 0) {
+      const { data: settings } = await admin
+        .from("dealer_settings")
+        .select([
+          "default_addendum_new", "default_addendum_used", "default_addendum_cpo",
+          "default_infosheet_new", "default_infosheet_used", "default_infosheet_cpo",
+          "default_buyersguide_new", "default_buyersguide_used", "default_buyersguide_cpo",
+        ].join(", "))
+        .eq("dealer_id", dv.dealer_id)
+        .maybeSingle<DealerSettingsRow>();
+
+      if (settings) {
+        const condKey = dv.condition === "New" ? "new" : dv.condition === "Used" ? "used" : "cpo";
+        const docKey = docType === "buyer_guide" ? "buyersguide" : docType;
+        const col = `default_${docKey}_${condKey}` as keyof DealerSettingsRow;
+        const templateId = settings[col] as string | null;
+
+        if (templateId) {
+          const { data: tmpl } = await admin
+            .from("templates")
+            .select("template_json")
+            .eq("id", templateId)
+            .maybeSingle<{ template_json: Record<string, unknown> }>();
+
+          if (tmpl?.template_json) {
+            const tj = tmpl.template_json as {
+              widgets?: Record<string, Widget>;
+              bgUrl?: string;
+              fontScale?: number;
+              paperSize?: string;
+            };
+            if (tj.widgets && Object.keys(tj.widgets).length > 0) {
+              savedTemplateWidgets = Object.values(tj.widgets);
+            }
+            if (tj.bgUrl) savedTemplateBgUrl = tj.bgUrl;
+            if (typeof tj.fontScale === "number") savedTemplateFontScale = tj.fontScale;
+            if (tj.paperSize) savedTemplatePaperSize = tj.paperSize as PaperSize;
+          }
+        }
+      }
+    }
+
     // ── Build widget layout ───────────────────────────────────────────────────
-    const isInfosheet = paperSize === "infosheet";
+    const effectivePaperSize: PaperSize = savedTemplatePaperSize ?? paperSize;
+    const effectiveFontScale = savedTemplateFontScale ?? fontScale;
+    const isInfosheet = effectivePaperSize === "infosheet";
     let widgets: Widget[];
 
     if (inWidgets && inWidgets.length > 0) {
       widgets = inWidgets;
+    } else if (savedTemplateWidgets && savedTemplateWidgets.length > 0) {
+      widgets = savedTemplateWidgets;
     } else {
       const layout = isInfosheet ? LAYOUT_INFOSHEET : LAYOUT;
       const order = isInfosheet
@@ -182,11 +236,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // ── Render and upload ─────────────────────────────────────────────────────
-    const bgUrl = body.bgUrl || (isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT);
+    const bgUrl = body.bgUrl || savedTemplateBgUrl || (isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT);
     const html = buildPdfHtml({
       widgets,
-      paperSize,
-      fontScale,
+      paperSize: effectivePaperSize,
+      fontScale: effectiveFontScale,
       bgUrl,
       vehicle: vehicleData,
       options,
@@ -195,7 +249,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     let pdfBuffer: Buffer;
     try {
-      pdfBuffer = await renderPdf(html, paperSize);
+      pdfBuffer = await renderPdf(html, effectivePaperSize);
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : "PDF render failed" }, { status: 500 });
     }
