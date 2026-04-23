@@ -87,8 +87,8 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
   const displayedVehicles = printFilter === "all"
     ? vehicles
     : printFilter === "printed"
-    ? vehicles.filter((v) => v.PRINT_STATUS === "1")
-    : vehicles.filter((v) => v.PRINT_STATUS !== "1");
+    ? vehicles.filter((v) => !!v.supabase_printed)
+    : vehicles.filter((v) => !v.supabase_printed);
 
   function toggleCheck(id: number) {
     setCheckedIds((prev) => {
@@ -401,7 +401,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
                   {displayedVehicles.map((v, i) => {
                     const photos = parsePhotos(v.PHOTOS);
                     const cond = vehicleCondition(v);
-                    const printed = v.PRINT_STATUS === "1";
+                    const printed = !!v.supabase_printed;
                     const checked = checkedIds.has(v.id);
                     return (
                       <tr

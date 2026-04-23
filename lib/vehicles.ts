@@ -26,7 +26,8 @@ export type VehicleRow = {
   OPTIONS: string | null;
   PHOTOS: string | null;
   DESCRIPTION: string | null;
-  PRINT_STATUS: "0" | "1";
+  PRINT_STATUS?: "0" | "1";
+  supabase_printed?: boolean;
   HMPG: string | null;
   CMPG: string | null;
   MPG: string | null;

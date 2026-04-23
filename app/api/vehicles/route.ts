@@ -100,7 +100,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const selectCols =
     "id, DEALER_ID, VIN_NUMBER, STOCK_NUMBER, YEAR, MAKE, MODEL, TRIM, BODYSTYLE, " +
-    "EXT_COLOR, MILEAGE, MSRP, NEW_USED, CERTIFIED, STATUS, PRINT_STATUS, " +
+    "EXT_COLOR, MILEAGE, MSRP, NEW_USED, CERTIFIED, STATUS, " +
     "DATE_IN_STOCK, PHOTOS, HMPG, CMPG, MPG";
 
   try {
@@ -117,8 +117,28 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       [...params, perPage, offset]
     );
 
+    // Determine printed state from Supabase print_history (never from Aurora PRINT_STATUS)
+    const admin = createAdminSupabaseClient();
+    const vehicleIds = rows.map((r) => (r as unknown as { id: number }).id);
+    let printedSet = new Set<number>();
+    if (vehicleIds.length > 0) {
+      const { data: printedRows } = await admin
+        .from("print_history")
+        .select("vehicle_id")
+        .eq("dealer_id", dealerId)
+        .in("vehicle_id", vehicleIds);
+      for (const r of printedRows ?? []) {
+        printedSet.add(r.vehicle_id as number);
+      }
+    }
+
+    const enriched = rows.map((r) => {
+      const id = (r as unknown as { id: number }).id;
+      return { ...r, supabase_printed: printedSet.has(id) };
+    });
+
     return NextResponse.json({
-      data: rows,
+      data: enriched,
       total,
       page,
       per_page: perPage,
