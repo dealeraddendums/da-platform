@@ -20,6 +20,7 @@ export interface BuildPdfHtmlInput {
   vehicle?: VehicleRow;
   options?: AnyOption[];
   disclaimer?: string;
+  dealerLogoUrl?: string;
 }
 
 export function buildPdfHtml({
@@ -30,11 +31,17 @@ export function buildPdfHtml({
   vehicle,
   options,
   disclaimer,
+  dealerLogoUrl,
 }: BuildPdfHtmlInput): string {
   const paper = PAPER_DIMS[paperSize];
 
   const enriched = widgets.map(w => {
     const d = { ...w.d };
+
+    // Always inject the dealer's current logo URL so PDFs never show placeholder
+    if (w.type === 'logo' && dealerLogoUrl) {
+      d.imgUrl = dealerLogoUrl;
+    }
 
     if (vehicle) {
       if (w.type === 'vehicle') {
@@ -66,7 +73,8 @@ export function buildPdfHtml({
   const widgetHtml = enriched
     .map(w => {
       const inner = renderW(w.type, w.d, fontScale);
-      return `<div style="position:absolute;left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px;overflow:hidden;z-index:10;background:transparent;">${inner}</div>`;
+      // overflow:visible matches the canvas — widget content is never clipped
+      return `<div style="position:absolute;left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px;overflow:visible;z-index:10;background:transparent;">${inner}</div>`;
     })
     .join('\n');
 

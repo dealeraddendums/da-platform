@@ -161,7 +161,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           return w;
         });
 
-      const html = buildPdfHtml({ widgets, paperSize, fontScale: 1.0, bgUrl, vehicle: vehicleData, options });
+      const html = buildPdfHtml({ widgets, paperSize, fontScale: 1.0, bgUrl, vehicle: vehicleData, options, dealerLogoUrl: dealer?.logo_url ?? undefined });
       const pdfBuffer = await renderPdf(html, paperSize);
 
       const timestamp = Date.now();

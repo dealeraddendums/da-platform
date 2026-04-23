@@ -245,6 +245,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       vehicle: vehicleData,
       options,
       disclaimer: disclaimer ?? undefined,
+      dealerLogoUrl: dealer?.logo_url ?? undefined,
     });
 
     let pdfBuffer: Buffer;
