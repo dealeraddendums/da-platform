@@ -40,7 +40,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const { dealerVehicleId, widgets: inWidgets, paperSize = "standard", fontScale = 1.0, docType = "addendum" } = body;
 
+  console.log("[pdf/generate] called — dealerVehicleId:", dealerVehicleId, "docType:", docType, "role:", claims.role, "dealer_id:", claims.dealer_id);
+
   if (!dealerVehicleId) {
+    console.error("[pdf/generate] missing dealerVehicleId — body keys:", Object.keys(body));
     return NextResponse.json({ error: "dealerVehicleId required" }, { status: 400 });
   }
 
@@ -225,6 +228,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       vehicle_id: dealerVehicleId,
       stock_number: dv.stock_number,
       action: "print",
+      method: "print",
       changed_by: claims.sub,
       document_type: docType,
     } as VehicleAuditLogInsert);

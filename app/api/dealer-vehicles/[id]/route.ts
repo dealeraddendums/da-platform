@@ -96,6 +96,7 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     vehicle_id: params.id,
     stock_number: current.stock_number,
     action: "edit",
+    method: "edit",
     changed_by: claims.sub,
     changed_by_email: claims.email,
     changes,
