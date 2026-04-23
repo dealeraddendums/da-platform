@@ -98,10 +98,6 @@ export async function PATCH(
   if (body.inventory_dealer_id !== undefined && claims.role === "super_admin") {
     patch.inventory_dealer_id = body.inventory_dealer_id;
   }
-  if (body.hubspot_url !== undefined && claims.role === "super_admin") {
-    patch.hubspot_url = body.hubspot_url;
-  }
-
   const { data, error: dbError } = await admin
     .from("dealers")
     .update(patch)

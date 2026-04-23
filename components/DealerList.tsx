@@ -10,6 +10,7 @@ type DealerListRow = DealerRow & {
   group_name: string | null;
   lifetime_prints: number;
   last_30_prints: number;
+  hubspot_company_id: number | null;
 };
 
 type DealersResponse = {
@@ -481,7 +482,9 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                     </td>
                     {role === "super_admin" && (
                       <td className="px-4 py-3 text-center">
-                        {d.hubspot_url && <HubSpotPill href={d.hubspot_url} />}
+                        {d.hubspot_company_id && (
+                          <HubSpotPill href={`https://app.hubspot.com/contacts/23896347/record/0-2/${d.hubspot_company_id}`} />
+                        )}
                       </td>
                     )}
                   </tr>

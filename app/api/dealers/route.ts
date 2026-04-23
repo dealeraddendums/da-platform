@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerUpdate } from "@/lib/db";
+import { getPool } from "@/lib/aurora";
+import type { RowDataPacket } from "mysql2/promise";
 
 // Strip HTML tags from dealer names imported from Aurora
 function sanitizeName(name: string | null | undefined): string {
@@ -21,6 +23,25 @@ async function getPrintCounts(admin: ReturnType<typeof createAdminSupabaseClient
   for (const r of lifetimeRes.data ?? []) lifetime[r.dealer_id] = (lifetime[r.dealer_id] ?? 0) + 1;
   for (const r of recentRes.data ?? []) recent[r.dealer_id] = (recent[r.dealer_id] ?? 0) + 1;
   return { lifetime, recent };
+}
+
+async function getHubspotCompanyIds(inventoryIds: (string | null | undefined)[]): Promise<Record<string, number>> {
+  const ids = inventoryIds.filter((v): v is string => !!v);
+  if (ids.length === 0) return {};
+  try {
+    const placeholders = ids.map(() => "?").join(",");
+    const [rows] = await getPool().execute<RowDataPacket[]>(
+      `SELECT DEALER_ID, HUBSPOT_COMPANY_ID FROM dealer_dim WHERE DEALER_ID IN (${placeholders}) AND HUBSPOT_COMPANY_ID IS NOT NULL`,
+      ids
+    );
+    const map: Record<string, number> = {};
+    for (const row of rows) {
+      if (row.DEALER_ID && row.HUBSPOT_COMPANY_ID) map[row.DEALER_ID as string] = row.HUBSPOT_COMPANY_ID as number;
+    }
+    return map;
+  } catch {
+    return {};
+  }
 }
 
 type SortableCol = "name" | "active" | "account_type" | "created_at" | "lifetime_prints" | "last_30_prints" | "group_name";
@@ -58,7 +79,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (allErr) return NextResponse.json({ error: allErr.message }, { status: 500 });
 
     const dealerIds = (allDealers ?? []).map((d: Record<string, unknown>) => d.dealer_id as string);
-    const { lifetime, recent } = await getPrintCounts(admin, dealerIds);
+    const inventoryIds = (allDealers ?? []).map((d: Record<string, unknown>) => d.inventory_dealer_id as string | null);
+    const [{ lifetime, recent }, hubspotMap] = await Promise.all([
+      getPrintCounts(admin, dealerIds),
+      getHubspotCompanyIds(inventoryIds),
+    ]);
 
     const atRiskList = (allDealers ?? [])
       .map((d: Record<string, unknown>) => ({
@@ -67,6 +92,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         group_name: (d.groups as { name: string } | null)?.name ?? null,
         lifetime_prints: lifetime[d.dealer_id as string] ?? 0,
         last_30_prints: recent[d.dealer_id as string] ?? 0,
+        hubspot_company_id: hubspotMap[d.inventory_dealer_id as string] ?? null,
       }))
       .filter((d) => d.lifetime_prints >= 50 && d.last_30_prints === 0)
       .sort((a, b) => b.lifetime_prints - a.lifetime_prints);
@@ -91,7 +117,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
 
   const dealerIds = (data ?? []).map((d: Record<string, unknown>) => d.dealer_id as string);
-  const { lifetime, recent } = await getPrintCounts(admin, dealerIds);
+  const inventoryIds = (data ?? []).map((d: Record<string, unknown>) => d.inventory_dealer_id as string | null);
+  const [{ lifetime, recent }, hubspotMap] = await Promise.all([
+    getPrintCounts(admin, dealerIds),
+    getHubspotCompanyIds(inventoryIds),
+  ]);
 
   let enriched = (data ?? []).map((d: Record<string, unknown>) => ({
     ...d,
@@ -99,6 +129,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     group_name: (d.groups as { name: string } | null)?.name ?? null,
     lifetime_prints: lifetime[d.dealer_id as string] ?? 0,
     last_30_prints: recent[d.dealer_id as string] ?? 0,
+    hubspot_company_id: hubspotMap[d.inventory_dealer_id as string] ?? null,
   }));
 
   // In-memory sort for computed/joined columns

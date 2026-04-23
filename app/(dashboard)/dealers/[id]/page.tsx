@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
 import DealerProfileCard from "@/components/DealerProfileCard";
+import { getPool } from "@/lib/aurora";
+import type { RowDataPacket } from "mysql2/promise";
 
 type Props = { params: { id: string } };
 
@@ -49,6 +51,20 @@ export default async function DealerPage({ params }: Props) {
 
   const canEdit = isSuperAdmin || isDealerAdmin;
 
+  // Look up HUBSPOT_COMPANY_ID from Aurora using inventory_dealer_id
+  let hubspotCompanyId: number | null = null;
+  if (dealer.inventory_dealer_id) {
+    try {
+      const [rows] = await getPool().execute<RowDataPacket[]>(
+        "SELECT HUBSPOT_COMPANY_ID FROM dealer_dim WHERE DEALER_ID = ? LIMIT 1",
+        [dealer.inventory_dealer_id]
+      );
+      if (rows.length > 0 && rows[0].HUBSPOT_COMPANY_ID) {
+        hubspotCompanyId = rows[0].HUBSPOT_COMPANY_ID as number;
+      }
+    } catch { /* proceed without HubSpot link */ }
+  }
+
   return (
     <div>
       {isSuperAdmin && (
@@ -58,7 +74,7 @@ export default async function DealerPage({ params }: Props) {
           </Link>
         </nav>
       )}
-      <DealerProfileCard dealer={dealer} group={group} canEdit={canEdit} isSuperAdmin={isSuperAdmin} />
+      <DealerProfileCard dealer={dealer} group={group} canEdit={canEdit} isSuperAdmin={isSuperAdmin} hubspotCompanyId={hubspotCompanyId} />
     </div>
   );
 }

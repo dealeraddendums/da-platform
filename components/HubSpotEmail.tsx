@@ -1,16 +1,23 @@
+const PORTAL = "23896347";
+
 type Props = {
   email: string | null | undefined;
+  /** HubSpot contact record ID — links directly to the record instead of search */
+  contactId?: number | null;
   /** When true, falls back to "—" instead of null for missing values */
   showDash?: boolean;
 };
 
-export function HubSpotEmail({ email, showDash = true }: Props) {
+export function HubSpotEmail({ email, contactId, showDash = true }: Props) {
   if (!email) {
     return showDash ? <span style={{ color: "var(--text-muted)" }}>—</span> : null;
   }
+  const href = contactId
+    ? `https://app.hubspot.com/contacts/${PORTAL}/record/0-1/${contactId}`
+    : `https://app.hubspot.com/contacts/search?query=${encodeURIComponent(email)}`;
   return (
     <a
-      href={`https://app.hubspot.com/contacts/search?query=${encodeURIComponent(email)}`}
+      href={href}
       target="_blank"
       rel="noopener noreferrer"
       title="Open in HubSpot"

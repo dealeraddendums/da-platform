@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
+import { getPool } from "@/lib/aurora";
+import type { RowDataPacket } from "mysql2/promise";
 
 /**
  * GET /api/users — super_admin only.
@@ -49,7 +51,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ? (admin as any).schema("auth").from("users").select("id, last_sign_in_at").in("id", userIds) as Promise<{ data: AuthUserRow[] | null }>
     : Promise.resolve({ data: [] as AuthUserRow[] });
 
-  const [dealerRes, groupRes, authUsersRes] = await Promise.all([
+  // Fetch HUBSPOT_CONTACT_ID from Aurora users table by email
+  const emails = rows.map(p => p.email).filter((e): e is string => !!e);
+  async function getHubspotContactIds(): Promise<Map<string, number>> {
+    if (emails.length === 0) return new Map();
+    try {
+      const placeholders = emails.map(() => "?").join(",");
+      const [hsRows] = await getPool().execute<RowDataPacket[]>(
+        `SELECT EMAIL, HUBSPOT_CONTACT_ID FROM users WHERE EMAIL IN (${placeholders}) AND HUBSPOT_CONTACT_ID IS NOT NULL`,
+        emails
+      );
+      return new Map(
+        (hsRows as RowDataPacket[])
+          .filter(r => r.EMAIL && r.HUBSPOT_CONTACT_ID)
+          .map(r => [String(r.EMAIL).toLowerCase(), r.HUBSPOT_CONTACT_ID as number])
+      );
+    } catch {
+      return new Map();
+    }
+  }
+
+  const [dealerRes, groupRes, authUsersRes, hubspotContactMap] = await Promise.all([
     dealerIds.length > 0
       ? admin.from("dealers").select("dealer_id, name").in("dealer_id", dealerIds)
       : Promise.resolve({ data: [] as { dealer_id: string; name: string }[] }),
@@ -57,6 +79,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ? admin.from("groups").select("id, name").in("id", groupIds)
       : Promise.resolve({ data: [] as { id: string; name: string }[] }),
     authUsersQuery,
+    getHubspotContactIds(),
   ]);
 
   const dealerMap     = new Map((dealerRes.data     ?? []).map(d => [d.dealer_id, d.name]));
@@ -65,9 +88,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const users = rows.map(p => ({
     ...p,
-    dealer_name:     p.dealer_id ? (dealerMap.get(p.dealer_id)     ?? null) : null,
-    group_name:      p.group_id  ? (groupMap.get(p.group_id)       ?? null) : null,
-    last_sign_in_at: lastSignInMap.get(p.id) ?? null,
+    dealer_name:        p.dealer_id ? (dealerMap.get(p.dealer_id) ?? null) : null,
+    group_name:         p.group_id  ? (groupMap.get(p.group_id)   ?? null) : null,
+    last_sign_in_at:    lastSignInMap.get(p.id) ?? null,
+    hubspot_contact_id: hubspotContactMap.get(p.email?.toLowerCase() ?? "") ?? null,
   }));
 
   return NextResponse.json({ users, total: count ?? 0 });
