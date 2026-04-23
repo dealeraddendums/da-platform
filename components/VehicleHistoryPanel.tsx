@@ -24,6 +24,8 @@ function actionLabel(entry: HistoryEntry): string {
       return "Vehicle edited";
     case "delete":
       return "Vehicle deleted";
+    case "restored_from_archive":
+      return "Restored from archive";
     case "print": {
       const dt = entry.document_type ?? "";
       if (dt === "infosheet") return "Infosheet printed";
@@ -49,10 +51,11 @@ function byWhom(entry: HistoryEntry): string {
 }
 
 const DOT_COLORS: Record<string, string> = {
-  import: "#4caf50",
-  edit:   "#78828c",
-  print:  "#1976d2",
-  delete: "#ff5252",
+  import:                  "#4caf50",
+  edit:                    "#78828c",
+  print:                   "#1976d2",
+  delete:                  "#ff5252",
+  restored_from_archive:   "#ffa500",
 };
 
 export default function VehicleHistoryPanel({ vehicleId, stockNumber, onClose }: Props) {

@@ -4,9 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import AddVehicleModal from "./AddVehicleModal";
 import EditVehicleModal from "./EditVehicleModal";
 import VehicleHistoryPanel from "./VehicleHistoryPanel";
-import type { DealerVehicleRow } from "@/lib/db";
+import type { DealerVehicleRow, DealerVehicleArchiveRow } from "@/lib/db";
 
-type Props = { dealerId: string };
+type Props = { dealerId: string; isSuperAdmin?: boolean };
 
 type ListResponse = {
   data: DealerVehicleRow[];
@@ -82,7 +82,7 @@ function SortTh({ label, col, sortBy, sortDir, onSort }: {
   );
 }
 
-export default function ManualVehicleInventory({ dealerId }: Props) {
+export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false }: Props) {
   const [vehicles, setVehicles] = useState<DealerVehicleRow[]>([]);
   const [printedTypes, setPrintedTypes] = useState<Record<string, string[]>>({});
   const [total, setTotal] = useState(0);
@@ -111,6 +111,39 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
   const [historyVehicle, setHistoryVehicle] = useState<{ id: string; stock_number: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Archive modal (super_admin only)
+  const [showArchive, setShowArchive] = useState(false);
+  const [archiveRows, setArchiveRows] = useState<DealerVehicleArchiveRow[]>([]);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
+  async function openArchive() {
+    setShowArchive(true);
+    setArchiveLoading(true);
+    setArchiveError(null);
+    const res = await fetch(`/api/admin/vehicle-archive?dealer_id=${encodeURIComponent(dealerId)}`);
+    const json = await res.json() as { data?: DealerVehicleArchiveRow[]; error?: string };
+    setArchiveLoading(false);
+    if (!res.ok) { setArchiveError(json.error ?? "Failed to load archive"); return; }
+    setArchiveRows(json.data ?? []);
+  }
+
+  async function handleRestore(archiveId: string) {
+    if (!confirm("Restore this vehicle to active inventory with status 'Inactive'?")) return;
+    setRestoringId(archiveId);
+    const res = await fetch("/api/admin/vehicle-archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "restore", id: archiveId }),
+    });
+    const json = await res.json() as { vehicle?: DealerVehicleRow; error?: string };
+    setRestoringId(null);
+    if (!res.ok) { alert(json.error ?? "Restore failed"); return; }
+    setArchiveRows((prev) => prev.filter((r) => r.id !== archiveId));
+    void fetchVehicles();
+  }
 
   const fetchVehicles = useCallback(async () => {
     setLoading(true);
@@ -234,6 +267,14 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
         </select>
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {isSuperAdmin && (
+            <button
+              onClick={openArchive}
+              style={{ height: 36, padding: "0 12px", background: "#fff", color: "var(--text-secondary)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer" }}
+            >
+              View Archive
+            </button>
+          )}
           <AddVehicleModal dealerId={dealerId} aiEnabled={aiEnabled} onSaved={() => fetchVehicles()} label="+ Add Vehicle" />
           <AddVehicleModal dealerId={dealerId} aiEnabled={aiEnabled} onSaved={() => fetchVehicles()} initialTab="import" label="↑ Import Vehicles" />
         </div>
@@ -415,6 +456,83 @@ export default function ManualVehicleInventory({ dealerId }: Props) {
           stockNumber={historyVehicle.stock_number}
           onClose={() => setHistoryVehicle(null)}
         />
+      )}
+
+      {/* Archive modal (super_admin only) */}
+      {showArchive && (
+        <>
+          <div onClick={() => setShowArchive(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000 }} />
+          <div style={{
+            position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+            background: "#fff", borderRadius: 6, zIndex: 1001, width: "min(880px, 96vw)",
+            maxHeight: "80vh", display: "flex", flexDirection: "column",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+          }}>
+            {/* Header */}
+            <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}>Archived Vehicles</h2>
+                <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>Vehicles inactive for 6+ months, removed from active inventory</p>
+              </div>
+              <button onClick={() => setShowArchive(false)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "var(--text-muted)", lineHeight: 1 }}>×</button>
+            </div>
+
+            {/* Body */}
+            <div style={{ flex: 1, overflowY: "auto", padding: 0 }}>
+              {archiveLoading && (
+                <p style={{ padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>Loading…</p>
+              )}
+              {archiveError && (
+                <p style={{ padding: 40, textAlign: "center", color: "#c62828", fontSize: 13 }}>{archiveError}</p>
+              )}
+              {!archiveLoading && !archiveError && archiveRows.length === 0 && (
+                <p style={{ padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No archived vehicles for this dealer.</p>
+              )}
+              {archiveRows.length > 0 && (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
+                      {["Stock #", "Year / Make / Model", "VIN", "Deactivated", "Archived", "Action"].map((h) => (
+                        <th key={h} style={{ padding: "8px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {archiveRows.map((r, i) => (
+                      <tr key={r.id} style={{ borderBottom: i < archiveRows.length - 1 ? "1px solid var(--border)" : "none" }}>
+                        <td style={{ padding: "8px 14px" }}>
+                          <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>{r.stock_number}</span>
+                        </td>
+                        <td style={{ padding: "8px 14px" }}>
+                          <div style={{ fontWeight: 500, color: "var(--text-primary)" }}>{[r.year, r.make, r.model].filter(Boolean).join(" ") || "—"}</div>
+                          {r.trim && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{r.trim}</div>}
+                        </td>
+                        <td style={{ padding: "8px 14px" }}>
+                          <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)" }}>{r.vin ?? "—"}</span>
+                        </td>
+                        <td style={{ padding: "8px 14px", fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                          {r.updated_at ? new Date(r.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                        </td>
+                        <td style={{ padding: "8px 14px", fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                          {new Date(r.archived_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </td>
+                        <td style={{ padding: "8px 14px" }}>
+                          <button
+                            onClick={() => handleRestore(r.id)}
+                            disabled={restoringId === r.id}
+                            style={{ height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", borderRadius: 4, cursor: restoringId === r.id ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+                          >
+                            {restoringId === r.id ? "Restoring…" : "Restore"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       {/* Delete confirmation modal */}

@@ -74,7 +74,7 @@ export default async function VehiclesPage() {
     <div>
       {isDealerContext && <VehicleSubNav />}
       {manual ? (
-        <ManualVehicleInventory dealerId={fixedDealerId!} />
+        <ManualVehicleInventory dealerId={fixedDealerId!} isSuperAdmin={role === "super_admin"} />
       ) : (
         <VehicleInventory
           fixedDealerId={fixedDealerId}

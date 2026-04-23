@@ -812,12 +812,16 @@ export type DealerVehicleInsert = {
   input_date?: string | null;
 };
 
+export type VehicleAuditLogAction =
+  | "import" | "edit" | "print" | "delete"
+  | "archived" | "restored_from_archive";
+
 export type VehicleAuditLogRow = {
   id: string;
   dealer_id: string;
   vehicle_id: string | null;
   stock_number: string | null;
-  action: "import" | "edit" | "print" | "delete";
+  action: VehicleAuditLogAction;
   method: string | null;
   changed_by: string | null;
   changed_by_email: string | null;
@@ -830,7 +834,46 @@ export type VehicleAuditLogInsert = {
   dealer_id: string;
   vehicle_id?: string | null;
   stock_number?: string | null;
-  action: "import" | "edit" | "print" | "delete";
+  action: VehicleAuditLogAction;
+  method?: string | null;
+  changed_by?: string | null;
+  changed_by_email?: string | null;
+  changes?: Record<string, { old: unknown; new: unknown }> | null;
+  document_type?: string | null;
+};
+
+export type DealerVehicleArchiveRow = DealerVehicleRow & {
+  archived_at: string;
+  archive_reason: string;
+};
+
+export type DealerVehicleArchiveInsert = Omit<DealerVehicleRow, "date_added" | "updated_at"> & {
+  date_added?: string | null;
+  updated_at?: string | null;
+  archived_at?: string;
+  archive_reason?: string;
+};
+
+export type VehicleAuditLogArchiveRow = {
+  id: string;
+  dealer_id: string;
+  vehicle_id: string | null;
+  stock_number: string | null;
+  action: string;
+  method: string | null;
+  changed_by: string | null;
+  changed_by_email: string | null;
+  changes: Record<string, { old: unknown; new: unknown }> | null;
+  document_type: string | null;
+  created_at: string;
+};
+
+export type VehicleAuditLogArchiveInsert = {
+  id?: string;
+  dealer_id: string;
+  vehicle_id?: string | null;
+  stock_number?: string | null;
+  action: string;
   method?: string | null;
   changed_by?: string | null;
   changed_by_email?: string | null;
@@ -1029,6 +1072,18 @@ export type Database = {
       vehicle_audit_log: {
         Row: VehicleAuditLogRow;
         Insert: VehicleAuditLogInsert;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      dealer_vehicles_archive: {
+        Row: DealerVehicleArchiveRow;
+        Insert: DealerVehicleArchiveInsert;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      vehicle_audit_log_archive: {
+        Row: VehicleAuditLogArchiveRow;
+        Insert: VehicleAuditLogArchiveInsert;
         Update: Record<string, never>;
         Relationships: [];
       };

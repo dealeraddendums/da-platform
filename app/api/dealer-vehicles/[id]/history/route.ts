@@ -6,7 +6,7 @@ type Params = { params: { id: string } };
 
 export type HistoryEntry = {
   id: string;
-  action: "import" | "edit" | "print" | "delete";
+  action: "import" | "edit" | "print" | "delete" | "restored_from_archive";
   method: string | null;
   document_type: string | null;
   changed_by: string | null;
