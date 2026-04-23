@@ -103,8 +103,8 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
                 EMAIL_REPORT, REPORT_SEND_TO, LAST30, created_at
          FROM dealer_dim
          WHERE ACTIVE = 'Yes' AND _ID > ?
-         ORDER BY _ID ASC LIMIT ?`,
-        [lastId, CHUNK]
+         ORDER BY _ID ASC LIMIT ${CHUNK}`,
+        [lastId]
       );
       if (!rows.length) break;
 
