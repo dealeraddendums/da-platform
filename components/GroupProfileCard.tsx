@@ -10,6 +10,7 @@ type Props = {
   group: GroupRow;
   canEdit: boolean;
   isSuperAdmin: boolean;
+  hubspotCompanyId?: number | null;
 };
 
 type FormData = {
@@ -38,7 +39,34 @@ function groupToForm(g: GroupRow): FormData {
   };
 }
 
-export default function GroupProfileCard({ group: initialGroup, canEdit, isSuperAdmin }: Props) {
+function HubSpotPill({ href }: { href: string }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open in HubSpot"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: "inline-flex", alignItems: "center",
+        height: 22, padding: "0 8px", borderRadius: 20,
+        fontSize: 11, fontWeight: 500,
+        background: "transparent",
+        border: `1px solid ${hovered ? "#ff7a59" : "#c0c0c0"}`,
+        color: hovered ? "#ff7a59" : "#78828c",
+        textDecoration: "none",
+        transition: "border-color 120ms, color 120ms",
+        whiteSpace: "nowrap",
+      }}
+    >
+      HubSpot ↗
+    </a>
+  );
+}
+
+export default function GroupProfileCard({ group: initialGroup, canEdit, isSuperAdmin, hubspotCompanyId }: Props) {
   const [group, setGroup] = useState(initialGroup);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<FormData>(groupToForm(initialGroup));
@@ -128,6 +156,9 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
             >
               {group.active ? "Active" : "Inactive"}
             </span>
+            {hubspotCompanyId && (
+              <HubSpotPill href={`https://app.hubspot.com/contacts/23896347/record/0-2/${hubspotCompanyId}`} />
+            )}
           </div>
           <p className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
             Group ID: {group.id.slice(0, 8)}…

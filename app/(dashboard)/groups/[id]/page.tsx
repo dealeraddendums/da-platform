@@ -5,6 +5,8 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow } from "@/lib/db";
 import GroupProfileCard from "@/components/GroupProfileCard";
 import GroupOptionsPanel from "@/components/GroupOptionsPanel";
+import { getPool } from "@/lib/aurora";
+import type { RowDataPacket } from "mysql2/promise";
 
 type Props = { params: { id: string } };
 
@@ -40,6 +42,20 @@ export default async function GroupPage({ params }: Props) {
 
   const canEdit = isSuperAdmin || isGroupAdmin;
 
+  // Look up HUBSPOT_COMPANY_ID from Aurora using legacy_id (_ID)
+  let hubspotCompanyId: number | null = null;
+  if (group.legacy_id) {
+    try {
+      const [rows] = await getPool().execute<RowDataPacket[]>(
+        "SELECT HUBSPOT_COMPANY_ID FROM dealer_group WHERE _ID = ? LIMIT 1",
+        [group.legacy_id]
+      );
+      if (rows.length > 0 && rows[0].HUBSPOT_COMPANY_ID) {
+        hubspotCompanyId = rows[0].HUBSPOT_COMPANY_ID as number;
+      }
+    } catch { /* proceed without HubSpot link */ }
+  }
+
   return (
     <div>
       {isSuperAdmin && (
@@ -49,7 +65,7 @@ export default async function GroupPage({ params }: Props) {
           </Link>
         </nav>
       )}
-      <GroupProfileCard group={group} canEdit={canEdit} isSuperAdmin={isSuperAdmin} />
+      <GroupProfileCard group={group} canEdit={canEdit} isSuperAdmin={isSuperAdmin} hubspotCompanyId={hubspotCompanyId} />
       {(isSuperAdmin || isGroupAdmin) && (
         <GroupOptionsPanel groupId={params.id} />
       )}

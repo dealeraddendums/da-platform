@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
 
-type GroupListRow = GroupRow & { dealer_count: number };
+type GroupListRow = GroupRow & { dealer_count: number; hubspot_company_id: number | null };
 type GroupsResponse = {
   data: GroupListRow[];
   total: number;
@@ -253,7 +253,12 @@ export default function GroupList() {
                     </span>
                   </th>
                 ))}
-                <th className="px-4 py-2.5" />
+                <th
+                  className="text-center px-4 py-2.5 font-semibold"
+                  style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", width: 110, whiteSpace: "nowrap" }}
+                >
+                  HubSpot
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -347,6 +352,13 @@ export default function GroupList() {
                   <td className="px-4 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>
                     {g.billing_contact || <span style={{ color: "var(--text-muted)" }}>—</span>}
                   </td>
+
+                  {/* HubSpot */}
+                  <td className="px-4 py-3 text-center">
+                    {g.hubspot_company_id && (
+                      <HubSpotPill href={`https://app.hubspot.com/contacts/23896347/record/0-2/${g.hubspot_company_id}`} />
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -396,6 +408,34 @@ type NewGroupFormProps = {
   onCreated: (id: string) => void;
   onCancel: () => void;
 };
+
+function HubSpotPill({ href }: { href: string }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open in HubSpot"
+      onClick={e => e.stopPropagation()}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: "inline-flex", alignItems: "center",
+        height: 22, padding: "0 8px", borderRadius: 20,
+        fontSize: 11, fontWeight: 500,
+        background: "transparent",
+        border: `1px solid ${hovered ? "#ff7a59" : "#c0c0c0"}`,
+        color: hovered ? "#ff7a59" : "#78828c",
+        textDecoration: "none",
+        transition: "border-color 120ms, color 120ms",
+        whiteSpace: "nowrap",
+      }}
+    >
+      HubSpot ↗
+    </a>
+  );
+}
 
 function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
   const [saving, setSaving] = useState(false);

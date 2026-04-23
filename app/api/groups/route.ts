@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow, GroupUpdate } from "@/lib/db";
+import { getPool } from "@/lib/aurora";
+import type { RowDataPacket } from "mysql2/promise";
 
 type SortableCol = "name" | "active" | "account_type" | "dealer_count" | "created_at" | "billing_contact";
 const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "billing_contact", "created_at"]);
@@ -51,9 +53,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // Fetch HUBSPOT_COMPANY_ID from Aurora dealer_group using legacy_id (_ID)
+  const legacyIds = (data ?? []).map((g: Record<string, unknown>) => g.legacy_id as number | null).filter((id): id is number => id != null);
+  let hubspotMap: Record<number, number> = {};
+  if (legacyIds.length > 0) {
+    try {
+      const placeholders = legacyIds.map(() => "?").join(",");
+      const [rows] = await getPool().execute<RowDataPacket[]>(
+        `SELECT _ID, HUBSPOT_COMPANY_ID FROM dealer_group WHERE _ID IN (${placeholders}) AND HUBSPOT_COMPANY_ID IS NOT NULL`,
+        legacyIds
+      );
+      for (const row of rows) {
+        if (row._ID && row.HUBSPOT_COMPANY_ID) hubspotMap[row._ID as number] = row.HUBSPOT_COMPANY_ID as number;
+      }
+    } catch { /* proceed without */ }
+  }
+
   let enriched = (data ?? []).map((g: Record<string, unknown>) => ({
     ...g,
     dealer_count: dealerCounts[g.id as string] ?? 0,
+    hubspot_company_id: hubspotMap[g.legacy_id as number] ?? null,
   }));
 
   if (sortCol === "dealer_count") {
