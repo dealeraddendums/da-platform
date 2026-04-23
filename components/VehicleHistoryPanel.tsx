@@ -39,13 +39,18 @@ function actionLabel(entry: HistoryEntry): string {
 
 function byWhom(entry: HistoryEntry): string {
   const m = entry.method ?? "";
+  const name = entry.user_full_name ?? null;
+
   if (m === "etl" || m.startsWith("automatic")) return "ETL Import";
-  if (m === "vin_decoder") return "VIN Decoder";
-  if (m === "csv_import" || m === "csv" || m === "spreadsheet") return "Spreadsheet Import";
-  if (m === "manual" || m === "print" || m === "edit") {
-    return entry.user_full_name ?? entry.changed_by_email ?? "System";
+  if (m === "cron") return "System";
+  if (m === "vin_decoder") return name ? `VIN Decoder (${name})` : "VIN Decoder";
+  if (m === "csv_import" || m === "csv" || m === "spreadsheet") {
+    return name ? `Spreadsheet Import (${name})` : "Spreadsheet Import";
   }
-  if (entry.user_full_name) return entry.user_full_name;
+  if (m === "manual" || m === "print" || m === "edit") {
+    return name ?? entry.changed_by_email ?? "System";
+  }
+  if (name) return name;
   if (entry.changed_by_email) return entry.changed_by_email;
   return "System";
 }
