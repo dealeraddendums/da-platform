@@ -533,6 +533,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   const saveTemplate = useCallback(async () => {
     const name = saveTname.trim() || templateName;
     if (!name) return;
+    const isDraft = saveVtypes.has('draft');
     const docType = paperSize === 'infosheet' ? 'infosheet' : 'addendum';
     const vtypes = Array.from(saveVtypes).filter(v => v !== 'draft');
     const body = {
@@ -540,17 +541,30 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
       document_type: docType,
       vehicle_types: vtypes.length ? vtypes : ['new'],
       template_json: { widgets: widgetsRef.current, nid, bgUrl, fontScale, paperSize },
-      is_active: !saveVtypes.has('draft'),
+      is_active: !isDraft,
     };
     try {
       const r = await fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (r.ok) {
-        setTemplateName(name);
-        setShowSave(false);
-        showToast(`✓ Template saved: ${name}`);
-      } else {
-        showToast('Save failed — try again');
+      if (!r.ok) { showToast('Save failed — try again'); return; }
+      const { data: savedArr } = await r.json() as { data?: { id: string }[] };
+      const saved = savedArr?.[0];
+      setTemplateName(name);
+      setShowSave(false);
+
+      if (!isDraft && saved?.id) {
+        const isAll = saveVtypes.has('all');
+        const settingsPatch: Record<string, string> = {};
+        if (isAll || saveVtypes.has('new'))  settingsPatch.default_template_new  = saved.id;
+        if (isAll || saveVtypes.has('used')) settingsPatch.default_template_used = saved.id;
+        if (isAll || saveVtypes.has('cpo'))  settingsPatch.default_template_cpo  = saved.id;
+        if (Object.keys(settingsPatch).length > 0) {
+          await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settingsPatch) });
+          const label = isAll ? 'All' : vtypes.map(v => v.charAt(0).toUpperCase() + v.slice(1)).join('/');
+          showToast(`✓ Template saved and set as default for ${label} vehicles`);
+          return;
+        }
       }
+      showToast(`✓ Template saved: ${name}`);
     } catch {
       showToast('Save failed — try again');
     }
