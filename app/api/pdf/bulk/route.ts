@@ -1,36 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { getPool } from "@/lib/aurora";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf } from "@/lib/s3-upload";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
+import { getGroupOptionsForDealer } from "@/lib/options-engine";
 import type { Widget, PaperSize } from "@/components/builder/types";
-import type { VehicleRow } from "@/lib/vehicles";
-import type { RowDataPacket } from "mysql2";
 import JSZip from "jszip";
-
-type VehicleDimRow = VehicleRow & {
-  DEALER_NAME: string | null;
-  DEALER_ADDRESS: string | null;
-  DEALER_CITY: string | null;
-  DEALER_STATE: string | null;
-  DEALER_ZIP: string | null;
-  DEALER_PHONE: string | null;
-  logo_url: string | null;
-} & RowDataPacket;
 
 /**
  * POST /api/pdf/bulk
- * Generates PDFs for multiple vehicles, bundles into a ZIP, returns download stream.
+ * Generates PDFs for multiple dealer_vehicles, bundles into a ZIP.
+ * vehicleIds are dealer_vehicles UUIDs (Supabase only — no Aurora).
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
   let body: {
-    vehicleIds: number[];
+    vehicleIds: string[];
     docType?: "addendum" | "infosheet" | "buyer_guide";
     paperSize?: PaperSize;
   };
@@ -52,52 +41,90 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const isInfosheet = paperSize === "infosheet";
   const bgUrl = isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT;
 
-  const pool = getPool();
   const admin = createAdminSupabaseClient();
   const zip = new JSZip();
+  const results: { vehicleId: string; pdfUrl?: string; error?: string }[] = [];
 
-  const results: { vehicleId: number; pdfUrl?: string; error?: string }[] = [];
-
-  // Process vehicles sequentially to avoid memory spikes
   for (const vehicleId of vehicleIds) {
     try {
-      const [rows] = await pool.query<VehicleDimRow[]>(
-        `SELECT v.id, v.DEALER_ID, v.VIN_NUMBER, v.STOCK_NUMBER, v.YEAR, v.MAKE,
-                v.MODEL, v.TRIM, v.EXT_COLOR, v.MILEAGE, v.MSRP, v.NEW_USED, v.CERTIFIED,
-                v.BODYSTYLE, v.OPTIONS, v.PHOTOS, v.DESCRIPTION,
-                v.STATUS, v.PRINT_STATUS, v.DATE_IN_STOCK, v.INT_COLOR,
-                v.ENGINE, v.FUEL, v.DRIVETRAIN, v.TRANSMISSION, v.HMPG, v.CMPG, v.MPG,
-                d.DEALER_NAME, d.DEALER_ADDRESS, d.DEALER_CITY, d.DEALER_STATE,
-                d.DEALER_ZIP, d.DEALER_PHONE, d.logo_url
-         FROM dealer_inventory v
-         LEFT JOIN dealer_dim d ON d.DEALER_ID = v.DEALER_ID
-         WHERE v.id = ? LIMIT 1`,
-        [vehicleId]
-      );
+      // ── Vehicle from Supabase dealer_vehicles ─────────────────────────────
+      const { data: dv } = await admin
+        .from("dealer_vehicles")
+        .select("*")
+        .eq("id", vehicleId)
+        .maybeSingle();
 
-      if (!rows.length) {
+      if (!dv) {
         results.push({ vehicleId, error: "not found" });
         continue;
       }
-      const v = rows[0];
 
-      // TODO: verify this should use inventory_dealer_id (claims.dealer_id is Supabase; v.DEALER_ID is Aurora)
       if (claims.role === "dealer_admin" || claims.role === "dealer_user") {
-        if (v.DEALER_ID !== claims.dealer_id) {
+        if (dv.dealer_id !== claims.dealer_id) {
           results.push({ vehicleId, error: "forbidden" });
           continue;
         }
       }
 
+      // ── Dealer from Supabase dealers ──────────────────────────────────────
+      const { data: dealer } = await admin
+        .from("dealers")
+        .select("dealer_id, name, address, city, state, zip, phone, logo_url")
+        .eq("dealer_id", dv.dealer_id)
+        .maybeSingle();
+
+      // ── Options from Supabase ─────────────────────────────────────────────
       const { data: optionRows } = await admin
         .from("vehicle_options")
         .select("*")
-        .eq("vehicle_id", vehicleId)
+        .eq("vehicle_id", 0)
+        .eq("dealer_id", dv.dealer_id)
         .eq("active", true)
         .order("sort_order");
-      const options = optionRows ?? [];
 
-      // Build default widget layout
+      const groupOpts = await getGroupOptionsForDealer(dv.dealer_id);
+      const options = [
+        ...groupOpts.map(g => ({
+          option_name: g.option_name,
+          option_price: g.option_price,
+          description: null as string | null,
+          active: true as const,
+        })),
+        ...(optionRows ?? []).map(r => ({ ...r, description: r.description ?? null })),
+      ];
+
+      // ── Map dealer_vehicles → VehicleRow shape ────────────────────────────
+      const vehicleData = {
+        id: 0 as const,
+        DEALER_ID: dv.dealer_id,
+        VIN_NUMBER: dv.vin ?? "",
+        STOCK_NUMBER: dv.stock_number,
+        YEAR: dv.year ? String(dv.year) : null,
+        MAKE: dv.make,
+        MODEL: dv.model,
+        TRIM: dv.trim,
+        BODYSTYLE: dv.body_style,
+        EXT_COLOR: dv.exterior_color,
+        INT_COLOR: dv.interior_color,
+        ENGINE: dv.engine,
+        FUEL: null,
+        DRIVETRAIN: dv.drivetrain,
+        TRANSMISSION: dv.transmission,
+        MILEAGE: dv.mileage ? String(dv.mileage) : null,
+        DATE_IN_STOCK: dv.date_added,
+        STATUS: "1" as const,
+        MSRP: dv.msrp ? String(dv.msrp) : null,
+        NEW_USED: dv.condition === "Used" ? "Used" : "New",
+        CERTIFIED: dv.condition === "CPO" ? "Yes" : "No",
+        OPTIONS: null,
+        PHOTOS: null,
+        DESCRIPTION: dv.description ?? null,
+        HMPG: null,
+        CMPG: null,
+        MPG: null,
+      };
+
+      // ── Build widget layout ───────────────────────────────────────────────
       const layout = isInfosheet ? LAYOUT_INFOSHEET : LAYOUT;
       const order = isInfosheet
         ? ["logo", "vehicle", "description", "features", "askbar", "qrcode", "barcode", "dealer", "customtext"]
@@ -108,25 +135,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .map(t => {
           const id = "w" + nid++;
           const w = makeWidget(t, id, undefined, undefined, undefined, undefined, isInfosheet);
-          if (t === "msrp" && v.MSRP) {
-            const msrp = parseFloat(v.MSRP);
+          if (t === "msrp" && vehicleData.MSRP) {
+            const msrp = parseFloat(vehicleData.MSRP);
             if (!isNaN(msrp)) w.d = { ...w.d, value: `$${msrp.toLocaleString()}` };
           }
           if (t === "dealer") {
             const lines = [
-              v.DEALER_NAME,
-              v.DEALER_ADDRESS,
-              [v.DEALER_CITY, v.DEALER_STATE, v.DEALER_ZIP].filter(Boolean).join(" "),
-              v.DEALER_PHONE,
+              dealer?.name,
+              dealer?.address,
+              [dealer?.city, dealer?.state, dealer?.zip].filter(Boolean).join(" "),
+              dealer?.phone,
             ].filter(Boolean);
             if (lines.length) w.d = { ...w.d, text: lines.join("\n") };
           }
-          if (t === "logo" && v.logo_url) w.d = { ...w.d, imgUrl: v.logo_url };
+          if (t === "logo" && dealer?.logo_url) w.d = { ...w.d, imgUrl: dealer.logo_url };
           if (t === "askbar") {
-            const msrp = v.MSRP ? parseFloat(v.MSRP) : 0;
+            const msrp = vehicleData.MSRP ? parseFloat(vehicleData.MSRP) : 0;
             const optTotal = options.reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
-            const ask = msrp + optTotal;
-            if (ask > 0) w.d = { ...w.d, value: `$${ask.toLocaleString()}` };
+            if (msrp + optTotal > 0) w.d = { ...w.d, value: `$${(msrp + optTotal).toLocaleString()}` };
           }
           if (t === "subtotal") {
             const optTotal = options.reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
@@ -135,22 +161,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           return w;
         });
 
-      const html = buildPdfHtml({ widgets, paperSize, fontScale: 1.0, bgUrl, vehicle: v, options });
+      const html = buildPdfHtml({ widgets, paperSize, fontScale: 1.0, bgUrl, vehicle: vehicleData, options });
       const pdfBuffer = await renderPdf(html, paperSize);
 
       const timestamp = Date.now();
-      const s3Key = `${v.DEALER_ID}/${vehicleId}/${timestamp}.pdf`;
+      const s3Key = `${dv.dealer_id}/${vehicleId}/${timestamp}.pdf`;
       const pdfUrl = await uploadPdf(pdfBuffer, s3Key);
 
+      // ── Log to print_history ──────────────────────────────────────────────
       await admin.from("print_history").insert({
         vehicle_id: vehicleId,
-        dealer_id: v.DEALER_ID,
+        dealer_id:  dv.dealer_id,
         document_type: docType,
         printed_by: claims.sub,
-        pdf_url: pdfUrl,
+        pdf_url:    pdfUrl,
       });
 
-      const fileName = `${v.STOCK_NUMBER || vehicleId}_${v.YEAR ?? ""}_${v.MAKE ?? ""}_${v.MODEL ?? ""}.pdf`
+      const fileName = `${dv.stock_number || vehicleId}_${dv.year ?? ""}_${dv.make ?? ""}_${dv.model ?? ""}.pdf`
         .replace(/\s+/g, "_")
         .replace(/[^a-zA-Z0-9_.-]/g, "");
       zip.file(fileName, pdfBuffer);
@@ -166,12 +193,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "All vehicles failed", results }, { status: 500 });
   }
 
-  // If only one vehicle succeeded, return the URL directly
   if (succeeded.length === 1) {
     return NextResponse.json({ url: succeeded[0].pdfUrl, results });
   }
 
-  // Bundle into ZIP
   const zipBuffer = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
   return new NextResponse(zipBuffer as BodyInit, {
     status: 200,

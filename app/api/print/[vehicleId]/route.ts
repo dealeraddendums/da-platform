@@ -2,14 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { AddendumHistoryInsert } from "@/lib/db";
-import { getPool } from "@/lib/aurora";
-import type { VehicleRowPacket } from "@/lib/aurora";
 
 type Params = { params: { vehicleId: string } };
 
 /**
  * POST /api/print/[vehicleId]
- * Logs a print event to print_history.
+ * Logs a print event to print_history. vehicleId is the dealer_vehicles UUID.
  * Body: { document_type: 'addendum'|'infosheet'|'buyer_guide', template_id?: string }
  */
 export async function POST(
@@ -19,10 +17,7 @@ export async function POST(
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  const vehicleId = parseInt(params.vehicleId, 10);
-  if (isNaN(vehicleId)) {
-    return NextResponse.json({ error: "Invalid vehicleId" }, { status: 400 });
-  }
+  const vehicleId = params.vehicleId;
 
   const body = await req.json() as {
     document_type?: string;
@@ -36,15 +31,20 @@ export async function POST(
     return NextResponse.json({ error: "Invalid document_type" }, { status: 400 });
   }
 
-  const pool = getPool();
-  const [vrows] = await pool.execute<VehicleRowPacket[]>(
-    "SELECT DEALER_ID FROM dealer_inventory WHERE id = ? LIMIT 1",
-    [vehicleId]
-  );
-  if (!vrows.length) {
+  const admin = createAdminSupabaseClient();
+
+  // Look up dealer_id from dealer_vehicles (Supabase only — no Aurora)
+  const { data: dv } = await admin
+    .from("dealer_vehicles")
+    .select("dealer_id")
+    .eq("id", vehicleId)
+    .maybeSingle();
+
+  if (!dv) {
     return NextResponse.json({ error: "Vehicle not found" }, { status: 404 });
   }
-  const dealerId = vrows[0].DEALER_ID; // TODO: verify this should use inventory_dealer_id when comparing against claims.dealer_id
+
+  const dealerId = dv.dealer_id;
 
   if (
     (claims.role === "dealer_admin" || claims.role === "dealer_user") &&
@@ -53,7 +53,6 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const admin = createAdminSupabaseClient();
   const { data, error: err } = await admin
     .from("print_history")
     .insert({
@@ -73,7 +72,7 @@ export async function POST(
     const today = new Date().toISOString().split("T")[0];
     const historyRows: AddendumHistoryInsert[] = body.options.map((o, i) => ({
       legacy_id:    null,
-      vehicle_id:   vehicleId,
+      vehicle_id:   null,
       vin:          body.vin ?? null,
       dealer_id:    dealerId,
       item_name:    o.option_name,
@@ -103,27 +102,23 @@ export async function GET(
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  const vehicleId = parseInt(params.vehicleId, 10);
-  if (isNaN(vehicleId)) {
-    return NextResponse.json({ error: "Invalid vehicleId" }, { status: 400 });
-  }
-
+  const vehicleId = params.vehicleId;
   const admin = createAdminSupabaseClient();
 
-  // Get dealer_id from first history row or from vehicle
-  const pool = getPool();
-  const [vrows] = await pool.execute<VehicleRowPacket[]>(
-    "SELECT DEALER_ID FROM dealer_inventory WHERE id = ? LIMIT 1",
-    [vehicleId]
-  );
-  if (!vrows.length) {
+  // Look up dealer_id from dealer_vehicles (Supabase only — no Aurora)
+  const { data: dv } = await admin
+    .from("dealer_vehicles")
+    .select("dealer_id")
+    .eq("id", vehicleId)
+    .maybeSingle();
+
+  if (!dv) {
     return NextResponse.json({ error: "Vehicle not found" }, { status: 404 });
   }
-  const dealerId = vrows[0].DEALER_ID;
 
   if (
     (claims.role === "dealer_admin" || claims.role === "dealer_user") &&
-    claims.dealer_id !== dealerId
+    claims.dealer_id !== dv.dealer_id
   ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

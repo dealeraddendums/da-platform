@@ -207,6 +207,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: err instanceof Error ? err.message : "S3 upload failed" }, { status: 500 });
     }
 
+    // ── Print history — source of truth for dashboard stats ──────────────────
+    // vehicle_id is stored as the dealer_vehicles UUID string (text column after migration 030)
+    // dealer_id matches dealers.dealer_id and profiles.dealer_id
+    await admin.from("print_history").insert({
+      vehicle_id: dealerVehicleId,
+      dealer_id:  dv.dealer_id,
+      document_type: docType,
+      printed_by: claims.sub,
+      pdf_url:    pdfUrl,
+    });
+
     // ── Audit log ─────────────────────────────────────────────────────────────
     await admin.from("vehicle_audit_log").insert({
       dealer_id: dv.dealer_id,

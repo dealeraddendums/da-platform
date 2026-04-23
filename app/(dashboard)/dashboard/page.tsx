@@ -252,7 +252,7 @@ function DealerView({
   printedToday: number;
   printed30: number;
   vehicles: VehicleShort[];
-  printTypes: Record<number, Set<string>>;
+  printTypes: Record<string, Set<string>>;
 }) {
   const stats = [
     { label: "Total Vehicles", value: totalVehicles },
@@ -425,17 +425,15 @@ export default async function DashboardPage() {
     let groupPrinted30 = 0;
     let lifetimeCounts: Record<string, number> = {};
     let recentCounts: Record<string, number> = {};
-    let printedVehicleIds: Set<number> = new Set();
+    let printedVehicleIds: Set<string> = new Set();
 
     if (dealerIds.length > 0) {
-      const pool = getPool();
-      const placeholders = dealerIds.map(() => "?").join(", ");
-
-      const [[groupCount]] = await pool.execute<CountRow[]>(
-        `SELECT COUNT(*) as total FROM vehicles WHERE DEALER_ID IN (${placeholders}) AND STATUS = '1'`,
-        dealerIds
-      );
-      totalGroupVehicles = groupCount.total;
+      const { count: dvCount } = await admin
+        .from("dealer_vehicles")
+        .select("*", { count: "exact", head: true })
+        .in("dealer_id", dealerIds)
+        .eq("status", "active");
+      totalGroupVehicles = dvCount ?? 0;
 
       const [lifetimeRes, recentRes] = await Promise.all([
         admin.from("print_history").select("dealer_id").in("dealer_id", dealerIds).limit(100000),
@@ -447,16 +445,16 @@ export default async function DashboardPage() {
       }
       for (const r of recentRes.data ?? []) {
         recentCounts[r.dealer_id as string] = (recentCounts[r.dealer_id as string] ?? 0) + 1;
-        printedVehicleIds.add(r.vehicle_id as number);
+        printedVehicleIds.add(r.vehicle_id as string);
         groupPrinted30++;
       }
     }
 
     const { data: lifetimeAllRes } = await (dealerIds.length > 0
       ? admin.from("print_history").select("vehicle_id").in("dealer_id", dealerIds).limit(100000)
-      : Promise.resolve({ data: [] as Array<{ vehicle_id: number }> }));
+      : Promise.resolve({ data: [] as Array<{ vehicle_id: string }> }));
 
-    const allPrintedSet = new Set((lifetimeAllRes ?? []).map((r) => r.vehicle_id as number));
+    const allPrintedSet = new Set((lifetimeAllRes ?? []).map((r) => r.vehicle_id as string));
     const unprintedTotal = Math.max(0, totalGroupVehicles - allPrintedSet.size);
 
     const enrichedDealers: GroupDealerRow[] = (groupDealers ?? []).map((d) => ({
@@ -551,12 +549,12 @@ export default async function DashboardPage() {
 
   const vehicleIds = recentVehicles.map((v) => v.id);
   const vehiclePrintsRes = vehicleIds.length > 0
-    ? await admin.from("print_history").select("vehicle_id, document_type").in("vehicle_id", vehicleIds)
-    : { data: [] as Array<{ vehicle_id: number; document_type: string }> };
+    ? await admin.from("print_history").select("vehicle_id, document_type").in("vehicle_id", vehicleIds.map(String))
+    : { data: [] as Array<{ vehicle_id: string; document_type: string }> };
 
-  const printTypes: Record<number, Set<string>> = {};
+  const printTypes: Record<string, Set<string>> = {};
   for (const r of vehiclePrintsRes.data ?? []) {
-    const vid = r.vehicle_id as number;
+    const vid = r.vehicle_id as string;
     if (!printTypes[vid]) printTypes[vid] = new Set();
     printTypes[vid].add(r.document_type as string);
   }

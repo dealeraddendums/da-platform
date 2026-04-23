@@ -118,9 +118,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
 
     // Determine printed state from Supabase print_history (never from Aurora PRINT_STATUS)
+    // vehicle_id is text after migration 030 — convert integer IDs to strings for comparison
     const admin = createAdminSupabaseClient();
-    const vehicleIds = rows.map((r) => (r as unknown as { id: number }).id);
-    let printedSet = new Set<number>();
+    const vehicleIds = rows.map((r) => String((r as unknown as { id: number }).id));
+    let printedSet = new Set<string>();
     if (vehicleIds.length > 0) {
       const { data: printedRows } = await admin
         .from("print_history")
@@ -128,12 +129,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .eq("dealer_id", dealerId)
         .in("vehicle_id", vehicleIds);
       for (const r of printedRows ?? []) {
-        printedSet.add(r.vehicle_id as number);
+        printedSet.add(String(r.vehicle_id));
       }
     }
 
     const enriched = rows.map((r) => {
-      const id = (r as unknown as { id: number }).id;
+      const id = String((r as unknown as { id: number }).id);
       return { ...r, supabase_printed: printedSet.has(id) };
     });
 

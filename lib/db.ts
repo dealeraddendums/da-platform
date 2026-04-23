@@ -417,7 +417,7 @@ type VehicleOptionUpdate = {
 
 export type PrintHistoryRow = {
   id: string;
-  vehicle_id: number;
+  vehicle_id: string;
   dealer_id: string;
   document_type: "addendum" | "infosheet" | "buyer_guide";
   printed_by: string;
@@ -427,7 +427,7 @@ export type PrintHistoryRow = {
 };
 
 type PrintHistoryInsert = {
-  vehicle_id: number;
+  vehicle_id: string;
   dealer_id: string;
   document_type: "addendum" | "infosheet" | "buyer_guide";
   printed_by: string;
