@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { TemplateRow, UserRole } from "@/lib/db";
+import type { UserRole } from "@/lib/db";
 import TemplateList from "@/components/TemplateList";
 
 export const metadata = { title: "Templates — DA Platform" };
@@ -22,20 +22,8 @@ export default async function TemplatesPage() {
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user") as UserRole;
 
-  if (role === "dealer_user") redirect("/dashboard");
-
-  const isDealer = role === "dealer_admin";
-  const dealerId = isDealer ? (profile?.dealer_id ?? null) : null;
-
-  let initialTemplates: TemplateRow[] = [];
-  if (dealerId) {
-    const { data: t } = await admin
-      .from("templates")
-      .select("*")
-      .eq("dealer_id", dealerId)
-      .order("created_at", { ascending: false });
-    initialTemplates = (t as TemplateRow[] | null) ?? [];
-  }
+  // Dealer roles manage templates inside the Builder — redirect there
+  if (role === "dealer_admin" || role === "dealer_user" || (role as string) === "dealer_restricted") redirect("/builder");
 
   return (
     <div>
@@ -48,10 +36,10 @@ export default async function TemplatesPage() {
         </p>
       </div>
       <TemplateList
-        fixedDealerId={dealerId}
+        fixedDealerId={null}
         role={role}
         groupId={profile?.group_id ?? null}
-        initialTemplates={initialTemplates}
+        initialTemplates={[]}
       />
     </div>
   );

@@ -71,19 +71,6 @@ const nav: NavEntry[] = [
   },
   // ── Dealer-facing items ───────────────────────────────────────────────────────
   {
-    label: "Inventory",
-    href: "/vehicles",
-    roles: ["dealer_admin", "dealer_user"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <rect x="1" y="3" width="15" height="13" rx="1" />
-        <path d="M16 8h4l3 5v3h-7V8z" />
-        <circle cx="5.5" cy="18.5" r="2.5" />
-        <circle cx="18.5" cy="18.5" r="2.5" />
-      </svg>
-    ),
-  },
-  {
     label: "Options",
     href: "/options",
     roles: ["dealer_admin", "dealer_user"],
@@ -106,18 +93,6 @@ const nav: NavEntry[] = [
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M12 20h9" />
         <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-      </svg>
-    ),
-  },
-  {
-    label: "Templates",
-    href: "/templates",
-    roles: ["dealer_admin", "dealer_user"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <rect x="3" y="3" width="18" height="18" rx="2" />
-        <line x1="3" y1="9" x2="21" y2="9" />
-        <line x1="9" y1="21" x2="9" y2="9" />
       </svg>
     ),
   },

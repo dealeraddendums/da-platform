@@ -28,6 +28,11 @@ export default async function VehiclesPage() {
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user";
 
+  // Dealer roles use /dashboard as their inventory view
+  if (role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted") {
+    redirect("/dashboard");
+  }
+
   // Check for active impersonation (super_admin viewing as a dealer)
   const appMeta = session.user.app_metadata as Record<string, unknown>;
   const impersonatingDealerId = (appMeta?.impersonating_dealer_id as string | null) ?? null;
