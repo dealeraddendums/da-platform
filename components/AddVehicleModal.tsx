@@ -251,9 +251,8 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
         year: form.year ? parseInt(form.year, 10) : null,
         mileage: form.mileage ? parseInt(form.mileage, 10) : 0,
         msrp: form.msrp ? parseFloat(form.msrp) : null,
-        decode_source: decodeResult?.source ?? "manual",
+        decode_source: decodeResult ? "vin_decoder" : "manual",
         decode_flagged: decodeResult?.decode_flagged ?? false,
-        created_by: "vin_decoder",
       }),
     });
     const json = await res.json() as { id?: string; error?: string };

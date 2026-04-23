@@ -188,16 +188,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: dbErr.message }, { status: 500 });
   }
 
+  const decodeSource = (body.decode_source as string | undefined) ?? "manual";
+  const importMethod = decodeSource === "manual" ? "manual" : "vin_decoder";
+
   const logEntry: VehicleAuditLogInsert = {
     dealer_id: dealerId,
     vehicle_id: data.id,
     stock_number: stockNumber,
     action: "import",
-    method: (body.created_by as string | undefined)?.trim() || ((body.decode_source as string | undefined) === "manual" ? "manual" : "vin_decoder"),
+    method: importMethod,
     changed_by: claims.sub,
     changed_by_email: claims.email,
   };
-  void admin.from("vehicle_audit_log").insert(logEntry);
+  const { error: auditErr } = await admin.from("vehicle_audit_log").insert(logEntry);
+  if (auditErr) console.error("[dealer-vehicles POST] audit_log insert failed:", auditErr.message, auditErr.code);
 
   return NextResponse.json(data, { status: 201 });
 }
