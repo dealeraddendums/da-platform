@@ -13,15 +13,9 @@ export default async function BuilderVehicleRoute({
   params: { vehicleId: string };
 }) {
   const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) redirect(`/login?next=/builder/${params.vehicleId}`);
 
-  if (!session) {
-    redirect(`/login?next=/builder/${params.vehicleId}`);
-  }
-
-  // Fetch vehicle from Aurora
   const pool = getPool();
   const [rows] = await pool.execute<VehicleRowPacket[]>(
     `SELECT v.id, v.DEALER_ID, v.VIN_NUMBER, v.STOCK_NUMBER, v.YEAR, v.MAKE,
@@ -38,21 +32,15 @@ export default async function BuilderVehicleRoute({
 
   const r = rows[0];
 
-  // Fetch profile to check dealer scope
   const { data: profile } = await supabase
     .from("profiles")
     .select("role, dealer_id")
     .eq("id", session.user.id)
     .single<{ role: string; dealer_id: string | null }>();
 
-  // Scope check: dealer_admin/user can only open their own dealer's vehicles
-  // TODO: verify this should use inventory_dealer_id (profile.dealer_id is Supabase; r.DEALER_ID is Aurora)
-  if (
-    profile?.role === "dealer_admin" ||
-    profile?.role === "dealer_user"
-  ) {
+  if (profile?.role === "dealer_admin" || profile?.role === "dealer_user") {
     if (profile.dealer_id && r.DEALER_ID !== profile.dealer_id) {
-      redirect("/vehicles");
+      redirect("/dashboard");
     }
   }
 
@@ -81,7 +69,6 @@ export default async function BuilderVehicleRoute({
       .join(", ") || null,
   };
 
-  // Fetch dealer's AI content default setting
   const admin = createAdminSupabaseClient();
   const { data: settings } = await admin
     .from("dealer_settings")

@@ -5,6 +5,8 @@ import type { UserRole } from "@/lib/db";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
+import MainContent from "@/components/MainContent";
+import { BuilderBreadcrumbProvider } from "@/contexts/BuilderBreadcrumb";
 
 export default async function DashboardLayout({
   children,
@@ -37,13 +39,10 @@ export default async function DashboardLayout({
       <Sidebar role={role} />
       <div className="flex flex-col flex-1 overflow-hidden">
         <ImpersonationBanner />
-        <Topbar user={userDisplay} />
-        <main
-          className="flex-1 overflow-auto p-6 relative"
-          style={{ background: "var(--bg-app)" }}
-        >
-          {children}
-        </main>
+        <BuilderBreadcrumbProvider>
+          <Topbar user={userDisplay} />
+          <MainContent>{children}</MainContent>
+        </BuilderBreadcrumbProvider>
       </div>
     </div>
   );

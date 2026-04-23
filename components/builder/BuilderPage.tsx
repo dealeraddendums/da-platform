@@ -9,6 +9,7 @@ import {
 } from './constants';
 import { renderW } from './widgetRenderer';
 import type { Widget, PaperSize, CustomWidgetDef, VehiclePreload, SavedTemplate } from './types';
+import { useBuilderBreadcrumb } from '@/contexts/BuilderBreadcrumb';
 
 // ── Palette widget tiles ──────────────────────────────────────────────
 const PALETTE_TILES = [
@@ -43,6 +44,8 @@ interface Props {
 }
 
 export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: Props) {
+  const { setTitle } = useBuilderBreadcrumb();
+
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
   const [nid, setNid] = useState(1);
   const [selId, setSelId] = useState<string | null>(null);
@@ -83,6 +86,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   const ZRef = useRef(Z);
   const paperSizeRef = useRef(paperSize);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Set topbar breadcrumb
+  useEffect(() => {
+    const parts = [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(' ');
+    const stock = vehicle?.stock_number ? ` — ${vehicle.stock_number}` : '';
+    setTitle(parts ? `${parts}${stock}` : null);
+    return () => setTitle(null);
+  }, [vehicle, setTitle]);
 
   // Keep refs in sync
   useEffect(() => { widgetsRef.current = widgets; }, [widgets]);
@@ -623,15 +634,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   const usedTypes = new Set(Object.values(widgets).map(w => w.type));
 
   return (
-    <div style={{ fontFamily: "'Roboto', -apple-system, sans-serif", display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', fontSize: 13, background: '#3a6897', color: '#333' }}>
+    <div style={{ fontFamily: "'Roboto', -apple-system, sans-serif", display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', fontSize: 13, background: '#3a6897', color: '#333' }}>
 
       {/* TOPBAR */}
       <div style={{ height: 50, background: '#2a2b3c', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', flexShrink: 0, gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <a href="/dashboard" style={{ fontSize: 13, fontWeight: 600, color: '#fff', textDecoration: 'none' }}>
-            Dealer<span style={{ color: '#ffa500' }}>Addendums</span>
-          </a>
-          <div style={{ width: 1, height: 20, background: '#e0e0e0', flexShrink: 0 }} />
           <input
             value={templateName}
             onChange={e => setTemplateName(e.target.value)}

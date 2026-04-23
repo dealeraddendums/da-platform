@@ -1,8 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { UserRole } from "@/lib/db";
+import { useBuilderBreadcrumb } from "@/contexts/BuilderBreadcrumb";
 
 const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super Admin",
@@ -23,6 +24,9 @@ type Props = {
 
 export default function Topbar({ user }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
+  const { title: builderTitle } = useBuilderBreadcrumb();
+  const isBuilder = pathname.startsWith("/builder");
 
   async function handleLogout() {
     const supabase = createClient();
@@ -36,13 +40,24 @@ export default function Topbar({ user }: Props) {
 
   return (
     <header
-      className="flex items-center justify-end px-6 flex-shrink-0"
+      className="flex items-center justify-between px-6 flex-shrink-0"
       style={{
         height: 56,
         background: "var(--navy)",
         borderBottom: "1px solid rgba(255,255,255,0.08)",
       }}
     >
+      {/* Left: breadcrumb (builder only) */}
+      {isBuilder ? (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="font-semibold" style={{ color: "rgba(255,255,255,0.85)" }}>Builder</span>
+          <span style={{ color: "rgba(255,255,255,0.3)" }}>·</span>
+          <span style={{ color: "rgba(255,255,255,0.65)" }}>
+            {builderTitle ?? "New Document"}
+          </span>
+        </div>
+      ) : <div />}
+
       {/* Right */}
       <div className="flex items-center gap-4">
         {/* Role badge */}
