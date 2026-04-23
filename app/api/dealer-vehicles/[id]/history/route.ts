@@ -63,9 +63,12 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
       .from("profiles")
       .select("id, full_name")
       .in("id", Array.from(userIds));
+    console.log("[history] userIds:", Array.from(userIds), "profiles:", JSON.stringify(profiles));
     for (const p of profiles ?? []) {
       if (p.full_name) nameMap[p.id as string] = p.full_name as string;
     }
+  } else {
+    console.log("[history] no changed_by values found in audit rows — auditRows sample:", JSON.stringify(auditRows.slice(0, 2)));
   }
 
   const auditEntries: HistoryEntry[] = auditRows.map((r) => ({
