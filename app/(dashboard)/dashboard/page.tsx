@@ -436,18 +436,32 @@ export default async function DashboardPage() {
       totalGroupVehicles = dvCount ?? 0;
 
       const [lifetimeRes, recentRes] = await Promise.all([
-        admin.from("print_history").select("dealer_id").in("dealer_id", dealerIds).limit(100000),
+        admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).limit(100000),
         admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).gte("created_at", thirtyDaysAgo).limit(20000),
       ]);
 
+      // Deduplicate per dealer: each vehicle counts once regardless of how many times printed
+      const lifetimeSets: Record<string, Set<string>> = {};
       for (const r of lifetimeRes.data ?? []) {
-        lifetimeCounts[r.dealer_id as string] = (lifetimeCounts[r.dealer_id as string] ?? 0) + 1;
+        const did = r.dealer_id as string;
+        if (!lifetimeSets[did]) lifetimeSets[did] = new Set();
+        lifetimeSets[did].add(r.vehicle_id as string);
       }
+      for (const [did, s] of Object.entries(lifetimeSets)) {
+        lifetimeCounts[did] = s.size;
+      }
+
+      const recentSets: Record<string, Set<string>> = {};
       for (const r of recentRes.data ?? []) {
-        recentCounts[r.dealer_id as string] = (recentCounts[r.dealer_id as string] ?? 0) + 1;
+        const did = r.dealer_id as string;
+        if (!recentSets[did]) recentSets[did] = new Set();
+        recentSets[did].add(r.vehicle_id as string);
         printedVehicleIds.add(r.vehicle_id as string);
-        groupPrinted30++;
       }
+      for (const [did, s] of Object.entries(recentSets)) {
+        recentCounts[did] = s.size;
+      }
+      groupPrinted30 = printedVehicleIds.size;
     }
 
     const { data: lifetimeAllRes } = await (dealerIds.length > 0
@@ -500,18 +514,18 @@ export default async function DashboardPage() {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const todayUTC = new Date(); todayUTC.setUTCHours(0, 0, 0, 0);
 
-  const [{ count: totalVehiclesCount }, { count: printedTodayCount }, { count: printed30Count }] = await Promise.all([
+  const [{ count: totalVehiclesCount }, todayRes, last30Res] = await Promise.all([
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active"),
-    admin.from("print_history").select("*", { count: "exact", head: true })
+    admin.from("print_history").select("vehicle_id")
       .eq("dealer_id", dealerId).gte("created_at", todayUTC.toISOString()),
-    admin.from("print_history").select("*", { count: "exact", head: true })
+    admin.from("print_history").select("vehicle_id")
       .eq("dealer_id", dealerId).gte("created_at", thirtyDaysAgo),
   ]);
 
   const totalVehicles = totalVehiclesCount ?? 0;
-  const printedToday = printedTodayCount ?? 0;
-  const printed30 = printed30Count ?? 0;
+  const printedToday = new Set((todayRes.data ?? []).map(r => r.vehicle_id)).size;
+  const printed30 = new Set((last30Res.data ?? []).map(r => r.vehicle_id)).size;
   const unprintedCount = Math.max(0, totalVehicles - printed30);
 
   // ── Manual dealer ─────────────────────────────────────────────────────────
