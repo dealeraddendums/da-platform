@@ -583,18 +583,27 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   const loadTemplate = useCallback(async (id: string) => {
     try {
       const r = await fetch(`/api/templates/${id}`);
-      if (!r.ok) return;
-      const data = await r.json();
-      const json = data.template_json as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: PaperSize };
-      if (json.widgets) { setWidgets(json.widgets); widgetsRef.current = json.widgets; }
+      if (!r.ok) { showToast('Failed to load template'); return; }
+      const resp = await r.json();
+      const tmpl = resp.data as { template_json?: Record<string, unknown>; name?: string } | null;
+      if (!tmpl?.template_json || Object.keys(tmpl.template_json).length === 0) {
+        showToast('This template has no saved layout. Please re-save it from the Builder.');
+        return;
+      }
+      const json = tmpl.template_json as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: PaperSize };
+      if (!json.widgets || Object.keys(json.widgets).length === 0) {
+        showToast('This template has no saved layout. Please re-save it from the Builder.');
+        return;
+      }
+      setWidgets(json.widgets); widgetsRef.current = json.widgets;
       if (json.nid) setNid(json.nid);
       if (json.bgUrl) { setBgUrl(json.bgUrl); setBgInputVal(json.bgUrl); }
       if (json.fontScale) setFontScale(json.fontScale);
       if (json.paperSize) { setPaperSize(json.paperSize); paperSizeRef.current = json.paperSize; }
-      setTemplateName(data.name || 'Template');
+      setTemplateName(tmpl.name || 'Template');
       setSelId(null);
       setShowOpenModal(false);
-      showToast(`Loaded: ${data.name}`);
+      showToast(`Loaded: ${tmpl.name || 'Template'}`);
     } catch {
       showToast('Failed to load template');
     }
