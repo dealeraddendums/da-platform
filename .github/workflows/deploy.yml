@@ -22,7 +22,7 @@ jobs:
           ssh -i ~/.ssh/deploy_key ubuntu@ec2-54-167-226-23.compute-1.amazonaws.com '
             set -e
             cd /var/www/da-platform
-            git pull origin main
+            for i in 1 2 3; do git pull origin main && break || { echo "git pull attempt $i failed, retrying..."; sleep 10; }; done
             npm ci
             npm run build
             pm2 restart da-platform || pm2 start ecosystem.config.js
