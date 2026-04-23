@@ -501,7 +501,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          vehicleId: parseInt(vehicle.id, 10),
+          dealerVehicleId: vehicle.id,
           widgets: Object.values(widgetsRef.current),
           paperSize,
           fontScale,

@@ -210,13 +210,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // ── Print history — source of truth for dashboard stats ──────────────────
     // vehicle_id is stored as the dealer_vehicles UUID string (text column after migration 030)
     // dealer_id matches dealers.dealer_id and profiles.dealer_id
-    await admin.from("print_history").insert({
+    const { error: phErr } = await admin.from("print_history").insert({
       vehicle_id: dealerVehicleId,
       dealer_id:  dv.dealer_id,
       document_type: docType,
       printed_by: claims.sub,
       pdf_url:    pdfUrl,
     });
+    if (phErr) console.error("[pdf/generate] print_history insert failed:", phErr.message, phErr.code, "dealer_id:", dv.dealer_id, "vehicle_id:", dealerVehicleId);
 
     // ── Audit log ─────────────────────────────────────────────────────────────
     await admin.from("vehicle_audit_log").insert({
