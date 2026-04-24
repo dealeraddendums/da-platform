@@ -10,6 +10,8 @@ import {
 import { renderW } from './widgetRenderer';
 import type { Widget, PaperSize, CustomWidgetDef, VehiclePreload, SavedTemplate, CustomSize } from './types';
 import { useBuilderBreadcrumb } from '@/contexts/BuilderBreadcrumb';
+import CustomSizesModal from '@/components/CustomSizesModal';
+import ImageUploadPicker from '@/components/ImageUploadPicker';
 
 // ── Palette widget tiles ──────────────────────────────────────────────
 const PALETTE_TILES = [
@@ -42,9 +44,10 @@ interface Props {
   templateId?: string;
   aiEnabled?: boolean;
   customSizes?: CustomSize[];
+  dealerId?: string;
 }
 
-export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [] }: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId }: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
@@ -74,6 +77,10 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [saveDocType, setSaveDocType] = useState<'addendum' | 'infosheet'>('addendum');
   const [nudge, setNudge] = useState({ left: 0, right: 0, top: 0, bottom: 0 });
   const [printAiOverride, setPrintAiOverride] = useState<'db'|'ai'|'default'>('default');
+  const [localCustomSizes, setLocalCustomSizes] = useState<CustomSize[]>(customSizes);
+  const [showCustomSizesModal, setShowCustomSizesModal] = useState(false);
+  const [showBgPicker, setShowBgPicker] = useState(false);
+  const [showLogoPicker, setShowLogoPicker] = useState(false);
 
   // Refs for drag
   const paperRef = useRef<HTMLDivElement>(null);
@@ -101,7 +108,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   useEffect(() => { widgetsRef.current = widgets; }, [widgets]);
   useEffect(() => { ZRef.current = Z; }, [Z]);
   useEffect(() => { paperSizeRef.current = paperSize; }, [paperSize]);
-  useEffect(() => { customSizesRef.current = customSizes; }, [customSizes]);
+  useEffect(() => { customSizesRef.current = localCustomSizes; }, [localCustomSizes]);
 
   // ── Toast ──────────────────────────────────────────────────────────
   const showToast = useCallback((msg: string) => {
@@ -633,7 +640,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // ────────────────────────────────────────────────────────────────────
   // RENDER
   // ────────────────────────────────────────────────────────────────────
-  const ps = getPaperDims(paperSize, customSizes);
+  const ps = getPaperDims(paperSize, localCustomSizes);
   const isInfosheet = paperSize === 'infosheet';
   const usedTypes = new Set(Object.values(widgets).map(w => w.type));
 
@@ -764,10 +771,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 <option value="narrow">3.125&quot; × 11&quot; Narrow</option>
                 <option value="standard">4.25&quot; × 11&quot; Standard</option>
                 <option value="infosheet">8.5&quot; × 11&quot; Infosheet</option>
-                {customSizes.map(cs => (
+                {localCustomSizes.map(cs => (
                   <option key={cs.id} value={cs.id}>{cs.name} ({cs.width_in}&quot; × {cs.height_in}&quot;)</option>
                 ))}
               </select>
+              <button onClick={() => setShowCustomSizesModal(true)} title="Manage custom sizes"
+                style={{ width: 26, height: 26, borderRadius: 4, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.85)', fontSize: 13, flexShrink: 0 }}>
+                ⚙
+              </button>
               <select value={fontScale} onChange={e => setFontScale(+e.target.value)}
                 style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>
                 <option value="0.8">Font: Small</option>
@@ -910,14 +921,17 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                         </div>
                       ))}
                     </div>
-                    <div style={{ marginBottom: 4, fontSize: 11, color: '#55595c' }}>Load from URL</div>
+                    <button onClick={() => setShowBgPicker(true)} style={{ width: '100%', padding: '6px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer', marginBottom: 6 }}>
+                      Upload / Choose from Library
+                    </button>
+                    <div style={{ marginBottom: 4, fontSize: 11, color: '#55595c' }}>Or load from URL</div>
                     <input
                       value={bgInputVal}
                       onChange={e => setBgInputVal(e.target.value)}
                       style={{ width: '100%', padding: '5px 8px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, marginBottom: 4, boxSizing: 'border-box' }}
                       placeholder="https://s3.amazonaws.com/…/bg.png"
                     />
-                    <button onClick={() => { if (bgInputVal) setBgUrl(bgInputVal); }} style={{ width: '100%', padding: '6px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Load background</button>
+                    <button onClick={() => { if (bgInputVal) setBgUrl(bgInputVal); }} style={{ width: '100%', padding: '6px', background: '#f5f6f7', color: '#55595c', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Load URL</button>
                   </div>
                 )}
               </EpSection>
@@ -931,6 +945,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                   onAdjFont={adjFont}
                   onDelete={deleteWidget}
                   onUpdatePos={updateWidgetPos}
+                  onPickLogoImage={() => setShowLogoPicker(true)}
                 />
               ) : (
                 <EpSection>
@@ -1080,6 +1095,49 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           {toast}
         </div>
       )}
+
+      {/* CUSTOM SIZES MODAL */}
+      {showCustomSizesModal && (dealerId ?? vehicle?.dealer_id) && (
+        <CustomSizesModal
+          dealerId={(dealerId ?? vehicle?.dealer_id)!}
+          initialSizes={localCustomSizes}
+          onUpdate={setLocalCustomSizes}
+          onClose={() => setShowCustomSizesModal(false)}
+        />
+      )}
+
+      {/* BACKGROUND IMAGE PICKER */}
+      {showBgPicker && (
+        <ImageUploadPicker
+          title="Choose Background Image"
+          tab1Label="My Backgrounds"
+          listEndpoint={`/api/upload-image?bucket=${isInfosheet ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds'}${(dealerId ?? vehicle?.dealer_id) ? `&prefix=${encodeURIComponent((dealerId ?? vehicle?.dealer_id)!)}` : ''}`}
+          uploadBucket={isInfosheet ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds'}
+          uploadKeyPrefix={dealerId ?? vehicle?.dealer_id ?? ''}
+          acceptedTypes="image/png"
+          maxSizeMB={5}
+          onSelect={url => { setBgUrl(url); setBgInputVal(url); setShowBgPicker(false); }}
+          onClose={() => setShowBgPicker(false)}
+        />
+      )}
+
+      {/* LOGO IMAGE PICKER */}
+      {showLogoPicker && (
+        <ImageUploadPicker
+          title="Choose Logo Image"
+          tab1Label="My Logos"
+          listEndpoint={`/api/upload-image?bucket=new-dealer-logos${(dealerId ?? vehicle?.dealer_id) ? `&prefix=${encodeURIComponent((dealerId ?? vehicle?.dealer_id)!)}` : ''}`}
+          uploadBucket="new-dealer-logos"
+          uploadKeyPrefix={dealerId ?? vehicle?.dealer_id ?? ''}
+          acceptedTypes="image/png,image/jpeg,image/jpg,image/svg+xml"
+          maxSizeMB={2}
+          onSelect={url => {
+            if (selId) updateWidget(selId, 'imgUrl', url);
+            setShowLogoPicker(false);
+          }}
+          onClose={() => setShowLogoPicker(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1123,13 +1181,14 @@ function ModalRow({ icon, label, children }: { icon: React.ReactNode; label: Rea
 }
 
 // ── Widget Edit Panel ──────────────────────────────────────────────────
-function WidgetEditPanel({ widget: w, fontScale, onUpdate, onAdjFont, onDelete, onUpdatePos }: {
+function WidgetEditPanel({ widget: w, fontScale, onUpdate, onAdjFont, onDelete, onUpdatePos, onPickLogoImage }: {
   widget: Widget;
   fontScale: number;
   onUpdate: (id: string, key: string, value: unknown) => void;
   onAdjFont: (id: string, key: string, delta: number) => void;
   onDelete: (id: string) => void;
   onUpdatePos: (id: string, key: 'x'|'y'|'w'|'h', value: number) => void;
+  onPickLogoImage?: () => void;
 }) {
   const d = w.d;
   const u = (key: string, val: unknown) => onUpdate(w.id, key, val);
@@ -1156,8 +1215,17 @@ function WidgetEditPanel({ widget: w, fontScale, onUpdate, onAdjFont, onDelete, 
       {w.type === 'logo' && (
         <EpSection>
           <Eps>Logo</Eps>
-          <Fd label="Logo URL">
-            <input className="fi" value={(d.imgUrl as string) || ''} onChange={e => u('imgUrl', e.target.value)} style={fiStyle} placeholder="https://…" />
+          <Fd label="Logo Image">
+            <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+              <input className="fi" value={(d.imgUrl as string) || ''} onChange={e => u('imgUrl', e.target.value)} style={{ ...fiStyle, flex: 1 }} placeholder="https://…" />
+              <button onClick={onPickLogoImage} style={{ padding: '5px 8px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, background: '#f5f6f7', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap', color: '#55595c' }}>
+                Choose
+              </button>
+            </div>
+            {(d.imgUrl as string) && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={d.imgUrl as string} alt="" style={{ maxWidth: '100%', maxHeight: 40, objectFit: 'contain', border: '1px solid #e0e0e0', borderRadius: 2, marginTop: 2 }} />
+            )}
           </Fd>
           <Fd label="Placeholder text">
             <input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} />

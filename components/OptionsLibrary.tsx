@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { formatOptionPrice } from "@/lib/option-price";
 import type { AddendumLibraryRow } from "@/lib/db";
+import ImageUploadPicker from "@/components/ImageUploadPicker";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -188,176 +189,6 @@ function PriceHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
   );
 }
 
-// ── ImagePickerModal ───────────────────────────────────────────────────────────
-
-function ImagePickerModal({
-  onInsert, onClose,
-}: {
-  onInsert: (url: string, target: "description" | "item_name") => void;
-  onClose: () => void;
-}) {
-  const [activeTab, setActiveTab] = useState<"library" | "upload">("library");
-  const [images, setImages] = useState<Array<{ key: string; url: string }>>([]);
-  const [loadingLib, setLoadingLib] = useState(false);
-  const [searchQ, setSearchQ] = useState("");
-  const [selectedUrl, setSelectedUrl] = useState<string | null>(null);
-  const [insertTarget, setInsertTarget] = useState<"description" | "item_name">("description");
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-
-  useEffect(() => { void loadLibrary(); }, []);
-
-  async function loadLibrary() {
-    setLoadingLib(true);
-    try {
-      const res = await fetch("/api/option-images");
-      const json = await res.json() as { images?: Array<{ key: string; url: string }> };
-      setImages(json.images ?? []);
-    } catch { setImages([]); }
-    finally { setLoadingLib(false); }
-  }
-
-  function handleFileSelect(file: File) {
-    setUploadFile(file);
-    setUploadError(null);
-    const reader = new FileReader();
-    reader.onload = e => setUploadPreview(e.target?.result as string);
-    reader.readAsDataURL(file);
-  }
-
-  async function handleUpload() {
-    if (!uploadFile) return;
-    setUploading(true);
-    setUploadError(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", uploadFile);
-      const res = await fetch("/api/option-images/upload", { method: "POST", body: fd });
-      const json = await res.json() as { url?: string; error?: string };
-      if (!res.ok) { setUploadError(json.error ?? "Upload failed"); return; }
-      if (json.url) {
-        setSelectedUrl(json.url);
-        setActiveTab("library");
-        void loadLibrary();
-        setUploadFile(null);
-        setUploadPreview(null);
-      }
-    } finally { setUploading(false); }
-  }
-
-  const filtered = images.filter(img => !searchQ || img.key.toLowerCase().includes(searchQ.toLowerCase()));
-
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
-      <div style={{ background: "#fff", borderRadius: 6, width: 640, maxWidth: "96vw", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: "#333" }}>Product Image Library</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, color: "#78828c" }}>×</button>
-        </div>
-
-        <div style={{ display: "flex", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
-          {(["library", "upload"] as const).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              style={{ padding: "10px 20px", background: "none", border: "none", cursor: "pointer", fontSize: 13, fontWeight: activeTab === tab ? 600 : 400, color: activeTab === tab ? "#1976d2" : "#55595c", borderBottom: activeTab === tab ? "2px solid #1976d2" : "2px solid transparent", marginBottom: -1 }}>
-              {tab === "library" ? "Library" : "Upload New"}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
-          {activeTab === "library" ? (
-            <div>
-              <input value={searchQ} onChange={e => setSearchQ(e.target.value)}
-                placeholder="Search images…" style={{ ...inp, marginBottom: 14 }} />
-              {loadingLib ? (
-                <div style={{ textAlign: "center", padding: 32, color: "#78828c" }}>Loading…</div>
-              ) : filtered.length === 0 ? (
-                <div style={{ textAlign: "center", padding: 32, color: "#78828c" }}>
-                  {images.length === 0 ? "No images yet. Upload one to get started." : "No images match your search."}
-                </div>
-              ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-                  {filtered.map(img => (
-                    <div key={img.key} onClick={() => setSelectedUrl(img.url)}
-                      style={{ border: `2px solid ${selectedUrl === img.url ? "#1976d2" : "#e0e0e0"}`, borderRadius: 4, padding: 4, cursor: "pointer", background: selectedUrl === img.url ? "#e3f2fd" : "#fafafa", display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img.url} alt={img.key} style={{ width: "100%", height: 80, objectFit: "contain" }} />
-                      <div style={{ fontSize: 10, color: "#78828c", textAlign: "center", wordBreak: "break-all" }}>
-                        {img.key.split("/").pop()?.replace(/^\d+-/, "") ?? img.key}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div>
-              <div
-                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={e => { e.preventDefault(); setDragOver(false); const fl = e.dataTransfer.files[0]; if (fl) handleFileSelect(fl); }}
-                onClick={() => (document.getElementById("img-upload-input") as HTMLInputElement | null)?.click()}
-                style={{ border: `2px dashed ${dragOver ? "#1976d2" : "#e0e0e0"}`, borderRadius: 6, padding: 32, textAlign: "center", cursor: "pointer", background: dragOver ? "#e3f2fd" : "#fafafa" }}>
-                {uploadPreview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={uploadPreview} alt="Preview" style={{ maxHeight: 160, maxWidth: "100%", objectFit: "contain" }} />
-                ) : (
-                  <>
-                    <div style={{ fontSize: 32, color: "#e0e0e0", marginBottom: 8 }}>↑</div>
-                    <div style={{ fontSize: 13, color: "#55595c", marginBottom: 4 }}>Drag & drop or click to select</div>
-                    <div style={{ fontSize: 11, color: "#78828c" }}>PNG, JPG, GIF, WebP — max 5MB</div>
-                  </>
-                )}
-              </div>
-              <input id="img-upload-input" type="file" accept="image/*" style={{ display: "none" }}
-                onChange={e => { const fl = e.target.files?.[0]; if (fl) handleFileSelect(fl); }} />
-              {uploadFile && (
-                <div style={{ marginTop: 10, fontSize: 12, color: "#55595c" }}>
-                  Selected: {uploadFile.name} ({(uploadFile.size / 1024).toFixed(1)} KB)
-                </div>
-              )}
-              {uploadError && (
-                <div style={{ marginTop: 8, padding: "6px 10px", background: "#ffebee", border: "1px solid #ffcdd2", borderRadius: 4, color: "#c62828", fontSize: 12 }}>
-                  {uploadError}
-                </div>
-              )}
-              {uploadFile && (
-                <button onClick={() => void handleUpload()} disabled={uploading}
-                  style={{ ...btnPrimary, marginTop: 12, width: "100%" }}>
-                  {uploading ? "Uploading…" : "Upload Image"}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div style={{ padding: "12px 20px", borderTop: "1px solid #e0e0e0", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <div style={{ display: "flex", gap: 16, fontSize: 12, alignItems: "center" }}>
-            <span style={{ color: "#55595c", fontWeight: 600 }}>Insert into:</span>
-            {([["description", "Description"], ["item_name", "Item Name"]] as const).map(([val, label]) => (
-              <label key={val} style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", color: "#333" }}>
-                <input type="radio" name="imgInsertTarget" value={val} checked={insertTarget === val}
-                  onChange={() => setInsertTarget(val)} />
-                {label}
-              </label>
-            ))}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onClose} style={btnGhost}>Cancel</button>
-            <button onClick={() => { if (selectedUrl) onInsert(selectedUrl, insertTarget); }} disabled={!selectedUrl}
-              style={{ ...btnPrimary, opacity: selectedUrl ? 1 : 0.5, cursor: selectedUrl ? "pointer" : "default" }}>
-              Insert Image
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Option form ────────────────────────────────────────────────────────────────
 
 function OptionForm({
@@ -374,6 +205,7 @@ function OptionForm({
   const [aiGenerated, setAiGenerated] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [showImagePicker, setShowImagePicker] = useState(false);
+  const [insertTarget, setInsertTarget] = useState<"description" | "item_name">("description");
 
   function f(field: keyof FormData, value: unknown) {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -442,10 +274,16 @@ function OptionForm({
         {aiError && (
           <p style={{ fontSize: 11, color: "#c62828", marginTop: 4, marginBottom: 0 }}>{aiError}</p>
         )}
-        <button type="button" onClick={() => setShowImagePicker(true)}
-          style={{ marginTop: 6, padding: "4px 10px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#55595c", fontWeight: 600 }}>
-          + Add Image
-        </button>
+        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+          <button type="button" onClick={() => { setInsertTarget("description"); setShowImagePicker(true); }}
+            style={{ padding: "4px 10px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#55595c", fontWeight: 600 }}>
+            + Add to description
+          </button>
+          <button type="button" onClick={() => { setInsertTarget("item_name"); setShowImagePicker(true); }}
+            style={{ padding: "4px 10px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#55595c", fontWeight: 600 }}>
+            + Add to item name
+          </button>
+        </div>
       </div>
 
       {/* Applies To toggle — shown before Type since it controls visibility */}
@@ -618,10 +456,16 @@ function OptionForm({
       </div>
 
       {showImagePicker && (
-        <ImagePickerModal
-          onInsert={(url, target) => {
+        <ImageUploadPicker
+          title="Product Image Library"
+          tab1Label="Library"
+          listEndpoint="/api/upload-image?bucket=addendum-product-images"
+          uploadBucket="addendum-product-images"
+          acceptedTypes="image/png,image/jpeg,image/jpg,image/gif,image/webp"
+          maxSizeMB={5}
+          onSelect={url => {
             const tag = `<img src="${url}" width="125" style="max-width:125px;" />`;
-            if (target === "item_name") {
+            if (insertTarget === "item_name") {
               f("option_name", form.option_name + tag);
             } else {
               f("description", form.description + tag);

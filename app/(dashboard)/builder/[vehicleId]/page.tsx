@@ -84,5 +84,5 @@ export default async function BuilderVehicleRoute({
     ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
     : null;
 
-  return <BuilderPage vehicle={{ ...vehicle, logo_url: resolvedLogoUrl }} aiEnabled={aiEnabled} customSizes={customSizeRows ?? []} />;
+  return <BuilderPage vehicle={{ ...vehicle, logo_url: resolvedLogoUrl }} aiEnabled={aiEnabled} customSizes={customSizeRows ?? []} dealerId={r.DEALER_ID} />;
 }

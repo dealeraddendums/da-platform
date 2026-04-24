@@ -22,5 +22,5 @@ export default async function BuilderRoute() {
     ? await admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, created_at, updated_at").eq("dealer_id", dealerId).order("name")
     : { data: [] };
 
-  return <BuilderPage customSizes={customSizeRows ?? []} />;
+  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} />;
 }

@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { DealerSettingsRow, TemplateRow, UserRole, DealerCustomSizeRow, BuyersGuideDefaults } from "@/lib/db";
+import type { DealerSettingsRow, TemplateRow, UserRole, BuyersGuideDefaults } from "@/lib/db";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
-import AddCustomSizeModal from "@/components/AddCustomSizeModal";
 
 type Props = {
   fixedDealerId: string | null;
@@ -91,12 +90,6 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
   const [error, setError] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
 
-  // Custom sizes
-  const [customSizes, setCustomSizes] = useState<DealerCustomSizeRow[]>([]);
-  const [showAddSize, setShowAddSize] = useState(false);
-  const [editingSize, setEditingSize] = useState<DealerCustomSizeRow | null>(null);
-  const [deletingSize, setDeletingSize] = useState<string | null>(null);
-
   const isAdminPicker = role === "super_admin" || role === "group_admin";
 
   // Fetch dealers for picker
@@ -129,16 +122,14 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
 
   const fetchSettingsAndTemplates = useCallback(async (id: string) => {
     const qs = role === "dealer_admin" ? "" : `?dealer_id=${id}`;
-    const [sRes, tRes, lRes, csRes] = await Promise.all([
+    const [sRes, tRes, lRes] = await Promise.all([
       fetch(`/api/settings${qs}`),
       fetch(`/api/templates${qs}`),
       fetch(`/api/dealers/${id}/logo`),
-      fetch(`/api/custom-sizes?dealer_id=${encodeURIComponent(id)}`),
     ]);
     const sJson = await sRes.json() as { data: DealerSettingsRow };
     const tJson = await tRes.json() as { data: TemplateRow[] };
     const lJson = await lRes.json() as { logo_url?: string | null };
-    const csJson = await csRes.json() as { data: DealerCustomSizeRow[] };
     if (sJson.data) {
       setSettings({
         ai_content_default: sJson.data.ai_content_default,
@@ -163,7 +154,6 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
     }
     setTemplates(tJson.data ?? []);
     setLogoUrl(lJson.logo_url ?? null);
-    setCustomSizes(csJson.data ?? []);
   }, [role]);
 
   useEffect(() => {
@@ -175,16 +165,6 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
     setDealerName(d.name);
     setDealerResults([]);
     setDealerQuery("");
-  }
-
-  async function deleteCustomSize(id: string) {
-    setDeletingSize(id);
-    try {
-      await fetch(`/api/custom-sizes/${id}`, { method: "DELETE" });
-      setCustomSizes(prev => prev.filter(s => s.id !== id));
-    } finally {
-      setDeletingSize(null);
-    }
   }
 
   function setBgDefaults<K extends keyof BuyersGuideDefaults>(key: K, val: BuyersGuideDefaults[K]) {
@@ -303,43 +283,6 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
             currentLogoUrl={logoUrl}
             onUpdated={(url) => setLogoUrl(url)}
           />
-        </div>
-      )}
-
-      {/* Custom Sizes */}
-      {(role === "dealer_admin" || isAdminPicker) && dealerId && (
-        <div className="card p-5 mb-4">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>Custom Paper Sizes</p>
-            <button className="btn btn-primary text-xs" style={{ height: 28, padding: "0 12px" }} onClick={() => { setEditingSize(null); setShowAddSize(true); }}>+ Add Size</button>
-          </div>
-          {customSizes.length === 0 ? (
-            <p className="text-xs" style={{ color: "var(--text-muted)" }}>No custom sizes yet. Add a size to use it in the Document Builder.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Name</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Size</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Background</th>
-                  <th className="px-3 py-2" style={{ width: 80 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {customSizes.map(cs => (
-                  <tr key={cs.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <td className="px-3 py-2" style={{ color: "var(--text-primary)" }}>{cs.name}</td>
-                    <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{cs.width_in}&quot; × {cs.height_in}&quot;</td>
-                    <td className="px-3 py-2" style={{ color: "var(--text-muted)", fontSize: 11 }}>{cs.background_url ? "Custom" : "Default"}</td>
-                    <td className="px-3 py-2 text-right">
-                      <button className="text-xs mr-3" style={{ color: "var(--blue)" }} onClick={() => { setEditingSize(cs); setShowAddSize(true); }}>Edit</button>
-                      <button className="text-xs" style={{ color: "var(--error)", opacity: deletingSize === cs.id ? 0.5 : 1 }} disabled={deletingSize === cs.id} onClick={() => void deleteCustomSize(cs.id)}>Delete</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
         </div>
       )}
 
@@ -554,18 +497,6 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
         )}
       </div>
 
-      {showAddSize && dealerId && (
-        <AddCustomSizeModal
-          dealerId={dealerId}
-          editing={editingSize ?? undefined}
-          onSaved={(row) => {
-            setCustomSizes(prev => editingSize ? prev.map(s => s.id === row.id ? row : s) : [...prev, row]);
-            setShowAddSize(false);
-            setEditingSize(null);
-          }}
-          onClose={() => { setShowAddSize(false); setEditingSize(null); }}
-        />
-      )}
     </div>
   );
 }
