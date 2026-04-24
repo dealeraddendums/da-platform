@@ -13,6 +13,8 @@ import {
   makeWidget,
 } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimer } from "@/lib/options-engine";
+import { resolveCustomTextTokens } from "@/lib/token-resolver";
+import { generateVehicleContent } from "@/lib/ai-content";
 import type { Widget, PaperSize } from "@/components/builder/types";
 
 /**
@@ -268,6 +270,47 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           }
           return w;
         });
+    }
+
+    // ── Resolve {{token}} patterns in customtext widgets ─────────────────────
+    const tokenWidgets = widgets.filter(
+      w => w.type === 'customtext' && ((w.d.text as string) || '').includes('{{')
+    );
+    if (tokenWidgets.length > 0) {
+      let aiContent: { description: string; features: [string, string][] } | null = null;
+      const needsAi = tokenWidgets.some(w => ((w.d.text as string) || '').includes('{{ai.'));
+      if (needsAi && vehicleData.VIN_NUMBER) {
+        const { data: cached } = await admin
+          .from('ai_content_cache')
+          .select('description, features')
+          .eq('vin', vehicleData.VIN_NUMBER)
+          .eq('dealer_id', dv.dealer_id)
+          .maybeSingle();
+        if (cached?.description) {
+          aiContent = { description: cached.description, features: (cached.features as [string,string][]) ?? [] };
+        } else {
+          try {
+            const generated = await generateVehicleContent({
+              year: vehicleData.YEAR, make: vehicleData.MAKE, model: vehicleData.MODEL,
+              trim: vehicleData.TRIM, colorExt: vehicleData.EXT_COLOR,
+              mileage: vehicleData.MILEAGE,
+              msrp: vehicleData.MSRP ? parseFloat(vehicleData.MSRP) : null,
+            }, null);
+            aiContent = generated;
+            await admin.from('ai_content_cache').upsert({
+              vin: vehicleData.VIN_NUMBER, dealer_id: dv.dealer_id,
+              description: generated.description, features: generated.features,
+              generated_at: new Date().toISOString(), model_version: generated.modelVersion,
+            }, { onConflict: 'vin,dealer_id' });
+          } catch { /* AI generation failed — tokens render as empty string */ }
+        }
+      }
+      widgets = widgets.map(w => {
+        if (w.type !== 'customtext') return w;
+        const text = (w.d.text as string) || '';
+        if (!text.includes('{{')) return w;
+        return { ...w, d: { ...w.d, text: resolveCustomTextTokens(text, vehicleData, options, aiContent) } };
+      });
     }
 
     // ── Render and upload ─────────────────────────────────────────────────────

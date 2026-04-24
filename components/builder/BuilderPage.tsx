@@ -1422,36 +1422,95 @@ function WidgetEditPanel({ widget: w, fontScale, onUpdate, onAdjFont, onDelete, 
         </EpSection>
       )}
 
-      {w.type === 'customtext' && (
-        <EpSection>
-          <Eps>Custom Text</Eps>
-          <textarea value={(d.text as string) || ''} onChange={e => u('text', e.target.value)} rows={3}
-            style={{ ...fiStyle, resize: 'none', width: '100%', boxSizing: 'border-box' }} />
-          <Fd label="Font size" style={{ marginTop: 6 }}>
-            <input type="number" value={(d.fs as number) || 10} min={7} max={24} onChange={e => u('fs', +e.target.value)} style={fiStyle} />
-          </Fd>
-          <Eps style={{ marginTop: 8 }}>Text Format</Eps>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 4 }}>
-            <Fd label="Alignment">
-              <div style={{ display: 'flex', gap: 2 }}>
-                {(['left','center','right'] as const).map(a => {
-                  const cur = (d.textAlign as string) || (d.align as string) || 'left';
-                  return (
-                    <button key={a} onClick={() => { u('textAlign', a); u('align', a); }}
-                      style={{ flex: 1, height: 28, border: `1px solid ${cur === a ? '#1976d2' : '#e0e0e0'}`, borderRadius: 4, background: cur === a ? '#e3f2fd' : '#fff', cursor: 'pointer', fontSize: 11, color: cur === a ? '#1976d2' : '#555', fontWeight: 600 }}>
-                      {a === 'left' ? '≡L' : a === 'center' ? '≡C' : '≡R'}
-                    </button>
-                  );
-                })}
-              </div>
+      {w.type === 'customtext' && (() => {
+        // eslint-disable-next-line react-hooks/rules-of-hooks
+        const textareaRef = useRef<HTMLTextAreaElement>(null);
+        function insertToken(token: string) {
+          const el = textareaRef.current;
+          const cur = (d.text as string) || '';
+          if (!el) { u('text', cur + token); return; }
+          const start = el.selectionStart ?? cur.length;
+          const end = el.selectionEnd ?? cur.length;
+          const next = cur.slice(0, start) + token + cur.slice(end);
+          u('text', next);
+          requestAnimationFrame(() => {
+            el.focus();
+            el.setSelectionRange(start + token.length, start + token.length);
+          });
+        }
+        return (
+          <EpSection>
+            <Eps>Custom Text</Eps>
+            <textarea ref={textareaRef} value={(d.text as string) || ''} onChange={e => u('text', e.target.value)} rows={3}
+              style={{ ...fiStyle, resize: 'none', width: '100%', boxSizing: 'border-box' }} />
+            <Fd label="Font size" style={{ marginTop: 6 }}>
+              <input type="number" value={(d.fs as number) || 10} min={7} max={24} onChange={e => u('fs', +e.target.value)} style={fiStyle} />
             </Fd>
-            <Fd label="Line spacing">
-              <input type="number" value={(d.lineHeight as number) || 1.5} min={1.0} max={3.0} step={0.1}
-                onChange={e => u('lineHeight', parseFloat(e.target.value))} style={{ ...fiStyle, width: '100%' }} />
+            <Eps style={{ marginTop: 8 }}>Text Format</Eps>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 4 }}>
+              <Fd label="Alignment">
+                <div style={{ display: 'flex', gap: 2 }}>
+                  {(['left','center','right'] as const).map(a => {
+                    const cur = (d.textAlign as string) || (d.align as string) || 'left';
+                    return (
+                      <button key={a} onClick={() => { u('textAlign', a); u('align', a); }}
+                        style={{ flex: 1, height: 28, border: `1px solid ${cur === a ? '#1976d2' : '#e0e0e0'}`, borderRadius: 4, background: cur === a ? '#e3f2fd' : '#fff', cursor: 'pointer', fontSize: 11, color: cur === a ? '#1976d2' : '#555', fontWeight: 600 }}>
+                        {a === 'left' ? '≡L' : a === 'center' ? '≡C' : '≡R'}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Fd>
+              <Fd label="Line spacing">
+                <input type="number" value={(d.lineHeight as number) || 1.5} min={1.0} max={3.0} step={0.1}
+                  onChange={e => u('lineHeight', parseFloat(e.target.value))} style={{ ...fiStyle, width: '100%' }} />
+              </Fd>
+            </div>
+            <Eps style={{ marginTop: 10 }}>Populate From</Eps>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+              {([
+                ['Vehicle Desc', '{{vehicle.description}}'],
+                ['Options List', '{{vehicle.options}}'],
+                ['AI Desc', '{{ai.description}}'],
+                ['AI Features', '{{ai.features}}'],
+              ] as [string, string][]).map(([label, token]) => (
+                <button key={token} onClick={() => insertToken(token)}
+                  style={{ padding: '4px 7px', border: '1px solid #e0e0e0', borderRadius: 4, background: '#f5f6f7', cursor: 'pointer', fontSize: 11, color: '#333', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+                  + {label}
+                </button>
+              ))}
+            </div>
+            <Fd label="Insert token" style={{ marginTop: 6 }}>
+              <select defaultValue="" onChange={e => { if (e.target.value) { insertToken(e.target.value); (e.target as HTMLSelectElement).value = ''; } }}
+                style={{ ...fiStyle }}>
+                <option value="" disabled>Insert token…</option>
+                <optgroup label="Vehicle">
+                  {([
+                    ['vehicle.description','Description'],
+                    ['vehicle.options','Options list'],
+                    ['vehicle.year','Year'],
+                    ['vehicle.make','Make'],
+                    ['vehicle.model','Model'],
+                    ['vehicle.trim','Trim'],
+                    ['vehicle.vin','VIN'],
+                    ['vehicle.stock','Stock #'],
+                    ['vehicle.mileage','Mileage'],
+                    ['vehicle.color','Color'],
+                    ['vehicle.msrp','MSRP'],
+                    ['vehicle.asking_price','Asking Price'],
+                  ] as [string,string][]).map(([key, label]) => (
+                    <option key={key} value={`{{${key}}}`}>{label}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="AI Content">
+                  <option value="{{ai.description}}">AI Description</option>
+                  <option value="{{ai.features}}">AI Features</option>
+                </optgroup>
+              </select>
             </Fd>
-          </div>
-        </EpSection>
-      )}
+          </EpSection>
+        );
+      })()}
 
       {w.type === 'sigline' && (
         <EpSection>

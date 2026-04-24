@@ -73,7 +73,14 @@ export function renderW(type: string, d: D, fontScale: number): string {
   if (type === 'customtext') {
     const ta = (d.textAlign as string) || (d.align as string) || 'left';
     const lh = (d.lineHeight as number) || 1.5;
-    return `<div style="padding:4px 0"><div style="font-size:${d.fs || 10}px;text-align:${ta};color:#555;line-height:${lh}">${((d.text as string) || '').replace(/\n/g, '<br>')}</div></div>`;
+    const rawText = (d.text as string) || '';
+    // Replace {{token}} patterns with grey italic placeholders for canvas preview.
+    // At PDF time, pdf-html.ts pre-resolves these before calling renderW.
+    const html = rawText
+      .replace(/\n/g, '<br>')
+      .replace(/\{\{([^}]+)\}\}/g, (_, key: string) =>
+        `<em style="color:#bbb;font-style:italic">[${key.trim()}]</em>`);
+    return `<div style="padding:4px 0"><div style="font-size:${d.fs || 10}px;text-align:${ta};color:#555;line-height:${lh}">${html}</div></div>`;
   }
 
   if (type === 'sigline') {
