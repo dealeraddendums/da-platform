@@ -633,6 +633,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
 
   // ── Selected widget ────────────────────────────────────────────────
   const sel = selId ? widgets[selId] : null;
+  const effectiveDealerId = dealerId ?? vehicle?.dealer_id ?? null;
 
   // ── Zoom ───────────────────────────────────────────────────────────
   const doZoom = (d: number) => { setZ(z => { const next = Math.max(0.25, Math.min(2, z + d)); ZRef.current = next; return next; }); };
@@ -1097,13 +1098,23 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       )}
 
       {/* CUSTOM SIZES MODAL */}
-      {showCustomSizesModal && (dealerId ?? vehicle?.dealer_id) && (
-        <CustomSizesModal
-          dealerId={(dealerId ?? vehicle?.dealer_id)!}
-          initialSizes={localCustomSizes}
-          onUpdate={setLocalCustomSizes}
-          onClose={() => setShowCustomSizesModal(false)}
-        />
+      {showCustomSizesModal && (
+        effectiveDealerId ? (
+          <CustomSizesModal
+            dealerId={effectiveDealerId}
+            initialSizes={localCustomSizes}
+            onUpdate={setLocalCustomSizes}
+            onClose={() => setShowCustomSizesModal(false)}
+          />
+        ) : (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            onClick={() => setShowCustomSizesModal(false)}>
+            <div style={{ background: '#fff', borderRadius: 6, padding: 24, maxWidth: 360, textAlign: 'center', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+              <p style={{ fontSize: 14, color: '#333', marginBottom: 16 }}>Custom sizes require opening the builder from a vehicle page.</p>
+              <button onClick={() => setShowCustomSizesModal(false)} style={{ padding: '7px 18px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 13, cursor: 'pointer' }}>OK</button>
+            </div>
+          </div>
+        )
       )}
 
       {/* BACKGROUND IMAGE PICKER */}
@@ -1111,9 +1122,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         <ImageUploadPicker
           title="Choose Background Image"
           tab1Label="My Backgrounds"
-          listEndpoint={`/api/upload-image?bucket=${isInfosheet ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds'}${(dealerId ?? vehicle?.dealer_id) ? `&prefix=${encodeURIComponent((dealerId ?? vehicle?.dealer_id)!)}` : ''}`}
+          listEndpoint={`/api/upload-image?bucket=${isInfosheet ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds'}${effectiveDealerId ? `&prefix=${encodeURIComponent(effectiveDealerId)}` : ''}`}
           uploadBucket={isInfosheet ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds'}
-          uploadKeyPrefix={dealerId ?? vehicle?.dealer_id ?? ''}
+          uploadKeyPrefix={effectiveDealerId ?? ''}
           acceptedTypes="image/png"
           maxSizeMB={5}
           onSelect={url => { setBgUrl(url); setBgInputVal(url); setShowBgPicker(false); }}
@@ -1126,9 +1137,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         <ImageUploadPicker
           title="Choose Logo Image"
           tab1Label="My Logos"
-          listEndpoint={`/api/upload-image?bucket=new-dealer-logos${(dealerId ?? vehicle?.dealer_id) ? `&prefix=${encodeURIComponent((dealerId ?? vehicle?.dealer_id)!)}` : ''}`}
+          listEndpoint={`/api/upload-image?bucket=new-dealer-logos${effectiveDealerId ? `&prefix=${encodeURIComponent(effectiveDealerId)}` : ''}`}
           uploadBucket="new-dealer-logos"
-          uploadKeyPrefix={dealerId ?? vehicle?.dealer_id ?? ''}
+          uploadKeyPrefix={effectiveDealerId ?? ''}
           acceptedTypes="image/png,image/jpeg,image/jpg,image/svg+xml"
           maxSizeMB={2}
           onSelect={url => {
