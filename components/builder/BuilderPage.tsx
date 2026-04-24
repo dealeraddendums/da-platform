@@ -782,17 +782,15 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 <option value="narrow">3.125&quot; × 11&quot; Narrow</option>
                 <option value="standard">4.25&quot; × 11&quot; Standard</option>
                 <option value="infosheet">8.5&quot; × 11&quot; Infosheet</option>
-                {localCustomSizes.length > 0 && (
-                  <option disabled>────────────────</option>
-                )}
+                {effectiveDealerId && <option disabled>────────────────</option>}
                 {localCustomSizes.map(cs => (
                   <option key={cs.id} value={cs.id}>{cs.name} ({cs.width_in}&quot; × {cs.height_in}&quot;)</option>
                 ))}
+                {effectiveDealerId && localCustomSizes.length > 0 && (
+                  <option disabled>────────────────</option>
+                )}
                 {effectiveDealerId && (
-                  <>
-                    <option disabled>────────────────</option>
-                    <option value="__add_new__">+ Add Custom Size</option>
-                  </>
+                  <option value="__add_new__">+ Add Custom Size</option>
                 )}
               </select>
               {effectiveDealerId && (

@@ -9,7 +9,9 @@ export default async function BuilderRoute() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect("/login?next=/builder");
 
-  const { data: profile } = await supabase
+  // Use admin client to bypass RLS — user-scoped client can return null if JWT is stale
+  const admin = createAdminSupabaseClient();
+  const { data: profile } = await admin
     .from("profiles")
     .select("dealer_id")
     .eq("id", session.user.id)
@@ -17,7 +19,6 @@ export default async function BuilderRoute() {
 
   const dealerId = profile?.dealer_id ?? null;
 
-  const admin = createAdminSupabaseClient();
   const { data: customSizeRows } = dealerId
     ? await admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, created_at, updated_at").eq("dealer_id", dealerId).order("name")
     : { data: [] };
