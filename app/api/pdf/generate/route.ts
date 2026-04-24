@@ -15,6 +15,7 @@ import {
 import { getGroupOptionsForDealer, getGroupDisclaimer } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent } from "@/lib/ai-content";
+import QRCode from "qrcode";
 import type { Widget, PaperSize } from "@/components/builder/types";
 
 /**
@@ -80,6 +81,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // dealer.dealer_id is the text ID used by group options / disclaimers
     const textDealerId = dealer?.dealer_id ?? "";
+
+    // ── Dealer QR URL template ────────────────────────────────────────────────
+    let dealerQrTemplate: string | null = null;
+    try {
+      const { data: dealerQrSettings } = await admin
+        .from("dealer_settings")
+        .select("qr_url_template")
+        .eq("dealer_id", dv.dealer_id)
+        .maybeSingle<{ qr_url_template: string | null }>();
+      dealerQrTemplate = dealerQrSettings?.qr_url_template ?? null;
+    } catch { /* column may not exist until migration 034 is applied */ }
 
     // ── Options from Supabase ─────────────────────────────────────────────────
     const { data: optionRows } = await admin
@@ -270,6 +282,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           }
           return w;
         });
+    }
+
+    // ── Generate QR codes for infobox QR widgets ─────────────────────────────
+    const qrWidgets = widgets.filter(
+      w => w.type === 'infobox' && (w.d.ibType as string) === 'qr'
+    );
+    if (qrWidgets.length > 0) {
+      widgets = await Promise.all(widgets.map(async w => {
+        if (w.type !== 'infobox' || (w.d.ibType as string) !== 'qr') return w;
+        // Priority: vdp_link > widget template > dealer template
+        const vin  = dv.vin ?? '';
+        const stock = dv.stock_number ?? '';
+        let qrUrl = dv.vdp_link
+          ?? ((w.d.qrUrlTemplate as string) || dealerQrTemplate
+            ? ((w.d.qrUrlTemplate as string) || dealerQrTemplate as string)
+                .replace('[VIN]', vin).replace('[STOCK]', stock)
+            : null);
+        if (!qrUrl) return w;
+        try {
+          const dataUrl = await QRCode.toDataURL(qrUrl, { width: 300, margin: 1, color: { dark: '#000000', light: '#ffffff' } });
+          return { ...w, d: { ...w.d, imgUrl: dataUrl } };
+        } catch { return w; }
+      }));
     }
 
     // ── Resolve {{token}} patterns in customtext widgets ─────────────────────

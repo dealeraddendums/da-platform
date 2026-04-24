@@ -32,6 +32,7 @@ const SETTING_DEFAULTS: Omit<DealerSettingsRow, "dealer_id" | "updated_at"> = {
   default_buyersguide_used: null,
   default_buyersguide_cpo: null,
   buyers_guide_defaults: null,
+  qr_url_template: null,
 };
 
 const WARRANTY_LABELS: Record<string, string> = {
@@ -79,6 +80,7 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
           default_buyersguide_used: initialSettings.default_buyersguide_used ?? null,
           default_buyersguide_cpo: initialSettings.default_buyersguide_cpo ?? null,
           buyers_guide_defaults: initialSettings.buyers_guide_defaults ?? null,
+          qr_url_template: initialSettings.qr_url_template ?? null,
         }
       : { ...SETTING_DEFAULTS }
   );
@@ -150,6 +152,7 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
         default_buyersguide_used: sJson.data.default_buyersguide_used ?? null,
         default_buyersguide_cpo: sJson.data.default_buyersguide_cpo ?? null,
         buyers_guide_defaults: sJson.data.buyers_guide_defaults ?? null,
+        qr_url_template: sJson.data.qr_url_template ?? null,
       });
     }
     setTemplates(tJson.data ?? []);
@@ -448,6 +451,22 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
             </>
           )}
         </div>
+      </div>
+
+      {/* QR Code */}
+      <div className="card p-5 mb-4">
+        <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+          QR Code
+        </p>
+        <p className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
+          Default URL template for QR Code infobox widgets. Use <code style={{ background: "var(--bg-subtle)", padding: "1px 4px", borderRadius: 3, fontFamily: "monospace" }}>[VIN]</code> or <code style={{ background: "var(--bg-subtle)", padding: "1px 4px", borderRadius: 3, fontFamily: "monospace" }}>[STOCK]</code> as variables. VDP link from inventory data takes priority when available.
+        </p>
+        <input
+          className="input w-full"
+          value={settings.qr_url_template ?? ""}
+          onChange={(e) => setSettings((s) => ({ ...s, qr_url_template: e.target.value || null }))}
+          placeholder="https://yoursite.com/inventory/[VIN]"
+        />
       </div>
 
       {/* Printer Nudge Margins */}

@@ -1524,14 +1524,32 @@ function WidgetEditPanel({ widget: w, fontScale, onUpdate, onAdjFont, onDelete, 
         <EpSection>
           <Eps>Infobox Type</Eps>
           {[['epa','EPA/DOT Fuel Economy'],['photo','Dynamic vehicle photo'],['qr','QR code'],['barcode','VIN barcode'],['upload','Upload custom']].map(([v,l]) => (
-            <div key={v} onClick={() => { u('ibType', v); if (v === 'epa') u('imgUrl', IB_DEFAULT); else u('imgUrl', ''); }}
+            <div key={v} onClick={() => { u('ibType', v); if (v === 'epa') u('imgUrl', IB_DEFAULT); else if (v !== 'upload') u('imgUrl', ''); }}
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', border: `1px solid ${(d.ibType as string) === v ? '#1976d2' : '#e0e0e0'}`, borderRadius: 6, cursor: 'pointer', marginBottom: 3, background: (d.ibType as string) === v ? '#e3f2fd' : '#fff' }}>
               <span style={{ fontSize: 11, fontWeight: (d.ibType as string) === v ? 600 : 500, color: (d.ibType as string) === v ? '#1976d2' : '#333' } as React.CSSProperties}>{l}</span>
             </div>
           ))}
-          <Fd label="Or load from URL" style={{ marginTop: 8 }}>
-            <input value={(d.imgUrl as string) || ''} onChange={e => u('imgUrl', e.target.value)} style={{ ...fiStyle, fontSize: 11 }} placeholder="https://…" />
-          </Fd>
+          {(d.ibType as string) === 'qr' && (
+            <>
+              <Fd label="Custom URL template (optional)" style={{ marginTop: 8 }}>
+                <input value={(d.qrUrlTemplate as string) || ''} onChange={e => u('qrUrlTemplate', e.target.value || null)}
+                  style={{ ...fiStyle, fontSize: 11 }} placeholder="https://dealer.com/inventory/[VIN]" />
+              </Fd>
+              <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, marginTop: 4 }}>
+                Use <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[VIN]</code> or <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[STOCK]</code> as variables. Leave blank to use VDP link from inventory data.
+              </div>
+            </>
+          )}
+          {(d.ibType as string) === 'upload' && (
+            <Fd label="Image URL" style={{ marginTop: 8 }}>
+              <input value={(d.imgUrl as string) || ''} onChange={e => u('imgUrl', e.target.value)} style={{ ...fiStyle, fontSize: 11 }} placeholder="https://…" />
+            </Fd>
+          )}
+          {!['qr','upload'].includes((d.ibType as string) || '') && (
+            <Fd label="Or load from URL" style={{ marginTop: 8 }}>
+              <input value={(d.imgUrl as string) || ''} onChange={e => u('imgUrl', e.target.value)} style={{ ...fiStyle, fontSize: 11 }} placeholder="https://…" />
+            </Fd>
+          )}
         </EpSection>
       )}
 

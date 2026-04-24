@@ -101,9 +101,12 @@ export function renderW(type: string, d: D, fontScale: number): string {
         : `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">Vehicle Photo</span></div>`;
     }
     if (ibType === 'qr') {
-      return src
-        ? `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="QR Code"></div>`
-        : `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">QR Code</span></div>`;
+      if (src) return `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="QR Code"></div>`;
+      const tmpl = ((d.qrUrlTemplate as string) || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return `<div style="${phSt};flex-direction:column;gap:3px;padding:6px;box-sizing:border-box">
+        <span style="font-size:11px;color:#999;font-weight:500">QR Code</span>
+        ${tmpl ? `<span style="font-size:8px;color:#bbb;text-align:center;word-break:break-all;line-height:1.3">${tmpl}</span>` : '<span style="font-size:8px;color:#bbb">URL from VDP link or template</span>'}
+      </div>`;
     }
     if (ibType === 'barcode') {
       return src

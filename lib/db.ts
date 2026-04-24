@@ -377,6 +377,7 @@ export type DealerSettingsRow = {
   default_buyersguide_used: string | null;
   default_buyersguide_cpo: string | null;
   buyers_guide_defaults: BuyersGuideDefaults | null;
+  qr_url_template: string | null;
   updated_at: string;
 };
 
@@ -400,6 +401,7 @@ type DealerSettingsInsert = {
   default_buyersguide_used?: string | null;
   default_buyersguide_cpo?: string | null;
   buyers_guide_defaults?: BuyersGuideDefaults | null;
+  qr_url_template?: string | null;
 };
 
 export type DealerSettingsUpdate = {
@@ -421,6 +423,7 @@ export type DealerSettingsUpdate = {
   default_buyersguide_used?: string | null;
   default_buyersguide_cpo?: string | null;
   buyers_guide_defaults?: BuyersGuideDefaults | null;
+  qr_url_template?: string | null;
   updated_at?: string;
 };
 
