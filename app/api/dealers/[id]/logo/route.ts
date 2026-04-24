@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { uploadLogo } from "@/lib/s3-upload";
+import sharp from "sharp";
 
 type Params = { params: { id: string } };
 
@@ -87,12 +88,28 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     return NextResponse.json({ error: "File must be under 2 MB" }, { status: 400 });
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const s3Key = `${dealer.dealer_id}/logo.${ext}`;
+  const rawBuffer = Buffer.from(await file.arrayBuffer());
+  let buffer: Buffer;
+
+  // Resize raster images to max 800×400 px, PNG output for quality/transparency
+  if (file.type !== "image/svg+xml") {
+    const resized = await sharp(rawBuffer)
+      .resize({ width: 800, height: 400, fit: "inside", withoutEnlargement: true })
+      .png({ compressionLevel: 8 })
+      .toBuffer();
+    buffer = Buffer.from(resized);
+  } else {
+    buffer = rawBuffer;
+  }
+
+  // Always store as .png for raster (consistent URL, no format confusion)
+  const finalExt = file.type === "image/svg+xml" ? "svg" : "png";
+  const finalContentType = file.type === "image/svg+xml" ? "image/svg+xml" : "image/png";
+  const s3Key = `${dealer.dealer_id}/logo.${finalExt}`;
 
   let logoUrl: string;
   try {
-    logoUrl = await uploadLogo(buffer, s3Key, file.type);
+    logoUrl = await uploadLogo(buffer, s3Key, finalContentType);
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Upload failed" }, { status: 500 });
   }
