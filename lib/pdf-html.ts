@@ -4,7 +4,7 @@ import type { Widget, PaperSize } from '@/components/builder/types';
 import { formatOptionPrice } from '@/lib/option-price';
 import type { VehicleRow } from '@/lib/vehicles';
 
-const PAPER_DIMS: Record<PaperSize, { w: number; h: number }> = {
+const PAPER_DIMS: Record<string, { w: number; h: number }> = {
   standard: { w: 408, h: 1056 },
   narrow: { w: 300, h: 1056 },
   infosheet: { w: 816, h: 1056 },
@@ -14,13 +14,14 @@ type AnyOption = { option_name: string; option_price: string; active?: boolean; 
 
 export interface BuildPdfHtmlInput {
   widgets: Widget[];
-  paperSize: PaperSize;
+  paperSize: string;
   fontScale: number;
   bgUrl: string;
   vehicle?: VehicleRow;
   options?: AnyOption[];
   disclaimer?: string;
   dealerLogoUrl?: string | null;
+  customDims?: { widthIn: number; heightIn: number };
 }
 
 export function buildPdfHtml({
@@ -32,8 +33,11 @@ export function buildPdfHtml({
   options,
   disclaimer,
   dealerLogoUrl,
+  customDims,
 }: BuildPdfHtmlInput): string {
-  const paper = PAPER_DIMS[paperSize];
+  const paper = customDims
+    ? { w: Math.round(customDims.widthIn * 96), h: Math.round(customDims.heightIn * 96) }
+    : (PAPER_DIMS[paperSize] ?? PAPER_DIMS.standard);
 
   const enriched = widgets.map(w => {
     const d = { ...w.d };

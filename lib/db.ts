@@ -335,6 +335,28 @@ export type TemplateUpdate = {
   updated_at?: string;
 };
 
+export type BuyersGuideDefaults = {
+  warranty_type: 'as_is' | 'implied_only' | 'full' | 'limited';
+  labor_pct?: number;
+  parts_pct?: number;
+  systems_covered?: string;
+  duration?: string;
+  non_dealer_warranties?: string[];
+  service_contract?: boolean;
+  dealer_email?: string;
+};
+
+export type DealerCustomSizeRow = {
+  id: string;
+  dealer_id: string;
+  name: string;
+  width_in: number;
+  height_in: number;
+  background_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DealerSettingsRow = {
   dealer_id: string;
   ai_content_default: boolean;
@@ -354,6 +376,7 @@ export type DealerSettingsRow = {
   default_buyersguide_new: string | null;
   default_buyersguide_used: string | null;
   default_buyersguide_cpo: string | null;
+  buyers_guide_defaults: BuyersGuideDefaults | null;
   updated_at: string;
 };
 
@@ -376,6 +399,7 @@ type DealerSettingsInsert = {
   default_buyersguide_new?: string | null;
   default_buyersguide_used?: string | null;
   default_buyersguide_cpo?: string | null;
+  buyers_guide_defaults?: BuyersGuideDefaults | null;
 };
 
 export type DealerSettingsUpdate = {
@@ -396,6 +420,7 @@ export type DealerSettingsUpdate = {
   default_buyersguide_new?: string | null;
   default_buyersguide_used?: string | null;
   default_buyersguide_cpo?: string | null;
+  buyers_guide_defaults?: BuyersGuideDefaults | null;
   updated_at?: string;
 };
 
@@ -1133,6 +1158,12 @@ export type Database = {
         Row: { id: number; name: string };
         Insert: { id: number; name: string };
         Update: { name?: string };
+        Relationships: [];
+      };
+      dealer_custom_sizes: {
+        Row: DealerCustomSizeRow;
+        Insert: { dealer_id: string; name: string; width_in: number; height_in?: number; background_url?: string | null };
+        Update: { name?: string; width_in?: number; height_in?: number; background_url?: string | null; updated_at?: string };
         Relationships: [];
       };
       nhtsa_vin_patterns: {

@@ -136,6 +136,16 @@ export const DEFAULT_CUSTOM_WIDGETS: CustomWidgetDef[] = [
   },
 ];
 
+export function getPaperDims(
+  size: string,
+  customSizes?: { id: string; width_in: number; height_in: number }[]
+): { w: number; h: number } {
+  if (PAPERS[size as keyof typeof PAPERS]) return PAPERS[size as keyof typeof PAPERS];
+  const cs = customSizes?.find(c => c.id === size);
+  if (cs) return { w: Math.round(cs.width_in * 96), h: Math.round(cs.height_in * 96) };
+  return PAPERS.standard;
+}
+
 export function snapV(v: number): number {
   return Math.round(v / SNAP) * SNAP;
 }

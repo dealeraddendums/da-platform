@@ -6,6 +6,7 @@ import { vehicleCondition, parsePhotos } from "@/lib/vehicles";
 import { formatOptionPrice, parseOptionPriceValue } from "@/lib/option-price";
 import type { VehicleOptionRow } from "@/lib/db";
 import PrintPreviewModal from "@/components/PrintPreviewModal";
+import BuyersGuideModal from "@/components/BuyersGuideModal";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -643,10 +644,17 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
       )}
 
       {/* ── Print preview modal ───────────────────────────────────────────── */}
-      {printDoc && (
+      {printDoc && printDoc !== 'buyer_guide' && (
         <PrintPreviewModal
           dealerVehicleId={dealerVehicleId}
           docType={printDoc}
+          vehicleName={[vehicle.YEAR, vehicle.MAKE, vehicle.MODEL].filter(Boolean).join(" ") || "Vehicle"}
+          onClose={() => setPrintDoc(null)}
+        />
+      )}
+      {printDoc === 'buyer_guide' && (
+        <BuyersGuideModal
+          dealerVehicleId={dealerVehicleId}
           vehicleName={[vehicle.YEAR, vehicle.MAKE, vehicle.MODEL].filter(Boolean).join(" ") || "Vehicle"}
           onClose={() => setPrintDoc(null)}
         />

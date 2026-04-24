@@ -37,6 +37,17 @@ export async function uploadPdf(buffer: Buffer, key: string): Promise<string> {
   );
 }
 
+export async function uploadBackground(buffer: Buffer, key: string): Promise<string> {
+  const s3 = getClient();
+  await s3.send(new PutObjectCommand({
+    Bucket: 'new-addendum-backgrounds',
+    Key: key,
+    Body: buffer,
+    ContentType: 'image/png',
+  }));
+  return `https://new-addendum-backgrounds.s3.us-east-1.amazonaws.com/${key}`;
+}
+
 export async function uploadLogo(buffer: Buffer, key: string, contentType: string): Promise<string> {
   const s3 = getClient();
   await s3.send(new PutObjectCommand({

@@ -108,6 +108,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     ...("default_buyersguide_new" in body && { default_buyersguide_new: body.default_buyersguide_new ?? null }),
     ...("default_buyersguide_used" in body && { default_buyersguide_used: body.default_buyersguide_used ?? null }),
     ...("default_buyersguide_cpo" in body && { default_buyersguide_cpo: body.default_buyersguide_cpo ?? null }),
+    ...("buyers_guide_defaults" in body && { buyers_guide_defaults: body.buyers_guide_defaults ?? null }),
   };
 
   const admin = createAdminSupabaseClient();

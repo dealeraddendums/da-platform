@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { DealerSettingsRow, TemplateRow, UserRole } from "@/lib/db";
+import type { DealerSettingsRow, TemplateRow, UserRole, DealerCustomSizeRow, BuyersGuideDefaults } from "@/lib/db";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
+import AddCustomSizeModal from "@/components/AddCustomSizeModal";
 
 type Props = {
   fixedDealerId: string | null;
@@ -31,7 +32,21 @@ const SETTING_DEFAULTS: Omit<DealerSettingsRow, "dealer_id" | "updated_at"> = {
   default_buyersguide_new: null,
   default_buyersguide_used: null,
   default_buyersguide_cpo: null,
+  buyers_guide_defaults: null,
 };
+
+const WARRANTY_LABELS: Record<string, string> = {
+  as_is: "As Is — No Dealer Warranty",
+  implied_only: "Implied Warranties Only",
+  full: "Full Warranty",
+  limited: "Limited Warranty",
+};
+
+const NON_DEALER = [
+  { key: "mfr_new", label: "Manufacturer's new vehicle warranty still applies" },
+  { key: "mfr_used", label: "Manufacturer's used vehicle warranty applies" },
+  { key: "other_used", label: "Other used vehicle warranty applies" },
+];
 
 type DocTab = "addendum" | "infosheet" | "buyers_guide";
 
@@ -64,6 +79,7 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
           default_buyersguide_new: initialSettings.default_buyersguide_new ?? null,
           default_buyersguide_used: initialSettings.default_buyersguide_used ?? null,
           default_buyersguide_cpo: initialSettings.default_buyersguide_cpo ?? null,
+          buyers_guide_defaults: initialSettings.buyers_guide_defaults ?? null,
         }
       : { ...SETTING_DEFAULTS }
   );
@@ -74,6 +90,12 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  // Custom sizes
+  const [customSizes, setCustomSizes] = useState<DealerCustomSizeRow[]>([]);
+  const [showAddSize, setShowAddSize] = useState(false);
+  const [editingSize, setEditingSize] = useState<DealerCustomSizeRow | null>(null);
+  const [deletingSize, setDeletingSize] = useState<string | null>(null);
 
   const isAdminPicker = role === "super_admin" || role === "group_admin";
 
@@ -107,14 +129,16 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
 
   const fetchSettingsAndTemplates = useCallback(async (id: string) => {
     const qs = role === "dealer_admin" ? "" : `?dealer_id=${id}`;
-    const [sRes, tRes, lRes] = await Promise.all([
+    const [sRes, tRes, lRes, csRes] = await Promise.all([
       fetch(`/api/settings${qs}`),
       fetch(`/api/templates${qs}`),
       fetch(`/api/dealers/${id}/logo`),
+      fetch(`/api/custom-sizes?dealer_id=${encodeURIComponent(id)}`),
     ]);
     const sJson = await sRes.json() as { data: DealerSettingsRow };
     const tJson = await tRes.json() as { data: TemplateRow[] };
     const lJson = await lRes.json() as { logo_url?: string | null };
+    const csJson = await csRes.json() as { data: DealerCustomSizeRow[] };
     if (sJson.data) {
       setSettings({
         ai_content_default: sJson.data.ai_content_default,
@@ -134,10 +158,12 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
         default_buyersguide_new: sJson.data.default_buyersguide_new ?? null,
         default_buyersguide_used: sJson.data.default_buyersguide_used ?? null,
         default_buyersguide_cpo: sJson.data.default_buyersguide_cpo ?? null,
+        buyers_guide_defaults: sJson.data.buyers_guide_defaults ?? null,
       });
     }
     setTemplates(tJson.data ?? []);
     setLogoUrl(lJson.logo_url ?? null);
+    setCustomSizes(csJson.data ?? []);
   }, [role]);
 
   useEffect(() => {
@@ -149,6 +175,31 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
     setDealerName(d.name);
     setDealerResults([]);
     setDealerQuery("");
+  }
+
+  async function deleteCustomSize(id: string) {
+    setDeletingSize(id);
+    try {
+      await fetch(`/api/custom-sizes/${id}`, { method: "DELETE" });
+      setCustomSizes(prev => prev.filter(s => s.id !== id));
+    } finally {
+      setDeletingSize(null);
+    }
+  }
+
+  function setBgDefaults<K extends keyof BuyersGuideDefaults>(key: K, val: BuyersGuideDefaults[K]) {
+    setSettings(s => ({
+      ...s,
+      buyers_guide_defaults: { ...(s.buyers_guide_defaults ?? { warranty_type: 'as_is' }), [key]: val },
+    }));
+  }
+
+  function toggleNdw(key: string) {
+    setSettings(s => {
+      const cur = s.buyers_guide_defaults?.non_dealer_warranties ?? [];
+      const next = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key];
+      return { ...s, buyers_guide_defaults: { ...(s.buyers_guide_defaults ?? { warranty_type: 'as_is' }), non_dealer_warranties: next } };
+    });
   }
 
   async function handleSave() {
@@ -252,6 +303,97 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
             currentLogoUrl={logoUrl}
             onUpdated={(url) => setLogoUrl(url)}
           />
+        </div>
+      )}
+
+      {/* Custom Sizes */}
+      {(role === "dealer_admin" || isAdminPicker) && dealerId && (
+        <div className="card p-5 mb-4">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>Custom Paper Sizes</p>
+            <button className="btn btn-primary text-xs" style={{ height: 28, padding: "0 12px" }} onClick={() => { setEditingSize(null); setShowAddSize(true); }}>+ Add Size</button>
+          </div>
+          {customSizes.length === 0 ? (
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>No custom sizes yet. Add a size to use it in the Document Builder.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Name</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Size</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Background</th>
+                  <th className="px-3 py-2" style={{ width: 80 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {customSizes.map(cs => (
+                  <tr key={cs.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                    <td className="px-3 py-2" style={{ color: "var(--text-primary)" }}>{cs.name}</td>
+                    <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{cs.width_in}&quot; × {cs.height_in}&quot;</td>
+                    <td className="px-3 py-2" style={{ color: "var(--text-muted)", fontSize: 11 }}>{cs.background_url ? "Custom" : "Default"}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button className="text-xs mr-3" style={{ color: "var(--blue)" }} onClick={() => { setEditingSize(cs); setShowAddSize(true); }}>Edit</button>
+                      <button className="text-xs" style={{ color: "var(--error)", opacity: deletingSize === cs.id ? 0.5 : 1 }} disabled={deletingSize === cs.id} onClick={() => void deleteCustomSize(cs.id)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Buyer's Guide Defaults */}
+      {(role === "dealer_admin" || isAdminPicker) && dealerId && (
+        <div className="card p-5 mb-4">
+          <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>Buyer's Guide Defaults</p>
+          <div className="mb-3">
+            <label className="label">Default Warranty Type</label>
+            <select className="input w-full" value={settings.buyers_guide_defaults?.warranty_type ?? "as_is"} onChange={e => setBgDefaults("warranty_type", e.target.value as BuyersGuideDefaults["warranty_type"])}>
+              {Object.entries(WARRANTY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          {settings.buyers_guide_defaults?.warranty_type === "limited" && (
+            <>
+              <div className="flex gap-3 mb-3">
+                <div className="flex-1">
+                  <label className="label">Labor %</label>
+                  <input className="input w-full" type="number" min={0} max={100} value={settings.buyers_guide_defaults?.labor_pct ?? ""} onChange={e => setBgDefaults("labor_pct", Number(e.target.value))} placeholder="50" />
+                </div>
+                <div className="flex-1">
+                  <label className="label">Parts %</label>
+                  <input className="input w-full" type="number" min={0} max={100} value={settings.buyers_guide_defaults?.parts_pct ?? ""} onChange={e => setBgDefaults("parts_pct", Number(e.target.value))} placeholder="50" />
+                </div>
+              </div>
+              <div className="mb-3">
+                <label className="label">Systems Covered</label>
+                <textarea className="input w-full" rows={2} style={{ height: "auto", resize: "vertical" }} value={settings.buyers_guide_defaults?.systems_covered ?? ""} onChange={e => setBgDefaults("systems_covered", e.target.value)} placeholder="Powertrain, Engine, Transmission" />
+              </div>
+              <div className="mb-3">
+                <label className="label">Duration</label>
+                <input className="input w-full" value={settings.buyers_guide_defaults?.duration ?? ""} onChange={e => setBgDefaults("duration", e.target.value)} placeholder="30 days or 1,000 miles" />
+              </div>
+            </>
+          )}
+          <div className="mb-3">
+            <label className="label mb-2" style={{ display: "block" }}>Non-Dealer Warranties</label>
+            {NON_DEALER.map(({ key, label }) => (
+              <label key={key} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={settings.buyers_guide_defaults?.non_dealer_warranties?.includes(key) ?? false} onChange={() => toggleNdw(key)} style={{ marginTop: 2, flexShrink: 0 }} />
+                <span className="text-xs" style={{ color: "var(--text-secondary)", lineHeight: 1.4 }}>{label}</span>
+              </label>
+            ))}
+          </div>
+          <div className="mb-3">
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input type="checkbox" checked={settings.buyers_guide_defaults?.service_contract ?? false} onChange={e => setBgDefaults("service_contract", e.target.checked)} />
+              <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Service contract available</span>
+            </label>
+          </div>
+          <div>
+            <label className="label">Dealer Email (optional)</label>
+            <input className="input w-full" type="email" value={settings.buyers_guide_defaults?.dealer_email ?? ""} onChange={e => setBgDefaults("dealer_email", e.target.value)} placeholder="sales@dealer.com" />
+          </div>
         </div>
       )}
 
@@ -411,6 +553,19 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
           <span className="text-sm" style={{ color: "var(--error)" }}>{error}</span>
         )}
       </div>
+
+      {showAddSize && dealerId && (
+        <AddCustomSizeModal
+          dealerId={dealerId}
+          editing={editingSize ?? undefined}
+          onSaved={(row) => {
+            setCustomSizes(prev => editingSize ? prev.map(s => s.id === row.id ? row : s) : [...prev, row]);
+            setShowAddSize(false);
+            setEditingSize(null);
+          }}
+          onClose={() => { setShowAddSize(false); setEditingSize(null); }}
+        />
+      )}
     </div>
   );
 }

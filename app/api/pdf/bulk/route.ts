@@ -37,8 +37,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Maximum 50 vehicles per bulk request" }, { status: 400 });
   }
 
-  const paperSize: PaperSize = reqPaperSize ?? (docType === "infosheet" ? "infosheet" : "standard");
-  const isInfosheet = paperSize === "infosheet";
+  const paperSizeStr: string = reqPaperSize ?? (docType === "infosheet" ? "infosheet" : "standard");
+  const knownSizes = new Set(['standard', 'narrow', 'infosheet']);
+  const paperSize: PaperSize = (knownSizes.has(paperSizeStr) ? paperSizeStr : 'standard') as PaperSize;
+  const isInfosheet = paperSizeStr === "infosheet";
   const bgUrl = isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT;
 
   const admin = createAdminSupabaseClient();
@@ -185,8 +187,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const dealerLogoUrl = rawLogo
         ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
         : null;
-      const html = buildPdfHtml({ widgets, paperSize, fontScale: 1.0, bgUrl, vehicle: vehicleData, options, dealerLogoUrl });
-      const pdfBuffer = await renderPdf(html, paperSize);
+      // Custom paper size dims (bulk: look up once per vehicle since dealer may differ)
+      let customPaperDims: { widthIn: number; heightIn: number } | undefined;
+      if (!knownSizes.has(paperSizeStr)) {
+        const { data: cs } = await admin
+          .from("dealer_custom_sizes")
+          .select("width_in, height_in")
+          .eq("id", paperSizeStr)
+          .eq("dealer_id", dv.dealer_id)
+          .maybeSingle();
+        if (cs) customPaperDims = { widthIn: Number(cs.width_in), heightIn: Number(cs.height_in) };
+      }
+      const html = buildPdfHtml({ widgets, paperSize: paperSizeStr, fontScale: 1.0, bgUrl, vehicle: vehicleData, options, dealerLogoUrl, customDims: customPaperDims });
+      const pdfBuffer = await renderPdf(html, paperSizeStr, { customDims: customPaperDims });
 
       const timestamp = Date.now();
       const s3Key = `${dv.dealer_id}/${vehicleId}/${timestamp}.pdf`;

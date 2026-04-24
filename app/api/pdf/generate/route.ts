@@ -38,7 +38,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { dealerVehicleId, widgets: inWidgets, paperSize = "standard", fontScale = 1.0, docType = "addendum" } = body;
+  const { dealerVehicleId, widgets: inWidgets, paperSize: reqPaperSize = "standard", fontScale = 1.0, docType = "addendum" } = body;
+  const paperSize = reqPaperSize;
 
   console.log("[pdf/generate] called — dealerVehicleId:", dealerVehicleId, "docType:", docType, "role:", claims.role, "dealer_id:", claims.dealer_id);
 
@@ -201,8 +202,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
+    // ── Resolve custom paper size dimensions ──────────────────────────────────
+    let customPaperDims: { widthIn: number; heightIn: number } | undefined;
+    const knownSizes = new Set(['standard', 'narrow', 'infosheet']);
+    const effectivePaperSizeStr = savedTemplatePaperSize ?? paperSize;
+    if (!knownSizes.has(effectivePaperSizeStr)) {
+      const { data: cs } = await admin
+        .from("dealer_custom_sizes")
+        .select("width_in, height_in")
+        .eq("id", effectivePaperSizeStr)
+        .eq("dealer_id", dv.dealer_id)
+        .maybeSingle();
+      if (cs) customPaperDims = { widthIn: Number(cs.width_in), heightIn: Number(cs.height_in) };
+    }
+
     // ── Build widget layout ───────────────────────────────────────────────────
-    const effectivePaperSize: PaperSize = savedTemplatePaperSize ?? paperSize;
+    const effectivePaperSize: PaperSize = (knownSizes.has(effectivePaperSizeStr) ? effectivePaperSizeStr : 'standard') as PaperSize;
     const effectiveFontScale = savedTemplateFontScale ?? fontScale;
     const isInfosheet = effectivePaperSize === "infosheet";
     let widgets: Widget[];
@@ -260,18 +275,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       : null;
     const html = buildPdfHtml({
       widgets,
-      paperSize: effectivePaperSize,
+      paperSize: effectivePaperSizeStr,
       fontScale: effectiveFontScale,
       bgUrl,
       vehicle: vehicleData,
       options,
       disclaimer: disclaimer ?? undefined,
       dealerLogoUrl,
+      customDims: customPaperDims,
     });
 
     let pdfBuffer: Buffer;
     try {
-      pdfBuffer = await renderPdf(html, effectivePaperSize);
+      pdfBuffer = await renderPdf(html, effectivePaperSizeStr, { customDims: customPaperDims });
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : "PDF render failed" }, { status: 500 });
     }

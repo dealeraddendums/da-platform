@@ -70,9 +70,10 @@ export default async function BuilderVehicleRoute({
   };
 
   const admin = createAdminSupabaseClient();
-  const [{ data: settings }, { data: dealerRow }] = await Promise.all([
+  const [{ data: settings }, { data: dealerRow }, { data: customSizeRows }] = await Promise.all([
     admin.from("dealer_settings").select("ai_content_default").eq("dealer_id", r.DEALER_ID).single<{ ai_content_default: boolean }>(),
     admin.from("dealers").select("logo_url").eq("dealer_id", r.DEALER_ID).maybeSingle<{ logo_url: string | null }>(),
+    admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, created_at, updated_at").eq("dealer_id", r.DEALER_ID).order("name"),
   ]);
 
   const aiEnabled = settings?.ai_content_default ?? false;
@@ -83,5 +84,5 @@ export default async function BuilderVehicleRoute({
     ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
     : null;
 
-  return <BuilderPage vehicle={{ ...vehicle, logo_url: resolvedLogoUrl }} aiEnabled={aiEnabled} />;
+  return <BuilderPage vehicle={{ ...vehicle, logo_url: resolvedLogoUrl }} aiEnabled={aiEnabled} customSizes={customSizeRows ?? []} />;
 }

@@ -5,10 +5,10 @@ import {
   SNAP, MIN_W, MIN_H, BG_DEFAULT, IS_BG_DEFAULT, IB_DEFAULT,
   PAPERS, LAYOUT, LAYOUT_INFOSHEET, WIDGET_LABELS, UNIQUE_WIDGETS,
   PALETTE_HIDDEN_IN_ADDENDUM, PALETTE_HIDDEN_IN_INFOSHEET,
-  DEFS, DEFAULT_CUSTOM_WIDGETS, snapV, makeWidget,
+  DEFS, DEFAULT_CUSTOM_WIDGETS, snapV, makeWidget, getPaperDims,
 } from './constants';
 import { renderW } from './widgetRenderer';
-import type { Widget, PaperSize, CustomWidgetDef, VehiclePreload, SavedTemplate } from './types';
+import type { Widget, PaperSize, CustomWidgetDef, VehiclePreload, SavedTemplate, CustomSize } from './types';
 import { useBuilderBreadcrumb } from '@/contexts/BuilderBreadcrumb';
 
 // ── Palette widget tiles ──────────────────────────────────────────────
@@ -41,16 +41,17 @@ interface Props {
   vehicle?: VehiclePreload;
   templateId?: string;
   aiEnabled?: boolean;
+  customSizes?: CustomSize[];
 }
 
-export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [] }: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
   const [nid, setNid] = useState(1);
   const [selId, setSelId] = useState<string | null>(null);
   const [Z, setZ] = useState(0.75);
-  const [paperSize, setPaperSize] = useState<PaperSize>('standard');
+  const [paperSize, setPaperSize] = useState<string>('standard');
   const [fontScale, setFontScale] = useState(1.0);
   const [bgUrl, setBgUrl] = useState(BG_DEFAULT);
   const [bgInputVal, setBgInputVal] = useState(BG_DEFAULT);
@@ -85,6 +86,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   } | null>(null);
   const ZRef = useRef(Z);
   const paperSizeRef = useRef(paperSize);
+  const customSizesRef = useRef<CustomSize[]>(customSizes);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Set topbar breadcrumb
@@ -99,6 +101,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   useEffect(() => { widgetsRef.current = widgets; }, [widgets]);
   useEffect(() => { ZRef.current = Z; }, [Z]);
   useEffect(() => { paperSizeRef.current = paperSize; }, [paperSize]);
+  useEffect(() => { customSizesRef.current = customSizes; }, [customSizes]);
 
   // ── Toast ──────────────────────────────────────────────────────────
   const showToast = useCallback((msg: string) => {
@@ -241,7 +244,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
       const Z = ZRef.current;
       const ps = paperSizeRef.current;
       const pr = paperRef.current.getBoundingClientRect();
-      const { w: pw, h: ph } = PAPERS[ps];
+      const { w: pw, h: ph } = getPaperDims(ps, customSizesRef.current);
       let nx = w.x, ny = w.y, nw = w.w, nh = w.h;
 
       if (drag.mode === 'move') {
@@ -299,7 +302,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
         const step = e.metaKey || e.ctrlKey ? 10 : e.shiftKey ? 4 : 1;
         setWidgets(prev => {
           const w = prev[selId]; if (!w) return prev;
-          const { w: pw, h: ph } = PAPERS[paperSizeRef.current];
+          const { w: pw, h: ph } = getPaperDims(paperSizeRef.current, customSizesRef.current);
           let { x, y } = w;
           if (e.key === 'ArrowLeft')  x = Math.max(0, x - step);
           if (e.key === 'ArrowRight') x = Math.min(pw - w.w, x + step);
@@ -381,7 +384,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   }, [templateId]);
 
   // ── Paper size switch ──────────────────────────────────────────────
-  const switchPaperSize = useCallback((size: PaperSize) => {
+  const switchPaperSize = useCallback((size: string) => {
     setPaperSize(size);
     paperSizeRef.current = size;
     if (size === 'infosheet') {
@@ -410,7 +413,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
         setAiPendingLoad(true);
       }
     } else {
-      setBgUrl(BG_DEFAULT); setBgInputVal(BG_DEFAULT);
+      const customBg = customSizesRef.current.find(c => c.id === size)?.background_url;
+      setBgUrl(customBg ?? BG_DEFAULT); setBgInputVal(customBg ?? BG_DEFAULT);
       const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox'];
       let nextNid = 1;
       const ws: Record<string, Widget> = {};
@@ -442,7 +446,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   const align = useCallback((dir: 'left'|'center'|'right') => {
     if (!selId) return;
     const w = widgetsRef.current[selId]; if (!w) return;
-    const pw = PAPERS[paperSizeRef.current].w;
+    const pw = getPaperDims(paperSizeRef.current, customSizesRef.current).w;
     let x = w.x;
     if (dir === 'left') x = 12;
     else if (dir === 'right') x = pw - w.w - 12;
@@ -629,7 +633,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
   // ────────────────────────────────────────────────────────────────────
   // RENDER
   // ────────────────────────────────────────────────────────────────────
-  const ps = PAPERS[paperSize];
+  const ps = getPaperDims(paperSize, customSizes);
   const isInfosheet = paperSize === 'infosheet';
   const usedTypes = new Set(Object.values(widgets).map(w => w.type));
 
@@ -755,11 +759,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false }: 
               <Tb onClick={() => align('center')} title="Center">↔</Tb>
               <Tb onClick={() => align('right')} title="Align right">⇥</Tb>
               <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.2)' }} />
-              <select value={paperSize} onChange={e => switchPaperSize(e.target.value as PaperSize)}
+              <select value={paperSize} onChange={e => switchPaperSize(e.target.value)}
                 style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>
                 <option value="narrow">3.125&quot; × 11&quot; Narrow</option>
                 <option value="standard">4.25&quot; × 11&quot; Standard</option>
                 <option value="infosheet">8.5&quot; × 11&quot; Infosheet</option>
+                {customSizes.map(cs => (
+                  <option key={cs.id} value={cs.id}>{cs.name} ({cs.width_in}&quot; × {cs.height_in}&quot;)</option>
+                ))}
               </select>
               <select value={fontScale} onChange={e => setFontScale(+e.target.value)}
                 style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>

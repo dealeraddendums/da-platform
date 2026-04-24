@@ -1,5 +1,14 @@
 export type PaperSize = 'standard' | 'narrow' | 'infosheet';
 
+export interface CustomSize {
+  id: string;
+  dealer_id: string;
+  name: string;
+  width_in: number;
+  height_in: number;
+  background_url: string | null;
+}
+
 export type WidgetType =
   | 'logo' | 'vehicle' | 'msrp' | 'options' | 'subtotal'
   | 'askbar' | 'dealer' | 'infobox' | 'headerbar' | 'customtext'
