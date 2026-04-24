@@ -40,6 +40,27 @@ const BG_COLORS = [
   ['#134e4a','10 Teal'], ['#4a1942','11 Maroon'], ['#1e3a8a','12 Cobalt'],
 ];
 
+// Nudge any widget whose top-left corner is outside canvas back to the nearest in-bounds position
+function clampWidgets(ws: Record<string, Widget>, pw: number, ph: number): Record<string, Widget> {
+  let changed = false;
+  const result: Record<string, Widget> = {};
+  for (const [id, w] of Object.entries(ws)) {
+    const x = Math.max(0, Math.min(pw - MIN_W, w.x));
+    const y = Math.max(0, Math.min(ph - MIN_H, w.y));
+    if (x !== w.x || y !== w.y) { result[id] = { ...w, x, y }; changed = true; }
+    else result[id] = w;
+  }
+  return changed ? result : ws;
+}
+
+// For non-infosheet layouts: add askbar at default position if it was somehow removed
+function ensureAskbar(ws: Record<string, Widget>, nid: number, ps: string): [Record<string, Widget>, number] {
+  if (ps === 'infosheet') return [ws, nid];
+  if (Object.values(ws).some(w => w.type === 'askbar')) return [ws, nid];
+  const id = 'w' + nid;
+  return [{ ...ws, [id]: makeWidget('askbar', id) }, nid + 1];
+}
+
 interface Props {
   vehicle?: VehiclePreload;
   templateId?: string;
@@ -378,12 +399,18 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return;
-        const json = data.template_json as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: PaperSize };
+        const json = data.template_json as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: string };
         if (json.widgets) {
-          setWidgets(json.widgets);
-          widgetsRef.current = json.widgets;
+          const ps = json.paperSize ?? 'standard';
+          const { w: pw, h: ph } = getPaperDims(ps, customSizesRef.current);
+          let ws = json.widgets;
+          let n = json.nid ?? 1;
+          [ws, n] = ensureAskbar(ws, n, ps);
+          ws = clampWidgets(ws, pw, ph);
+          setWidgets(ws);
+          widgetsRef.current = ws;
+          setNid(n);
         }
-        if (json.nid) setNid(json.nid);
         if (json.bgUrl) { setBgUrl(json.bgUrl); setBgInputVal(json.bgUrl); }
         if (json.fontScale) setFontScale(json.fontScale);
         if (json.paperSize) setPaperSize(json.paperSize);
@@ -422,15 +449,24 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         setAiPendingLoad(true);
       }
     } else {
+      const { w: pw, h: ph } = getPaperDims(size, customSizesRef.current);
+      // Scale widget x/w proportionally when canvas width differs from the standard 408px reference
+      const scaleW = pw / PAPERS.standard.w;
       const customBg = customSizesRef.current.find(c => c.id === size)?.background_url;
       setBgUrl(customBg ?? BG_DEFAULT); setBgInputVal(customBg ?? BG_DEFAULT);
       const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox'];
       let nextNid = 1;
-      const ws: Record<string, Widget> = {};
+      let ws: Record<string, Widget> = {};
       order.forEach(type => {
         const id = 'w' + nextNid++;
-        ws[id] = makeWidget(type, id);
+        if (scaleW !== 1) {
+          const layout = LAYOUT[type] ?? { x: 12, y: 200, w: 384, h: 60 };
+          ws[id] = makeWidget(type, id, Math.round(layout.x * scaleW), layout.y, Math.round(layout.w * scaleW), layout.h);
+        } else {
+          ws[id] = makeWidget(type, id);
+        }
       });
+      ws = clampWidgets(ws, pw, ph);
       widgetsRef.current = ws;
       setWidgets(ws);
       setNid(nextNid);
@@ -614,13 +650,19 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         showToast('This template has no saved layout. Please re-save it from the Builder.');
         return;
       }
-      const json = tmpl.template_json as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: PaperSize };
+      const json = tmpl.template_json as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: string };
       if (!json.widgets || Object.keys(json.widgets).length === 0) {
         showToast('This template has no saved layout. Please re-save it from the Builder.');
         return;
       }
-      setWidgets(json.widgets); widgetsRef.current = json.widgets;
-      if (json.nid) setNid(json.nid);
+      const ps = json.paperSize ?? 'standard';
+      const { w: pw, h: ph } = getPaperDims(ps, customSizesRef.current);
+      let ws = json.widgets;
+      let n = json.nid ?? 1;
+      [ws, n] = ensureAskbar(ws, n, ps);
+      ws = clampWidgets(ws, pw, ph);
+      setWidgets(ws); widgetsRef.current = ws;
+      setNid(n);
       if (json.bgUrl) { setBgUrl(json.bgUrl); setBgInputVal(json.bgUrl); }
       if (json.fontScale) setFontScale(json.fontScale);
       if (json.paperSize) { setPaperSize(json.paperSize); paperSizeRef.current = json.paperSize; }
