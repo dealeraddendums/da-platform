@@ -11,6 +11,7 @@ import { renderW } from './widgetRenderer';
 import type { Widget, PaperSize, CustomWidgetDef, VehiclePreload, SavedTemplate, CustomSize } from './types';
 import { useBuilderBreadcrumb } from '@/contexts/BuilderBreadcrumb';
 import CustomSizesModal from '@/components/CustomSizesModal';
+import AddCustomSizeModal from './AddCustomSizeModal';
 import ImageUploadPicker from '@/components/ImageUploadPicker';
 
 // ── Palette widget tiles ──────────────────────────────────────────────
@@ -79,6 +80,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [printAiOverride, setPrintAiOverride] = useState<'db'|'ai'|'default'>('default');
   const [localCustomSizes, setLocalCustomSizes] = useState<CustomSize[]>(customSizes);
   const [showCustomSizesModal, setShowCustomSizesModal] = useState(false);
+  const [showAddSizeModal, setShowAddSizeModal] = useState(false);
   const [showBgPicker, setShowBgPicker] = useState(false);
   const [showLogoPicker, setShowLogoPicker] = useState(false);
 
@@ -767,14 +769,31 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
               <Tb onClick={() => align('center')} title="Center">↔</Tb>
               <Tb onClick={() => align('right')} title="Align right">⇥</Tb>
               <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.2)' }} />
-              <select value={paperSize} onChange={e => switchPaperSize(e.target.value)}
+              <select
+                value={paperSize}
+                onChange={e => {
+                  if (e.target.value === '__add_new__') {
+                    if (effectiveDealerId) setShowAddSizeModal(true);
+                  } else {
+                    switchPaperSize(e.target.value);
+                  }
+                }}
                 style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>
                 <option value="narrow">3.125&quot; × 11&quot; Narrow</option>
                 <option value="standard">4.25&quot; × 11&quot; Standard</option>
                 <option value="infosheet">8.5&quot; × 11&quot; Infosheet</option>
+                {localCustomSizes.length > 0 && (
+                  <option disabled>────────────────</option>
+                )}
                 {localCustomSizes.map(cs => (
                   <option key={cs.id} value={cs.id}>{cs.name} ({cs.width_in}&quot; × {cs.height_in}&quot;)</option>
                 ))}
+                {effectiveDealerId && (
+                  <>
+                    <option disabled>────────────────</option>
+                    <option value="__add_new__">+ Add Custom Size</option>
+                  </>
+                )}
               </select>
               {effectiveDealerId && (
                 <button onClick={() => setShowCustomSizesModal(true)} title="Manage custom sizes"
@@ -1104,8 +1123,26 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         <CustomSizesModal
           dealerId={effectiveDealerId}
           initialSizes={localCustomSizes}
-          onUpdate={setLocalCustomSizes}
+          onUpdate={sizes => {
+            setLocalCustomSizes(sizes);
+            customSizesRef.current = sizes;
+          }}
           onClose={() => setShowCustomSizesModal(false)}
+        />
+      )}
+
+      {/* ADD CUSTOM SIZE MODAL */}
+      {showAddSizeModal && effectiveDealerId && (
+        <AddCustomSizeModal
+          dealerId={effectiveDealerId}
+          onSave={newSize => {
+            const updated = [...customSizesRef.current, newSize];
+            setLocalCustomSizes(updated);
+            customSizesRef.current = updated;
+            setShowAddSizeModal(false);
+            switchPaperSize(newSize.id);
+          }}
+          onClose={() => setShowAddSizeModal(false)}
         />
       )}
 
