@@ -81,7 +81,37 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   if (type === 'infobox') {
-    return `<div style="width:100%;height:100%"><img src="${(d.imgUrl as string) || IB_DEFAULT}" style="width:100%;height:100%;object-fit:fill;display:block;mix-blend-mode:multiply" alt="Infobox"></div>`;
+    const ibType = (d.ibType as string) || 'epa';
+    const imgSt = 'width:100%;height:100%;object-fit:fill;display:block;mix-blend-mode:multiply';
+    const phSt = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#f0f0f0;border:1px dashed #bbb';
+    const src = (d.imgUrl as string) || '';
+    if (ibType === 'epa') {
+      return `<div style="width:100%;height:100%"><img src="${src || IB_DEFAULT}" style="${imgSt}" alt="EPA"></div>`;
+    }
+    if (ibType === 'photo') {
+      return src
+        ? `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="Vehicle Photo"></div>`
+        : `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">Vehicle Photo</span></div>`;
+    }
+    if (ibType === 'qr') {
+      return src
+        ? `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="QR Code"></div>`
+        : `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">QR Code</span></div>`;
+    }
+    if (ibType === 'barcode') {
+      return src
+        ? `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="VIN Barcode"></div>`
+        : `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">VIN Barcode</span></div>`;
+    }
+    if (ibType === 'upload') {
+      return src
+        ? `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="Custom Image"></div>`
+        : `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">Upload Custom Image</span></div>`;
+    }
+    // fallback — URL loaded directly via imgUrl input
+    return src
+      ? `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="Infobox"></div>`
+      : `<div style="width:100%;height:100%"><img src="${IB_DEFAULT}" style="${imgSt}" alt="Infobox"></div>`;
   }
 
   if (type === 'description') {

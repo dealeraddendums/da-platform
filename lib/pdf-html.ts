@@ -2,6 +2,7 @@
 import { renderW } from '@/components/builder/widgetRenderer';
 import type { Widget, PaperSize } from '@/components/builder/types';
 import { formatOptionPrice } from '@/lib/option-price';
+import { parsePhotos } from '@/lib/vehicles';
 import type { VehicleRow } from '@/lib/vehicles';
 
 const PAPER_DIMS: Record<string, { w: number; h: number }> = {
@@ -78,6 +79,10 @@ export function buildPdfHtml({
         };
       }
       if (w.type === 'barcode') d.vin = vehicle.VIN_NUMBER;
+      if (w.type === 'infobox' && (d.ibType as string) === 'photo') {
+        const photos = parsePhotos(vehicle.PHOTOS ?? null);
+        if (photos[0]) d.imgUrl = photos[0];
+      }
     }
 
     if (options !== undefined && w.type === 'options') {
