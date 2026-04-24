@@ -776,10 +776,12 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                   <option key={cs.id} value={cs.id}>{cs.name} ({cs.width_in}&quot; × {cs.height_in}&quot;)</option>
                 ))}
               </select>
-              <button onClick={() => setShowCustomSizesModal(true)} title="Manage custom sizes"
-                style={{ width: 26, height: 26, borderRadius: 4, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.85)', fontSize: 13, flexShrink: 0 }}>
-                ⚙
-              </button>
+              {effectiveDealerId && (
+                <button onClick={() => setShowCustomSizesModal(true)} title="Manage custom sizes"
+                  style={{ width: 26, height: 26, borderRadius: 4, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.85)', fontSize: 13, flexShrink: 0 }}>
+                  ⚙
+                </button>
+              )}
               <select value={fontScale} onChange={e => setFontScale(+e.target.value)}
                 style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>
                 <option value="0.8">Font: Small</option>
@@ -1098,23 +1100,13 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       )}
 
       {/* CUSTOM SIZES MODAL */}
-      {showCustomSizesModal && (
-        effectiveDealerId ? (
-          <CustomSizesModal
-            dealerId={effectiveDealerId}
-            initialSizes={localCustomSizes}
-            onUpdate={setLocalCustomSizes}
-            onClose={() => setShowCustomSizesModal(false)}
-          />
-        ) : (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            onClick={() => setShowCustomSizesModal(false)}>
-            <div style={{ background: '#fff', borderRadius: 6, padding: 24, maxWidth: 360, textAlign: 'center', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
-              <p style={{ fontSize: 14, color: '#333', marginBottom: 16 }}>Custom sizes require opening the builder from a vehicle page.</p>
-              <button onClick={() => setShowCustomSizesModal(false)} style={{ padding: '7px 18px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 13, cursor: 'pointer' }}>OK</button>
-            </div>
-          </div>
-        )
+      {showCustomSizesModal && effectiveDealerId && (
+        <CustomSizesModal
+          dealerId={effectiveDealerId}
+          initialSizes={localCustomSizes}
+          onUpdate={setLocalCustomSizes}
+          onClose={() => setShowCustomSizesModal(false)}
+        />
       )}
 
       {/* BACKGROUND IMAGE PICKER */}

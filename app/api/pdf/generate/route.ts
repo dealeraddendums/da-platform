@@ -204,16 +204,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // ── Resolve custom paper size dimensions ──────────────────────────────────
     let customPaperDims: { widthIn: number; heightIn: number } | undefined;
+    let customSizeBgUrl: string | undefined;
     const knownSizes = new Set(['standard', 'narrow', 'infosheet']);
     const effectivePaperSizeStr = savedTemplatePaperSize ?? paperSize;
     if (!knownSizes.has(effectivePaperSizeStr)) {
       const { data: cs } = await admin
         .from("dealer_custom_sizes")
-        .select("width_in, height_in")
+        .select("width_in, height_in, background_url")
         .eq("id", effectivePaperSizeStr)
         .eq("dealer_id", dv.dealer_id)
         .maybeSingle();
-      if (cs) customPaperDims = { widthIn: Number(cs.width_in), heightIn: Number(cs.height_in) };
+      if (cs) {
+        customPaperDims = { widthIn: Number(cs.width_in), heightIn: Number(cs.height_in) };
+        if (cs.background_url) customSizeBgUrl = cs.background_url;
+      }
     }
 
     // ── Build widget layout ───────────────────────────────────────────────────
@@ -267,7 +271,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // ── Render and upload ─────────────────────────────────────────────────────
-    const bgUrl = body.bgUrl || savedTemplateBgUrl || (isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT);
+    const bgUrl = body.bgUrl || savedTemplateBgUrl || customSizeBgUrl || (isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT);
     const S3_LOGO = "https://new-dealer-logos.s3.us-east-1.amazonaws.com/";
     const rawLogo = dealer?.logo_url ?? null;
     const dealerLogoUrl = rawLogo
