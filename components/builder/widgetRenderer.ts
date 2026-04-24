@@ -6,6 +6,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
   const fs = fontScale;
 
   if (type === 'logo') {
+    if (d.imgUrl === null) return '';  // dealer has no logo — render blank
     if (d.imgUrl)
       return `<img style="width:100%;height:100%;object-fit:contain;object-position:left center;display:block;" src="${d.imgUrl}" alt="Logo">`;
     return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;border-radius:4px;"><span style="font-size:16px;font-weight:700;color:#bbb;">${d.label || 'Your Logo'}</span></div>`;

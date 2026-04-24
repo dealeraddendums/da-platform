@@ -20,7 +20,7 @@ export interface BuildPdfHtmlInput {
   vehicle?: VehicleRow;
   options?: AnyOption[];
   disclaimer?: string;
-  dealerLogoUrl?: string;
+  dealerLogoUrl?: string | null;
 }
 
 export function buildPdfHtml({
@@ -38,9 +38,26 @@ export function buildPdfHtml({
   const enriched = widgets.map(w => {
     const d = { ...w.d };
 
-    // Always inject the dealer's current logo URL so PDFs never show placeholder
-    if (w.type === 'logo' && dealerLogoUrl) {
+    // Logo: always override saved template value with live dealer logo.
+    // null = dealer has no logo → render blank. undefined = not provided → keep saved.
+    if (w.type === 'logo' && dealerLogoUrl !== undefined) {
       d.imgUrl = dealerLogoUrl;
+    }
+
+    // MSRP / askbar / subtotal: always use live vehicle data, never saved template values.
+    if (w.type === 'msrp' && vehicle?.MSRP) {
+      const msrp = parseFloat(vehicle.MSRP);
+      if (!isNaN(msrp)) d.value = `$${msrp.toLocaleString()}`;
+    }
+    if (w.type === 'askbar' && vehicle) {
+      const msrp = vehicle.MSRP ? parseFloat(vehicle.MSRP) : 0;
+      const optTotal = (options ?? []).reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
+      const total = msrp + optTotal;
+      if (total > 0) d.value = `$${total.toLocaleString()}`;
+    }
+    if (w.type === 'subtotal') {
+      const optTotal = (options ?? []).reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
+      if (optTotal > 0) d.value = `$${optTotal.toLocaleString()}`;
     }
 
     if (vehicle) {

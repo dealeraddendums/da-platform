@@ -78,13 +78,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // dealer.dealer_id is the text ID used by group options / disclaimers
     const textDealerId = dealer?.dealer_id ?? "";
 
-    // ── Options from Supabase — descriptions come directly from the rows ──────
+    // ── Options from Supabase ─────────────────────────────────────────────────
     const { data: optionRows } = await admin
       .from("vehicle_options")
       .select("*")
       .eq("vehicle_id", 0)
       .eq("dealer_id", dv.dealer_id)
       .order("sort_order");
+
+    // For options missing a description, fall back to addendum_library by name
+    const nullDescNames = (optionRows ?? [])
+      .filter(r => !r.description)
+      .map(r => r.option_name as string);
+    const libDescMap: Record<string, string | null> = {};
+    if (nullDescNames.length > 0) {
+      const { data: libRows } = await admin
+        .from("addendum_library")
+        .select("option_name, description")
+        .in("option_name", nullDescNames)
+        .not("description", "is", null);
+      for (const lr of libRows ?? []) {
+        if (lr.description) libDescMap[lr.option_name as string] = lr.description as string;
+      }
+    }
 
     const groupOpts = await getGroupOptionsForDealer(textDealerId);
 
@@ -97,7 +113,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       })),
       ...(optionRows ?? []).map(r => ({
         ...r,
-        description: r.description ?? null,
+        description: r.description ?? libDescMap[r.option_name as string] ?? null,
       })),
     ];
 
@@ -237,6 +253,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // ── Render and upload ─────────────────────────────────────────────────────
     const bgUrl = body.bgUrl || savedTemplateBgUrl || (isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT);
+    const S3_LOGO = "https://new-dealer-logos.s3.us-east-1.amazonaws.com/";
+    const rawLogo = dealer?.logo_url ?? null;
+    const dealerLogoUrl = rawLogo
+      ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
+      : null;
     const html = buildPdfHtml({
       widgets,
       paperSize: effectivePaperSize,
@@ -245,7 +266,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       vehicle: vehicleData,
       options,
       disclaimer: disclaimer ?? undefined,
-      dealerLogoUrl: dealer?.logo_url ?? undefined,
+      dealerLogoUrl,
     });
 
     let pdfBuffer: Buffer;

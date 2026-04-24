@@ -82,6 +82,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .eq("active", true)
         .order("sort_order");
 
+      // Fall back to addendum_library descriptions for options with null description
+      const nullDescNames = (optionRows ?? [])
+        .filter(r => !r.description)
+        .map(r => r.option_name as string);
+      const libDescMap: Record<string, string | null> = {};
+      if (nullDescNames.length > 0) {
+        const { data: libRows } = await admin
+          .from("addendum_library")
+          .select("option_name, description")
+          .in("option_name", nullDescNames)
+          .not("description", "is", null);
+        for (const lr of libRows ?? []) {
+          if (lr.description) libDescMap[lr.option_name as string] = lr.description as string;
+        }
+      }
+
       const groupOpts = await getGroupOptionsForDealer(dv.dealer_id);
       const options = [
         ...groupOpts.map(g => ({
@@ -90,7 +106,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           description: null as string | null,
           active: true as const,
         })),
-        ...(optionRows ?? []).map(r => ({ ...r, description: r.description ?? null })),
+        ...(optionRows ?? []).map(r => ({
+          ...r,
+          description: r.description ?? libDescMap[r.option_name as string] ?? null,
+        })),
       ];
 
       // ── Map dealer_vehicles → VehicleRow shape ────────────────────────────
@@ -161,7 +180,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           return w;
         });
 
-      const html = buildPdfHtml({ widgets, paperSize, fontScale: 1.0, bgUrl, vehicle: vehicleData, options, dealerLogoUrl: dealer?.logo_url ?? undefined });
+      const S3_LOGO = "https://new-dealer-logos.s3.us-east-1.amazonaws.com/";
+      const rawLogo = dealer?.logo_url ?? null;
+      const dealerLogoUrl = rawLogo
+        ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
+        : null;
+      const html = buildPdfHtml({ widgets, paperSize, fontScale: 1.0, bgUrl, vehicle: vehicleData, options, dealerLogoUrl });
       const pdfBuffer = await renderPdf(html, paperSize);
 
       const timestamp = Date.now();
