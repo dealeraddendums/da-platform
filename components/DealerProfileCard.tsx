@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
+import DealerLogoUploader from "@/components/DealerLogoUploader";
 
 type Props = {
   dealer: DealerRow;
@@ -77,6 +78,7 @@ function dealerToForm(d: DealerRow): FormData {
 
 export default function DealerProfileCard({ dealer: initialDealer, group, canEdit, isSuperAdmin, hubspotCompanyId }: Props) {
   const [dealer, setDealer] = useState(initialDealer);
+  const [logoUrl, setLogoUrl] = useState<string | null>(initialDealer.logo_url ?? null);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<FormData>(dealerToForm(initialDealer));
   const [saving, setSaving] = useState(false);
@@ -416,6 +418,23 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
           </div>
         </div>
       </div>
+
+      {/* Dealer Logo */}
+      {(canEdit || isSuperAdmin) && (
+        <div className="card p-6 mb-4">
+          <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+            Dealer Logo
+          </p>
+          <DealerLogoUploader
+            dealerId={dealer.id}
+            currentLogoUrl={logoUrl}
+            onUpdated={(url) => {
+              setLogoUrl(url);
+              setDealer((d) => ({ ...d, logo_url: url }));
+            }}
+          />
+        </div>
+      )}
 
       {/* Makes */}
       <div className="card p-6">

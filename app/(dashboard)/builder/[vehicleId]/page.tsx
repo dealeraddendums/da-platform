@@ -70,13 +70,18 @@ export default async function BuilderVehicleRoute({
   };
 
   const admin = createAdminSupabaseClient();
-  const { data: settings } = await admin
-    .from("dealer_settings")
-    .select("ai_content_default")
-    .eq("dealer_id", r.DEALER_ID)
-    .single<{ ai_content_default: boolean }>();
+  const [{ data: settings }, { data: dealerRow }] = await Promise.all([
+    admin.from("dealer_settings").select("ai_content_default").eq("dealer_id", r.DEALER_ID).single<{ ai_content_default: boolean }>(),
+    admin.from("dealers").select("logo_url").eq("dealer_id", r.DEALER_ID).maybeSingle<{ logo_url: string | null }>(),
+  ]);
 
   const aiEnabled = settings?.ai_content_default ?? false;
 
-  return <BuilderPage vehicle={vehicle} aiEnabled={aiEnabled} />;
+  const S3_LOGO = "https://new-dealer-logos.s3.us-east-1.amazonaws.com/";
+  const rawLogo = dealerRow?.logo_url ?? vehicle.logo_url ?? null;
+  const resolvedLogoUrl = rawLogo
+    ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
+    : null;
+
+  return <BuilderPage vehicle={{ ...vehicle, logo_url: resolvedLogoUrl }} aiEnabled={aiEnabled} />;
 }

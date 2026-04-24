@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { DealerSettingsRow, TemplateRow, UserRole } from "@/lib/db";
+import DealerLogoUploader from "@/components/DealerLogoUploader";
 
 type Props = {
   fixedDealerId: string | null;
@@ -72,6 +73,7 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
 
   const isAdminPicker = role === "super_admin" || role === "group_admin";
 
@@ -105,12 +107,14 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
 
   const fetchSettingsAndTemplates = useCallback(async (id: string) => {
     const qs = role === "dealer_admin" ? "" : `?dealer_id=${id}`;
-    const [sRes, tRes] = await Promise.all([
+    const [sRes, tRes, lRes] = await Promise.all([
       fetch(`/api/settings${qs}`),
       fetch(`/api/templates${qs}`),
+      fetch(`/api/dealers/${id}/logo`),
     ]);
     const sJson = await sRes.json() as { data: DealerSettingsRow };
     const tJson = await tRes.json() as { data: TemplateRow[] };
+    const lJson = await lRes.json() as { logo_url?: string | null };
     if (sJson.data) {
       setSettings({
         ai_content_default: sJson.data.ai_content_default,
@@ -133,6 +137,7 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
       });
     }
     setTemplates(tJson.data ?? []);
+    setLogoUrl(lJson.logo_url ?? null);
   }, [role]);
 
   useEffect(() => {
@@ -233,6 +238,20 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
           >
             Change
           </button>
+        </div>
+      )}
+
+      {/* Dealer Logo */}
+      {(role === "dealer_admin" || isAdminPicker) && dealerId && (
+        <div className="card p-5 mb-4">
+          <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+            Dealer Logo
+          </p>
+          <DealerLogoUploader
+            dealerId={dealerId}
+            currentLogoUrl={logoUrl}
+            onUpdated={(url) => setLogoUrl(url)}
+          />
         </div>
       )}
 

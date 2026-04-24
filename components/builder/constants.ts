@@ -58,7 +58,6 @@ export const PALETTE_HIDDEN_IN_INFOSHEET = ['msrp','options','subtotal','infobox
 export const DEFS: Record<string, Record<string, unknown>> = {
   logo: {
     label: 'Your Logo',
-    imgUrl: 'https://new-dealer-logos.s3.us-east-1.amazonaws.com/default_logo.png',
     showName: false,
     dealerName: '',
   },
