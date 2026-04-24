@@ -61,7 +61,9 @@ export function renderW(type: string, d: D, fontScale: number): string {
 
   if (type === 'dealer') {
     const sz = Math.round(10 * fs * ((d.fontSize as number) || 1));
-    return `<div style="padding:4px 0"><div style="font-size:${sz}px;color:#1a1916;line-height:1.65;font-weight:700">${((d.text as string) || '').replace(/\n/g, '<br>')}</div></div>`;
+    const ta = (d.textAlign as string) || 'left';
+    const lh = (d.lineHeight as number) || 1.5;
+    return `<div style="padding:4px 0"><div style="font-size:${sz}px;color:#1a1916;line-height:${lh};font-weight:700;text-align:${ta}">${((d.text as string) || '').replace(/\n/g, '<br>')}</div></div>`;
   }
 
   if (type === 'headerbar') {
@@ -69,7 +71,9 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   if (type === 'customtext') {
-    return `<div style="padding:4px 0"><div style="font-size:${d.fs || 10}px;text-align:${d.align || 'left'};color:#555;line-height:1.5">${((d.text as string) || '').replace(/\n/g, '<br>')}</div></div>`;
+    const ta = (d.textAlign as string) || (d.align as string) || 'left';
+    const lh = (d.lineHeight as number) || 1.5;
+    return `<div style="padding:4px 0"><div style="font-size:${d.fs || 10}px;text-align:${ta};color:#555;line-height:${lh}">${((d.text as string) || '').replace(/\n/g, '<br>')}</div></div>`;
   }
 
   if (type === 'sigline') {

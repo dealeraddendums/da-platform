@@ -1388,6 +1388,23 @@ function WidgetEditPanel({ widget: w, fontScale, onUpdate, onAdjFont, onDelete, 
           <textarea value={(d.text as string) || ''} onChange={e => u('text', e.target.value)} rows={5}
             style={{ ...fiStyle, resize: 'none', width: '100%', boxSizing: 'border-box' }} />
           <FontStepper label="Font size" fkey="fontSize" base={10} d={d} fontScale={fontScale} af={af} />
+          <Eps style={{ marginTop: 8 }}>Text Format</Eps>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 4 }}>
+            <Fd label="Alignment">
+              <div style={{ display: 'flex', gap: 2 }}>
+                {(['left','center','right'] as const).map(a => (
+                  <button key={a} onClick={() => u('textAlign', a)}
+                    style={{ flex: 1, height: 28, border: `1px solid ${(d.textAlign as string || 'left') === a ? '#1976d2' : '#e0e0e0'}`, borderRadius: 4, background: (d.textAlign as string || 'left') === a ? '#e3f2fd' : '#fff', cursor: 'pointer', fontSize: 11, color: (d.textAlign as string || 'left') === a ? '#1976d2' : '#555', fontWeight: 600 }}>
+                    {a === 'left' ? '≡L' : a === 'center' ? '≡C' : '≡R'}
+                  </button>
+                ))}
+              </div>
+            </Fd>
+            <Fd label="Line spacing">
+              <input type="number" value={(d.lineHeight as number) || 1.5} min={1.0} max={3.0} step={0.1}
+                onChange={e => u('lineHeight', parseFloat(e.target.value))} style={{ ...fiStyle, width: '100%' }} />
+            </Fd>
+          </div>
         </EpSection>
       )}
 
@@ -1410,16 +1427,27 @@ function WidgetEditPanel({ widget: w, fontScale, onUpdate, onAdjFont, onDelete, 
           <Eps>Custom Text</Eps>
           <textarea value={(d.text as string) || ''} onChange={e => u('text', e.target.value)} rows={3}
             style={{ ...fiStyle, resize: 'none', width: '100%', boxSizing: 'border-box' }} />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 6 }}>
+          <Fd label="Font size" style={{ marginTop: 6 }}>
+            <input type="number" value={(d.fs as number) || 10} min={7} max={24} onChange={e => u('fs', +e.target.value)} style={fiStyle} />
+          </Fd>
+          <Eps style={{ marginTop: 8 }}>Text Format</Eps>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 4 }}>
             <Fd label="Alignment">
-              <select value={(d.align as string) || 'left'} onChange={e => u('align', e.target.value)} style={{ ...fiStyle, width: '100%' }}>
-                <option value="left">Left</option>
-                <option value="center">Center</option>
-                <option value="right">Right</option>
-              </select>
+              <div style={{ display: 'flex', gap: 2 }}>
+                {(['left','center','right'] as const).map(a => {
+                  const cur = (d.textAlign as string) || (d.align as string) || 'left';
+                  return (
+                    <button key={a} onClick={() => { u('textAlign', a); u('align', a); }}
+                      style={{ flex: 1, height: 28, border: `1px solid ${cur === a ? '#1976d2' : '#e0e0e0'}`, borderRadius: 4, background: cur === a ? '#e3f2fd' : '#fff', cursor: 'pointer', fontSize: 11, color: cur === a ? '#1976d2' : '#555', fontWeight: 600 }}>
+                      {a === 'left' ? '≡L' : a === 'center' ? '≡C' : '≡R'}
+                    </button>
+                  );
+                })}
+              </div>
             </Fd>
-            <Fd label="Font size">
-              <input type="number" value={(d.fs as number) || 10} min={7} max={24} onChange={e => u('fs', +e.target.value)} style={fiStyle} />
+            <Fd label="Line spacing">
+              <input type="number" value={(d.lineHeight as number) || 1.5} min={1.0} max={3.0} step={0.1}
+                onChange={e => u('lineHeight', parseFloat(e.target.value))} style={{ ...fiStyle, width: '100%' }} />
             </Fd>
           </div>
         </EpSection>
