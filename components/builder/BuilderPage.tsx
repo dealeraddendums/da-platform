@@ -61,15 +61,33 @@ function ensureAskbar(ws: Record<string, Widget>, nid: number, ps: string): [Rec
   return [{ ...ws, [id]: makeWidget('askbar', id) }, nid + 1];
 }
 
+// Override all logo widgets with the canonical dealer logo.
+// logoUrl=null → imgUrl='' (shows "Upload logo in Settings" placeholder on canvas).
+// Canvas always shows the live dealer logo; PDF rendering overrides independently via pdf-html.ts.
+function applyLogoToWidgets(ws: Record<string, Widget>, logoUrl: string | null): Record<string, Widget> {
+  const result: Record<string, Widget> = {};
+  let changed = false;
+  for (const [id, w] of Object.entries(ws)) {
+    if (w.type === 'logo') {
+      result[id] = { ...w, d: { ...w.d, imgUrl: logoUrl ?? '' } };
+      changed = true;
+    } else {
+      result[id] = w;
+    }
+  }
+  return changed ? result : ws;
+}
+
 interface Props {
   vehicle?: VehiclePreload;
   templateId?: string;
   aiEnabled?: boolean;
   customSizes?: CustomSize[];
   dealerId?: string;
+  dealerLogoUrl?: string | null;
 }
 
-export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId }: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl }: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
@@ -104,6 +122,10 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [showAddSizeModal, setShowAddSizeModal] = useState(false);
   const [showBgPicker, setShowBgPicker] = useState(false);
   const [showLogoPicker, setShowLogoPicker] = useState(false);
+
+  // Canonical dealer logo — pre-resolved S3 URL from the page server component.
+  // Stays constant for the lifetime of this builder session.
+  const canonicalLogoRef = useRef<string | null>(vehicle?.logo_url ?? dealerLogoUrl ?? null);
 
   // Refs for drag
   const paperRef = useRef<HTMLDivElement>(null);
@@ -180,6 +202,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     }
     const id = 'w' + nid;
     const widget = makeWidget(type, id, x, y, w, h, isInfosheet);
+    if (type === 'logo') widget.d = { ...widget.d, imgUrl: canonicalLogoRef.current ?? '' };
     setNid(n => n + 1);
     setWidgets(prev => {
       const next = { ...prev, [id]: widget };
@@ -369,9 +392,6 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (w.type === 'dealer' && vehicle.dealer_name) {
           w.d = { ...w.d, text: [vehicle.dealer_name, vehicle.dealer_address || ''].filter(Boolean).join('\n') };
         }
-        if (w.type === 'logo' && vehicle.logo_url) {
-          w.d = { ...w.d, imgUrl: vehicle.logo_url };
-        }
         if (w.type === 'msrp' && vehicle.msrp) {
           w.d = { ...w.d, value: `$${vehicle.msrp.toLocaleString()}` };
         }
@@ -380,6 +400,10 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         }
       });
     }
+    // Always apply canonical dealer logo to logo widgets (works with or without a vehicle)
+    Object.values(ws).forEach(w => {
+      if (w.type === 'logo') w.d = { ...w.d, imgUrl: canonicalLogoRef.current ?? '' };
+    });
     widgetsRef.current = ws;
     setWidgets(ws);
     setNid(nextNid);
@@ -407,6 +431,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           let n = json.nid ?? 1;
           [ws, n] = ensureAskbar(ws, n, ps);
           ws = clampWidgets(ws, pw, ph);
+          ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
           setWidgets(ws);
           widgetsRef.current = ws;
           setNid(n);
@@ -438,11 +463,12 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (type === 'askbar') { ws[id].d = { ...ws[id].d, labelFontSize: 1.6, valueFontSize: 1.9 }; }
         if (type === 'vehicle') { ws[id].d = { ...ws[id].d, headerFontSize: 1.2 }; }
       });
-      widgetsRef.current = ws;
-      setWidgets(ws);
+      const wsWithLogo = applyLogoToWidgets(ws, canonicalLogoRef.current);
+      widgetsRef.current = wsWithLogo;
+      setWidgets(wsWithLogo);
       setNid(nextNid);
       setSelId(null);
-      pushHistory(ws, nextNid);
+      pushHistory(wsWithLogo, nextNid);
       showToast('Infosheet layout loaded');
       // Auto-load AI content when switching to infosheet with a vehicle
       if (vehicle && aiEnabled) {
@@ -467,6 +493,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         }
       });
       ws = clampWidgets(ws, pw, ph);
+      ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
       widgetsRef.current = ws;
       setWidgets(ws);
       setNid(nextNid);
@@ -661,6 +688,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       let n = json.nid ?? 1;
       [ws, n] = ensureAskbar(ws, n, ps);
       ws = clampWidgets(ws, pw, ph);
+      ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
       setWidgets(ws); widgetsRef.current = ws;
       setNid(n);
       if (json.bgUrl) { setBgUrl(json.bgUrl); setBgInputVal(json.bgUrl); }
