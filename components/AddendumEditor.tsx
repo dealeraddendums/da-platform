@@ -231,10 +231,10 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
     }
   }
 
-  // ── Print ─────────────────────────────────────────────────────────────────────
+  // ── Print — always saves current options before generating PDF ───────────────
 
   async function handlePrint(docType: "addendum" | "infosheet" | "buyer_guide") {
-    if (dirty) await saveOptions();
+    await saveOptions();
     setPrintDoc(docType);
   }
 
@@ -544,19 +544,6 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
           )}
         </div>
 
-        {/* Save button */}
-        {dirty && (
-          <div className="mt-3 flex justify-end">
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={saving}
-              onClick={() => void saveOptions()}
-            >
-              {saving ? "Saving…" : "Save Options"}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* ── Right: Print actions ──────────────────────────────────────────── */}
@@ -570,25 +557,28 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
               type="button"
               className="btn btn-primary w-full text-sm"
               style={{ justifyContent: "flex-start", textAlign: "left" }}
-              onClick={() => setPrintDoc("addendum")}
+              disabled={saving}
+              onClick={() => void handlePrint("addendum")}
             >
-              Addendum
+              {saving ? "Saving…" : "Addendum"}
             </button>
             <button
               type="button"
               className="btn btn-secondary w-full text-sm"
               style={{ justifyContent: "flex-start", textAlign: "left" }}
-              onClick={() => setPrintDoc("infosheet")}
+              disabled={saving}
+              onClick={() => void handlePrint("infosheet")}
             >
-              Info Sheet
+              {saving ? "Saving…" : "Info Sheet"}
             </button>
             <button
               type="button"
               className="btn btn-secondary w-full text-sm"
               style={{ justifyContent: "flex-start", textAlign: "left" }}
-              onClick={() => setPrintDoc("buyer_guide")}
+              disabled={saving}
+              onClick={() => void handlePrint("buyer_guide")}
             >
-              Buyer Guide
+              {saving ? "Saving…" : "Buyer Guide"}
             </button>
           </div>
           <div className="mt-4 pt-4" style={{ borderTop: "1px solid var(--border)" }}>

@@ -526,6 +526,51 @@ export type AddendumLibraryRow = {
 type AddendumLibraryInsert = Omit<AddendumLibraryRow, 'id' | 'created_at' | 'updated_at'>;
 type AddendumLibraryUpdate = Partial<Omit<AddendumLibraryRow, 'id' | 'dealer_id' | 'created_at' | 'updated_at'>>;
 
+export type AddendumDataRow = {
+  id: string;
+  dealer_id: string;
+  legacy_dealer_id: string | null;
+  vehicle_id: string | null;
+  legacy_vehicle_id: number | null;
+  item_name: string;
+  item_description: string | null;
+  item_price: string | null;
+  active: string | null;
+  separator_below: number | null;
+  separator_above: number | null;
+  or_or_ad: number | null;
+  vin_number: string | null;
+  order_by: number | null;
+  separator_spaces: number | null;
+  editable: number | null;
+  printed_at: string | null;
+  document_type: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+export type AddendumDataInsert = {
+  dealer_id: string;
+  item_name: string;
+  legacy_dealer_id?: string | null;
+  vehicle_id?: string | null;
+  legacy_vehicle_id?: number | null;
+  item_description?: string | null;
+  item_price?: string | null;
+  active?: string | null;
+  separator_below?: number | null;
+  separator_above?: number | null;
+  or_or_ad?: number | null;
+  vin_number?: string | null;
+  order_by?: number | null;
+  separator_spaces?: number | null;
+  editable?: number | null;
+  printed_at?: string | null;
+  document_type?: string | null;
+  created_at?: string;
+  updated_at?: string | null;
+};
+
 export type AddendumHistoryRow = {
   id: string;
   legacy_id: number | null;
@@ -842,7 +887,8 @@ export type DealerVehicleInsert = {
 
 export type VehicleAuditLogAction =
   | "import" | "edit" | "print" | "delete"
-  | "archived" | "restored_from_archive";
+  | "archived" | "restored_from_archive"
+  | "print_history_cleared";
 
 export type VehicleAuditLogRow = {
   id: string;
@@ -1048,6 +1094,12 @@ export type Database = {
             referencedColumns: ["dealer_id"];
           }
         ];
+      };
+      addendum_data: {
+        Row: AddendumDataRow;
+        Insert: AddendumDataInsert;
+        Update: Partial<Omit<AddendumDataRow, 'id' | 'created_at'>>;
+        Relationships: [];
       };
       addendum_history: {
         Row: AddendumHistoryRow;

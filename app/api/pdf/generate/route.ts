@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { VehicleAuditLogInsert, AddendumHistoryInsert, DealerSettingsRow } from "@/lib/db";
+import type { VehicleAuditLogInsert, AddendumHistoryInsert, AddendumDataInsert, DealerSettingsRow } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf } from "@/lib/s3-upload";
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // dealer_vehicles.dealer_id is the TEXT dealer_id (matches dealers.dealer_id, not dealers.id UUID)
     const { data: dealer } = await admin
       .from("dealers")
-      .select("dealer_id, name, address, city, state, zip, phone, logo_url")
+      .select("id, dealer_id, name, address, city, state, zip, phone, logo_url")
       .eq("dealer_id", dv.dealer_id)
       .maybeSingle();
 
@@ -406,6 +406,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       changed_by: claims.sub,
       document_type: docType,
     } as VehicleAuditLogInsert);
+
+    // ── Write addendum_data snapshot (one row per option at print time) ─────────
+    if (dealer?.id && options.length > 0) {
+      const printedAt = new Date().toISOString();
+      const adRows: AddendumDataInsert[] = options.map((o, i) => ({
+        dealer_id: dealer.id,
+        legacy_dealer_id: dv.dealer_id,
+        vehicle_id: dealerVehicleId,
+        vin_number: dv.vin ?? null,
+        item_name: o.option_name,
+        item_description: (o as { description?: string | null }).description ?? null,
+        item_price: (o as { option_price?: string }).option_price ?? null,
+        active: '1',
+        or_or_ad: 1,
+        order_by: i,
+        separator_spaces: 2,
+        editable: 1,
+        printed_at: printedAt,
+        document_type: docType,
+      }));
+      await admin.from("addendum_data").insert(adRows);
+    }
 
     // ── Write per-option history rows ─────────────────────────────────────────
     const today = new Date().toISOString().split("T")[0];
