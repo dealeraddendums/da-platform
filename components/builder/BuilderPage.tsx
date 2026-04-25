@@ -111,6 +111,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [showPrint, setShowPrint] = useState(false);
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([]);
+  // ID of the template currently loaded in the builder (for upsert-on-save logic)
+  const [loadedTemplateId, setLoadedTemplateId] = useState<string | null>(null);
   const [customWidgets, setCustomWidgets] = useState<CustomWidgetDef[]>(DEFAULT_CUSTOM_WIDGETS);
   const [saveVtypes, setSaveVtypes] = useState<Set<string>>(new Set(['new']));
   const [saveTname, setSaveTname] = useState('');
@@ -440,6 +442,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (json.fontScale) setFontScale(json.fontScale);
         if (json.paperSize) setPaperSize(json.paperSize);
         setTemplateName(data.name || 'Template');
+        setLoadedTemplateId(templateId);
       })
       .catch(() => {});
   }, [templateId]);
@@ -631,32 +634,57 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       is_active: !isDraft,
     };
     try {
-      const r = await fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) { showToast('Save failed — try again'); return; }
-      const { data: savedArr } = await r.json() as { data?: { id: string }[] };
-      const saved = savedArr?.[0];
+      // Determine whether to update an existing template or create a new one:
+      // 1. If a template was loaded and the name is unchanged → PATCH that ID
+      // 2. If a template with this name already exists for this dealer → PATCH it
+      // 3. Otherwise → POST (create new)
+      let existingId: string | null = null;
+      if (loadedTemplateId && name === templateName) {
+        existingId = loadedTemplateId;
+      } else {
+        const match = savedTemplates.find(t => t.name.trim() === name);
+        if (match) existingId = match.id;
+      }
+
+      let savedId: string | null = null;
+      let wasUpdate = false;
+
+      if (existingId) {
+        const r = await fetch(`/api/templates/${existingId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!r.ok) { showToast('Save failed — try again'); return; }
+        const { data } = await r.json() as { data?: { id: string } };
+        savedId = data?.id ?? existingId;
+        wasUpdate = true;
+      } else {
+        const r = await fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!r.ok) { showToast('Save failed — try again'); return; }
+        const { data: savedArr } = await r.json() as { data?: { id: string }[] };
+        savedId = savedArr?.[0]?.id ?? null;
+      }
+
       setTemplateName(name);
+      if (savedId) setLoadedTemplateId(savedId);
       setShowSave(false);
 
-      if (!isDraft && saved?.id) {
+      if (!isDraft && savedId) {
         const isAll = saveVtypes.has('all');
         const dtKey = saveDocType === 'infosheet' ? 'infosheet' : 'addendum';
         const settingsPatch: Record<string, string> = {};
-        if (isAll || saveVtypes.has('new'))  settingsPatch[`default_${dtKey}_new`]  = saved.id;
-        if (isAll || saveVtypes.has('used')) settingsPatch[`default_${dtKey}_used`] = saved.id;
-        if (isAll || saveVtypes.has('cpo'))  settingsPatch[`default_${dtKey}_cpo`]  = saved.id;
+        if (isAll || saveVtypes.has('new'))  settingsPatch[`default_${dtKey}_new`]  = savedId;
+        if (isAll || saveVtypes.has('used')) settingsPatch[`default_${dtKey}_used`] = savedId;
+        if (isAll || saveVtypes.has('cpo'))  settingsPatch[`default_${dtKey}_cpo`]  = savedId;
         if (Object.keys(settingsPatch).length > 0) {
           await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settingsPatch) });
           const label = isAll ? 'All' : vtypes.map(v => v.charAt(0).toUpperCase() + v.slice(1)).join('/');
-          showToast(`✓ Template saved and set as default for ${label} vehicles`);
+          showToast(`✓ Template ${wasUpdate ? 'updated' : 'saved'} and set as default for ${label} vehicles`);
           return;
         }
       }
-      showToast(`✓ Template saved: ${name}`);
+      showToast(wasUpdate ? `✓ Template updated: ${name}` : `✓ Template saved: ${name}`);
     } catch {
       showToast('Save failed — try again');
     }
-  }, [saveTname, templateName, saveDocType, saveVtypes, nid, bgUrl, fontScale, showToast]);
+  }, [saveTname, templateName, saveDocType, saveVtypes, nid, bgUrl, fontScale, showToast, loadedTemplateId, savedTemplates]);
 
   // ── Load templates list ────────────────────────────────────────────
   const openTemplates = useCallback(async () => {
@@ -695,6 +723,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       if (json.fontScale) setFontScale(json.fontScale);
       if (json.paperSize) { setPaperSize(json.paperSize); paperSizeRef.current = json.paperSize; }
       setTemplateName(tmpl.name || 'Template');
+      setLoadedTemplateId(id);
       setSelId(null);
       setShowOpenModal(false);
       showToast(`Loaded: ${tmpl.name || 'Template'}`);
@@ -759,7 +788,13 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
             </button>
           )}
           <button onClick={openTemplates} style={tbBtn}>All templates</button>
-          <button onClick={() => { setSaveTname(templateName); setSaveDocType(paperSize === 'infosheet' ? 'infosheet' : 'addendum'); setShowSave(true); }} style={{ ...tbBtn, background: '#1976d2', borderColor: '#1976d2' }}>Save template</button>
+          <button onClick={async () => {
+            setSaveTname(templateName);
+            setSaveDocType(paperSize === 'infosheet' ? 'infosheet' : 'addendum');
+            // Fetch current templates so saveTemplate can detect name collisions
+            try { const r = await fetch('/api/templates'); if (r.ok) { const j = await r.json(); setSavedTemplates(j.data ?? []); } } catch {}
+            setShowSave(true);
+          }} style={{ ...tbBtn, background: '#1976d2', borderColor: '#1976d2' }}>Save template</button>
         </div>
       </div>
 
