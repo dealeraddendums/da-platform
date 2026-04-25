@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import puppeteer from "puppeteer";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerSettingsRow } from "@/lib/db";
@@ -52,6 +53,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const templateCache = new Map<string, Widget[] | null>();
   const templateMetaCache = new Map<string, { bgUrl?: string; fontScale?: number; paperSizeStr?: string }>();
 
+  // Launch one browser for all vehicles — avoids repeated Chrome startup overhead
+  const sharedBrowser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  });
+
+  try {
   for (const vehicleId of vehicleIds) {
     try {
       // ── Vehicle ───────────────────────────────────────────────────────────
@@ -168,17 +176,39 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .eq("active", true)
         .order("sort_order");
 
-      const nullDescNames = (optionRows ?? []).filter(r => !r.description).map(r => r.option_name as string);
-      const libDescMap: Record<string, string | null> = {};
-      if (nullDescNames.length > 0) {
+      let effectiveOptions: { option_name: string; option_price: string; description: string | null }[];
+
+      if ((optionRows ?? []).length > 0) {
+        const nullDescNames = (optionRows ?? []).filter(r => !r.description).map(r => r.option_name as string);
+        const libDescMap: Record<string, string | null> = {};
+        if (nullDescNames.length > 0) {
+          const { data: libDescRows } = await admin
+            .from("addendum_library")
+            .select("option_name, description")
+            .in("option_name", nullDescNames)
+            .not("description", "is", null);
+          for (const lr of libDescRows ?? []) {
+            if (lr.description) libDescMap[lr.option_name as string] = lr.description as string;
+          }
+        }
+        effectiveOptions = (optionRows ?? []).map(r => ({
+          option_name: r.option_name as string,
+          option_price: (r.option_price as string) ?? "0",
+          description: (r.description as string | null) ?? libDescMap[r.option_name as string] ?? null,
+        }));
+      } else {
+        // No saved vehicle_options — fall back to addendum_library (same as AddendumEditor seed)
         const { data: libRows } = await admin
           .from("addendum_library")
-          .select("option_name, description")
-          .in("option_name", nullDescNames)
-          .not("description", "is", null);
-        for (const lr of libRows ?? []) {
-          if (lr.description) libDescMap[lr.option_name as string] = lr.description as string;
-        }
+          .select("option_name, item_price, description")
+          .eq("dealer_id", dv.dealer_id)
+          .eq("active", true)
+          .order("sort_order");
+        effectiveOptions = (libRows ?? []).map(r => ({
+          option_name: r.option_name as string,
+          option_price: (r.item_price as string) ?? "0",
+          description: (r.description as string) || null,
+        }));
       }
 
       const groupOpts = await getGroupOptionsForDealer(textDealerId);
@@ -187,9 +217,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           option_name: g.option_name, option_price: g.option_price,
           description: null as string | null, active: true as const,
         })),
-        ...(optionRows ?? []).map(r => ({
-          ...r, description: r.description ?? libDescMap[r.option_name as string] ?? null,
-        })),
+        ...effectiveOptions,
       ];
 
       const disclaimer = await getGroupDisclaimer(textDealerId, dealer?.state ?? null, docType);
@@ -327,7 +355,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         disclaimer: disclaimer ?? undefined,
         dealerLogoUrl, customDims: customPaperDims,
       });
-      const pdfBuffer = await renderPdf(html, effectivePaperSizeStr, { customDims: customPaperDims });
+      const pdfBuffer = await renderPdf(html, effectivePaperSizeStr, { customDims: customPaperDims, browser: sharedBrowser });
 
       const timestamp = Date.now();
       const s3Key = `${dv.dealer_id}/${vehicleId}/${timestamp}.pdf`;
@@ -343,6 +371,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } catch (err) {
       results.push({ vehicleId, error: err instanceof Error ? err.message : "error" });
     }
+  }
+  } finally {
+    await sharedBrowser.close();
   }
 
   const succeeded = results.filter(r => !r.error);

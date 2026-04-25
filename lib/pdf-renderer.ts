@@ -1,5 +1,6 @@
 // Server-only: renders HTML to PDF via Puppeteer (headless Chrome).
 import puppeteer from 'puppeteer';
+import type { Browser } from 'puppeteer';
 
 type KnownSize = 'standard' | 'narrow' | 'infosheet' | 'buyers_guide';
 
@@ -29,6 +30,8 @@ export interface PdfRenderOptions {
   customDims?: { widthIn: number; heightIn: number };
   /** render all pages instead of just page 1 (for Buyer's Guide 2-pager) */
   allPages?: boolean;
+  /** shared browser instance for bulk generation; if omitted a new browser is launched */
+  browser?: Browser;
 }
 
 export async function renderPdf(
@@ -36,7 +39,7 @@ export async function renderPdf(
   paperSize: string,
   opts: PdfRenderOptions = {},
 ): Promise<Buffer> {
-  const { customDims, allPages = false } = opts;
+  const { customDims, allPages = false, browser: sharedBrowser } = opts;
 
   let widthStr: string;
   let cssW: number;
@@ -55,22 +58,24 @@ export async function renderPdf(
 
   const heightStr = customDims ? `${customDims.heightIn}in` : '11in';
 
-  const browser = await puppeteer.launch({
+  const ownsBrowser = !sharedBrowser;
+  const browser = sharedBrowser ?? await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
   });
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: cssW, height: cssH, deviceScaleFactor: 1.5625 });
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30_000 });
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     const pdfBuffer = await page.pdf({
       width: widthStr,
       height: heightStr,
       printBackground: true,
       ...(allPages ? {} : { pageRanges: '1' }),
     });
+    await page.close();
     return Buffer.from(pdfBuffer);
   } finally {
-    await browser.close();
+    if (ownsBrowser) await browser.close();
   }
 }
