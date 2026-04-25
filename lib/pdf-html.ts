@@ -5,6 +5,29 @@ import { formatOptionPrice } from '@/lib/option-price';
 import { parsePhotos } from '@/lib/vehicles';
 import type { VehicleRow } from '@/lib/vehicles';
 
+async function fetchImageAsBase64(url: string): Promise<string> {
+  if (!url || !url.startsWith('http')) return url;
+  try {
+    const res = await fetch(url);
+    const buf = await res.arrayBuffer();
+    const contentType = res.headers.get('content-type') || 'image/png';
+    return `data:${contentType};base64,${Buffer.from(buf).toString('base64')}`;
+  } catch (e) {
+    console.error('[pdf-html] fetchImageAsBase64 failed:', url, e);
+    return url;
+  }
+}
+
+async function inlineImagesInHtml(html: string): Promise<string> {
+  const re = /src="(https?:\/\/[^"]+)"/g;
+  const urls = Array.from(html.matchAll(re), m => m[1]);
+  if (urls.length === 0) return html;
+  const unique = Array.from(new Set(urls));
+  const entries = await Promise.all(unique.map(async url => [url, await fetchImageAsBase64(url)] as const));
+  const map = Object.fromEntries(entries);
+  return html.replace(re, (_, url) => `src="${map[url] || url}"`);
+}
+
 const PAPER_DIMS: Record<string, { w: number; h: number }> = {
   standard: { w: 408, h: 1056 },
   narrow: { w: 300, h: 1056 },
@@ -25,7 +48,7 @@ export interface BuildPdfHtmlInput {
   customDims?: { widthIn: number; heightIn: number };
 }
 
-export function buildPdfHtml({
+export async function buildPdfHtml({
   widgets,
   paperSize,
   fontScale,
@@ -35,7 +58,7 @@ export function buildPdfHtml({
   disclaimer,
   dealerLogoUrl,
   customDims,
-}: BuildPdfHtmlInput): string {
+}: BuildPdfHtmlInput): Promise<string> {
   const paper = customDims
     ? { w: Math.round(customDims.widthIn * 96), h: Math.round(customDims.heightIn * 96) }
     : (PAPER_DIMS[paperSize] ?? PAPER_DIMS.standard);
@@ -108,7 +131,7 @@ export function buildPdfHtml({
     ? `<div style="position:absolute;bottom:4px;left:6px;right:6px;z-index:20;font-size:7px;line-height:1.3;color:#666;font-family:-apple-system,Roboto,Arial,sans-serif;">${disclaimer.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`
     : '';
 
-  return `<!DOCTYPE html>
+  const rawHtml = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -128,4 +151,6 @@ body { width: ${paper.w}px; height: ${paper.h}px; overflow: hidden; background: 
 </div>
 </body>
 </html>`;
+
+  return inlineImagesInHtml(rawHtml);
 }

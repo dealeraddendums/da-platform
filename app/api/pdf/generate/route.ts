@@ -355,7 +355,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const dealerLogoUrl = rawLogo
       ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
       : null;
-    const html = buildPdfHtml({
+    const html = await buildPdfHtml({
       widgets,
       paperSize: effectivePaperSizeStr,
       fontScale: effectiveFontScale,
