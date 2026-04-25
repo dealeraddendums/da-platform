@@ -112,6 +112,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
   }, []);
 
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [bulkPrinting, setBulkPrinting] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<DealerVehicleRow | null>(null);
   const [historyVehicle, setHistoryVehicle] = useState<{ id: string; stock_number: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -189,10 +190,53 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
     }
   }
 
-  function bulkPrint(docType: string) {
+  async function bulkPrint(docType: "addendum" | "infosheet" | "buyer_guide") {
     const ids = Array.from(checkedIds);
-    for (const id of ids) {
-      window.open(`/dealer-vehicles/${id}/addendum?type=${docType}`, "_blank");
+    if (!ids.length) return;
+
+    // Single vehicle: go to addendum options screen
+    if (ids.length === 1) {
+      window.open(`/dealer-vehicles/${ids[0]}/addendum?type=${docType}`, "_blank");
+      setCheckedIds(new Set());
+      return;
+    }
+
+    setBulkPrinting(true);
+    try {
+      const paperSize = docType === "infosheet" ? "infosheet" : "standard";
+      const res = await fetch("/api/pdf/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vehicleIds: ids, docType, paperSize }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json() as { error?: string };
+        alert(json.error ?? "Bulk PDF generation failed");
+        return;
+      }
+
+      const contentType = res.headers.get("Content-Type") ?? "";
+      if (contentType.includes("application/zip")) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${docType}_${Date.now()}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } else {
+        const json = await res.json() as { url?: string };
+        if (json.url) window.open(json.url, "_blank");
+      }
+
+      setCheckedIds(new Set());
+    } catch {
+      alert("Bulk PDF generation failed");
+    } finally {
+      setBulkPrinting(false);
     }
   }
 
@@ -300,23 +344,32 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
           borderRadius: 4,
         }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginRight: 4 }}>
-            {checkedIds.size} selected
+            {bulkPrinting ? `Generating ${checkedIds.size} PDF${checkedIds.size !== 1 ? "s" : ""}…` : `${checkedIds.size} selected`}
           </span>
-          <button onClick={() => bulkPrint("addendum")} style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
-            Print Addendums
+          <button onClick={() => void bulkPrint("addendum")} disabled={bulkPrinting}
+            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: bulkPrinting ? "#bbb" : "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: bulkPrinting ? "not-allowed" : "pointer" }}>
+            {bulkPrinting ? "…" : "Print Addendums"}
           </button>
-          <button onClick={() => bulkPrint("infosheet")} style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
-            Print Info Sheets
+          <button onClick={() => void bulkPrint("infosheet")} disabled={bulkPrinting}
+            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: bulkPrinting ? "#bbb" : "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: bulkPrinting ? "not-allowed" : "pointer" }}>
+            {bulkPrinting ? "…" : "Print Info Sheets"}
           </button>
-          <button onClick={() => bulkPrint("buyer_guide")} style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
-            Print Buyer Guides
+          <button onClick={() => void bulkPrint("buyer_guide")} disabled={bulkPrinting}
+            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: bulkPrinting ? "#bbb" : "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: bulkPrinting ? "not-allowed" : "pointer" }}>
+            {bulkPrinting ? "…" : "Print Buyer Guides"}
           </button>
-          <button onClick={() => setShowDeleteConfirm(true)} style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#ff5252", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", marginLeft: 4 }}>
-            Delete
-          </button>
-          <button onClick={() => setCheckedIds(new Set())} style={{ height: 30, padding: "0 10px", fontSize: 12, background: "#fff", border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer", color: "var(--text-muted)", marginLeft: "auto" }}>
-            Cancel
-          </button>
+          {!bulkPrinting && (
+            <>
+              <button onClick={() => setShowDeleteConfirm(true)}
+                style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#ff5252", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", marginLeft: 4 }}>
+                Delete
+              </button>
+              <button onClick={() => setCheckedIds(new Set())}
+                style={{ height: 30, padding: "0 10px", fontSize: 12, background: "#fff", border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer", color: "var(--text-muted)", marginLeft: "auto" }}>
+                Cancel
+              </button>
+            </>
+          )}
         </div>
       )}
 

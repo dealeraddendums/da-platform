@@ -110,7 +110,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
     if (checkedIds.size === 0) return;
     const ids = Array.from(checkedIds);
 
-    // Single vehicle: open in builder instead of bulk PDF
+    // Single vehicle: go to addendum options screen (unchanged)
     if (ids.length === 1) {
       window.open(`/builder/${ids[0]}?doc_type=${docType}`, "_blank");
       setCheckedIds(new Set());
@@ -138,18 +138,19 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `addendums_${Date.now()}.zip`;
+        a.download = `${docType}_${Date.now()}.zip`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } else {
-        // Single URL returned
         const json = await res.json() as { url?: string };
         if (json.url) window.open(json.url, "_blank");
       }
 
       setCheckedIds(new Set());
+    } catch {
+      alert("Bulk PDF generation failed");
     } finally {
       setBulkPrinting(false);
     }
@@ -308,11 +309,17 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
       {checkedIds.size > 0 && (
         <div
           className="card p-3 mb-4 flex items-center gap-3"
-          style={{ borderLeft: "3px solid var(--orange)" }}
+          style={{ borderLeft: "3px solid var(--orange)", flexWrap: "wrap" }}
         >
-          <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-            {checkedIds.size} selected
-          </span>
+          {bulkPrinting ? (
+            <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+              Generating {checkedIds.size} PDF{checkedIds.size !== 1 ? "s" : ""}…
+            </span>
+          ) : (
+            <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+              {checkedIds.size} selected
+            </span>
+          )}
           <button
             type="button"
             className="btn btn-primary text-xs"
@@ -320,7 +327,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
             disabled={bulkPrinting}
             onClick={() => void bulkPrint("addendum")}
           >
-            Addendum
+            {bulkPrinting ? "…" : "Addendum"}
           </button>
           <button
             type="button"
@@ -329,7 +336,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
             disabled={bulkPrinting}
             onClick={() => void bulkPrint("infosheet")}
           >
-            Info Sheet
+            {bulkPrinting ? "…" : "Info Sheet"}
           </button>
           <button
             type="button"
@@ -338,16 +345,18 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
             disabled={bulkPrinting}
             onClick={() => void bulkPrint("buyer_guide")}
           >
-            Buyer Guide
+            {bulkPrinting ? "…" : "Buyer Guide"}
           </button>
-          <button
-            type="button"
-            className="text-xs"
-            style={{ color: "var(--text-muted)", marginLeft: "auto" }}
-            onClick={() => setCheckedIds(new Set())}
-          >
-            Clear
-          </button>
+          {!bulkPrinting && (
+            <button
+              type="button"
+              className="text-xs"
+              style={{ color: "var(--text-muted)", marginLeft: "auto" }}
+              onClick={() => setCheckedIds(new Set())}
+            >
+              Clear
+            </button>
+          )}
         </div>
       )}
 
