@@ -39,15 +39,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const admin = createAdminSupabaseClient();
 
-  // Resolve print-status filter: fetch printed vehicle IDs when needed
+  // Resolve print-status filter: fetch printed vehicle IDs from print_history
+  // (print_history is the source of truth — it's what clear-print-history deletes from)
   let printedIds: string[] | null = null;
   if (printStatus !== "all") {
     try {
       const { data: prints } = await admin
-        .from("vehicle_audit_log")
+        .from("print_history")
         .select("vehicle_id")
-        .eq("dealer_id", dealerId)
-        .eq("action", "print");
+        .eq("dealer_id", dealerId);
       const seen = new Set<string>();
       for (const p of prints ?? []) { if (p.vehicle_id) seen.add(p.vehicle_id); }
       printedIds = Array.from(seen);
@@ -86,16 +86,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: dbErr.message }, { status: 500 });
   }
 
-  // Fetch print status from audit log (gracefully skip if table not yet created)
+  // Fetch print status from print_history — respects clear-print-history deletions
   let printedTypes: Record<string, string[]> = {};
   if (data?.length) {
     try {
       const ids = data.map((v) => v.id);
       const { data: prints } = await admin
-        .from("vehicle_audit_log")
+        .from("print_history")
         .select("vehicle_id, document_type")
-        .in("vehicle_id", ids)
-        .eq("action", "print");
+        .in("vehicle_id", ids);
       for (const p of prints ?? []) {
         if (!p.vehicle_id || !p.document_type) continue;
         if (!printedTypes[p.vehicle_id]) printedTypes[p.vehicle_id] = [];
