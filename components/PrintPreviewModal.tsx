@@ -4,11 +4,13 @@ import { useEffect, useRef, useState } from "react";
 type DocType = "addendum" | "infosheet" | "buyer_guide";
 
 type Props = {
-  dealerVehicleId: string;
+  dealerVehicleId?: string;
   docType: DocType;
   vehicleName: string;
   onClose: () => void;
   onPrinted?: () => void;
+  /** Skip PDF generation and use this URL directly (e.g. pre-generated bulk PDF). */
+  preloadedUrl?: string;
 };
 
 const DOC_LABELS: Record<DocType, string> = {
@@ -29,14 +31,16 @@ export default function PrintPreviewModal({
   vehicleName,
   onClose,
   onPrinted,
+  preloadedUrl,
 }: Props) {
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(preloadedUrl ?? null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(true);
+  const [generating, setGenerating] = useState(!preloadedUrl);
   const [genError, setGenError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
+    if (preloadedUrl) return; // already have URL — skip generation
     let cancelled = false;
 
     async function generate() {

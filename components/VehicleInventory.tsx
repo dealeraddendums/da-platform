@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { VehicleRow } from "@/lib/vehicles";
 import { parsePhotos, vehicleCondition } from "@/lib/vehicles";
 import VehicleDetail from "./VehicleDetail";
+import PrintPreviewModal from "./PrintPreviewModal";
 import type { DealerRow } from "@/lib/db";
 
 type InventoryResponse = {
@@ -47,6 +48,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleRow | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
   const [bulkPrinting, setBulkPrinting] = useState(false);
+  const [bulkModal, setBulkModal] = useState<{ url: string; docType: "addendum" | "infosheet" | "buyer_guide"; count: number } | null>(null);
 
   const isSuperAdmin = role === "super_admin";
   const isGroupAdmin = role === "group_admin";
@@ -134,33 +136,14 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
 
       const json = await res.json() as { url?: string };
       if (json.url) {
-        openPdfAndRedirect(json.url);
+        setBulkModal({ url: json.url, docType, count: ids.length });
+        setCheckedIds(new Set());
       }
-
-      setCheckedIds(new Set());
     } catch {
       alert("Bulk PDF generation failed");
     } finally {
       setBulkPrinting(false);
     }
-  }
-
-  function openPdfAndRedirect(url: string) {
-    const opened = window.open(url, "_blank");
-    if (!opened) {
-      window.location.href = "/dashboard";
-      return;
-    }
-    const win: Window = opened;
-    let redirected = false;
-    function doRedirect() {
-      if (redirected) return;
-      redirected = true;
-      try { win.close(); } catch { /* ignore */ }
-      window.location.href = "/dashboard";
-    }
-    win.addEventListener("afterprint", doRedirect);
-    setTimeout(doRedirect, 2000);
   }
 
   useEffect(() => {
@@ -568,6 +551,16 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
         <VehicleDetail
           vehicle={selectedVehicle}
           onClose={() => setSelectedVehicle(null)}
+        />
+      )}
+
+      {/* Bulk print preview modal */}
+      {bulkModal && (
+        <PrintPreviewModal
+          docType={bulkModal.docType}
+          vehicleName={`${bulkModal.count} Vehicles`}
+          preloadedUrl={bulkModal.url}
+          onClose={() => setBulkModal(null)}
         />
       )}
     </div>

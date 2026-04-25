@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import AddVehicleModal from "./AddVehicleModal";
 import EditVehicleModal from "./EditVehicleModal";
 import VehicleHistoryPanel from "./VehicleHistoryPanel";
+import PrintPreviewModal from "./PrintPreviewModal";
 import type { DealerVehicleRow, DealerVehicleArchiveRow } from "@/lib/db";
 
 type Props = { dealerId: string; isSuperAdmin?: boolean };
@@ -113,6 +114,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
 
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [bulkPrinting, setBulkPrinting] = useState(false);
+  const [bulkModal, setBulkModal] = useState<{ url: string; docType: "addendum" | "infosheet" | "buyer_guide"; count: number } | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<DealerVehicleRow | null>(null);
   const [historyVehicle, setHistoryVehicle] = useState<{ id: string; stock_number: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -218,33 +220,14 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
 
       const json = await res.json() as { url?: string };
       if (json.url) {
-        openPdfAndRedirect(json.url);
+        setBulkModal({ url: json.url, docType, count: ids.length });
+        setCheckedIds(new Set());
       }
-
-      setCheckedIds(new Set());
     } catch {
       alert("Bulk PDF generation failed");
     } finally {
       setBulkPrinting(false);
     }
-  }
-
-  function openPdfAndRedirect(url: string) {
-    const opened = window.open(url, "_blank");
-    if (!opened) {
-      window.location.href = "/dashboard";
-      return;
-    }
-    const win: Window = opened;
-    let redirected = false;
-    function doRedirect() {
-      if (redirected) return;
-      redirected = true;
-      try { win.close(); } catch { /* ignore */ }
-      window.location.href = "/dashboard";
-    }
-    win.addEventListener("afterprint", doRedirect);
-    setTimeout(doRedirect, 2000);
   }
 
   function handleSort(col: string) {
@@ -625,6 +608,15 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
             </div>
           </div>
         </>
+      )}
+      {/* Bulk print preview modal */}
+      {bulkModal && (
+        <PrintPreviewModal
+          docType={bulkModal.docType}
+          vehicleName={`${bulkModal.count} Vehicles`}
+          preloadedUrl={bulkModal.url}
+          onClose={() => setBulkModal(null)}
+        />
       )}
     </div>
   );
