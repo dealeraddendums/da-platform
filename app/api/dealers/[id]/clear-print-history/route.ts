@@ -67,6 +67,16 @@ export async function POST(
       .in("vehicle_id", activeIds);
   }
 
+  // Clear saved option overrides for this dealer's manual vehicles.
+  // Manual vehicles all use vehicle_id=0 sentinel; deleting these rows causes
+  // the next print to reseed from the dealer's addendum_library matching rules.
+  // The dealer's Options Library (addendum_library) is NOT affected.
+  await admin
+    .from("vehicle_options")
+    .delete()
+    .eq("dealer_id", dealerId)
+    .eq("vehicle_id", 0);
+
   // Log to vehicle_audit_log for each affected vehicle (fire-and-forget)
   const logRows: VehicleAuditLogInsert[] = activeIds.map(vid => ({
     dealer_id: dealerId,

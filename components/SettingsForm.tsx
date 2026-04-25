@@ -574,7 +574,7 @@ function PrintHistorySection({ dealerId }: { dealerId: string }) {
             </div>
             <div style={{ padding: "16px 16px 20px" }}>
               <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
-                This will reset the print status for all active vehicles in your inventory. Blue printed indicators will return to white and you will be able to reprint all vehicles. Historical addendum data for sold or inactive vehicles is preserved.
+                This will reset the print status and clear saved options for all active vehicles in your inventory. Blue printed indicators will return to white and vehicles will reload their default options on next print. Historical data for inactive vehicles is preserved.
               </p>
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
