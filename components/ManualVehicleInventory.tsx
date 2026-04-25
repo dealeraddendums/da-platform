@@ -216,20 +216,9 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
         return;
       }
 
-      const contentType = res.headers.get("Content-Type") ?? "";
-      if (contentType.includes("application/zip")) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${docType}_${Date.now()}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } else {
-        const json = await res.json() as { url?: string };
-        if (json.url) window.open(json.url, "_blank");
+      const json = await res.json() as { url?: string };
+      if (json.url) {
+        openPdfAndRedirect(json.url);
       }
 
       setCheckedIds(new Set());
@@ -238,6 +227,24 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
     } finally {
       setBulkPrinting(false);
     }
+  }
+
+  function openPdfAndRedirect(url: string) {
+    const opened = window.open(url, "_blank");
+    if (!opened) {
+      window.location.href = "/dashboard";
+      return;
+    }
+    const win: Window = opened;
+    let redirected = false;
+    function doRedirect() {
+      if (redirected) return;
+      redirected = true;
+      try { win.close(); } catch { /* ignore */ }
+      window.location.href = "/dashboard";
+    }
+    win.addEventListener("afterprint", doRedirect);
+    setTimeout(doRedirect, 2000);
   }
 
   function handleSort(col: string) {

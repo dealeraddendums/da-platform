@@ -10,7 +10,7 @@ import { getGroupOptionsForDealer, getGroupDisclaimer } from "@/lib/options-engi
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent } from "@/lib/ai-content";
 import QRCode from "qrcode";
-import JSZip from "jszip";
+import { PDFDocument } from "pdf-lib";
 import type { Widget, PaperSize } from "@/components/builder/types";
 
 /**
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const knownSizes = new Set(["standard", "narrow", "infosheet"]);
   const admin = createAdminSupabaseClient();
-  const zip = new JSZip();
+  const pdfBuffers: Buffer[] = [];
   const results: { vehicleId: string; pdfUrl?: string; error?: string }[] = [];
 
   // Cache dealer settings and templates to avoid redundant DB queries
@@ -338,9 +338,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         document_type: docType, printed_by: claims.sub, pdf_url: pdfUrl,
       });
 
-      const fileName = `${dv.stock_number || vehicleId}_${dv.year ?? ""}_${dv.make ?? ""}_${dv.model ?? ""}.pdf`
-        .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_.-]/g, "");
-      zip.file(fileName, pdfBuffer);
+      pdfBuffers.push(pdfBuffer);
       results.push({ vehicleId, pdfUrl });
     } catch (err) {
       results.push({ vehicleId, error: err instanceof Error ? err.message : "error" });
@@ -352,17 +350,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "All vehicles failed", results }, { status: 500 });
   }
 
-  if (succeeded.length === 1) {
+  if (pdfBuffers.length === 1) {
     return NextResponse.json({ url: succeeded[0].pdfUrl, results });
   }
 
-  const zipBuffer = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
-  return new NextResponse(zipBuffer as BodyInit, {
-    status: 200,
-    headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${docType}_${Date.now()}.zip"`,
-      "Content-Length": String((zipBuffer as ArrayBuffer).byteLength),
-    },
-  });
+  // Merge all PDFs into one document
+  const merged = await PDFDocument.create();
+  for (const buf of pdfBuffers) {
+    const src = await PDFDocument.load(buf);
+    const pages = await merged.copyPages(src, src.getPageIndices());
+    pages.forEach(p => merged.addPage(p));
+  }
+  const mergedBuffer = Buffer.from(await merged.save());
+  const mergedKey = `bulk/${claims.sub}/${docType}_${Date.now()}.pdf`;
+  const mergedUrl = await uploadPdf(mergedBuffer, mergedKey);
+
+  return NextResponse.json({ url: mergedUrl, results });
 }

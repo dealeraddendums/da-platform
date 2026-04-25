@@ -192,10 +192,25 @@ export default function PrintPreviewModal({
               <button
                 onClick={() => {
                   if (!blobUrl) return;
-                  const w = window.open(blobUrl, '_blank');
-                  if (w) setTimeout(() => {
-                    w.print();
-                    w.addEventListener('afterprint', () => w.close());
+                  const opened = window.open(blobUrl, "_blank");
+                  if (!opened) {
+                    onClose();
+                    window.location.href = "/dashboard";
+                    return;
+                  }
+                  const win: Window = opened;
+                  let redirected = false;
+                  function doRedirect() {
+                    if (redirected) return;
+                    redirected = true;
+                    try { win.close(); } catch { /* ignore */ }
+                    onClose();
+                    window.location.href = "/dashboard";
+                  }
+                  setTimeout(() => {
+                    win.print();
+                    win.addEventListener("afterprint", doRedirect);
+                    setTimeout(doRedirect, 2000);
                   }, 500);
                 }}
                 style={{
