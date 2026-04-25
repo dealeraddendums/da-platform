@@ -1003,6 +1003,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 <WidgetEditPanel
                   widget={sel}
                   fontScale={fontScale}
+                  dealerId={effectiveDealerId}
                   onUpdate={updateWidget}
                   onAdjFont={adjFont}
                   onDelete={deleteWidget}
@@ -1261,9 +1262,10 @@ function ModalRow({ icon, label, children }: { icon: React.ReactNode; label: Rea
 }
 
 // ── Widget Edit Panel ──────────────────────────────────────────────────
-function WidgetEditPanel({ widget: w, fontScale, onUpdate, onAdjFont, onDelete, onUpdatePos, onPickLogoImage }: {
+function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, onDelete, onUpdatePos, onPickLogoImage }: {
   widget: Widget;
   fontScale: number;
+  dealerId: string | null;
   onUpdate: (id: string, key: string, value: unknown) => void;
   onAdjFont: (id: string, key: string, delta: number) => void;
   onDelete: (id: string) => void;
@@ -1272,6 +1274,28 @@ function WidgetEditPanel({ widget: w, fontScale, onUpdate, onAdjFont, onDelete, 
 }) {
   const d = w.d;
   const u = (key: string, val: unknown) => onUpdate(w.id, key, val);
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [qrSavingDefault, setQrSavingDefault] = useState(false);
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [qrDefaultSaved, setQrDefaultSaved] = useState(false);
+
+  async function saveQrDefault() {
+    if (!dealerId) return;
+    const tmpl = (d.qrUrlTemplate as string) || '';
+    setQrSavingDefault(true);
+    try {
+      await fetch(`/api/settings?dealer_id=${encodeURIComponent(dealerId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qr_url_template: tmpl || null }),
+      });
+      setQrDefaultSaved(true);
+      setTimeout(() => setQrDefaultSaved(false), 2000);
+    } catch { /* ignore */ } finally {
+      setQrSavingDefault(false);
+    }
+  }
   const af = (key: string, delta: number) => onAdjFont(w.id, key, delta);
   const fp = (key: 'x'|'y'|'w'|'h', val: number) => onUpdatePos(w.id, key, val);
 
@@ -1538,6 +1562,17 @@ function WidgetEditPanel({ widget: w, fontScale, onUpdate, onAdjFont, onDelete, 
               <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, marginTop: 4 }}>
                 Use <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[VIN]</code> or <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[STOCK]</code> as variables. Leave blank to use VDP link from inventory data.
               </div>
+              {dealerId && (
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    onClick={() => void saveQrDefault()}
+                    disabled={qrSavingDefault}
+                    style={{ fontSize: 10, padding: '3px 8px', height: 24, background: '#fff', border: '1px solid #c0c0c0', borderRadius: 3, color: '#55595c', cursor: qrSavingDefault ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}
+                  >
+                    {qrSavingDefault ? 'Saving…' : qrDefaultSaved ? '✓ Saved as default' : 'Use as default QR URL for all addenda'}
+                  </button>
+                </div>
+              )}
             </>
           )}
           {(d.ibType as string) === 'upload' && (

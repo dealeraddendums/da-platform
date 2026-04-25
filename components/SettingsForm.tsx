@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { DealerSettingsRow, TemplateRow, UserRole, BuyersGuideDefaults } from "@/lib/db";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
 
@@ -453,22 +453,6 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
         </div>
       </div>
 
-      {/* QR Code */}
-      <div className="card p-5 mb-4">
-        <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
-          QR Code
-        </p>
-        <p className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
-          Default URL template for QR Code infobox widgets. Use <code style={{ background: "var(--bg-subtle)", padding: "1px 4px", borderRadius: 3, fontFamily: "monospace" }}>[VIN]</code> or <code style={{ background: "var(--bg-subtle)", padding: "1px 4px", borderRadius: 3, fontFamily: "monospace" }}>[STOCK]</code> as variables. VDP link from inventory data takes priority when available.
-        </p>
-        <input
-          className="input w-full"
-          value={settings.qr_url_template ?? ""}
-          onChange={(e) => setSettings((s) => ({ ...s, qr_url_template: e.target.value || null }))}
-          placeholder="https://yoursite.com/inventory/[VIN]"
-        />
-      </div>
-
       {/* Printer Nudge Margins */}
       <div className="card p-5 mb-6">
         <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
@@ -499,6 +483,11 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
         </div>
       </div>
 
+      {/* Print History */}
+      {(role === "dealer_admin" || isAdminPicker) && dealerId && (
+        <PrintHistorySection dealerId={dealerId} />
+      )}
+
       {/* Save */}
       <div className="flex items-center gap-3">
         <button
@@ -517,5 +506,94 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
       </div>
 
     </div>
+  );
+}
+
+// ── Print History section ──────────────────────────────────────────────────────
+
+function PrintHistorySection({ dealerId }: { dealerId: string }) {
+  const [open, setOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  async function confirm() {
+    setClearing(true);
+    try {
+      const res = await fetch(`/api/dealers/${encodeURIComponent(dealerId)}/clear-print-history`, {
+        method: "POST",
+      });
+      const json = await res.json() as { cleared_vehicles?: number; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Failed to clear");
+      setOpen(false);
+      setToast(`Print history cleared for ${json.cleared_vehicles ?? 0} active vehicles`);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => {
+        setToast(null);
+        window.location.reload();
+      }, 2500);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to clear print history");
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="card p-5 mb-6">
+        <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+          Print History
+        </p>
+        <p className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
+          Reset print status for all active vehicles. Use this when reprinting your entire inventory after product or price changes.
+        </p>
+        <button
+          onClick={() => setOpen(true)}
+          style={{
+            height: 32, padding: "0 12px", fontSize: 12, fontWeight: 500,
+            background: "#fff", border: "1px solid #c0c0c0", borderRadius: 4,
+            color: "#55595c", cursor: "pointer",
+          }}
+          onMouseEnter={e => { const b = e.currentTarget; b.style.borderColor = "#ff5252"; b.style.color = "#ff5252"; }}
+          onMouseLeave={e => { const b = e.currentTarget; b.style.borderColor = "#c0c0c0"; b.style.color = "#55595c"; }}
+        >
+          Clear Print History
+        </button>
+      </div>
+
+      {open && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+        >
+          <div style={{ background: "#fff", borderRadius: 6, width: "min(480px, 92vw)", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
+              <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)" }}>Clear Print History</span>
+              <button onClick={() => setOpen(false)} style={{ fontSize: 20, color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ padding: "16px 16px 20px" }}>
+              <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+                This will reset the print status for all active vehicles in your inventory. Green printed indicators will return to white and you will be able to reprint all vehicles. Historical addendum data for sold or inactive vehicles is preserved.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
+              <button onClick={() => setOpen(false)} disabled={clearing} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
+                Cancel
+              </button>
+              <button onClick={() => void confirm()} disabled={clearing} style={{ height: 36, padding: "0 16px", background: "#ff5252", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: clearing ? "not-allowed" : "pointer", opacity: clearing ? 0.7 : 1 }}>
+                {clearing ? "Clearing…" : "Clear Print History"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 2000, background: "#333", color: "#fff", padding: "10px 16px", borderRadius: 4, fontSize: 13, fontWeight: 500, boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
+          {toast}
+        </div>
+      )}
+    </>
   );
 }

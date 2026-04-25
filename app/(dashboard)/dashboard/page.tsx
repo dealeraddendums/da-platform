@@ -5,7 +5,6 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import VehicleInventory from "@/components/VehicleInventory";
-import ClearPrintHistoryButton from "@/components/ClearPrintHistoryButton";
 
 function isManualDealer(accountType: string | null): boolean {
   return !accountType || accountType === "Trial" || accountType === "Monthly Subscription Manual";
@@ -378,9 +377,8 @@ export default async function DashboardPage() {
     ];
     return (
       <div>
-        <div className="mb-5 flex items-center justify-between">
+        <div className="mb-5">
           <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Dashboard</h1>
-          {role === "dealer_admin" && <ClearPrintHistoryButton dealerId={dealerId} />}
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
           {manualStats.map((s) => (
@@ -405,9 +403,8 @@ export default async function DashboardPage() {
 
   return (
     <div>
-      <div className="mb-5 flex items-center justify-between">
+      <div className="mb-5">
         <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Dashboard</h1>
-        {role === "dealer_admin" && <ClearPrintHistoryButton dealerId={dealerId} />}
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {auroraStats.map((s) => (
