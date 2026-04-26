@@ -1492,7 +1492,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
             <ColorPair value={(d.labelColor as string) || '#ffffff'} onChange={v => u('labelColor', v)} />
           </Fd>
           <Fd label="Price color">
-            <ColorPair value={(d.valueColor as string) || '#000000'} onChange={v => u('valueColor', v)} />
+            <ColorPair value={(d.valueColor as string) || '#ffffff'} onChange={v => u('valueColor', v)} />
           </Fd>
           <FontStepper label="Label font size" fkey="labelFontSize" base={12} d={d} fontScale={fontScale} af={af} />
           <FontStepper label="Price font size" fkey="valueFontSize" base={13} d={d} fontScale={fontScale} af={af} />

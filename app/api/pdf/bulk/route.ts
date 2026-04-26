@@ -171,7 +171,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           const condKey = dv.condition === "New" ? "new" : dv.condition === "Used" ? "used" : "cpo";
           const docKey = docType === "buyer_guide" ? "buyersguide" : docType;
           const col = `default_${docKey}_${condKey}`;
-          const templateId = (dealerSettings as Record<string, unknown>)[col] as string | null;
+          const ds = dealerSettings as Record<string, unknown>;
+          const templateId = (ds[col] as string | null)
+            ?? (ds[`default_${docKey}_new`] as string | null)
+            ?? (ds[`default_${docKey}_used`] as string | null)
+            ?? (ds[`default_${docKey}_cpo`] as string | null);
 
           if (templateId) {
             if (!templateCache.has(templateId)) {

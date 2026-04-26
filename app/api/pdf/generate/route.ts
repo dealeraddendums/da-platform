@@ -203,7 +203,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const condKey = dv.condition === "New" ? "new" : dv.condition === "Used" ? "used" : "cpo";
         const docKey = docType === "buyer_guide" ? "buyersguide" : docType;
         const col = `default_${docKey}_${condKey}` as keyof DealerSettingsRow;
-        const templateId = settings[col] as string | null;
+        // Fallback: if no template set for this specific condition, try any condition for this doc type.
+        // Prevents falling back to LAYOUT_INFOSHEET defaults when the user saved a template for a
+        // different condition (e.g., saved for "new" but printing a "used" vehicle).
+        const templateId = (settings[col] as string | null)
+          ?? (settings[`default_${docKey}_new`] as string | null)
+          ?? (settings[`default_${docKey}_used`] as string | null)
+          ?? (settings[`default_${docKey}_cpo`] as string | null);
 
         if (templateId) {
           const { data: tmpl } = await admin
