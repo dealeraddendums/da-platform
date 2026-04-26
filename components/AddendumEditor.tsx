@@ -302,14 +302,6 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
           >
             <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
               Options
-              {source === "matched" && (
-                <span
-                  className="ml-2 font-normal text-xs"
-                  style={{ color: "var(--blue)", textTransform: "none", letterSpacing: 0 }}
-                >
-                  (auto-matched defaults — save to confirm)
-                </span>
-              )}
             </span>
             <div className="flex items-center gap-2">
               <button
