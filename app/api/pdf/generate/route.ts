@@ -418,7 +418,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       document_type: docType,
     } as VehicleAuditLogInsert);
 
-    // ── Write addendum_data snapshot (one row per option at print time) ─────────
+    // ── Write addendum_data — one row per option, permanent compliance record ──
     if (dealer?.id && options.length > 0) {
       const printedAt = new Date().toISOString();
       const adRows: AddendumDataInsert[] = options.map((o, i) => ({
@@ -429,7 +429,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         item_name: o.option_name,
         item_description: (o as { description?: string | null }).description ?? null,
         item_price: (o as { option_price?: string }).option_price ?? null,
-        active: '1',
+        active: "1",
         or_or_ad: 1,
         order_by: i,
         separator_spaces: 2,
@@ -437,7 +437,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         printed_at: printedAt,
         document_type: docType,
       }));
-      await admin.from("addendum_data").insert(adRows);
+      const { error: adErr } = await admin.from("addendum_data").insert(adRows);
+      if (adErr) console.error("[pdf/generate] addendum_data insert failed:", adErr.message, adErr.code);
     }
 
     // ── Write per-option history rows ─────────────────────────────────────────
