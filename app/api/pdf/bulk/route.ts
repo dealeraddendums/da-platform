@@ -396,8 +396,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
 
         // ── Fetch AI content for infosheet description/features + {{ai.}} tokens ─
+        // Always fetch for infosheet — ai_content_default controls AI vs DB preference,
+        // but we always need content available so placeholders never appear in PDFs.
         let aiContent: { description: string; features: [string, string][] } | null = null;
-        const needsAiForInfosheet = isInfosheet && aiEnabled;
+        const needsAiForInfosheet = isInfosheet; // always, not gated by aiEnabled
         const hasAiTokens = widgets.some(
           w => w.type === "customtext" && ((w.d.text as string) || "").includes("{{ai.")
         );
@@ -424,9 +426,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 description: generated.description, features: generated.features,
                 generated_at: new Date().toISOString(), model_version: generated.modelVersion,
               }, { onConflict: "vin,dealer_id" });
-            } catch { /* AI failed */ }
+            } catch (err) {
+              console.error(`[BULK]   AI generation failed vehicleId=${vehicleId}:`, err instanceof Error ? err.message : err);
+            }
           }
         }
+
+        console.log(`[BULK]   aiEnabled=${aiEnabled} aiContent=${aiContent ? 'yes' : 'none'} dbDescription=${vehicleData.DESCRIPTION ? 'yes' : 'null'} dbOptions=${(dv as Record<string, unknown>).options ? 'yes' : 'null'}`);
 
         // ── Apply {{token}} patterns in customtext widgets ─────────────────────
         if (widgets.some(w => w.type === "customtext" && ((w.d.text as string) || "").includes("{{"))) {

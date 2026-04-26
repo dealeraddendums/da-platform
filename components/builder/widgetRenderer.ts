@@ -129,7 +129,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const badge = d.aiMode === 'ai'
       ? '<span style="font-size:8px;background:#e3f2fd;color:#1976d2;padding:1px 6px;border-radius:8px;font-weight:700;margin-left:5px">AI</span>'
       : '<span style="font-size:8px;background:#f0f0f0;color:#78828c;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:5px">DB</span>';
-    return `<div style="padding:3px 0;height:100%;box-sizing:border-box;overflow:hidden"><div style="font-size:8px;font-weight:700;color:#78828c;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;display:flex;align-items:center">Description${badge}</div><div style="font-size:${sz}px;color:#222;line-height:1.6">${d.text || 'Vehicle description will appear here.'}</div></div>`;
+    return `<div style="padding:3px 0;height:100%;box-sizing:border-box;overflow:hidden"><div style="font-size:8px;font-weight:700;color:#78828c;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;display:flex;align-items:center">Description${badge}</div><div style="font-size:${sz}px;color:#222;line-height:1.6">${d.text != null ? d.text : 'Vehicle description will appear here.'}</div></div>`;
   }
 
   if (type === 'features') {

@@ -131,20 +131,24 @@ export async function buildPdfHtml({
       }));
     }
 
-    // Infosheet description: inject AI or DB vehicle description if widget shows placeholder
+    // Infosheet description: inject AI or DB vehicle description if widget has no custom content
     if (w.type === 'description') {
       const placeholder = 'Vehicle description will appear here.';
-      if (!d.text || d.text === placeholder) {
-        const text = aiEnabled && aiDescription ? aiDescription : (dbDescription ?? null);
-        if (text) d.text = text;
+      if (d.text == null || d.text === placeholder) {
+        // prefer DB when ai_content_default=false; prefer AI when true; fallback to whichever exists
+        const text = aiEnabled
+          ? (aiDescription || dbDescription || null)
+          : (dbDescription || aiDescription || null);
+        // empty string suppresses the placeholder without showing stray text
+        d.text = text ?? '';
       }
     }
 
-    // Infosheet features: inject AI features or DB options text if widget shows placeholder
+    // Infosheet features: inject AI features or DB options text if widget has no custom content
     if (w.type === 'features') {
-      const isDefault = !d.items || (
-        Array.isArray(d.items) && d.items.length <= 1 &&
-        Array.isArray((d.items as unknown[][])[0]) && ((d.items as unknown[][])[0] as unknown[])[0] === 'Feature'
+      const rawItems = d.items as [string, string][] | null | undefined;
+      const isDefault = !rawItems || rawItems.length === 0 || (
+        rawItems.length === 1 && rawItems[0][0] === 'Feature' && rawItems[0][1] === 'Feature'
       );
       if (isDefault) {
         if (aiEnabled && aiFeatures && aiFeatures.length > 0) {
@@ -157,7 +161,14 @@ export async function buildPdfHtml({
               pairs.push([lines[i], lines[i + 1] ?? '']);
             }
             d.items = pairs;
+          } else {
+            d.items = []; // suppress placeholder
           }
+        } else if (!aiEnabled && aiFeatures && aiFeatures.length > 0) {
+          // DB preferred but empty — use AI as fallback
+          d.items = aiFeatures;
+        } else {
+          d.items = []; // no content available — suppress placeholder
         }
       }
     }
