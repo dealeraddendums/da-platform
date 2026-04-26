@@ -376,22 +376,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           });
         }
 
-        // ── QR code generation ───────────────────────────────────────────────
-        const qrWidgets = widgets.filter(w => w.type === "infobox" && (w.d.ibType as string) === "qr");
-        if (qrWidgets.length > 0) {
+        // ── QR code generation (infobox-qr and qrcode widgets) ──────────────
+        const hasQrWidgets = widgets.some(
+          w => (w.type === "infobox" && (w.d.ibType as string) === "qr") || w.type === "qrcode"
+        );
+        if (hasQrWidgets) {
           widgets = await Promise.all(widgets.map(async w => {
-            if (w.type !== "infobox" || (w.d.ibType as string) !== "qr") return w;
             const vin = dv.vin ?? "";
             const stock = dv.stock_number ?? "";
-            const tmplStr = (w.d.qrUrlTemplate as string) || dealerQrTemplate || null;
-            const qrUrl = dv.vdp_link ?? (tmplStr
-              ? tmplStr.replace("[VIN]", vin).replace("[STOCK]", stock)
-              : null);
-            if (!qrUrl) return w;
-            try {
-              const dataUrl = await QRCode.toDataURL(qrUrl, { width: 300, margin: 1, color: { dark: "#000000", light: "#ffffff" } });
-              return { ...w, d: { ...w.d, imgUrl: dataUrl } };
-            } catch { return w; }
+
+            if (w.type === "infobox" && (w.d.ibType as string) === "qr") {
+              const tmplStr = (w.d.qrUrlTemplate as string) || dealerQrTemplate || null;
+              const qrUrl = dv.vdp_link ?? (tmplStr
+                ? tmplStr.replace("[VIN]", vin).replace("[STOCK]", stock)
+                : null);
+              if (!qrUrl) return w;
+              try {
+                const dataUrl = await QRCode.toDataURL(qrUrl, { width: 300, margin: 1, color: { dark: "#000000", light: "#ffffff" } });
+                return { ...w, d: { ...w.d, imgUrl: dataUrl } };
+              } catch { return w; }
+            }
+
+            if (w.type === "qrcode") {
+              const tmplStr = (w.d.qrUrlTemplate as string) || dealerQrTemplate || null;
+              const resolvedTmpl = tmplStr ? tmplStr.replace("[VIN]", vin).replace("[STOCK]", stock) : null;
+              const baseUrl = dv.vdp_link ?? resolvedTmpl ?? (w.d.url as string) ?? "https://dealeraddendums.com";
+              try {
+                const dataUrl = await QRCode.toDataURL(baseUrl, { width: 300, margin: 1, color: { dark: "#000000", light: "#ffffff" } });
+                return { ...w, d: { ...w.d, imgUrl: dataUrl } };
+              } catch { return w; }
+            }
+
+            return w;
           }));
         }
 
@@ -456,7 +472,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           widgets, paperSize: effectivePaperSizeStr, fontScale, bgUrl,
           vehicle: vehicleData, options,
           disclaimer: disclaimer ?? undefined,
-          dealerLogoUrl, customDims: customPaperDims,
+          dealerLogoUrl,
+          dealer: dealer ? { name: dealer.name, address: dealer.address, city: dealer.city, state: dealer.state, zip: dealer.zip, phone: dealer.phone } : undefined,
+          customDims: customPaperDims,
           aiEnabled,
           aiDescription: aiContent?.description ?? null,
           aiFeatures: (aiContent?.features as [string, string][] | undefined) ?? null,

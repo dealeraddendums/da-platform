@@ -161,7 +161,9 @@ export function renderW(type: string, d: D, fontScale: number): string {
   if (type === 'qrcode') {
     const url = encodeURIComponent((d.url as string) || 'https://dealeraddendums.com');
     const label = (d.label as string) || 'Scan for more info';
-    return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:4px;background:#fff;box-sizing:border-box"><img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${url}&margin=2" style="width:calc(100% - 4px);height:calc(100% - 20px);object-fit:contain;display:block" alt="QR Code"><div style="font-size:9px;color:#555;margin-top:3px;text-align:center;font-weight:600">${label}</div></div>`;
+    // d.imgUrl is set at PDF render time to a pre-generated base64 data URL; falls back to external API for canvas preview
+    const imgSrc = (d.imgUrl as string) || `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${url}&margin=2`;
+    return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:4px;background:#fff;box-sizing:border-box"><img src="${imgSrc}" style="width:calc(100% - 4px);height:calc(100% - 20px);object-fit:contain;display:block" alt="QR Code"><div style="font-size:9px;color:#555;margin-top:3px;text-align:center;font-weight:600">${label}</div></div>`;
   }
 
   if (type === 'custom') {

@@ -45,6 +45,7 @@ export interface BuildPdfHtmlInput {
   options?: AnyOption[];
   disclaimer?: string;
   dealerLogoUrl?: string | null;
+  dealer?: { name?: string | null; address?: string | null; city?: string | null; state?: string | null; zip?: string | null; phone?: string | null };
   customDims?: { widthIn: number; heightIn: number };
   aiEnabled?: boolean;
   aiDescription?: string | null;
@@ -62,6 +63,7 @@ export async function buildPdfHtml({
   options,
   disclaimer,
   dealerLogoUrl,
+  dealer,
   customDims,
   aiEnabled,
   aiDescription,
@@ -80,6 +82,17 @@ export async function buildPdfHtml({
     // null = dealer has no logo → render blank. undefined = not provided → keep saved.
     if (w.type === 'logo' && dealerLogoUrl !== undefined) {
       d.imgUrl = dealerLogoUrl;
+    }
+
+    // Dealer address: always inject live dealer data so PDF never shows template placeholder.
+    if (w.type === 'dealer' && dealer) {
+      const lines = [
+        dealer.name,
+        dealer.address,
+        [dealer.city, dealer.state, dealer.zip].filter(Boolean).join(' '),
+        dealer.phone,
+      ].filter(Boolean) as string[];
+      if (lines.length) d.text = lines.join('\n');
     }
 
     // MSRP / askbar / subtotal: always use live vehicle data, never saved template values.
