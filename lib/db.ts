@@ -210,6 +210,15 @@ export type DealerRow = {
   report_send_to: string | null;
   last30: number | null;
   makes: string[];
+  shipping_name: string | null;
+  shipping_attention: string | null;
+  shipping_address: string | null;
+  shipping_address2: string | null;
+  shipping_city: string | null;
+  shipping_state: string | null;
+  shipping_zip: string | null;
+  shipping_country: string;
+  shipping_phone: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -258,6 +267,15 @@ type DealerInsert = {
   report_send_to?: string | null;
   last30?: number | null;
   makes?: string[];
+  shipping_name?: string | null;
+  shipping_attention?: string | null;
+  shipping_address?: string | null;
+  shipping_address2?: string | null;
+  shipping_city?: string | null;
+  shipping_state?: string | null;
+  shipping_zip?: string | null;
+  shipping_country?: string;
+  shipping_phone?: string | null;
   created_at?: string | null;
 };
 
@@ -303,6 +321,29 @@ export type DealerUpdate = {
   report_send_to?: string | null;
   last30?: number | null;
   makes?: string[];
+  shipping_name?: string | null;
+  shipping_attention?: string | null;
+  shipping_address?: string | null;
+  shipping_address2?: string | null;
+  shipping_city?: string | null;
+  shipping_state?: string | null;
+  shipping_zip?: string | null;
+  shipping_country?: string;
+  shipping_phone?: string | null;
+};
+
+export type LabelOrderRow = {
+  id: string;
+  dealer_id: string | null;
+  ordered_by: string | null;
+  items: Record<string, unknown>[];
+  ship_to: Record<string, unknown>;
+  total_amount: number | null;
+  billing_status: string;
+  email_status: string;
+  xps_status: string;
+  xps_order_id: string | null;
+  created_at: string;
 };
 
 export type TemplateRow = {
@@ -1219,6 +1260,27 @@ export type Database = {
         Row: DealerCustomSizeRow;
         Insert: { dealer_id: string; name: string; width_in: number; height_in?: number; background_url?: string | null };
         Update: { name?: string; width_in?: number; height_in?: number; background_url?: string | null; updated_at?: string };
+        Relationships: [];
+      };
+      label_orders: {
+        Row: LabelOrderRow;
+        Insert: {
+          dealer_id?: string | null;
+          ordered_by?: string | null;
+          items: Record<string, unknown>[];
+          ship_to: Record<string, unknown>;
+          total_amount?: number | null;
+          billing_status?: string;
+          email_status?: string;
+          xps_status?: string;
+          xps_order_id?: string | null;
+        };
+        Update: {
+          billing_status?: string;
+          email_status?: string;
+          xps_status?: string;
+          xps_order_id?: string | null;
+        };
         Relationships: [];
       };
       nhtsa_vin_patterns: {

@@ -94,6 +94,16 @@ export async function PATCH(
   if (body.country !== undefined) patch.country = body.country;
   if (body.makes !== undefined) patch.makes = body.makes;
   if (body.logo_url !== undefined) patch.logo_url = body.logo_url;
+  // shipping address fields — dealer_admin and super_admin
+  if (body.shipping_name !== undefined) patch.shipping_name = body.shipping_name;
+  if (body.shipping_attention !== undefined) patch.shipping_attention = body.shipping_attention;
+  if (body.shipping_address !== undefined) patch.shipping_address = body.shipping_address;
+  if (body.shipping_address2 !== undefined) patch.shipping_address2 = body.shipping_address2;
+  if (body.shipping_city !== undefined) patch.shipping_city = body.shipping_city;
+  if (body.shipping_state !== undefined) patch.shipping_state = body.shipping_state;
+  if (body.shipping_zip !== undefined) patch.shipping_zip = body.shipping_zip;
+  if (body.shipping_country !== undefined) patch.shipping_country = body.shipping_country;
+  if (body.shipping_phone !== undefined) patch.shipping_phone = body.shipping_phone;
   // inventory_dealer_id: super_admin only (updated when feed goes live). internal_id is never updated.
   if (body.inventory_dealer_id !== undefined && claims.role === "super_admin") {
     patch.inventory_dealer_id = body.inventory_dealer_id;

@@ -28,10 +28,22 @@ export default async function DashboardLayout({
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user") as UserRole;
 
+  const isDealerRole = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";
+  let dealerName: string | null = null;
+  if (isDealerRole && profile?.dealer_id) {
+    const { data: dealerData } = await admin
+      .from("dealers")
+      .select("name")
+      .eq("dealer_id", profile.dealer_id)
+      .maybeSingle<{ name: string }>();
+    dealerName = dealerData?.name ?? null;
+  }
+
   const userDisplay = {
     email: session.user.email ?? "",
     fullName: profile?.full_name ?? null,
     role,
+    dealerName,
   };
 
   return (

@@ -14,11 +14,14 @@ const ROLE_LABELS: Record<UserRole, string> = {
   dealer_restricted: "Dealer User",
 };
 
+const DEALER_ROLES: UserRole[] = ["dealer_admin", "dealer_user", "dealer_restricted"];
+
 type Props = {
   user: {
     email: string;
     fullName: string | null;
     role: string;
+    dealerName?: string | null;
   };
 };
 
@@ -37,6 +40,8 @@ export default function Topbar({ user }: Props) {
 
   const displayName = user.fullName || user.email;
   const roleLabel = ROLE_LABELS[user.role as UserRole] ?? user.role;
+  const isDealerRole = DEALER_ROLES.includes(user.role as UserRole);
+  const showDealerNameBar = isDealerRole && !!user.dealerName;
 
   return (
     <header
@@ -60,33 +65,43 @@ export default function Topbar({ user }: Props) {
 
       {/* Right */}
       <div className="flex items-center gap-4">
-        {/* Role badge */}
-        <span
-          className="text-xs font-semibold px-2 py-1 rounded"
-          style={{
-            background: "rgba(255,165,0,0.15)",
-            color: "var(--orange)",
-            border: "1px solid rgba(255,165,0,0.25)",
-          }}
-        >
-          {roleLabel}
-        </span>
 
-        {/* User */}
-        <div className="flex items-center gap-2">
-          <div
-            className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-            style={{ background: "var(--blue-primary, #1976d2)" }}
-          >
-            {displayName.charAt(0).toUpperCase()}
+        {showDealerNameBar ? (
+          /* Dealer role: show "Dealership Name | User Full Name" */
+          <div className="flex items-center text-sm">
+            <span style={{ fontWeight: 600, color: "#ffffff" }}>{user.dealerName}</span>
+            <span style={{ color: "rgba(255,255,255,0.4)", margin: "0 8px" }}>|</span>
+            <span style={{ color: "rgba(255,255,255,0.6)", fontWeight: 400 }}>{displayName}</span>
           </div>
-          <span
-            className="text-sm max-w-[180px] truncate"
-            style={{ color: "rgba(255,255,255,0.85)" }}
-          >
-            {displayName}
-          </span>
-        </div>
+        ) : (
+          /* Super admin / group admin: role badge + user name */
+          <>
+            <span
+              className="text-xs font-semibold px-2 py-1 rounded"
+              style={{
+                background: "rgba(255,165,0,0.15)",
+                color: "var(--orange)",
+                border: "1px solid rgba(255,165,0,0.25)",
+              }}
+            >
+              {roleLabel}
+            </span>
+            <div className="flex items-center gap-2">
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                style={{ background: "var(--blue-primary, #1976d2)" }}
+              >
+                {displayName.charAt(0).toUpperCase()}
+              </div>
+              <span
+                className="text-sm max-w-[180px] truncate"
+                style={{ color: "rgba(255,255,255,0.85)" }}
+              >
+                {displayName}
+              </span>
+            </div>
+          </>
+        )}
 
         {/* Logout */}
         <button
