@@ -85,17 +85,20 @@ export async function buildPdfHtml({
     // MSRP / askbar / subtotal: always use live vehicle data, never saved template values.
     if (w.type === 'msrp' && vehicle?.MSRP) {
       const msrp = parseFloat(vehicle.MSRP);
-      if (!isNaN(msrp)) d.value = `$${msrp.toLocaleString()}`;
+      if (!isNaN(msrp)) d.value = msrp.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
     }
     if (w.type === 'askbar' && vehicle) {
       const msrp = vehicle.MSRP != null ? parseFloat(vehicle.MSRP) : null;
       if (paperSize === 'infosheet') {
         // Infosheet: asking price = MSRP only (no addendum options total)
-        if (msrp != null && !isNaN(msrp) && msrp > 0) d.value = `$${msrp.toLocaleString()}`;
+        if (msrp != null && !isNaN(msrp) && msrp > 0) {
+          d.value = msrp.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+          console.log('[pdf-html] infosheet askbar msrp:', msrp, '→', d.value);
+        }
       } else {
         const optTotal = (options ?? []).reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
         const total = (msrp ?? 0) + optTotal;
-        if (total > 0) d.value = `$${total.toLocaleString()}`;
+        if (total > 0) d.value = total.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
       }
     }
     if (w.type === 'subtotal') {
