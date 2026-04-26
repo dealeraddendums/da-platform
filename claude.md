@@ -1,5 +1,5 @@
 # DealerAddendums Platform — CLAUDE.md
-## Last updated: 2026-04-22
+## Last updated: 2026-04-26
 
 ---
 
@@ -25,6 +25,11 @@ and attention to detail are not optional — they are the foundation of everythi
 
 3. **Modern flat design using DA colors** — all UI must follow the design system below.
    No gradients, no shadows on cards, no border radius > 6px, no skeuomorphic elements.
+
+4. **Never add new Aurora queries** — Aurora (MySQL, legacy EC2) is being terminated.
+   All production data must come from Supabase. If Supabase doesn't have the data yet,
+   the field is null — do not fall back to Aurora. Aurora may be read for reference/migration
+   scripts only. Never add new `getPool()` / `pool.execute` calls to production routes.
 
 ---
 
@@ -108,7 +113,7 @@ Badges:    radius=20px, 11px bold text
 | QuietReady EC2 | `ssh -i ~/ssh/QuietReady2026.pem ubuntu@ec2-54-160-4-222.compute-1.amazonaws.com` |
 | ZoomTrainer EC2 | `ec2-44-202-168-181.compute-1.amazonaws.com`, key `~/ssh/zoom2026.pem` |
 | FT-Tracker EC2 | `apps.dealeraddendums.com` |
-| Aurora (MySQL) | PRODUCTION — read-only from new platform. ~82 tables, 9.3M addendum rows, 2M vehicle rows |
+| Aurora (MySQL) | **BEING TERMINATED** — reference only. ~82 tables, 9.3M addendum rows, 2M vehicle rows. No new queries. |
 | Supabase | https://byouefbebqgffhtfdggu.supabase.co |
 | GitHub | https://github.com/dealeraddendums/da-platform |
 | Anthropic API | `allan@dealeraddendums.com` enterprise key |
@@ -270,10 +275,11 @@ Same impersonation UX as Dealers list:
 
 ## Phase 4 — Vehicle Inventory ✅ COMPLETE
 
-### CRITICAL: Aurora is read-only
-The Aurora MySQL database is LIVE PRODUCTION. The new platform connects read-only.
-**Never run INSERT, UPDATE, or DELETE against Aurora from this codebase.**
-Use indexed columns only in WHERE clauses — vehicles table has 2M+ rows.
+### CRITICAL: Aurora is being terminated
+Aurora is the legacy MySQL database. The new platform must NOT add new Aurora queries.
+**Never run INSERT, UPDATE, or DELETE. Never add new SELECT queries to production routes.**
+Existing Aurora reads in Phase 4 vehicle inventory are legacy code pending migration to Supabase.
+Use indexed columns only in any remaining WHERE clauses — vehicles table has 2M+ rows.
 Safe indexed columns: dealer_id, stock_number, vin, year, make, model, status.
 
 ### Aurora connection
@@ -368,6 +374,21 @@ AURORA_DATABASE, AURORA_PORT
 ---
 
 ## Phase 6 — Unified Document Builder ✅ COMPLETE
+
+### CRITICAL: Single renderer rule
+The Builder canvas and PDF output MUST use the same renderer.
+`components/builder/widgetRenderer.ts` → `renderW()` is the single source of truth
+for all widget HTML. `lib/pdf-html.ts` pipes every widget through `renderW()` — it
+never builds widget HTML independently. Any divergence between canvas and PDF is a bug.
+Canvas uses `renderW()` via `dangerouslySetInnerHTML`; PDF uses `renderW()` via `buildPdfHtml()`.
+
+### WYSIWYG canvas rule (2026-04-26)
+`applyVehicleDataToWidgets()` in `BuilderPage.tsx` is called on init, paper-size switch,
+and template load. It mirrors the enrichment `buildPdfHtml()` does at print time:
+sets `vehicleData`, `vin` (barcode), dealer text (4-line: name/address/city-state-zip/phone),
+MSRP value, and QR code `url` from VDP link. All dealer data comes from Supabase `dealers`
+table — no Aurora fallback. `VehiclePreload` carries `dealer_city/state/zip/phone` and
+`vdp_link` (fetched from `dealer_vehicles` in Supabase).
 
 ### Prototype file
 `DA-TemplateBuilder-FINAL.html` — fully functional standalone HTML prototype (~122KB).
@@ -476,6 +497,15 @@ research and inspections before making any purchasing decisions.
 - Print settings inner wrapper border-radius: 8 → 6
 - Save template summary border-radius: 8 → 6
 
+### WYSIWYG fixes (2026-04-26)
+- `applyVehicleDataToWidgets()` added to `BuilderPage.tsx` — call on init, switchPaperSize,
+  and template load. Sets real vehicleData/vin/dealer/msrp/askbar/qr from VehiclePreload.
+- Infosheet AI fetch now triggers on switchPaperSize regardless of `aiEnabled` setting,
+  matching PDF behavior (AI always attempted at print time).
+- Builder server component queries Supabase `dealers` for full dealer info (not Aurora),
+  plus Supabase `dealer_vehicles` for `vdp_link`. No Aurora fallback.
+- Palette widget hints for description/features changed to "Populated at print time".
+
 ---
 
 ## Phase 7 — VIN & AI Enrichment ✅ COMPLETE
@@ -517,6 +547,26 @@ research and inspections before making any purchasing decisions.
 - Install Chromium system deps: libnss3 and related packages ✅ (installed 2026-04-19)
 - AWS credentials: ✅ added to .env.production (IAM user da-platform-app)
 
+### PDF engine details (2026-04-26)
+- **addendum_data table**: created in Supabase, written on every print (single + bulk).
+  Append-only compliance record. Includes `legacy_dealer_id` and `legacy_vehicle_id`
+  for Aurora history import. Import script: `scripts/import-addendum-data.ts` (pending run).
+- **vehicle_options sentinel**: `vehicle_id='0'` was legacy sentinel for dealer-wide defaults
+  pre-UUID. Migrate-on-write: first save per vehicle writes UUID-keyed rows and deletes
+  sentinel. Self-healing as dealers print.
+- **Infosheet AI content**: always fetches AI regardless of `ai_content_default`. Cross-fallback:
+  DB→AI or AI→DB, never empty. Empty string suppresses placeholder — generated PDFs never
+  show placeholder text.
+- **Clear Print History**: also clears `vehicle_options` for active vehicles so next print
+  reloads fresh library options.
+- **Bulk print limit**: 15 vehicles max. `PdfBuildingOverlay` SVG car assembly animation
+  shows during generation.
+- **QR codes**: pre-generated server-side as base64 data URLs (node `qrcode` package) for
+  both `qrcode` and `infobox[ibType=qr]` widgets. Eliminates external `api.qrserver.com`
+  dependency inside Puppeteer. Canvas still uses external API for live preview.
+- **Currency format**: all money values use `toLocaleString('en-US', {style:'currency',
+  currency:'USD'})` for consistent `$31,000.00` format on Linux/EC2.
+
 ---
 
 ## Phase 9b — Vehicle Archive ✅ COMPLETE
@@ -546,6 +596,30 @@ research and inspections before making any purchasing decisions.
 - Header: x-cron-secret: [production CRON_SECRET value]
 - Schedule: 0 3 * * 0 (3 AM UTC every Sunday)
 - Method: POST
+
+---
+
+## New Supabase columns (added post-Phase-9)
+
+| Table | Column | Type | Notes |
+|---|---|---|---|
+| `dealer_vehicles` | `vdp_link` | text, nullable | ETL populated; used for QR code URL |
+| `dealer_settings` | `buyers_guide_defaults` | jsonb | Buyer's guide default options |
+| `dealer_settings` | `qr_url_template` | text, nullable | Template with `[VIN]`/`[STOCK]` tokens |
+| `dealer_settings` | `default_addendum_new/used/cpo` | uuid, nullable | FK → templates.id |
+| `dealer_settings` | `default_infosheet_new/used/cpo` | uuid, nullable | FK → templates.id |
+| `dealer_settings` | `default_buyersguide_new/used/cpo` | uuid, nullable | FK → templates.id |
+| `print_history` | `pdf_url` | text, nullable | S3 signed URL (24hr) |
+
+## New Supabase tables (added post-Phase-9)
+
+| Table | Purpose |
+|---|---|
+| `addendum_data` | Append-only compliance/analytics record — one row per option per print |
+| `dealer_custom_sizes` | Custom paper sizes per dealer (width_in, height_in, background_url) |
+| `dealer_vehicles_archive` | Mirror of dealer_vehicles + archived_at/archive_reason for 6mo+ inactive |
+| `vehicle_audit_log_archive` | Mirror of vehicle_audit_log without FK constraints (for archived vehicles) |
+| `ai_content_cache` | Per-VIN+dealer_id AI description + features cache |
 
 ---
 

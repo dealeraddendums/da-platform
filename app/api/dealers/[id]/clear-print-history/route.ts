@@ -68,13 +68,21 @@ export async function POST(
   }
 
   // Clear saved option overrides for this dealer's manual vehicles.
-  // Delete by active vehicle UUIDs and legacy '0' sentinel.
+  // Two separate queries: per-vehicle UUIDs (requires migration 037) and legacy '0' sentinel.
   // The dealer's Options Library (addendum_library) is NOT affected.
+  if (activeIds.length > 0) {
+    await admin
+      .from("vehicle_options")
+      .delete()
+      .eq("dealer_id", dealerId)
+      .in("vehicle_id", activeIds);
+  }
+  // Always delete legacy '0' sentinel rows (safe on both bigint and text columns)
   await admin
     .from("vehicle_options")
     .delete()
     .eq("dealer_id", dealerId)
-    .in("vehicle_id", [...activeIds, "0"]);
+    .eq("vehicle_id", "0");
 
   // Log to vehicle_audit_log for each affected vehicle (fire-and-forget)
   const logRows: VehicleAuditLogInsert[] = activeIds.map(vid => ({
