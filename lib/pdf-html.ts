@@ -46,6 +46,11 @@ export interface BuildPdfHtmlInput {
   disclaimer?: string;
   dealerLogoUrl?: string | null;
   customDims?: { widthIn: number; heightIn: number };
+  aiEnabled?: boolean;
+  aiDescription?: string | null;
+  aiFeatures?: [string, string][] | null;
+  dbDescription?: string | null;
+  dbOptionsText?: string | null;
 }
 
 export async function buildPdfHtml({
@@ -58,6 +63,11 @@ export async function buildPdfHtml({
   disclaimer,
   dealerLogoUrl,
   customDims,
+  aiEnabled,
+  aiDescription,
+  aiFeatures,
+  dbDescription,
+  dbOptionsText,
 }: BuildPdfHtmlInput): Promise<string> {
   const paper = customDims
     ? { w: Math.round(customDims.widthIn * 96), h: Math.round(customDims.heightIn * 96) }
@@ -78,10 +88,15 @@ export async function buildPdfHtml({
       if (!isNaN(msrp)) d.value = `$${msrp.toLocaleString()}`;
     }
     if (w.type === 'askbar' && vehicle) {
-      const msrp = vehicle.MSRP ? parseFloat(vehicle.MSRP) : 0;
-      const optTotal = (options ?? []).reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
-      const total = msrp + optTotal;
-      if (total > 0) d.value = `$${total.toLocaleString()}`;
+      const msrp = vehicle.MSRP != null ? parseFloat(vehicle.MSRP) : null;
+      if (paperSize === 'infosheet') {
+        // Infosheet: asking price = MSRP only (no addendum options total)
+        if (msrp != null && !isNaN(msrp) && msrp > 0) d.value = `$${msrp.toLocaleString()}`;
+      } else {
+        const optTotal = (options ?? []).reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
+        const total = (msrp ?? 0) + optTotal;
+        if (total > 0) d.value = `$${total.toLocaleString()}`;
+      }
     }
     if (w.type === 'subtotal') {
       const optTotal = (options ?? []).reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
@@ -114,6 +129,37 @@ export async function buildPdfHtml({
         desc: o.description ?? '',
         price: formatOptionPrice(o.option_price),
       }));
+    }
+
+    // Infosheet description: inject AI or DB vehicle description if widget shows placeholder
+    if (w.type === 'description') {
+      const placeholder = 'Vehicle description will appear here.';
+      if (!d.text || d.text === placeholder) {
+        const text = aiEnabled && aiDescription ? aiDescription : (dbDescription ?? null);
+        if (text) d.text = text;
+      }
+    }
+
+    // Infosheet features: inject AI features or DB options text if widget shows placeholder
+    if (w.type === 'features') {
+      const isDefault = !d.items || (
+        Array.isArray(d.items) && d.items.length <= 1 &&
+        Array.isArray((d.items as unknown[][])[0]) && ((d.items as unknown[][])[0] as unknown[])[0] === 'Feature'
+      );
+      if (isDefault) {
+        if (aiEnabled && aiFeatures && aiFeatures.length > 0) {
+          d.items = aiFeatures;
+        } else if (dbOptionsText) {
+          const lines = dbOptionsText.split(/[\n\r,]+/).map((s: string) => s.trim()).filter(Boolean);
+          if (lines.length > 0) {
+            const pairs: [string, string][] = [];
+            for (let i = 0; i < lines.length; i += 2) {
+              pairs.push([lines[i], lines[i + 1] ?? '']);
+            }
+            d.items = pairs;
+          }
+        }
+      }
     }
 
     return { ...w, d };

@@ -162,10 +162,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       FUEL: null,
       DRIVETRAIN: dv.drivetrain,
       TRANSMISSION: dv.transmission,
-      MILEAGE: dv.mileage ? String(dv.mileage) : null,
+      MILEAGE: dv.mileage != null ? String(dv.mileage) : null,
       DATE_IN_STOCK: dv.date_added,
       STATUS: "1" as const,
-      MSRP: dv.msrp ? String(dv.msrp) : null,
+      MSRP: dv.msrp != null ? String(dv.msrp) : null,
       NEW_USED: dv.condition === "Used" ? "Used" : "New",
       CERTIFIED: dv.condition === "CPO" ? "Yes" : "No",
       OPTIONS: null,
@@ -184,6 +184,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     let savedTemplateBgUrl: string | undefined;
     let savedTemplateFontScale: number | undefined;
     let savedTemplatePaperSize: PaperSize | undefined;
+    let aiEnabled = true; // default: AI mode per platform default
 
     if (!inWidgets || inWidgets.length === 0) {
       const { data: settings } = await admin
@@ -192,11 +193,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           "default_addendum_new", "default_addendum_used", "default_addendum_cpo",
           "default_infosheet_new", "default_infosheet_used", "default_infosheet_cpo",
           "default_buyersguide_new", "default_buyersguide_used", "default_buyersguide_cpo",
+          "ai_content_default",
         ].join(", "))
         .eq("dealer_id", dv.dealer_id)
         .maybeSingle<DealerSettingsRow>();
 
       if (settings) {
+        aiEnabled = settings.ai_content_default ?? true;
         const condKey = dv.condition === "New" ? "new" : dv.condition === "Used" ? "used" : "cpo";
         const docKey = docType === "buyer_guide" ? "buyersguide" : docType;
         const col = `default_${docKey}_${condKey}` as keyof DealerSettingsRow;
@@ -318,39 +321,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }));
     }
 
-    // ── Resolve {{token}} patterns in customtext widgets ─────────────────────
-    const tokenWidgets = widgets.filter(
-      w => w.type === 'customtext' && ((w.d.text as string) || '').includes('{{')
+    // ── Fetch AI content for infosheet description/features + {{ai.}} tokens ───
+    let aiContent: { description: string; features: [string, string][] } | null = null;
+    const needsAiForInfosheet = isInfosheet && aiEnabled;
+    const hasAiTokens = widgets.some(
+      w => w.type === 'customtext' && ((w.d.text as string) || '').includes('{{ai.')
     );
-    if (tokenWidgets.length > 0) {
-      let aiContent: { description: string; features: [string, string][] } | null = null;
-      const needsAi = tokenWidgets.some(w => ((w.d.text as string) || '').includes('{{ai.'));
-      if (needsAi && vehicleData.VIN_NUMBER) {
-        const { data: cached } = await admin
-          .from('ai_content_cache')
-          .select('description, features')
-          .eq('vin', vehicleData.VIN_NUMBER)
-          .eq('dealer_id', dv.dealer_id)
-          .maybeSingle();
-        if (cached?.description) {
-          aiContent = { description: cached.description, features: (cached.features as [string,string][]) ?? [] };
-        } else {
-          try {
-            const generated = await generateVehicleContent({
-              year: vehicleData.YEAR, make: vehicleData.MAKE, model: vehicleData.MODEL,
-              trim: vehicleData.TRIM, colorExt: vehicleData.EXT_COLOR,
-              mileage: vehicleData.MILEAGE,
-              msrp: vehicleData.MSRP ? parseFloat(vehicleData.MSRP) : null,
-            }, null);
-            aiContent = generated;
-            await admin.from('ai_content_cache').upsert({
-              vin: vehicleData.VIN_NUMBER, dealer_id: dv.dealer_id,
-              description: generated.description, features: generated.features,
-              generated_at: new Date().toISOString(), model_version: generated.modelVersion,
-            }, { onConflict: 'vin,dealer_id' });
-          } catch { /* AI generation failed — tokens render as empty string */ }
-        }
+    if ((needsAiForInfosheet || hasAiTokens) && vehicleData.VIN_NUMBER) {
+      const { data: cachedAi } = await admin
+        .from('ai_content_cache')
+        .select('description, features')
+        .eq('vin', vehicleData.VIN_NUMBER)
+        .eq('dealer_id', dv.dealer_id)
+        .maybeSingle();
+      if (cachedAi?.description) {
+        aiContent = { description: cachedAi.description, features: (cachedAi.features as [string,string][]) ?? [] };
+      } else {
+        try {
+          const generated = await generateVehicleContent({
+            year: vehicleData.YEAR, make: vehicleData.MAKE, model: vehicleData.MODEL,
+            trim: vehicleData.TRIM, colorExt: vehicleData.EXT_COLOR,
+            mileage: vehicleData.MILEAGE,
+            msrp: vehicleData.MSRP ? parseFloat(vehicleData.MSRP) : null,
+          }, null);
+          aiContent = generated;
+          await admin.from('ai_content_cache').upsert({
+            vin: vehicleData.VIN_NUMBER, dealer_id: dv.dealer_id,
+            description: generated.description, features: generated.features,
+            generated_at: new Date().toISOString(), model_version: generated.modelVersion,
+          }, { onConflict: 'vin,dealer_id' });
+        } catch { /* AI generation failed */ }
       }
+    }
+
+    // ── Apply {{token}} patterns in customtext widgets ─────────────────────────
+    if (widgets.some(w => w.type === 'customtext' && ((w.d.text as string) || '').includes('{{'))) {
       widgets = widgets.map(w => {
         if (w.type !== 'customtext') return w;
         const text = (w.d.text as string) || '';
@@ -376,6 +381,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       disclaimer: disclaimer ?? undefined,
       dealerLogoUrl,
       customDims: customPaperDims,
+      aiEnabled,
+      aiDescription: aiContent?.description ?? null,
+      aiFeatures: (aiContent?.features as [string, string][] | undefined) ?? null,
+      dbDescription: vehicleData.DESCRIPTION ?? null,
+      dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
     });
 
     let pdfBuffer: Buffer;
