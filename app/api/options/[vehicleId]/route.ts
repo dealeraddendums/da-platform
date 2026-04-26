@@ -8,14 +8,15 @@ import type { VehicleOptionRow } from "@/lib/db";
 
 type Params = { params: { vehicleId: string } };
 
+function isUUID(v: string) { return v.includes("-"); }
+function isManual(v: string) { return isUUID(v) || v === "0"; }
+
 /**
  * GET /api/options/[vehicleId]
- * Returns saved vehicle_options from Supabase.
- *
- * vehicleId === 0 is the sentinel for manual dealer_vehicles (not in Aurora).
- * In that case: skip Aurora entirely, return dealer's addendum_library as defaults.
- *
- * For Aurora vehicles: seeds from addendum_data on first open, then falls back to matched defaults.
+ * vehicleId can be:
+ *   - UUID string: manual dealer_vehicle (dealer_vehicles.id)
+ *   - "0":         legacy sentinel (backward compat, treated as manual)
+ *   - numeric:     Aurora vehicle ID
  */
 export async function GET(
   _req: NextRequest,
@@ -25,28 +26,23 @@ export async function GET(
     const { claims, error } = await requireAuth();
     if (error) return error;
 
-    const vehicleId = parseInt(params.vehicleId, 10);
-    if (isNaN(vehicleId)) {
-      return NextResponse.json({ error: "Invalid vehicleId" }, { status: 400 });
-    }
-
+    const vid = params.vehicleId;
     const admin = createAdminSupabaseClient();
-    // Resolve effective dealer (handles impersonation)
     const effectiveDealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
 
-    // ── Manual vehicle path (vehicleId === 0 sentinel) ──────────────────────────
-    if (vehicleId === 0) {
+    // ── Manual vehicle path (UUID or legacy '0') ─────────────────────────────
+    if (isManual(vid)) {
       if (!effectiveDealerId) {
         return NextResponse.json({ data: [], groupOptions: [], source: "empty" });
       }
 
       const groupOptions = await getGroupOptionsForDealer(effectiveDealerId);
 
-      // Check for previously saved options (vehicle_id=0, dealer-scoped)
+      // Check for saved options keyed by this vehicleId
       const { data: saved } = await admin
         .from("vehicle_options")
         .select("*")
-        .eq("vehicle_id", 0)
+        .eq("vehicle_id", vid)
         .eq("dealer_id", effectiveDealerId)
         .order("sort_order", { ascending: true });
 
@@ -54,8 +50,21 @@ export async function GET(
         return NextResponse.json({ data: saved, groupOptions, source: "saved" });
       }
 
-      // No saved options — seed from dealer's Supabase addendum_library
-      // Skip applies_to='none' options — those are available in picker but don't auto-apply
+      // If UUID and nothing found, also check legacy '0' sentinel as fallback
+      if (isUUID(vid)) {
+        const { data: legacySaved } = await admin
+          .from("vehicle_options")
+          .select("*")
+          .eq("vehicle_id", "0")
+          .eq("dealer_id", effectiveDealerId)
+          .order("sort_order", { ascending: true });
+
+        if (legacySaved && legacySaved.length > 0) {
+          return NextResponse.json({ data: legacySaved, groupOptions, source: "saved" });
+        }
+      }
+
+      // No saved options — seed from dealer's addendum_library
       const { data: library } = await admin
         .from("addendum_library")
         .select("*")
@@ -76,13 +85,18 @@ export async function GET(
       return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false });
     }
 
-    // ── Aurora vehicle path ──────────────────────────────────────────────────────
+    // ── Aurora vehicle path ──────────────────────────────────────────────────
+    const vehicleIdNum = parseInt(vid, 10);
+    if (isNaN(vehicleIdNum)) {
+      return NextResponse.json({ error: "Invalid vehicleId" }, { status: 400 });
+    }
+
     const pool = getPool();
     const [vrows] = await pool.execute<VehicleRowPacket[]>(
       `SELECT id, DEALER_ID, VIN_NUMBER, YEAR, MAKE, MODEL, TRIM, BODYSTYLE,
               MILEAGE, MSRP, NEW_USED, CERTIFIED
        FROM dealer_inventory WHERE id = ? LIMIT 1`,
-      [vehicleId]
+      [vehicleIdNum]
     );
     if (!vrows.length) {
       return NextResponse.json({ error: "Vehicle not found" }, { status: 404 });
@@ -90,33 +104,29 @@ export async function GET(
     const vehicle = vrows[0];
     const dealerId = vehicle.DEALER_ID;
 
-    // Scope check — includes impersonation
     const isDealer = claims.role === "dealer_admin" || claims.role === "dealer_user";
     if (isDealer && effectiveDealerId && effectiveDealerId !== dealerId) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Check for saved options in Supabase
     const { data: saved } = await admin
       .from("vehicle_options")
       .select("*")
-      .eq("vehicle_id", vehicleId)
+      .eq("vehicle_id", vid)
       .eq("dealer_id", dealerId)
       .order("sort_order", { ascending: true });
 
-    // Fetch group-level locked options
     const groupOptions = await getGroupOptionsForDealer(dealerId);
 
     if (saved && saved.length > 0) {
       return NextResponse.json({ data: saved, groupOptions, source: "saved" });
     }
 
-    // No saved options — seed from Aurora addendum_data first
-    const auroraOptions = await getAuroraAppliedOptions(vehicleId, dealerId);
+    const auroraOptions = await getAuroraAppliedOptions(vehicleIdNum, dealerId);
 
     if (auroraOptions.length > 0) {
       const inserts = auroraOptions.map((o, i) => ({
-        vehicle_id: vehicleId,
+        vehicle_id: vid,
         dealer_id: dealerId,
         option_name: o.option_name,
         option_price: o.option_price,
@@ -130,7 +140,6 @@ export async function GET(
       return NextResponse.json({ data: inserted ?? inserts, groupOptions, source: "aurora_seeded" });
     }
 
-    // Fall back to matching defaults from addendum_defaults (Aurora)
     const matched = await matchOptionsToVehicle(vehicle, dealerId);
     return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false });
 
@@ -144,7 +153,6 @@ export async function GET(
 /**
  * POST /api/options/[vehicleId]
  * Replaces all options for a vehicle (batch save).
- * Body: { options: { option_name, option_price, sort_order, source }[] }
  */
 export async function POST(
   req: NextRequest,
@@ -154,11 +162,7 @@ export async function POST(
     const { claims, error } = await requireAuth();
     if (error) return error;
 
-    const vehicleId = parseInt(params.vehicleId, 10);
-    if (isNaN(vehicleId)) {
-      return NextResponse.json({ error: "Invalid vehicleId" }, { status: 400 });
-    }
-
+    const vid = params.vehicleId;
     type OptionInput = Pick<VehicleOptionRow, "option_name" | "option_price" | "sort_order" | "source"> & { description?: string | null };
     const body = await req.json() as { options?: OptionInput[]; dealer_id?: string };
     if (!body.options || !Array.isArray(body.options)) {
@@ -166,16 +170,20 @@ export async function POST(
     }
 
     const effectiveDealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
+    const admin = createAdminSupabaseClient();
 
-    // Manual vehicle path
-    if (vehicleId === 0) {
+    // Manual vehicle path (UUID or legacy '0')
+    if (isManual(vid)) {
       if (!effectiveDealerId) {
         return NextResponse.json({ error: "No dealer context" }, { status: 403 });
       }
-      const admin = createAdminSupabaseClient();
-      await admin.from("vehicle_options").delete().eq("vehicle_id", 0).eq("dealer_id", effectiveDealerId);
+      await admin.from("vehicle_options").delete().eq("vehicle_id", vid).eq("dealer_id", effectiveDealerId);
+      // Also clear legacy '0' sentinel if saving under UUID (migrate on write)
+      if (isUUID(vid)) {
+        await admin.from("vehicle_options").delete().eq("vehicle_id", "0").eq("dealer_id", effectiveDealerId);
+      }
       const inserts = body.options.map((o, i) => ({
-        vehicle_id: 0,
+        vehicle_id: vid,
         dealer_id: effectiveDealerId,
         option_name: o.option_name,
         option_price: o.option_price ?? "NC",
@@ -189,10 +197,14 @@ export async function POST(
     }
 
     // Aurora vehicle path
+    const vehicleIdNum = parseInt(vid, 10);
+    if (isNaN(vehicleIdNum)) {
+      return NextResponse.json({ error: "Invalid vehicleId" }, { status: 400 });
+    }
     const pool = getPool();
     const [vrows] = await pool.execute<VehicleRowPacket[]>(
       "SELECT DEALER_ID FROM dealer_inventory WHERE id = ? LIMIT 1",
-      [vehicleId]
+      [vehicleIdNum]
     );
     if (!vrows.length) {
       return NextResponse.json({ error: "Vehicle not found" }, { status: 404 });
@@ -204,11 +216,10 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const admin = createAdminSupabaseClient();
-    await admin.from("vehicle_options").delete().eq("vehicle_id", vehicleId).eq("dealer_id", dealerId);
+    await admin.from("vehicle_options").delete().eq("vehicle_id", vid).eq("dealer_id", dealerId);
 
     const inserts = body.options.map((o, i) => ({
-      vehicle_id: vehicleId,
+      vehicle_id: vid,
       dealer_id: dealerId,
       option_name: o.option_name,
       option_price: o.option_price ?? "NC",

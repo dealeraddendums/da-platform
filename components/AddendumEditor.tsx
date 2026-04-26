@@ -43,7 +43,8 @@ type Props = {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
-  const vehicleId = vehicle.id;
+  // Use UUID for manual vehicles (vehicle.id===0) so options are saved per-vehicle, not shared
+  const vehicleId: string | number = vehicle.id === 0 ? dealerVehicleId : vehicle.id;
   const dealerId = vehicle.DEALER_ID;
 
   const [options, setOptions] = useState<(VehicleOptionRow | MatchedOption)[]>([]);
@@ -106,8 +107,8 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
     setLibraryLoading(true);
     try {
       let items: LibraryOption[];
-      if (vehicleId === 0) {
-        // Manual vehicle: read from Supabase addendum_library (auth-scoped, no dealer_id param)
+      if (typeof vehicleId === "string" && vehicleId.includes("-")) {
+        // Manual vehicle (UUID): read from Supabase addendum_library (auth-scoped, no dealer_id param)
         const res = await fetch("/api/addendum-library?per_page=100");
         const json = await res.json() as { data?: Array<{ option_name: string; item_price: string; sort_order: number }> };
         items = (json.data ?? []).map((r, i) => ({
@@ -426,9 +427,10 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
                             {(() => {
                               const desc = (opt as MatchedOption).description ?? (opt as VehicleOptionRow).description;
                               return desc ? (
-                                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, paddingLeft: 8, lineHeight: 1.4 }}>
-                                  {desc}
-                                </div>
+                                <div
+                                  style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, paddingLeft: 8, lineHeight: 1.4 }}
+                                  dangerouslySetInnerHTML={{ __html: desc }}
+                                />
                               ) : null;
                             })()}
                           </div>

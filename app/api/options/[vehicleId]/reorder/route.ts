@@ -15,11 +15,6 @@ export async function PATCH(
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  const vehicleId = parseInt(params.vehicleId, 10);
-  if (isNaN(vehicleId)) {
-    return NextResponse.json({ error: "Invalid vehicleId" }, { status: 400 });
-  }
-
   const body = await req.json() as { order?: string[] };
   if (!body.order || !Array.isArray(body.order)) {
     return NextResponse.json({ error: "order array required" }, { status: 400 });

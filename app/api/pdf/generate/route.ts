@@ -94,12 +94,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } catch { /* column may not exist until migration 034 is applied */ }
 
     // ── Options from Supabase ─────────────────────────────────────────────────
-    const { data: optionRows } = await admin
+    // Check per-vehicle UUID first; fall back to legacy '0' sentinel
+    let { data: optionRows } = await admin
       .from("vehicle_options")
       .select("*")
-      .eq("vehicle_id", 0)
+      .eq("vehicle_id", dealerVehicleId)
       .eq("dealer_id", dv.dealer_id)
       .order("sort_order");
+
+    if (!optionRows || optionRows.length === 0) {
+      const { data: legacyRows } = await admin
+        .from("vehicle_options")
+        .select("*")
+        .eq("vehicle_id", "0")
+        .eq("dealer_id", dv.dealer_id)
+        .order("sort_order");
+      optionRows = legacyRows;
+    }
 
     // For options missing a description, fall back to addendum_library by name
     const nullDescNames = (optionRows ?? [])

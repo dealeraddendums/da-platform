@@ -439,7 +439,7 @@ export type AiContentCacheRow = {
 
 export type VehicleOptionRow = {
   id: string;
-  vehicle_id: number;
+  vehicle_id: string;
   dealer_id: string;
   option_name: string;
   option_price: string;
@@ -452,7 +452,7 @@ export type VehicleOptionRow = {
 };
 
 type VehicleOptionInsert = {
-  vehicle_id: number;
+  vehicle_id: string;
   dealer_id: string;
   option_name: string;
   option_price?: string;

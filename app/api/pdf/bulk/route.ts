@@ -233,45 +233,79 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
       }
 
-      // ── Options — per-vehicle library matching ────────────────────────────
-      // Fetch the dealer's addendum_library once per dealer (cached).
-      // Apply matching rules to THIS vehicle so each vehicle gets its own options.
-      // (vehicle_id=0 is a shared sentinel updated only when a specific vehicle is
-      //  opened in AddendumEditor — unreliable for bulk across multiple vehicles.)
-      if (!libCache.has(dv.dealer_id)) {
-        const { data: lib } = await admin
-          .from("addendum_library")
-          .select([
-            "option_name", "item_price", "description", "applies_to",
-            "ad_types", "ad_type",
-            "makes", "makes_not", "models", "models_not", "trims", "trims_not",
-            "year_condition", "year_value",
-            "miles_condition", "miles_value",
-            "msrp_condition", "msrp1", "msrp2",
-          ].join(", "))
+      // ── Options — saved options first, then library matching ─────────────
+      // 1. Check vehicle_options saved specifically for this vehicle (by UUID)
+      // 2. Fall back to legacy '0' sentinel
+      // 3. Fall back to addendum_library matching rules per vehicle
+      let effectiveOptions: { option_name: string; option_price: string; description: string | null }[] = [];
+
+      const { data: savedOpts } = await admin
+        .from("vehicle_options")
+        .select("option_name, option_price, description")
+        .eq("vehicle_id", vehicleId)
+        .eq("dealer_id", dv.dealer_id)
+        .eq("active", true)
+        .order("sort_order");
+
+      if (savedOpts && savedOpts.length > 0) {
+        effectiveOptions = savedOpts.map(o => ({
+          option_name: o.option_name,
+          option_price: o.option_price ?? "NC",
+          description: o.description ?? null,
+        }));
+      } else {
+        // Check legacy '0' sentinel
+        const { data: legacyOpts } = await admin
+          .from("vehicle_options")
+          .select("option_name, option_price, description")
+          .eq("vehicle_id", "0")
           .eq("dealer_id", dv.dealer_id)
           .eq("active", true)
           .order("sort_order");
-        libCache.set(dv.dealer_id, (lib ?? []) as unknown as LibRow[]);
-      }
-      const dealerLib = libCache.get(dv.dealer_id)!;
 
-      const vehicleCond = dv.condition === "New" ? "New" : dv.condition === "Used" ? "Used" : "CPO";
-      const effectiveOptions = dealerLib
-        .filter(r => {
-          const appliesTo = (r.applies_to as string) ?? "all";
-          if (appliesTo === "none") return false;
-          if (appliesTo === "all")  return true;
-          return libRowMatchesVehicle(
-            r, vehicleCond, dv.make, dv.model, dv.trim,
-            dv.year ?? null, dv.mileage ?? null, dv.msrp ?? null,
-          );
-        })
-        .map(r => ({
-          option_name: r.option_name as string,
-          option_price: (r.item_price as string) ?? "NC",
-          description: (r.description as string) || null,
-        }));
+        if (legacyOpts && legacyOpts.length > 0) {
+          effectiveOptions = legacyOpts.map(o => ({
+            option_name: o.option_name,
+            option_price: o.option_price ?? "NC",
+            description: o.description ?? null,
+          }));
+        } else {
+          // No saved options — fall back to addendum_library matching
+          if (!libCache.has(dv.dealer_id)) {
+            const { data: lib } = await admin
+              .from("addendum_library")
+              .select([
+                "option_name", "item_price", "description", "applies_to",
+                "ad_types", "ad_type",
+                "makes", "makes_not", "models", "models_not", "trims", "trims_not",
+                "year_condition", "year_value",
+                "miles_condition", "miles_value",
+                "msrp_condition", "msrp1", "msrp2",
+              ].join(", "))
+              .eq("dealer_id", dv.dealer_id)
+              .eq("active", true)
+              .order("sort_order");
+            libCache.set(dv.dealer_id, (lib ?? []) as unknown as LibRow[]);
+          }
+          const dealerLib = libCache.get(dv.dealer_id)!;
+          const vehicleCond = dv.condition === "New" ? "New" : dv.condition === "Used" ? "Used" : "CPO";
+          effectiveOptions = dealerLib
+            .filter(r => {
+              const appliesTo = (r.applies_to as string) ?? "all";
+              if (appliesTo === "none") return false;
+              if (appliesTo === "all")  return true;
+              return libRowMatchesVehicle(
+                r, vehicleCond, dv.make, dv.model, dv.trim,
+                dv.year ?? null, dv.mileage ?? null, dv.msrp ?? null,
+              );
+            })
+            .map(r => ({
+              option_name: r.option_name as string,
+              option_price: (r.item_price as string) ?? "NC",
+              description: (r.description as string) || null,
+            }));
+        }
+      }
 
       const groupOpts = await getGroupOptionsForDealer(textDealerId);
       const options = [
