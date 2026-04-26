@@ -63,6 +63,7 @@ export interface VehiclePreload {
   dealer_state?: string | null;
   dealer_zip?: string | null;
   dealer_phone?: string | null;
+  vdp_link?: string | null;
 }
 
 export interface SavedTemplate {

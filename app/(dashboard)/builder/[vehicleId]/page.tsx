@@ -44,6 +44,24 @@ export default async function BuilderVehicleRoute({
     }
   }
 
+  const admin = createAdminSupabaseClient();
+  const [{ data: settings }, { data: dealerRow }, { data: customSizeRows }, { data: dvRow }] = await Promise.all([
+    admin.from("dealer_settings").select("ai_content_default").eq("dealer_id", r.DEALER_ID).single<{ ai_content_default: boolean }>(),
+    admin.from("dealers").select("name, address, city, state, zip, phone, logo_url").eq("dealer_id", r.DEALER_ID).maybeSingle<{ name: string | null; address: string | null; city: string | null; state: string | null; zip: string | null; phone: string | null; logo_url: string | null }>(),
+    admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, created_at, updated_at").eq("dealer_id", r.DEALER_ID).order("name"),
+    admin.from("dealer_vehicles").select("vdp_link").eq("id", params.vehicleId).maybeSingle<{ vdp_link: string | null }>(),
+  ]);
+
+  const aiEnabled = settings?.ai_content_default ?? false;
+
+  const S3_LOGO = "https://new-dealer-logos.s3.us-east-1.amazonaws.com/";
+  const rawLogo = dealerRow?.logo_url ?? (r as Record<string, unknown>).logo_url as string | null ?? null;
+  const resolvedLogoUrl = rawLogo
+    ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
+    : null;
+
+  // Supabase dealers table is the canonical source — matches what the PDF route uses.
+  // Fall back to Aurora dealer_dim fields if Supabase has no record yet.
   const vehicle: VehiclePreload = {
     id: String(r.id),
     vin: r.VIN_NUMBER,
@@ -57,29 +75,15 @@ export default async function BuilderVehicleRoute({
     msrp: r.MSRP ? Number(r.MSRP) : null,
     internet_price: null,
     dealer_id: r.DEALER_ID,
-    logo_url: (r as Record<string, unknown>).logo_url as string | null ?? null,
-    dealer_name: (r as Record<string, unknown>).DEALER_NAME as string | null ?? null,
-    dealer_address: (r as Record<string, unknown>).DEALER_ADDRESS as string | null ?? null,
-    dealer_city: (r as Record<string, unknown>).DEALER_CITY as string | null ?? null,
-    dealer_state: (r as Record<string, unknown>).DEALER_STATE as string | null ?? null,
-    dealer_zip: (r as Record<string, unknown>).DEALER_ZIP as string | null ?? null,
-    dealer_phone: (r as Record<string, unknown>).DEALER_PHONE as string | null ?? null,
+    logo_url: resolvedLogoUrl,
+    dealer_name: dealerRow?.name ?? (r as Record<string, unknown>).DEALER_NAME as string | null ?? null,
+    dealer_address: dealerRow?.address ?? (r as Record<string, unknown>).DEALER_ADDRESS as string | null ?? null,
+    dealer_city: dealerRow?.city ?? (r as Record<string, unknown>).DEALER_CITY as string | null ?? null,
+    dealer_state: dealerRow?.state ?? (r as Record<string, unknown>).DEALER_STATE as string | null ?? null,
+    dealer_zip: dealerRow?.zip ?? (r as Record<string, unknown>).DEALER_ZIP as string | null ?? null,
+    dealer_phone: dealerRow?.phone ?? (r as Record<string, unknown>).DEALER_PHONE as string | null ?? null,
+    vdp_link: dvRow?.vdp_link ?? null,
   };
 
-  const admin = createAdminSupabaseClient();
-  const [{ data: settings }, { data: dealerRow }, { data: customSizeRows }] = await Promise.all([
-    admin.from("dealer_settings").select("ai_content_default").eq("dealer_id", r.DEALER_ID).single<{ ai_content_default: boolean }>(),
-    admin.from("dealers").select("logo_url").eq("dealer_id", r.DEALER_ID).maybeSingle<{ logo_url: string | null }>(),
-    admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, created_at, updated_at").eq("dealer_id", r.DEALER_ID).order("name"),
-  ]);
-
-  const aiEnabled = settings?.ai_content_default ?? false;
-
-  const S3_LOGO = "https://new-dealer-logos.s3.us-east-1.amazonaws.com/";
-  const rawLogo = dealerRow?.logo_url ?? vehicle.logo_url ?? null;
-  const resolvedLogoUrl = rawLogo
-    ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
-    : null;
-
-  return <BuilderPage vehicle={{ ...vehicle, logo_url: resolvedLogoUrl }} aiEnabled={aiEnabled} customSizes={customSizeRows ?? []} dealerId={r.DEALER_ID} />;
+  return <BuilderPage vehicle={vehicle} aiEnabled={aiEnabled} customSizes={customSizeRows ?? []} dealerId={r.DEALER_ID} />;
 }

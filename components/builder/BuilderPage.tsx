@@ -110,6 +110,8 @@ function applyVehicleDataToWidgets(
       result[id] = { ...w, d: { ...w.d, value: vehicle.msrp.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) } };
     } else if (w.type === 'askbar' && vehicle.msrp) {
       result[id] = { ...w, d: { ...w.d, value: vehicle.msrp.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) } };
+    } else if (w.type === 'qrcode' && vehicle.vdp_link) {
+      result[id] = { ...w, d: { ...w.d, url: vehicle.vdp_link } };
     } else {
       result[id] = w;
     }
