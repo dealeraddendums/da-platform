@@ -133,13 +133,15 @@ export async function buildPdfHtml({
 
     // Infosheet description: inject AI or DB vehicle description if widget has no custom content
     if (w.type === 'description') {
-      const placeholder = 'Vehicle description will appear here.';
-      if (d.text == null || d.text === placeholder) {
+      // Detect all known placeholder variants (from DEFS default or widgetRenderer fallback)
+      const isPlaceholder = d.text == null || d.text === '' ||
+        (typeof d.text === 'string' && d.text.startsWith('Vehicle description will appear here'));
+      if (isPlaceholder) {
         // prefer DB when ai_content_default=false; prefer AI when true; fallback to whichever exists
         const text = aiEnabled
           ? (aiDescription || dbDescription || null)
           : (dbDescription || aiDescription || null);
-        // empty string suppresses the placeholder without showing stray text
+        // empty string suppresses the placeholder without showing stray text in PDF
         d.text = text ?? '';
       }
     }
@@ -147,29 +149,31 @@ export async function buildPdfHtml({
     // Infosheet features: inject AI features or DB options text if widget has no custom content
     if (w.type === 'features') {
       const rawItems = d.items as [string, string][] | null | undefined;
+      // Detect default placeholder: null/empty, or every row starts with 'Feature' (DEFS default pattern)
       const isDefault = !rawItems || rawItems.length === 0 || (
-        rawItems.length === 1 && rawItems[0][0] === 'Feature' && rawItems[0][1] === 'Feature'
+        Array.isArray(rawItems) &&
+        rawItems.every(row => Array.isArray(row) && typeof row[0] === 'string' && row[0].startsWith('Feature'))
       );
       if (isDefault) {
-        if (aiEnabled && aiFeatures && aiFeatures.length > 0) {
-          d.items = aiFeatures;
-        } else if (dbOptionsText) {
-          const lines = dbOptionsText.split(/[\n\r,]+/).map((s: string) => s.trim()).filter(Boolean);
-          if (lines.length > 0) {
-            const pairs: [string, string][] = [];
-            for (let i = 0; i < lines.length; i += 2) {
-              pairs.push([lines[i], lines[i + 1] ?? '']);
-            }
-            d.items = pairs;
-          } else {
-            d.items = []; // suppress placeholder
-          }
-        } else if (!aiEnabled && aiFeatures && aiFeatures.length > 0) {
-          // DB preferred but empty — use AI as fallback
-          d.items = aiFeatures;
-        } else {
-          d.items = []; // no content available — suppress placeholder
-        }
+        // Determine content: prefer based on aiEnabled, fallback to the other source
+        const featuresContent = aiEnabled
+          ? (aiFeatures?.length ? aiFeatures : null)
+          : null;
+        const dbContent = dbOptionsText
+          ? (() => {
+              const lines = dbOptionsText.split(/[\n\r,]+/).map((s: string) => s.trim()).filter(Boolean);
+              if (!lines.length) return null;
+              const pairs: [string, string][] = [];
+              for (let i = 0; i < lines.length; i += 2) pairs.push([lines[i], lines[i + 1] ?? '']);
+              return pairs;
+            })()
+          : null;
+
+        const chosen = aiEnabled
+          ? (featuresContent || dbContent || (aiFeatures?.length ? aiFeatures : null))
+          : (dbContent || (aiFeatures?.length ? aiFeatures : null));
+
+        d.items = chosen ?? []; // empty array suppresses placeholder; [] is truthy so || fallback won't fire
       }
     }
 
