@@ -27,7 +27,7 @@ type Props = {
   groupId: string | null;
 };
 
-const PER_PAGE = 50;
+const PER_PAGE_OPTIONS = [15, 25, 50, 0] as const; // 0 = All
 
 type Condition = "all" | "new" | "used" | "cpo";
 type Status = "active" | "all";
@@ -38,6 +38,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(15);
   const [condition, setCondition] = useState<Condition>("all");
   const [status, setStatus] = useState<Status>("active");
   const [printFilter, setPrintFilter] = useState<PrintFilter>("all");
@@ -63,7 +64,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
     const params = new URLSearchParams({
       dealer_id: dealerId,
       page: String(page),
-      per_page: String(PER_PAGE),
+      per_page: String(perPage === 0 ? 9999 : perPage),
       condition,
       status,
     });
@@ -84,7 +85,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
     } finally {
       setLoading(false);
     }
-  }, [dealerId, page, condition, status, q]);
+  }, [dealerId, page, perPage, condition, status, q]);
 
   const displayedVehicles = printFilter === "all"
     ? vehicles
@@ -156,9 +157,10 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
     setQ(searchInput);
   }
 
-  const totalPages = Math.ceil(total / PER_PAGE);
-  const from = (page - 1) * PER_PAGE + 1;
-  const to = Math.min(page * PER_PAGE, total);
+  const effectivePerPage = perPage === 0 ? total : perPage;
+  const totalPages = effectivePerPage > 0 ? Math.ceil(total / effectivePerPage) : 1;
+  const from = (page - 1) * effectivePerPage + 1;
+  const to = Math.min(page * effectivePerPage, total);
 
   return (
     <div>
@@ -525,22 +527,36 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
           </div>
 
           {/* Pagination */}
-          {total > PER_PAGE && (
+          {total > 0 && (
             <div className="flex items-center justify-between mt-4">
-              <p className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-                Showing {from.toLocaleString()}–{to.toLocaleString()} of {total.toLocaleString()}
-              </p>
               <div className="flex items-center gap-2">
-                <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                  ← Prev
-                </button>
-                <span className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-                  {page} / {totalPages}
-                </span>
-                <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-                  Next →
-                </button>
+                <p className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
+                  {perPage === 0 ? `All ${total.toLocaleString()} vehicles` : `Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
+                </p>
+                <select
+                  value={perPage}
+                  onChange={e => { setPerPage(Number(e.target.value)); setPage(1); }}
+                  style={{ height: 28, padding: "0 6px", fontSize: 12, border: "1px solid rgba(255,255,255,0.25)", borderRadius: 4, background: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.8)", cursor: "pointer" }}
+                >
+                  {PER_PAGE_OPTIONS.map(n => (
+                    <option key={n} value={n} style={{ background: "#2a2b3c", color: "#fff" }}>{n === 0 ? "All" : n}</option>
+                  ))}
+                </select>
+                <span className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>per page</span>
               </div>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                    ← Prev
+                  </button>
+                  <span className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
+                    {page} / {totalPages}
+                  </span>
+                  <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                    Next →
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </>

@@ -3,10 +3,11 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerVehicleInsert, VehicleAuditLogInsert } from "@/lib/db";
 
-const PER_PAGE = 50;
+const PER_PAGE_DEFAULT = 15;
+const PER_PAGE_MAX = 9999;
 
 /**
- * GET /api/dealer-vehicles?dealer_id=&page=&q=&condition=&status=
+ * GET /api/dealer-vehicles?dealer_id=&page=&per_page=&q=&condition=&status=
  * Returns paginated dealer_vehicles for a manual dealer.
  * Restricted to dealer_admin / dealer_user only.
  */
@@ -26,6 +27,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const sp = req.nextUrl.searchParams;
   const page = Math.max(1, parseInt(sp.get("page") ?? "1", 10));
+  const perPage = Math.min(PER_PAGE_MAX, Math.max(1, parseInt(sp.get("per_page") ?? String(PER_PAGE_DEFAULT), 10)));
   const q = sp.get("q") ?? "";
   const condition = sp.get("condition") ?? "all";
   const status = sp.get("status") ?? "active";
@@ -34,8 +36,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const rawSort = sp.get("sort_by") ?? "date_added";
   const sortCol = SORTABLE_COLS.includes(rawSort) ? rawSort : "date_added";
   const sortAsc = sp.get("sort_dir") === "asc";
-  const from = (page - 1) * PER_PAGE;
-  const to = from + PER_PAGE - 1;
+  const from = (page - 1) * perPage;
+  const to = from + perPage - 1;
 
   const admin = createAdminSupabaseClient();
 
@@ -56,7 +58,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   // Short-circuit: "printed" filter with no printed vehicles → empty result
   if (printStatus === "printed" && printedIds && printedIds.length === 0) {
-    return NextResponse.json({ data: [], total: 0, page, per_page: PER_PAGE, dealer_id: dealerId, printedTypes: {} });
+    return NextResponse.json({ data: [], total: 0, page, per_page: perPage, dealer_id: dealerId, printedTypes: {} });
   }
 
   let query = admin
@@ -109,7 +111,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     data: data ?? [],
     total: count ?? 0,
     page,
-    per_page: PER_PAGE,
+    per_page: perPage,
     dealer_id: dealerId,
     printedTypes,
   });

@@ -17,7 +17,7 @@ type ListResponse = {
   printedTypes?: Record<string, string[]>;
 };
 
-const PER_PAGE = 50;
+const PER_PAGE_OPTIONS = [15, 25, 50, 0] as const; // 0 = All
 
 function conditionBadge(c: string) {
   const styles: Record<string, React.CSSProperties> = {
@@ -93,6 +93,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
   const [printedTypes, setPrintedTypes] = useState<Record<string, string[]>>({});
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(15);
   const [q, setQ] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [condition, setCondition] = useState("all");
@@ -157,7 +158,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
     setLoading(true);
     setError(null);
     setCheckedIds(new Set());
-    const params = new URLSearchParams({ page: String(page), condition, print_status: printStatus, sort_by: sortBy, sort_dir: sortDir });
+    const params = new URLSearchParams({ page: String(page), per_page: String(perPage === 0 ? 9999 : perPage), condition, print_status: printStatus, sort_by: sortBy, sort_dir: sortDir });
     if (q) params.set("q", q);
 
     const res = await fetch(`/api/dealer-vehicles?${params}`);
@@ -170,11 +171,12 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
       setTotal(json.total);
       setPrintedTypes(json.printedTypes ?? {});
     }
-  }, [page, condition, printStatus, sortBy, sortDir, q]);
+  }, [page, perPage, condition, printStatus, sortBy, sortDir, q]);
 
   useEffect(() => { void fetchVehicles(); }, [fetchVehicles]);
 
-  const totalPages = Math.ceil(total / PER_PAGE);
+  const effectivePerPage = perPage === 0 ? total : perPage;
+  const totalPages = effectivePerPage > 0 ? Math.ceil(total / effectivePerPage) : 1;
 
   function toggleCheck(id: string) {
     setCheckedIds((prev) => {
@@ -465,21 +467,35 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
           </div>
         )}
 
-        {totalPages > 1 && (
+        {total > 0 && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderTop: "1px solid var(--border)", background: "#fafafa" }}>
-            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-              Page {page} of {totalPages} — {total} total
-            </span>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
-                style={{ height: 32, padding: "0 12px", background: page <= 1 ? "#f5f6f7" : "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: page <= 1 ? "not-allowed" : "pointer", color: page <= 1 ? "var(--text-muted)" : "var(--text-primary)" }}>
-                Previous
-              </button>
-              <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}
-                style={{ height: 32, padding: "0 12px", background: page >= totalPages ? "#f5f6f7" : "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: page >= totalPages ? "not-allowed" : "pointer", color: page >= totalPages ? "var(--text-muted)" : "var(--text-primary)" }}>
-                Next
-              </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                {perPage === 0 ? `All ${total} vehicles` : `Page ${page} of ${totalPages} — ${total} total`}
+              </span>
+              <select
+                value={perPage}
+                onChange={e => { setPerPage(Number(e.target.value)); setPage(1); }}
+                style={{ height: 28, padding: "0 6px", fontSize: 12, border: "1px solid var(--border)", borderRadius: 4, background: "#fff", color: "var(--text-primary)", cursor: "pointer" }}
+              >
+                {PER_PAGE_OPTIONS.map(n => (
+                  <option key={n} value={n}>{n === 0 ? "All" : n}</option>
+                ))}
+              </select>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>per page</span>
             </div>
+            {totalPages > 1 && (
+              <div style={{ display: "flex", gap: 6 }}>
+                <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
+                  style={{ height: 32, padding: "0 12px", background: page <= 1 ? "#f5f6f7" : "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: page <= 1 ? "not-allowed" : "pointer", color: page <= 1 ? "var(--text-muted)" : "var(--text-primary)" }}>
+                  Previous
+                </button>
+                <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}
+                  style={{ height: 32, padding: "0 12px", background: page >= totalPages ? "#f5f6f7" : "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: page >= totalPages ? "not-allowed" : "pointer", color: page >= totalPages ? "var(--text-muted)" : "var(--text-primary)" }}>
+                  Next
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
