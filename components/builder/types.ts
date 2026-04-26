@@ -59,6 +59,10 @@ export interface VehiclePreload {
   logo_url?: string | null;
   dealer_name?: string | null;
   dealer_address?: string | null;
+  dealer_city?: string | null;
+  dealer_state?: string | null;
+  dealer_zip?: string | null;
+  dealer_phone?: string | null;
 }
 
 export interface SavedTemplate {

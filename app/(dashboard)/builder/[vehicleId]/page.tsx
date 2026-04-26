@@ -59,14 +59,11 @@ export default async function BuilderVehicleRoute({
     dealer_id: r.DEALER_ID,
     logo_url: (r as Record<string, unknown>).logo_url as string | null ?? null,
     dealer_name: (r as Record<string, unknown>).DEALER_NAME as string | null ?? null,
-    dealer_address: [
-      (r as Record<string, unknown>).DEALER_ADDRESS,
-      (r as Record<string, unknown>).DEALER_CITY,
-      (r as Record<string, unknown>).DEALER_STATE,
-      (r as Record<string, unknown>).DEALER_ZIP,
-    ]
-      .filter(Boolean)
-      .join(", ") || null,
+    dealer_address: (r as Record<string, unknown>).DEALER_ADDRESS as string | null ?? null,
+    dealer_city: (r as Record<string, unknown>).DEALER_CITY as string | null ?? null,
+    dealer_state: (r as Record<string, unknown>).DEALER_STATE as string | null ?? null,
+    dealer_zip: (r as Record<string, unknown>).DEALER_ZIP as string | null ?? null,
+    dealer_phone: (r as Record<string, unknown>).DEALER_PHONE as string | null ?? null,
   };
 
   const admin = createAdminSupabaseClient();

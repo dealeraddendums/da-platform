@@ -78,6 +78,45 @@ function applyLogoToWidgets(ws: Record<string, Widget>, logoUrl: string | null):
   return changed ? result : ws;
 }
 
+// Populate widget d-data from real vehicle/dealer data — mirrors pdf-html.ts enrichment
+function applyVehicleDataToWidgets(
+  ws: Record<string, Widget>,
+  vehicle: VehiclePreload,
+): Record<string, Widget> {
+  const result: Record<string, Widget> = {};
+  for (const [id, w] of Object.entries(ws)) {
+    if (w.type === 'vehicle') {
+      result[id] = { ...w, d: { ...w.d, vehicleData: {
+        stock: vehicle.stock_number ?? '',
+        vin: vehicle.vin ?? '',
+        year: vehicle.year ? String(vehicle.year) : '',
+        color: vehicle.color_ext ?? '',
+        make: vehicle.make ?? '',
+        trim: vehicle.trim ?? '',
+        model: vehicle.model ?? '',
+        mileage: vehicle.mileage ? String(vehicle.mileage) : '',
+      }}};
+    } else if (w.type === 'barcode') {
+      result[id] = { ...w, d: { ...w.d, vin: vehicle.vin ?? '' } };
+    } else if (w.type === 'dealer') {
+      const lines = [
+        vehicle.dealer_name,
+        vehicle.dealer_address,
+        [vehicle.dealer_city, vehicle.dealer_state, vehicle.dealer_zip].filter(Boolean).join(' '),
+        vehicle.dealer_phone,
+      ].filter(Boolean) as string[];
+      result[id] = lines.length ? { ...w, d: { ...w.d, text: lines.join('\n') } } : w;
+    } else if (w.type === 'msrp' && vehicle.msrp) {
+      result[id] = { ...w, d: { ...w.d, value: vehicle.msrp.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) } };
+    } else if (w.type === 'askbar' && vehicle.msrp) {
+      result[id] = { ...w, d: { ...w.d, value: vehicle.msrp.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) } };
+    } else {
+      result[id] = w;
+    }
+  }
+  return result;
+}
+
 interface Props {
   vehicle?: VehiclePreload;
   templateId?: string;
@@ -377,35 +416,21 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   useEffect(() => {
     const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox'];
     let nextNid = 1;
-    const ws: Record<string, Widget> = {};
+    let ws: Record<string, Widget> = {};
     order.forEach(type => {
       const id = 'w' + nextNid++;
       ws[id] = makeWidget(type, id);
     });
     if (vehicle) {
-      // Pre-fill vehicle data
+      // Set vehicle fields list first
       Object.values(ws).forEach(w => {
-        if (w.type === 'vehicle') {
-          w.d = {
-            ...w.d,
-            fields: ['stock','vin','year','color','make','trim','model'],
-          };
-        }
-        if (w.type === 'dealer' && vehicle.dealer_name) {
-          w.d = { ...w.d, text: [vehicle.dealer_name, vehicle.dealer_address || ''].filter(Boolean).join('\n') };
-        }
-        if (w.type === 'msrp' && vehicle.msrp) {
-          w.d = { ...w.d, value: `$${vehicle.msrp.toLocaleString()}` };
-        }
-        if (w.type === 'askbar' && vehicle.internet_price) {
-          w.d = { ...w.d, value: `$${vehicle.internet_price.toLocaleString()}` };
-        }
+        if (w.type === 'vehicle') w.d = { ...w.d, fields: ['stock','vin','year','color','make','trim','model'] };
       });
+      // Populate all widgets with real vehicle/dealer data
+      ws = applyVehicleDataToWidgets(ws, vehicle);
     }
     // Always apply canonical dealer logo to logo widgets (works with or without a vehicle)
-    Object.values(ws).forEach(w => {
-      if (w.type === 'logo') w.d = { ...w.d, imgUrl: canonicalLogoRef.current ?? '' };
-    });
+    ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
     widgetsRef.current = ws;
     setWidgets(ws);
     setNid(nextNid);
@@ -433,6 +458,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           let n = json.nid ?? 1;
           [ws, n] = ensureAskbar(ws, n, ps);
           ws = clampWidgets(ws, pw, ph);
+          if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
           ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
           setWidgets(ws);
           widgetsRef.current = ws;
@@ -456,7 +482,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       // Load infosheet default layout
       const order = ['logo','vehicle','description','features','askbar','qrcode','barcode','dealer','customtext'];
       let nextNid = 1;
-      const ws: Record<string, Widget> = {};
+      let ws: Record<string, Widget> = {};
       order.forEach(type => {
         const def = LAYOUT_INFOSHEET[type];
         if (!def) return;
@@ -466,6 +492,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (type === 'askbar') { ws[id].d = { ...ws[id].d, labelFontSize: 1.6, valueFontSize: 1.9 }; }
         if (type === 'vehicle') { ws[id].d = { ...ws[id].d, headerFontSize: 1.2 }; }
       });
+      if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
       const wsWithLogo = applyLogoToWidgets(ws, canonicalLogoRef.current);
       widgetsRef.current = wsWithLogo;
       setWidgets(wsWithLogo);
@@ -474,7 +501,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       pushHistory(wsWithLogo, nextNid);
       showToast('Infosheet layout loaded');
       // Auto-load AI content when switching to infosheet with a vehicle
-      if (vehicle && aiEnabled) {
+      if (vehicle) {
         setAiPendingLoad(true);
       }
     } else {
@@ -496,6 +523,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         }
       });
       ws = clampWidgets(ws, pw, ph);
+      if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
       ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
       widgetsRef.current = ws;
       setWidgets(ws);

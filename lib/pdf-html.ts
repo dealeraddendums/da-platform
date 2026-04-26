@@ -199,8 +199,11 @@ export async function buildPdfHtml({
   const widgetHtml = enriched
     .map(w => {
       const inner = renderW(w.type, w.d, fontScale);
-      // overflow:visible matches the canvas — widget content is never clipped
-      return `<div style="position:absolute;left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px;overflow:visible;z-index:10;background:transparent;">${inner}</div>`;
+      // Askbar with white text needs an explicit dark background — mix-blend-mode:multiply
+      // on the frame PNG is not guaranteed to produce a dark enough area in Puppeteer.
+      const bg = (w.type === 'askbar' && (w.d.labelColor as string | undefined) === '#ffffff')
+        ? '#1a1916' : 'transparent';
+      return `<div style="position:absolute;left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px;overflow:visible;z-index:10;background:${bg};">${inner}</div>`;
     })
     .join('\n');
 
