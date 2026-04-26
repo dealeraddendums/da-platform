@@ -14,6 +14,71 @@ import QRCode from "qrcode";
 import { PDFDocument } from "pdf-lib";
 import type { Widget, PaperSize } from "@/components/builder/types";
 
+// ── Per-vehicle library matching ──────────────────────────────────────────────
+// vehicle_id=0 is a shared sentinel for all manual vehicles — using it for bulk
+// would apply whichever vehicle last saved its options to all vehicles. Instead,
+// we run the addendum_library matching rules per-vehicle inside the loop.
+
+type LibRow = Record<string, unknown>;
+
+function listMatchesLib(val: string | null, field: string | null, notFlag: boolean): boolean {
+  if (!field || field.toUpperCase() === "ALL") return true;
+  const v = (val ?? "").toLowerCase().trim();
+  const items = field.split(",").map(s => s.toLowerCase().trim()).filter(Boolean);
+  const found = items.some(item => v === item || v.includes(item));
+  return notFlag ? !found : found;
+}
+
+function libRowMatchesVehicle(
+  r: LibRow,
+  condition: string,
+  make: string | null,
+  model: string | null,
+  trim: string | null,
+  year: number | null,
+  mileage: number | null,
+  msrp: number | null,
+): boolean {
+  // Condition — ad_types (multi-select) takes priority over legacy ad_type
+  const adTypes = r.ad_types as string[] | null;
+  if (adTypes && adTypes.length > 0) {
+    if (!adTypes.includes(condition)) return false;
+  } else {
+    const adType = (r.ad_type as string) ?? "Both";
+    if (adType === "New" && condition !== "New") return false;
+    if (adType === "Used" && condition === "New") return false;
+  }
+  // Makes / Models / Trims
+  if (!listMatchesLib(make,  r.makes  as string | null, !!(r.makes_not)))  return false;
+  if (!listMatchesLib(model, r.models as string | null, !!(r.models_not))) return false;
+  if (!listMatchesLib(trim,  r.trims  as string | null, !!(r.trims_not)))  return false;
+  // Year
+  const yc = (r.year_condition  as number) ?? 0;
+  const yv = (r.year_value      as number | null) ?? null;
+  if (yc !== 0 && yv != null && year != null) {
+    if (yc === 1 && year !== yv) return false;
+    if (yc === 2 && year >   yv) return false;
+    if (yc === 3 && year <   yv) return false;
+  }
+  // Mileage
+  const mc = (r.miles_condition as number) ?? 0;
+  const mv = (r.miles_value     as number | null) ?? null;
+  if (mc !== 0 && mv != null && mileage != null) {
+    if (mc === 1 && mileage > mv) return false;
+    if (mc === 2 && mileage < mv) return false;
+  }
+  // MSRP
+  const sc = (r.msrp_condition as number) ?? 0;
+  const s1 = (r.msrp1          as number | null) ?? null;
+  const s2 = (r.msrp2          as number | null) ?? null;
+  if (sc !== 0 && msrp != null) {
+    if (sc === 1 && s1 != null && msrp > s1) return false;
+    if (sc === 2 && s1 != null && msrp < s1) return false;
+    if (sc === 3 && s1 != null && s2 != null && (msrp < s1 || msrp > s2)) return false;
+  }
+  return true;
+}
+
 /**
  * POST /api/pdf/bulk
  * Generates PDFs for multiple dealer_vehicles, bundles into a ZIP.
@@ -48,10 +113,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const pdfBuffers: Buffer[] = [];
   const results: { vehicleId: string; pdfUrl?: string; error?: string }[] = [];
 
-  // Cache dealer settings and templates to avoid redundant DB queries
+  // Cache dealer settings, templates, and option libraries per dealer
   const dealerSettingsCache = new Map<string, DealerSettingsRow | null>();
   const templateCache = new Map<string, Widget[] | null>();
   const templateMetaCache = new Map<string, { bgUrl?: string; fontScale?: number; paperSizeStr?: string }>();
+  const libCache = new Map<string, LibRow[]>();
 
   // Launch one browser for all vehicles — avoids repeated Chrome startup overhead
   const sharedBrowser = await puppeteer.launch({
@@ -167,49 +233,45 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
       }
 
-      // ── Options ───────────────────────────────────────────────────────────
-      const { data: optionRows } = await admin
-        .from("vehicle_options")
-        .select("*")
-        .eq("vehicle_id", 0)
-        .eq("dealer_id", dv.dealer_id)
-        .eq("active", true)
-        .order("sort_order");
-
-      let effectiveOptions: { option_name: string; option_price: string; description: string | null }[];
-
-      if ((optionRows ?? []).length > 0) {
-        const nullDescNames = (optionRows ?? []).filter(r => !r.description).map(r => r.option_name as string);
-        const libDescMap: Record<string, string | null> = {};
-        if (nullDescNames.length > 0) {
-          const { data: libDescRows } = await admin
-            .from("addendum_library")
-            .select("option_name, description")
-            .in("option_name", nullDescNames)
-            .not("description", "is", null);
-          for (const lr of libDescRows ?? []) {
-            if (lr.description) libDescMap[lr.option_name as string] = lr.description as string;
-          }
-        }
-        effectiveOptions = (optionRows ?? []).map(r => ({
-          option_name: r.option_name as string,
-          option_price: (r.option_price as string) ?? "0",
-          description: (r.description as string | null) ?? libDescMap[r.option_name as string] ?? null,
-        }));
-      } else {
-        // No saved vehicle_options — fall back to addendum_library (same as AddendumEditor seed)
-        const { data: libRows } = await admin
+      // ── Options — per-vehicle library matching ────────────────────────────
+      // Fetch the dealer's addendum_library once per dealer (cached).
+      // Apply matching rules to THIS vehicle so each vehicle gets its own options.
+      // (vehicle_id=0 is a shared sentinel updated only when a specific vehicle is
+      //  opened in AddendumEditor — unreliable for bulk across multiple vehicles.)
+      if (!libCache.has(dv.dealer_id)) {
+        const { data: lib } = await admin
           .from("addendum_library")
-          .select("option_name, item_price, description")
+          .select([
+            "option_name", "item_price", "description", "applies_to",
+            "ad_types", "ad_type",
+            "makes", "makes_not", "models", "models_not", "trims", "trims_not",
+            "year_condition", "year_value",
+            "miles_condition", "miles_value",
+            "msrp_condition", "msrp1", "msrp2",
+          ].join(", "))
           .eq("dealer_id", dv.dealer_id)
           .eq("active", true)
           .order("sort_order");
-        effectiveOptions = (libRows ?? []).map(r => ({
+        libCache.set(dv.dealer_id, (lib ?? []) as unknown as LibRow[]);
+      }
+      const dealerLib = libCache.get(dv.dealer_id)!;
+
+      const vehicleCond = dv.condition === "New" ? "New" : dv.condition === "Used" ? "Used" : "CPO";
+      const effectiveOptions = dealerLib
+        .filter(r => {
+          const appliesTo = (r.applies_to as string) ?? "all";
+          if (appliesTo === "none") return false;
+          if (appliesTo === "all")  return true;
+          return libRowMatchesVehicle(
+            r, vehicleCond, dv.make, dv.model, dv.trim,
+            dv.year ?? null, dv.mileage ?? null, dv.msrp ?? null,
+          );
+        })
+        .map(r => ({
           option_name: r.option_name as string,
-          option_price: (r.item_price as string) ?? "0",
+          option_price: (r.item_price as string) ?? "NC",
           description: (r.description as string) || null,
         }));
-      }
 
       const groupOpts = await getGroupOptionsForDealer(textDealerId);
       const options = [
