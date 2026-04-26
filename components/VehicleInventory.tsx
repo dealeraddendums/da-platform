@@ -5,6 +5,7 @@ import type { VehicleRow } from "@/lib/vehicles";
 import { parsePhotos, vehicleCondition } from "@/lib/vehicles";
 import VehicleDetail from "./VehicleDetail";
 import PrintPreviewModal from "./PrintPreviewModal";
+import PdfBuildingOverlay from "./PdfBuildingOverlay";
 import type { DealerRow } from "@/lib/db";
 
 type InventoryResponse = {
@@ -303,41 +304,40 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
           className="card p-3 mb-4 flex items-center gap-3"
           style={{ borderLeft: "3px solid var(--orange)", flexWrap: "wrap" }}
         >
-          {bulkPrinting ? (
-            <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-              Generating {checkedIds.size} PDF{checkedIds.size !== 1 ? "s" : ""}…
-            </span>
-          ) : (
-            <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-              {checkedIds.size} selected
+          <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+            {checkedIds.size} selected
+          </span>
+          {checkedIds.size > 15 && (
+            <span className="text-xs" style={{ color: "#ff5252" }}>
+              You can print a maximum of 15 vehicles at once. Please select 15 or fewer vehicles.
             </span>
           )}
           <button
             type="button"
             className="btn btn-primary text-xs"
-            style={{ height: 30 }}
-            disabled={bulkPrinting}
+            style={{ height: 30, opacity: checkedIds.size > 15 ? 0.45 : 1 }}
+            disabled={bulkPrinting || checkedIds.size > 15}
             onClick={() => void bulkPrint("addendum")}
           >
-            {bulkPrinting ? "…" : "Addendum"}
+            Print Now ({checkedIds.size})
           </button>
           <button
             type="button"
             className="btn btn-secondary text-xs"
-            style={{ height: 30 }}
-            disabled={bulkPrinting}
+            style={{ height: 30, opacity: checkedIds.size > 15 ? 0.45 : 1 }}
+            disabled={bulkPrinting || checkedIds.size > 15}
             onClick={() => void bulkPrint("infosheet")}
           >
-            {bulkPrinting ? "…" : "Info Sheet"}
+            Info Sheet ({checkedIds.size})
           </button>
           <button
             type="button"
             className="btn btn-secondary text-xs"
-            style={{ height: 30 }}
-            disabled={bulkPrinting}
+            style={{ height: 30, opacity: checkedIds.size > 15 ? 0.45 : 1 }}
+            disabled={bulkPrinting || checkedIds.size > 15}
             onClick={() => void bulkPrint("buyer_guide")}
           >
-            {bulkPrinting ? "…" : "Buyer Guide"}
+            Buyer Guide ({checkedIds.size})
           </button>
           {!bulkPrinting && (
             <button
@@ -579,6 +579,8 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
           onClose={() => setBulkModal(null)}
         />
       )}
+
+      <PdfBuildingOverlay visible={bulkPrinting} />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import AddVehicleModal from "./AddVehicleModal";
 import EditVehicleModal from "./EditVehicleModal";
 import VehicleHistoryPanel from "./VehicleHistoryPanel";
 import PrintPreviewModal from "./PrintPreviewModal";
+import PdfBuildingOverlay from "./PdfBuildingOverlay";
 import type { DealerVehicleRow, DealerVehicleArchiveRow } from "@/lib/db";
 
 type Props = { dealerId: string; isSuperAdmin?: boolean };
@@ -336,19 +337,24 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
           borderRadius: 4,
         }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginRight: 4 }}>
-            {bulkPrinting ? `Generating ${checkedIds.size} PDF${checkedIds.size !== 1 ? "s" : ""}…` : `${checkedIds.size} selected`}
+            {checkedIds.size} selected
           </span>
-          <button onClick={() => void bulkPrint("addendum")} disabled={bulkPrinting}
-            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: bulkPrinting ? "#bbb" : "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: bulkPrinting ? "not-allowed" : "pointer" }}>
-            {bulkPrinting ? "…" : "Print Addendums"}
+          {checkedIds.size > 15 && (
+            <span style={{ fontSize: 12, color: "#ff5252" }}>
+              You can print a maximum of 15 vehicles at once. Please select 15 or fewer vehicles.
+            </span>
+          )}
+          <button onClick={() => void bulkPrint("addendum")} disabled={bulkPrinting || checkedIds.size > 15}
+            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: (bulkPrinting || checkedIds.size > 15) ? "not-allowed" : "pointer", opacity: checkedIds.size > 15 ? 0.45 : 1 }}>
+            Print Now ({checkedIds.size})
           </button>
-          <button onClick={() => void bulkPrint("infosheet")} disabled={bulkPrinting}
-            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: bulkPrinting ? "#bbb" : "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: bulkPrinting ? "not-allowed" : "pointer" }}>
-            {bulkPrinting ? "…" : "Print Info Sheets"}
+          <button onClick={() => void bulkPrint("infosheet")} disabled={bulkPrinting || checkedIds.size > 15}
+            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: (bulkPrinting || checkedIds.size > 15) ? "not-allowed" : "pointer", opacity: checkedIds.size > 15 ? 0.45 : 1 }}>
+            Info Sheet ({checkedIds.size})
           </button>
-          <button onClick={() => void bulkPrint("buyer_guide")} disabled={bulkPrinting}
-            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: bulkPrinting ? "#bbb" : "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: bulkPrinting ? "not-allowed" : "pointer" }}>
-            {bulkPrinting ? "…" : "Print Buyer Guides"}
+          <button onClick={() => void bulkPrint("buyer_guide")} disabled={bulkPrinting || checkedIds.size > 15}
+            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: (bulkPrinting || checkedIds.size > 15) ? "not-allowed" : "pointer", opacity: checkedIds.size > 15 ? 0.45 : 1 }}>
+            Buyer Guide ({checkedIds.size})
           </button>
           {!bulkPrinting && (
             <>
@@ -634,6 +640,8 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
           onClose={() => setBulkModal(null)}
         />
       )}
+
+      <PdfBuildingOverlay visible={bulkPrinting} />
     </div>
   );
 }
