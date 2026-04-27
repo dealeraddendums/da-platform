@@ -99,7 +99,6 @@ function drawTxt(page: PDFPage, font: PDFFont, x: number, y: number, text: strin
 // White-out the pre-printed blank and overlay the percentage value
 function drawPct(page: PDFPage, font: PDFFont, x: number, y: number, val: number | null | undefined) {
   if (val == null) return;
-  page.drawRectangle({ x: x - 1, y: y - 2, width: 26, height: 12, color: rgb(1, 1, 1) });
   page.drawText(String(val), { x, y, size: 9, font, color: rgb(0, 0, 0) });
 }
 
