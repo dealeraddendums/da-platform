@@ -28,23 +28,23 @@ export interface BuyersGuidePdfInput {
 // Source PDFs: assets/buyers-guide/en.pdf (3 pp), assets/buyers-guide/es.pdf (3 pp)
 // Page index: 0 = AS IS / COMO ESTÁ front, 1 = IMPLIED ONLY front, 2 = back page
 
-const VROW_Y = 629;                        // vehicle data row baseline
-const MAKE_X = 68;                         // left inner border
-const MODEL_X = 196;
-const YEAR_X = 348;
-const VIN_X = 428;
+const VROW_Y = 718;                        // vehicle data row baseline
+const MAKE_X = 72;                         // left inner border
+const MODEL_X = 190;
+const YEAR_X = 310;
+const VIN_X = 390;
 
 // Checkbox drawing params: cx/cy = center, sz = half-width of X strokes
 type CB = { cx: number; cy: number; sz: number };
 
 // Page 0 coords (AS IS / COMO ESTÁ version)
 const P0 = {
-  asIs:    { cx: 79, cy: 585, sz: 9 } as CB,   // large primary checkbox
-  dlrW:    { cx: 79, cy: 524, sz: 9 } as CB,   // large primary checkbox
-  full:    { cx: 87, cy: 501, sz: 6 } as CB,   // small sub-checkbox
-  lim:     { cx: 87, cy: 482, sz: 6 } as CB,
-  laborX:  285, laborY:  482,                   // inline percent overlay
-  partsX:  396, partsY:  482,
+  asIs:    { cx: 79, cy: 630, sz: 9 } as CB,   // large primary checkbox
+  dlrW:    { cx: 79, cy: 537, sz: 9 } as CB,   // full-warranty checkbox
+  full:    { cx: 87, cy: 515, sz: 6 } as CB,   // small sub-checkbox
+  lim:     { cx: 87, cy: 495, sz: 6 } as CB,
+  laborX:  175, laborY:  493,                   // inline percent overlay
+  partsX:  310, partsY:  493,
   sysX:     68, sysY:    419,                   // systems covered / duration lines
   durX:    315, durY:    419,
   mfrNew:  { cx: 79, cy: 319, sz: 5 } as CB,
@@ -56,12 +56,12 @@ const P0 = {
 // Page 1 coords (IMPLIED WARRANTIES ONLY / SOLO GARANTÍAS IMPLÍCITAS)
 // Everything below the primary section is shifted ~22pt lower (extra description text)
 const P1 = {
-  implied: { cx: 79, cy: 585, sz: 9 } as CB,
-  dlrW:    { cx: 79, cy: 502, sz: 9 } as CB,
-  full:    { cx: 87, cy: 479, sz: 6 } as CB,
-  lim:     { cx: 87, cy: 460, sz: 6 } as CB,
-  laborX:  285, laborY:  460,
-  partsX:  396, partsY:  460,
+  implied: { cx: 79, cy: 630, sz: 9 } as CB,
+  dlrW:    { cx: 79, cy: 515, sz: 9 } as CB,
+  full:    { cx: 87, cy: 493, sz: 6 } as CB,
+  lim:     { cx: 87, cy: 473, sz: 6 } as CB,
+  laborX:  175, laborY:  471,
+  partsX:  310, partsY:  471,
   sysX:     68, sysY:    397,
   durX:    315, durY:    397,
   mfrNew:  { cx: 79, cy: 297, sz: 5 } as CB,
@@ -72,16 +72,16 @@ const P1 = {
 
 // Back page (page 2) dealer info fields — same layout for EN and ES
 const BACK = {
-  nameX:  68, nameY:  201,
-  addrX:  68, addrY:  177,
-  phoneX: 68, phoneY: 154,
-  emailX: 310, emailY: 154,
-  complX: 68, complY: 114,
+  nameX:  68, nameY:  175,
+  addrX:  68, addrY:  153,
+  phoneX: 68, phoneY: 130,
+  emailX: 310, emailY: 130,
 };
 
 // ── Drawing helpers ───────────────────────────────────────────────────────────
 
 function drawX(page: PDFPage, { cx, cy, sz }: CB) {
+  page.drawRectangle({ x: cx - sz - 1, y: cy - sz - 1, width: sz * 2 + 2, height: sz * 2 + 2, color: rgb(1, 1, 1) });
   page.drawLine({ start: { x: cx - sz, y: cy - sz }, end: { x: cx + sz, y: cy + sz }, thickness: 1.5, color: rgb(0, 0, 0) });
   page.drawLine({ start: { x: cx + sz, y: cy - sz }, end: { x: cx - sz, y: cy + sz }, thickness: 1.5, color: rgb(0, 0, 0) });
 }
@@ -95,8 +95,8 @@ function drawTxt(page: PDFPage, font: PDFFont, x: number, y: number, text: strin
 // White-out the pre-printed blank and overlay the percentage value
 function drawPct(page: PDFPage, font: PDFFont, x: number, y: number, val: number | null | undefined) {
   if (val == null) return;
-  page.drawRectangle({ x: x - 1, y: y - 2, width: 26, height: 10, color: rgb(1, 1, 1) });
-  page.drawText(String(val), { x, y, size: 7.5, font, color: rgb(0, 0, 0) });
+  page.drawRectangle({ x: x - 1, y: y - 2, width: 26, height: 12, color: rgb(1, 1, 1) });
+  page.drawText(String(val), { x, y, size: 9, font, color: rgb(0, 0, 0) });
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
@@ -138,7 +138,7 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
   // Primary warranty checkbox
   if (isAsIs    && 'asIs'    in C) drawX(fp, (C as typeof P0).asIs);
   if (isImplied && 'implied' in C) drawX(fp, (C as typeof P1).implied);
-  if (hasDealerW) drawX(fp, C.dlrW);
+  if (isFull) drawX(fp, C.dlrW);
 
   // Sub-checkboxes and warranty details
   if (isFull) drawX(fp, C.full);
@@ -169,7 +169,6 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
   drawTxt(bp, font, BACK.addrX,  BACK.addrY,  dealerAddr,  8);
   drawTxt(bp, font, BACK.phoneX, BACK.phoneY, dealerPhone, 8);
   if (dealerEmail) drawTxt(bp, font, BACK.emailX, BACK.emailY, dealerEmail, 8);
-  drawTxt(bp, font, BACK.complX, BACK.complY, dealerName,  8);
 
   const bytes = await outDoc.save();
   return Buffer.from(bytes);
