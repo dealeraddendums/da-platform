@@ -46,7 +46,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── Dealer ────────────────────────────────────────────────────────────────
   const { data: dealer } = await admin
     .from("dealers")
-    .select("name, address, city, state, zip, phone")
+    .select("id, name, address, city, state, zip, phone")
     .eq("dealer_id", dv.dealer_id)
     .maybeSingle();
 
@@ -84,9 +84,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const dvDealerId = dv.dealer_id;
   const claimsSub = claims.sub;
 
+  const dealerUuid = dealer?.id ?? null;
+
   async function generateOneLang(lang: 'en' | 'es'): Promise<{ url: string; buffer: Buffer }> {
     const buffer = await buildBuyersGuidePdf({
       language: lang,
+      dealerUuid,
       vehicle: vehicleData,
       dealer: dealerData,
       warranty,

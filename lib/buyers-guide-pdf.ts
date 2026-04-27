@@ -1,11 +1,12 @@
 // Server-only. Overlays dealer/vehicle/warranty data onto the official FTC PDF backgrounds.
 import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from 'pdf-lib';
-import fs from 'fs';
-import path from 'path';
 import type { BuyersGuideDefaults } from '@/lib/db';
+import { getBuyersGuidePdfBytes } from '@/lib/buyers-guide-storage';
+import type { BgKey } from '@/lib/buyers-guide-constants';
 
 export interface BuyersGuidePdfInput {
   language: 'en' | 'es';
+  dealerUuid?: string | null;
   vehicle: {
     make: string | null;
     model: string | null;
@@ -105,11 +106,7 @@ function drawPct(page: PDFPage, font: PDFFont, x: number, y: number, val: number
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<Buffer> {
-  const { language: lang, vehicle: v, dealer: d, warranty: w } = input;
-
-  const srcPath = path.join(process.cwd(), 'assets', 'buyers-guide', lang === 'es' ? 'es.pdf' : 'en.pdf');
-  const srcBuf = fs.readFileSync(srcPath);
-  const srcDoc = await PDFDocument.load(srcBuf);
+  const { language: lang, dealerUuid, vehicle: v, dealer: d, warranty: w } = input;
 
   const isAsIs    = w.warranty_type === 'as_is';
   const isImplied = w.warranty_type === 'implied_only';
@@ -117,11 +114,12 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
   const isLimited = w.warranty_type === 'limited';
   const hasDealerW = isFull || isLimited;
 
-  // Page 0 = AS IS front, page 1 = IMPLIED ONLY front, page 2 = back
-  const frontIdx = isImplied ? 1 : 0;
+  const bgKey: BgKey = `${lang === 'es' ? 'spanish' : 'english'}-${isImplied ? 'implied' : 'as-is-warranty'}`;
+  const srcBuf = await getBuyersGuidePdfBytes(bgKey, dealerUuid);
+  const srcDoc = await PDFDocument.load(srcBuf);
 
   const outDoc = await PDFDocument.create();
-  const [front, back] = await outDoc.copyPages(srcDoc, [frontIdx, 2]);
+  const [front, back] = await outDoc.copyPages(srcDoc, [0, 1]);
   outDoc.addPage(front);
   outDoc.addPage(back);
 
@@ -130,7 +128,7 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
 
   // ── Front page ─────────────────────────────────────────────────────────────
   const fp = outDoc.getPage(0);
-  const C = frontIdx === 0 ? P0 : P1;
+  const C = isImplied ? P1 : P0;
 
   // Vehicle data
   drawTxt(fp, font, MAKE_X,  VROW_Y, v.make  ?? '');
