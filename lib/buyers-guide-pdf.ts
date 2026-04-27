@@ -28,7 +28,7 @@ export interface BuyersGuidePdfInput {
 // Source PDFs: assets/buyers-guide/en.pdf (3 pp), assets/buyers-guide/es.pdf (3 pp)
 // Page index: 0 = AS IS / COMO ESTÁ front, 1 = IMPLIED ONLY front, 2 = back page
 
-const VROW_Y = 718;                        // vehicle data row baseline
+const VROW_Y = 646;                        // vehicle data row baseline
 const MAKE_X = 72;                         // left inner border
 const MODEL_X = 190;
 const YEAR_X = 310;
@@ -76,10 +76,10 @@ const P1 = {
 
 // Back page (page 2) dealer info fields — same layout for EN and ES
 const BACK = {
-  nameX:  68, nameY:  197,
-  addrX:  68, addrY:  175,
-  phoneX: 68, phoneY: 152,
-  emailX: 310, emailY: 152,
+  nameX:  104, nameY:  197,
+  addrX:  104, addrY:  175,
+  phoneX: 104, phoneY: 152,
+  emailX: 346, emailY: 152,
 };
 
 // ── Drawing helpers ───────────────────────────────────────────────────────────
