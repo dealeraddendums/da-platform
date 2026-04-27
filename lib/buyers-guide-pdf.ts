@@ -59,20 +59,20 @@ const P0 = {
 };
 
 // Page 1 coords (IMPLIED WARRANTIES ONLY / SOLO GARANTÍAS IMPLÍCITAS)
-// Independently calibrated — implied page has different vertical spacing than as-is page.
+// Independently calibrated — +23pt (5/16") above P1 baseline.
 const P1 = {
-  implied: { cx: 92, cy: 563, sz: 11 } as CB,
-  dlrW:    { cx: 92, cy: 513, sz: 11 } as CB,
-  full:    { cx: 99, cy: 488, sz:  4 } as CB,
-  lim:     { cx: 99, cy: 470, sz:  4 } as CB,
-  laborX:  280, laborY:  467,
-  partsX:  370, partsY:  467,
-  sysX:     68, sysY:    397,
-  durX:    315, durY:    397,
-  mfrNew:  { cx: 85, cy: 303, sz: 4 } as CB,
-  mfrUsed: { cx: 85, cy: 279, sz: 4 } as CB,
-  othUsed: { cx: 85, cy: 263, sz: 4 } as CB,
-  svcCont: { cx: 85, cy: 213, sz: 4 } as CB,
+  implied: { cx: 92, cy: 586, sz: 11 } as CB,
+  dlrW:    { cx: 92, cy: 536, sz: 11 } as CB,
+  full:    { cx: 99, cy: 511, sz:  4 } as CB,
+  lim:     { cx: 99, cy: 493, sz:  4 } as CB,
+  laborX:  280, laborY:  490,
+  partsX:  370, partsY:  490,
+  sysX:     68, sysY:    420,
+  durX:    315, durY:    420,
+  mfrNew:  { cx: 85, cy: 326, sz: 4 } as CB,
+  mfrUsed: { cx: 85, cy: 302, sz: 4 } as CB,
+  othUsed: { cx: 85, cy: 286, sz: 4 } as CB,
+  svcCont: { cx: 85, cy: 236, sz: 4 } as CB,
 };
 
 // Back page (page 2) dealer info fields — same layout for EN and ES
