@@ -234,6 +234,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           }
         }
       }
+
+      // Fallback: if no default infosheet template configured in dealer_settings, use any active infosheet template
+      if (!savedTemplateWidgets && docType === 'infosheet') {
+        const { data: fallbackTmpl } = await admin
+          .from("templates")
+          .select("template_json")
+          .eq("dealer_id", dv.dealer_id)
+          .eq("document_type", "infosheet")
+          .eq("is_active", true)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle<{ template_json: Record<string, unknown> }>();
+
+        if (fallbackTmpl?.template_json) {
+          const ftj = fallbackTmpl.template_json as {
+            widgets?: Record<string, Widget>;
+            bgUrl?: string;
+            fontScale?: number;
+            paperSize?: string;
+          };
+          if (ftj.widgets && Object.keys(ftj.widgets).length > 0) {
+            savedTemplateWidgets = Object.values(ftj.widgets);
+          }
+          if (ftj.bgUrl) savedTemplateBgUrl = ftj.bgUrl;
+          if (typeof ftj.fontScale === "number") savedTemplateFontScale = ftj.fontScale;
+          if (ftj.paperSize) savedTemplatePaperSize = ftj.paperSize as PaperSize;
+        }
+      }
     }
 
     // ── Resolve custom paper size dimensions ──────────────────────────────────

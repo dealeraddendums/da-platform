@@ -205,6 +205,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           }
         }
 
+        // Fallback: if no default infosheet template configured, use any active infosheet template (cached per dealer)
+        if (!templateWidgets && docType === 'infosheet') {
+          const fallbackKey = `any_infosheet_${dv.dealer_id}`;
+          if (!templateCache.has(fallbackKey)) {
+            const { data: ft } = await admin
+              .from("templates")
+              .select("template_json")
+              .eq("dealer_id", dv.dealer_id)
+              .eq("document_type", "infosheet")
+              .eq("is_active", true)
+              .order("updated_at", { ascending: false })
+              .limit(1)
+              .maybeSingle<{ template_json: Record<string, unknown> }>();
+            if (ft?.template_json) {
+              const ftj = ft.template_json as { widgets?: Record<string, Widget>; bgUrl?: string; fontScale?: number; paperSize?: string };
+              templateCache.set(fallbackKey, ftj.widgets ? Object.values(ftj.widgets) : null);
+              templateMetaCache.set(fallbackKey, { bgUrl: ftj.bgUrl, fontScale: ftj.fontScale, paperSizeStr: ftj.paperSize });
+            } else {
+              templateCache.set(fallbackKey, null);
+            }
+          }
+          templateWidgets = templateCache.get(fallbackKey) ?? null;
+          if (templateWidgets) {
+            const meta = templateMetaCache.get(fallbackKey);
+            if (meta) { templateBgUrl = meta.bgUrl; templateFontScale = meta.fontScale; if (meta.paperSizeStr) templatePaperSizeStr = meta.paperSizeStr; }
+          }
+        }
+
         // ── Effective paper size ─────────────────────────────────────────────
         const effectivePaperSizeStr =
           (body.paperSize && knownSizes.has(body.paperSize) ? body.paperSize : null)
