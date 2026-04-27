@@ -38,29 +38,57 @@ const VIN_X = 390;
 // Checkbox drawing params: cx/cy = center, sz = half-width of X strokes
 type CB = { cx: number; cy: number; sz: number };
 
-// Page 0 coords (AS IS / COMO ESTÁ version)
-// Box positions confirmed via 300dpi pixel scan of source PDF:
-//   Large primary boxes: x=80.4-103.2 (cx≈92), sz=11
-//   Sub-checkboxes (full/lim): x=94.3-103.0 (cx≈99), sz=4
-//   Non-dealer boxes: x=80.4-89.3 (cx=85), sz=4
-const P0 = {
-  asIs:    { cx: 92, cy: 585, sz: 11 } as CB,  // large primary checkbox
-  dlrW:    { cx: 92, cy: 535, sz: 11 } as CB,  // large dealer warranty checkbox
-  full:    { cx: 99, cy: 510, sz:  4 } as CB,  // small sub-checkbox
+// ── English AS IS coords (calibrated) ────────────────────────────────────────
+const EN_P0 = {
+  asIs:    { cx: 92, cy: 585, sz: 11 } as CB,
+  dlrW:    { cx: 92, cy: 535, sz: 11 } as CB,
+  full:    { cx: 99, cy: 510, sz:  4 } as CB,
   lim:     { cx: 99, cy: 492, sz:  4 } as CB,
-  laborX:  280, laborY:  489,                   // inline percent overlay (over blank underline)
+  laborX:  280, laborY:  489,
   partsX:  370, partsY:  489,
-  sysX:     68, sysY:    419,                   // systems covered / duration lines
+  sysX:     68, sysY:    419,
   durX:    315, durY:    419,
-  mfrNew:  { cx: 85, cy: 325, sz: 4 } as CB,   // non-dealer boxes x=80.4-89.3, cy confirmed
+  mfrNew:  { cx: 85, cy: 325, sz: 4 } as CB,
   mfrUsed: { cx: 85, cy: 301, sz: 4 } as CB,
   othUsed: { cx: 85, cy: 285, sz: 4 } as CB,
   svcCont: { cx: 85, cy: 235, sz: 4 } as CB,
 };
 
-// Page 1 coords (IMPLIED WARRANTIES ONLY / SOLO GARANTÍAS IMPLÍCITAS)
-// Independently calibrated — +23pt (5/16") above P1 baseline.
-const P1 = {
+// ── English IMPLIED coords (calibrated) ──────────────────────────────────────
+const EN_P1 = {
+  implied: { cx: 92, cy: 586, sz: 11 } as CB,
+  dlrW:    { cx: 92, cy: 536, sz: 11 } as CB,
+  full:    { cx: 99, cy: 511, sz:  4 } as CB,
+  lim:     { cx: 99, cy: 493, sz:  4 } as CB,
+  laborX:  280, laborY:  490,
+  partsX:  370, partsY:  490,
+  sysX:     68, sysY:    420,
+  durX:    315, durY:    420,
+  mfrNew:  { cx: 85, cy: 326, sz: 4 } as CB,
+  mfrUsed: { cx: 85, cy: 302, sz: 4 } as CB,
+  othUsed: { cx: 85, cy: 286, sz: 4 } as CB,
+  svcCont: { cx: 85, cy: 236, sz: 4 } as CB,
+};
+
+// ── Spanish AS IS coords — same as EN_P0 except non-dealer boxes shifted ─────
+// mfrNew  -14pt (3/16" down), mfrUsed -9pt (1/8" down), othUsed -5pt (1/16" down)
+const ES_P0 = {
+  asIs:    { cx: 92, cy: 585, sz: 11 } as CB,
+  dlrW:    { cx: 92, cy: 535, sz: 11 } as CB,
+  full:    { cx: 99, cy: 510, sz:  4 } as CB,
+  lim:     { cx: 99, cy: 492, sz:  4 } as CB,
+  laborX:  280, laborY:  489,
+  partsX:  370, partsY:  489,
+  sysX:     68, sysY:    419,
+  durX:    315, durY:    419,
+  mfrNew:  { cx: 85, cy: 311, sz: 4 } as CB,
+  mfrUsed: { cx: 85, cy: 292, sz: 4 } as CB,
+  othUsed: { cx: 85, cy: 280, sz: 4 } as CB,
+  svcCont: { cx: 85, cy: 235, sz: 4 } as CB,
+};
+
+// ── Spanish IMPLIED coords — pending calibration, start from EN_P1 ────────────
+const ES_P1 = {
   implied: { cx: 92, cy: 586, sz: 11 } as CB,
   dlrW:    { cx: 92, cy: 536, sz: 11 } as CB,
   full:    { cx: 99, cy: 511, sz:  4 } as CB,
@@ -128,7 +156,9 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
 
   // ── Front page ─────────────────────────────────────────────────────────────
   const fp = outDoc.getPage(0);
-  const C = isImplied ? P1 : P0;
+  const C = lang === 'es'
+    ? (isImplied ? ES_P1 : ES_P0)
+    : (isImplied ? EN_P1 : EN_P0);
 
   // Vehicle data
   drawTxt(fp, font, MAKE_X,  VROW_Y, v.make  ?? '');
@@ -137,8 +167,8 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
   drawTxt(fp, font, VIN_X,   VROW_Y, v.vin   ?? '');
 
   // Primary warranty checkbox
-  if (isAsIs    && 'asIs'    in C) drawX(fp, (C as typeof P0).asIs);
-  if (isImplied && 'implied' in C) drawX(fp, (C as typeof P1).implied);
+  if (isAsIs    && 'asIs'    in C) drawX(fp, (C as typeof EN_P0).asIs);
+  if (isImplied && 'implied' in C) drawX(fp, (C as typeof EN_P1).implied);
   if (hasDealerW) drawX(fp, C.dlrW);
 
   // Sub-checkboxes and warranty details
