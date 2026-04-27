@@ -38,11 +38,12 @@ type LibraryOption = {
 type Props = {
   vehicle: VehicleRow;
   dealerVehicleId: string;
+  initialDocType?: "infosheet" | "buyer_guide";
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
+export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocType }: Props) {
   // Use UUID for manual vehicles (vehicle.id===0) so options are saved per-vehicle, not shared
   const vehicleId: string | number = vehicle.id === 0 ? dealerVehicleId : vehicle.id;
   const dealerId = vehicle.DEALER_ID;
@@ -71,6 +72,15 @@ export default function AddendumEditor({ vehicle, dealerVehicleId }: Props) {
 
   // Print preview modal
   const [printDoc, setPrintDoc] = useState<"addendum" | "infosheet" | "buyer_guide" | null>(null);
+
+  // Auto-trigger modal when navigated with ?type=infosheet or ?type=buyer_guide
+  const autoTriggered = useRef(false);
+  useEffect(() => {
+    if (loading || autoTriggered.current || !initialDocType) return;
+    autoTriggered.current = true;
+    void handlePrint(initialDocType);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   // Drag-and-drop
   const dragIdx = useRef<number | null>(null);

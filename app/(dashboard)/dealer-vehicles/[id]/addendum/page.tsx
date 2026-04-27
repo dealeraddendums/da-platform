@@ -7,8 +7,10 @@ export const metadata = { title: "Addendum — DA Platform" };
 
 export default async function DealerVehicleAddendumPage({
   params,
+  searchParams,
 }: {
   params: { id: string };
+  searchParams?: { type?: string };
 }) {
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
@@ -73,6 +75,10 @@ export default async function DealerVehicleAddendumPage({
     MPG: null,
   };
 
+  const rawType = searchParams?.type;
+  const initialDocType: "infosheet" | "buyer_guide" | undefined =
+    rawType === "infosheet" || rawType === "buyer_guide" ? rawType : undefined;
+
   const vehicleName = [dv.year, dv.make, dv.model].filter(Boolean).join(" ");
 
   return (
@@ -96,7 +102,7 @@ export default async function DealerVehicleAddendumPage({
         </p>
       </div>
 
-      <AddendumEditor vehicle={vehicle} dealerVehicleId={dv.id} />
+      <AddendumEditor vehicle={vehicle} dealerVehicleId={dv.id} initialDocType={initialDocType} />
     </div>
   );
 }
