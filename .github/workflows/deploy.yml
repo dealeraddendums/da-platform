@@ -23,7 +23,9 @@ jobs:
             set -e
             export PATH="/usr/bin:/usr/local/bin:$PATH"
             cd /var/www/da-platform
-            for i in 1 2 3; do git pull origin main && break || { echo "git pull attempt $i failed, retrying..."; sleep 10; }; done
+            git fetch origin
+            git reset --hard origin/main
+            sudo rm -rf node_modules .next
             /usr/bin/npm ci
             /usr/bin/npm run build
             pm2 restart da-platform || pm2 start ecosystem.config.js
