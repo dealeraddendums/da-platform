@@ -152,6 +152,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [showPrint, setShowPrint] = useState(false);
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([]);
+  const [defaultTemplateIds, setDefaultTemplateIds] = useState<Set<string>>(new Set());
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   // ID of the template currently loaded in the builder (for upsert-on-save logic)
   const [loadedTemplateId, setLoadedTemplateId] = useState<string | null>(null);
   const [customWidgets, setCustomWidgets] = useState<CustomWidgetDef[]>(DEFAULT_CUSTOM_WIDGETS);
@@ -723,9 +725,20 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // ── Load templates list ────────────────────────────────────────────
   const openTemplates = useCallback(async () => {
     try {
-      const r = await fetch('/api/templates');
-      if (r.ok) { const j = await r.json(); setSavedTemplates(j.data ?? []); }
+      const [tRes, sRes] = await Promise.all([fetch('/api/templates'), fetch('/api/settings')]);
+      if (tRes.ok) { const j = await tRes.json(); setSavedTemplates(j.data ?? []); }
+      if (sRes.ok) {
+        const sj = await sRes.json() as { data?: Record<string, string | null> };
+        const defaults = new Set(
+          Object.entries(sj.data ?? {})
+            .filter(([k]) => k.startsWith('default_') && k !== 'default_template_new' && k !== 'default_template_used' && k !== 'default_template_cpo')
+            .map(([, v]) => v)
+            .filter((v): v is string => !!v)
+        );
+        setDefaultTemplateIds(defaults);
+      }
     } catch {}
+    setDeleteConfirmId(null);
     setShowOpenModal(true);
   }, []);
 
@@ -1233,15 +1246,45 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           <div style={{ padding: '16px 24px', maxHeight: 400, overflowY: 'auto' }}>
             {savedTemplates.length === 0 ? (
               <div style={{ textAlign: 'center', color: '#78828c', padding: 24, fontSize: 13 }}>No saved templates yet.</div>
-            ) : savedTemplates.map(t => (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #e0e0e0' }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>{t.name}</div>
-                  <div style={{ fontSize: 11, color: '#78828c', marginTop: 2 }}>{t.document_type} · {t.vehicle_types?.join(', ')}</div>
+            ) : savedTemplates.map(t => {
+              const isDefault = defaultTemplateIds.has(t.id);
+              const isConfirming = deleteConfirmId === t.id;
+              return (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #e0e0e0', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>{t.name}</div>
+                    <div style={{ fontSize: 11, color: '#78828c', marginTop: 2 }}>{t.document_type} · {t.vehicle_types?.join(', ')}</div>
+                  </div>
+                  {isConfirming ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      <span style={{ fontSize: 11, color: '#555' }}>Delete &ldquo;{t.name}&rdquo;? This cannot be undone.</span>
+                      <button onClick={async () => {
+                        const r = await fetch(`/api/templates/${t.id}`, { method: 'DELETE' });
+                        if (r.ok || r.status === 204) {
+                          setSavedTemplates(prev => prev.filter(x => x.id !== t.id));
+                          setDefaultTemplateIds(prev => { const n = new Set(prev); n.delete(t.id); return n; });
+                        }
+                        setDeleteConfirmId(null);
+                      }} style={{ padding: '4px 10px', background: '#ff5252', color: '#fff', border: 'none', borderRadius: 4, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>Confirm</button>
+                      <button onClick={() => setDeleteConfirmId(null)} style={{ padding: '4px 10px', background: '#f5f6f7', color: '#333', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>Cancel</button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      <button onClick={() => loadTemplate(t.id)} style={{ padding: '5px 12px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Load</button>
+                      {isDefault ? (
+                        <span title="Cannot delete — assigned as a default template" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 4, border: '1px solid #e0e0e0', background: '#f5f6f7', cursor: 'not-allowed', color: '#ccc', flexShrink: 0 }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                        </span>
+                      ) : (
+                        <button onClick={() => setDeleteConfirmId(t.id)} title="Delete template" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 4, border: '1px solid #e0e0e0', background: '#fff', cursor: 'pointer', color: '#ff5252', flexShrink: 0 }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <button onClick={() => loadTemplate(t.id)} style={{ padding: '5px 12px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Load</button>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div style={{ padding: '16px 24px', borderTop: '1px solid #e0e0e0', display: 'flex', justifyContent: 'flex-end' }}>
             <button onClick={() => setShowOpenModal(false)} style={mfClose}>Close</button>
@@ -1372,10 +1415,10 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
   const d = w.d;
   const u = (key: string, val: unknown) => onUpdate(w.id, key, val);
 
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const [qrSavingDefault, setQrSavingDefault] = useState(false);
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const [qrDefaultSaved, setQrDefaultSaved] = useState(false);
+  // Must be unconditional — calling useRef inside a conditional IIFE causes React error #310
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   async function saveQrDefault() {
     if (!dealerId) return;
@@ -1544,8 +1587,6 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
       )}
 
       {w.type === 'customtext' && (() => {
-        // eslint-disable-next-line react-hooks/rules-of-hooks
-        const textareaRef = useRef<HTMLTextAreaElement>(null);
         function insertToken(token: string) {
           const el = textareaRef.current;
           const cur = (d.text as string) || '';

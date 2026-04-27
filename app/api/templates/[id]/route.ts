@@ -125,8 +125,28 @@ export async function DELETE(
 
   const checked = await fetchAndAuthorize(claims, params.id);
   if ("authError" in checked) return checked.authError;
+  const { dealerId } = checked;
 
   const admin = createAdminSupabaseClient();
+
+  // Refuse to delete a template that is currently assigned as any default
+  const { data: settings } = await admin
+    .from("dealer_settings")
+    .select("default_addendum_new, default_addendum_used, default_addendum_cpo, default_infosheet_new, default_infosheet_used, default_infosheet_cpo, default_buyersguide_new, default_buyersguide_used, default_buyersguide_cpo")
+    .eq("dealer_id", dealerId)
+    .maybeSingle();
+
+  if (settings) {
+    const assignedIds = [
+      settings.default_addendum_new, settings.default_addendum_used, settings.default_addendum_cpo,
+      settings.default_infosheet_new, settings.default_infosheet_used, settings.default_infosheet_cpo,
+      settings.default_buyersguide_new, settings.default_buyersguide_used, settings.default_buyersguide_cpo,
+    ];
+    if (assignedIds.includes(params.id)) {
+      return NextResponse.json({ error: "Template is assigned as a default and cannot be deleted" }, { status: 409 });
+    }
+  }
+
   const { error: deleteErr } = await admin
     .from("templates")
     .delete()
