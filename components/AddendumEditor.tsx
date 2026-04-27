@@ -70,17 +70,10 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
   // Edit inline
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Print preview modal
-  const [printDoc, setPrintDoc] = useState<"addendum" | "infosheet" | "buyer_guide" | null>(null);
-
-  // Auto-trigger modal when navigated with ?type=infosheet or ?type=buyer_guide
-  const autoTriggered = useRef(false);
-  useEffect(() => {
-    if (loading || autoTriggered.current || !initialDocType) return;
-    autoTriggered.current = true;
-    void handlePrint(initialDocType);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
+  // Print preview modal — initialize with initialDocType so ?type= param auto-opens correct modal
+  const [printDoc, setPrintDoc] = useState<"addendum" | "infosheet" | "buyer_guide" | null>(
+    initialDocType ?? null
+  );
 
   // Drag-and-drop
   const dragIdx = useRef<number | null>(null);
