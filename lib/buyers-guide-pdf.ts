@@ -70,15 +70,16 @@ const EN_P1 = {
   svcCont: { cx: 85, cy: 236, sz: 4 } as CB,
 };
 
-// ── Spanish AS IS coords — same as EN_P0 except non-dealer boxes shifted ─────
-// mfrNew  -14pt (3/16" down), mfrUsed -9pt (1/8" down), othUsed -5pt (1/16" down)
+// ── Spanish AS IS coords ──────────────────────────────────────────────────────
+// non-dealer: mfrNew −14pt, mfrUsed −9pt, othUsed −5pt
+// dlrW/lim/labor/parts: −27pt (3/8" down); laborX/partsX +32pt (7/16" right)
 const ES_P0 = {
   asIs:    { cx: 92, cy: 585, sz: 11 } as CB,
-  dlrW:    { cx: 92, cy: 535, sz: 11 } as CB,
+  dlrW:    { cx: 92, cy: 508, sz: 11 } as CB,
   full:    { cx: 99, cy: 510, sz:  4 } as CB,
-  lim:     { cx: 99, cy: 492, sz:  4 } as CB,
-  laborX:  280, laborY:  489,
-  partsX:  370, partsY:  489,
+  lim:     { cx: 99, cy: 465, sz:  4 } as CB,
+  laborX:  312, laborY:  462,
+  partsX:  402, partsY:  462,
   sysX:     68, sysY:    419,
   durX:    315, durY:    419,
   mfrNew:  { cx: 85, cy: 311, sz: 4 } as CB,
