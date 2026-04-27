@@ -2,18 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { BuyersGuideDefaults } from "@/lib/db";
-import { buildBuyersGuideHtml } from "@/lib/buyers-guide-html";
-import { renderPdf } from "@/lib/pdf-renderer";
+import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { uploadPdf } from "@/lib/s3-upload";
 import JSZip from "jszip";
 
 /**
  * POST /api/pdf/buyers-guide
- * Generates a 2-page FTC Buyer's Guide PDF.
+ * Generates a 2-page FTC Buyer's Guide PDF using pdf-lib overlay on official FTC backgrounds.
  * Body: { vehicleId, language?, both?, warranty? }
- * - language: 'en' | 'es' (default 'en')
- * - both: true → returns a ZIP with EN + ES PDFs
- * - warranty: BuyersGuideDefaults overrides (optional, falls back to dealer_settings)
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
@@ -89,14 +85,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const claimsSub = claims.sub;
 
   async function generateOneLang(lang: 'en' | 'es'): Promise<{ url: string; buffer: Buffer }> {
-    const html = buildBuyersGuideHtml({ language: lang, vehicle: vehicleData, dealer: dealerData, warranty });
-    const buffer = await renderPdf(html, 'buyers_guide', { allPages: true });
+    const buffer = await buildBuyersGuidePdf({
+      language: lang,
+      vehicle: vehicleData,
+      dealer: dealerData,
+      warranty,
+    });
     const key = `${dvDealerId}/${vehicleId}/buyers_guide_${lang}_${Date.now()}.pdf`;
     const url = await uploadPdf(buffer, key);
     return { url, buffer };
   }
 
-  // ── Log helper ────────────────────────────────────────────────────────────
   async function logPrint(pdfUrl: string) {
     await admin.from("print_history").insert({
       vehicle_id: vehicleId,
