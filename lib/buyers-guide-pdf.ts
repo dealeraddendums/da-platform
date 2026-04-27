@@ -38,36 +38,40 @@ const VIN_X = 390;
 type CB = { cx: number; cy: number; sz: number };
 
 // Page 0 coords (AS IS / COMO ESTÁ version)
+// Box positions confirmed via 300dpi pixel scan of source PDF:
+//   Large primary boxes: x=80.4-103.2 (cx≈92), sz=11
+//   Sub-checkboxes (full/lim): x=94.3-103.0 (cx≈99), sz=4
+//   Non-dealer boxes: x=80.4-89.3 (cx=85), sz=4
 const P0 = {
-  asIs:    { cx: 79, cy: 630, sz: 9 } as CB,   // large primary checkbox
-  dlrW:    { cx: 79, cy: 537, sz: 9 } as CB,   // full-warranty checkbox
-  full:    { cx: 74, cy: 515, sz: 7 } as CB,   // small sub-checkbox (inside section col x=54-94)
-  lim:     { cx: 74, cy: 495, sz: 7 } as CB,
+  asIs:    { cx: 92, cy: 585, sz: 11 } as CB,  // large primary checkbox
+  dlrW:    { cx: 92, cy: 535, sz: 11 } as CB,  // large dealer warranty checkbox
+  full:    { cx: 99, cy: 510, sz:  4 } as CB,  // small sub-checkbox
+  lim:     { cx: 99, cy: 492, sz:  4 } as CB,
   laborX:  293, laborY:  493,                   // inline percent overlay (over blank underline)
   partsX:  383, partsY:  493,
   sysX:     68, sysY:    419,                   // systems covered / duration lines
   durX:    315, durY:    419,
-  mfrNew:  { cx: 85, cy: 319, sz: 5 } as CB,   // centered in form □ box at x=80-89
-  mfrUsed: { cx: 85, cy: 299, sz: 5 } as CB,
-  othUsed: { cx: 85, cy: 281, sz: 5 } as CB,
-  svcCont: { cx: 85, cy: 237, sz: 5 } as CB,
+  mfrNew:  { cx: 85, cy: 325, sz: 4 } as CB,   // non-dealer boxes x=80.4-89.3, cy confirmed
+  mfrUsed: { cx: 85, cy: 301, sz: 4 } as CB,
+  othUsed: { cx: 85, cy: 285, sz: 4 } as CB,
+  svcCont: { cx: 85, cy: 235, sz: 4 } as CB,
 };
 
 // Page 1 coords (IMPLIED WARRANTIES ONLY / SOLO GARANTÍAS IMPLÍCITAS)
 // Everything below the primary section is shifted ~22pt lower (extra description text)
 const P1 = {
-  implied: { cx: 79, cy: 630, sz: 9 } as CB,
-  dlrW:    { cx: 79, cy: 515, sz: 9 } as CB,
-  full:    { cx: 74, cy: 493, sz: 7 } as CB,
-  lim:     { cx: 74, cy: 473, sz: 7 } as CB,
+  implied: { cx: 92, cy: 563, sz: 11 } as CB,  // 585-22
+  dlrW:    { cx: 92, cy: 513, sz: 11 } as CB,  // 535-22
+  full:    { cx: 99, cy: 488, sz:  4 } as CB,  // 510-22
+  lim:     { cx: 99, cy: 470, sz:  4 } as CB,  // 492-22
   laborX:  293, laborY:  471,
   partsX:  383, partsY:  471,
   sysX:     68, sysY:    397,
   durX:    315, durY:    397,
-  mfrNew:  { cx: 85, cy: 297, sz: 5 } as CB,
-  mfrUsed: { cx: 85, cy: 277, sz: 5 } as CB,
-  othUsed: { cx: 85, cy: 259, sz: 5 } as CB,
-  svcCont: { cx: 85, cy: 215, sz: 5 } as CB,
+  mfrNew:  { cx: 85, cy: 303, sz: 4 } as CB,   // 325-22
+  mfrUsed: { cx: 85, cy: 279, sz: 4 } as CB,   // 301-22
+  othUsed: { cx: 85, cy: 263, sz: 4 } as CB,   // 285-22
+  svcCont: { cx: 85, cy: 213, sz: 4 } as CB,   // 235-22
 };
 
 // Back page (page 2) dealer info fields — same layout for EN and ES
@@ -138,7 +142,7 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
   // Primary warranty checkbox
   if (isAsIs    && 'asIs'    in C) drawX(fp, (C as typeof P0).asIs);
   if (isImplied && 'implied' in C) drawX(fp, (C as typeof P1).implied);
-  if (isFull) drawX(fp, C.dlrW);
+  if (hasDealerW) drawX(fp, C.dlrW);
 
   // Sub-checkboxes and warranty details
   if (isFull) drawX(fp, C.full);
