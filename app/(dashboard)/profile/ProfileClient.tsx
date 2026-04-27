@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { DealerRow } from "@/lib/db";
 import type { LabelProduct } from "@/lib/label-products";
 import { LABEL_PRODUCTS } from "@/lib/label-products";
@@ -743,7 +744,11 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export default function ProfileClient({ dealer, canEdit, userEmail, userName }: Props) {
-  const [tab, setTab] = useState<Tab>("info");
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = searchParams.get("tab");
+    return (t === "labels" || t === "info" || t === "shipping" || t === "billing") ? t : "info";
+  });
 
   return (
     <div className="p-6">
