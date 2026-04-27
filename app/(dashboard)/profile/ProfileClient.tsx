@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { DealerRow } from "@/lib/db";
 import type { LabelProduct } from "@/lib/label-products";
 import { LABEL_PRODUCTS } from "@/lib/label-products";
 
-type Tab = "info" | "shipping" | "labels" | "buyers-guide" | "billing";
+type Tab = "info" | "shipping" | "labels" | "billing";
 
 type Props = {
   dealer: DealerRow;
@@ -602,186 +602,6 @@ function OrderLabelsTab({
   );
 }
 
-// ── Buyer's Guide PDFs Tab ───────────────────────────────────────────────────
-
-const BG_KEYS = [
-  "english-as-is-warranty",
-  "english-implied",
-  "spanish-as-is-warranty",
-  "spanish-implied",
-] as const;
-type BgKey = (typeof BG_KEYS)[number];
-
-const BG_LABELS: Record<BgKey, string> = {
-  "english-as-is-warranty": "English — As Is / Warranty",
-  "english-implied": "English — Implied Warranties Only",
-  "spanish-as-is-warranty": "Spanish — Como Está / Garantía",
-  "spanish-implied": "Spanish — Solo Garantías Implícitas",
-};
-
-type BgCardState = {
-  loading: boolean;
-  hasCustom: boolean;
-  url: string | null;
-  uploading: boolean;
-  error: string | null;
-};
-
-function BuyersGuidePdfsTab({ dealerId, canEdit }: { dealerId: string; canEdit: boolean }) {
-  const [cards, setCards] = React.useState<Record<BgKey, BgCardState>>(() =>
-    Object.fromEntries(BG_KEYS.map(k => [k, { loading: true, hasCustom: false, url: null, uploading: false, error: null }])) as Record<BgKey, BgCardState>
-  );
-  const fileRefs = React.useRef<Partial<Record<BgKey, HTMLInputElement>>>({});
-
-  function setCard(key: BgKey, patch: Partial<BgCardState>) {
-    setCards(prev => ({ ...prev, [key]: { ...prev[key], ...patch } }));
-  }
-
-  async function loadCard(key: BgKey) {
-    setCard(key, { loading: true, error: null });
-    try {
-      const res = await fetch(`/api/dealers/${dealerId}/buyers-guide-pdfs/${key}`);
-      const j = await res.json() as { hasCustom: boolean; url: string | null };
-      setCard(key, { loading: false, hasCustom: j.hasCustom, url: j.url });
-    } catch {
-      setCard(key, { loading: false, error: "Failed to load" });
-    }
-  }
-
-  React.useEffect(() => {
-    BG_KEYS.forEach(k => void loadCard(k));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dealerId]);
-
-  async function upload(key: BgKey, file: File) {
-    setCard(key, { uploading: true, error: null });
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch(`/api/dealers/${dealerId}/buyers-guide-pdfs/${key}`, { method: "PUT", body: fd });
-      const j = await res.json() as { ok?: boolean; url?: string; error?: string };
-      if (!res.ok) throw new Error(j.error ?? "Upload failed");
-      setCard(key, { uploading: false, hasCustom: true, url: j.url ?? null });
-    } catch (e) {
-      setCard(key, { uploading: false, error: e instanceof Error ? e.message : "Upload failed" });
-    }
-  }
-
-  async function remove(key: BgKey) {
-    setCard(key, { error: null });
-    try {
-      await fetch(`/api/dealers/${dealerId}/buyers-guide-pdfs/${key}`, { method: "DELETE" });
-      setCard(key, { hasCustom: false, url: null });
-    } catch {
-      setCard(key, { error: "Delete failed" });
-    }
-  }
-
-  return (
-    <div>
-      <p style={{ fontSize: 13, color: "#55595c", marginBottom: 20, marginTop: 0 }}>
-        Upload custom Buyer&apos;s Guide backgrounds for your dealership. These replace the system defaults
-        when generating PDFs. Leave blank to use the standard FTC background.
-      </p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, maxWidth: 680 }}>
-        {BG_KEYS.map(key => {
-          const c = cards[key];
-          return (
-            <div
-              key={key}
-              style={{
-                border: "1px solid #e0e0e0",
-                borderRadius: 6,
-                padding: "16px 16px 12px",
-                background: "#fff",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#2a2b3c" }}>
-                    {BG_LABELS[key]}
-                  </div>
-                  <div style={{ marginTop: 4 }}>
-                    {c.loading ? (
-                      <span style={{ fontSize: 11, color: "#78828c" }}>Loading…</span>
-                    ) : c.hasCustom ? (
-                      <span style={{
-                        fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 20,
-                        background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9",
-                      }}>
-                        Custom
-                      </span>
-                    ) : (
-                      <span style={{
-                        fontSize: 11, padding: "2px 7px", borderRadius: 20,
-                        background: "#f5f6f7", color: "#78828c", border: "1px solid #e0e0e0",
-                      }}>
-                        System default
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {c.url && (
-                  <a
-                    href={c.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ fontSize: 12, color: "#1976d2", textDecoration: "none" }}
-                  >
-                    Preview ↗
-                  </a>
-                )}
-              </div>
-
-              {c.error && (
-                <div style={{ fontSize: 12, color: "#c62828", marginBottom: 8 }}>{c.error}</div>
-              )}
-
-              {canEdit && (
-                <div style={{ display: "flex", gap: 6 }}>
-                  <input
-                    ref={el => { if (el) fileRefs.current[key] = el; }}
-                    type="file"
-                    accept="application/pdf"
-                    style={{ display: "none" }}
-                    onChange={e => {
-                      const f = e.target.files?.[0];
-                      if (f) void upload(key, f);
-                      e.target.value = "";
-                    }}
-                  />
-                  <button
-                    onClick={() => fileRefs.current[key]?.click()}
-                    disabled={c.uploading || c.loading}
-                    style={{
-                      height: 30, padding: "0 12px", background: "#1976d2", color: "#fff",
-                      border: "none", borderRadius: 4, fontSize: 12, fontWeight: 500, cursor: "pointer",
-                      opacity: c.uploading ? 0.6 : 1,
-                    }}
-                  >
-                    {c.uploading ? "Uploading…" : c.hasCustom ? "Replace" : "Upload"}
-                  </button>
-                  {c.hasCustom && (
-                    <button
-                      onClick={() => void remove(key)}
-                      style={{
-                        height: 30, padding: "0 10px", background: "#fff", color: "#ff5252",
-                        border: "1px solid #ff5252", borderRadius: 4, fontSize: 12, cursor: "pointer",
-                      }}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ── Billing Stub Tab ─────────────────────────────────────────────────────────
 
 function BillingTab() {
@@ -920,7 +740,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "info", label: "Dealership Info" },
   { id: "shipping", label: "Shipping Address" },
   { id: "labels", label: "Order Labels" },
-  { id: "buyers-guide", label: "Buyer's Guide PDFs" },
   { id: "billing", label: "Invoices & Billing" },
 ];
 
@@ -928,7 +747,7 @@ export default function ProfileClient({ dealer, canEdit, userEmail, userName }: 
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<Tab>(() => {
     const t = searchParams.get("tab");
-    return (t === "labels" || t === "info" || t === "shipping" || t === "billing" || t === "buyers-guide") ? t : "info";
+    return (t === "labels" || t === "info" || t === "shipping" || t === "billing") ? t : "info";
   });
 
   return (
@@ -997,7 +816,6 @@ export default function ProfileClient({ dealer, canEdit, userEmail, userName }: 
             userName={userName}
           />
         )}
-        {tab === "buyers-guide" && <BuyersGuidePdfsTab dealerId={dealer.id} canEdit={canEdit} />}
         {tab === "billing" && <BillingTab />}
       </div>
     </div>

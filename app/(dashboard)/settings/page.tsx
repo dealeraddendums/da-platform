@@ -28,13 +28,14 @@ export default async function SettingsPage() {
   const dealerId = isDealer ? (profile?.dealer_id ?? null) : null;
 
   let initialSettings: DealerSettingsRow | null = null;
+  let fixedDealerUuid: string | null = null;
   if (dealerId) {
-    const { data: s } = await admin
-      .from("dealer_settings")
-      .select("*")
-      .eq("dealer_id", dealerId)
-      .single();
+    const [{ data: s }, { data: dRow }] = await Promise.all([
+      admin.from("dealer_settings").select("*").eq("dealer_id", dealerId).single(),
+      admin.from("dealers").select("id").eq("dealer_id", dealerId).maybeSingle(),
+    ]);
     initialSettings = (s as DealerSettingsRow | null) ?? null;
+    fixedDealerUuid = (dRow as { id: string } | null)?.id ?? null;
   }
 
   return (
@@ -49,6 +50,7 @@ export default async function SettingsPage() {
       </div>
       <SettingsForm
         fixedDealerId={dealerId}
+        fixedDealerUuid={fixedDealerUuid}
         role={role}
         groupId={profile?.group_id ?? null}
         initialSettings={initialSettings}

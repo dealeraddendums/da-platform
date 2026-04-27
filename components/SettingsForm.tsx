@@ -3,15 +3,25 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { DealerSettingsRow, TemplateRow, UserRole, BuyersGuideDefaults } from "@/lib/db";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
+import { BG_KEYS, BG_LABELS, type BgKey } from "@/lib/buyers-guide-constants";
 
 type Props = {
   fixedDealerId: string | null;
+  fixedDealerUuid: string | null;
   role: UserRole;
   groupId: string | null;
   initialSettings: DealerSettingsRow | null;
 };
 
-type DealerOption = { dealer_id: string; name: string };
+type DealerOption = { id: string; dealer_id: string; name: string };
+
+type BgCardState = {
+  loading: boolean;
+  hasCustom: boolean;
+  url: string | null;
+  uploading: boolean;
+  error: string | null;
+};
 
 const SETTING_DEFAULTS: Omit<DealerSettingsRow, "dealer_id" | "updated_at"> = {
   ai_content_default: false,
@@ -50,8 +60,9 @@ const NON_DEALER = [
 
 type DocTab = "addendum" | "infosheet" | "buyers_guide";
 
-export default function SettingsForm({ fixedDealerId, role, groupId, initialSettings }: Props) {
+export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, groupId, initialSettings }: Props) {
   const [dealerId, setDealerId] = useState<string | null>(fixedDealerId);
+  const [dealerUuid, setDealerUuid] = useState<string | null>(fixedDealerUuid);
   const [dealerName, setDealerName] = useState<string>("");
 
   // dealer picker state (for super_admin / group_admin)
@@ -91,6 +102,10 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [bgCards, setBgCards] = useState<Record<BgKey, BgCardState>>(
+    () => Object.fromEntries(BG_KEYS.map(k => [k, { loading: false, hasCustom: false, url: null, uploading: false, error: null }])) as Record<BgKey, BgCardState>
+  );
+  const bgFileRefs = useRef<Partial<Record<BgKey, HTMLInputElement>>>({});
 
   const isAdminPicker = role === "super_admin" || role === "group_admin";
 
@@ -165,10 +180,57 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
 
   function selectDealer(d: DealerOption) {
     setDealerId(d.dealer_id);
+    setDealerUuid(d.id);
     setDealerName(d.name);
     setDealerResults([]);
     setDealerQuery("");
   }
+
+  // BG card helpers
+  function setBgCard(key: BgKey, patch: Partial<BgCardState>) {
+    setBgCards(prev => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  }
+
+  async function loadBgCard(key: BgKey, uuid: string) {
+    setBgCard(key, { loading: true, error: null });
+    try {
+      const res = await fetch(`/api/dealers/${uuid}/buyers-guide-pdfs/${key}`);
+      const j = await res.json() as { hasCustom: boolean; url: string | null };
+      setBgCard(key, { loading: false, hasCustom: j.hasCustom, url: j.url });
+    } catch {
+      setBgCard(key, { loading: false, error: "Failed to load" });
+    }
+  }
+
+  async function uploadBgCard(key: BgKey, file: File, uuid: string) {
+    setBgCard(key, { uploading: true, error: null });
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/dealers/${uuid}/buyers-guide-pdfs/${key}`, { method: "PUT", body: fd });
+      const j = await res.json() as { ok?: boolean; url?: string; error?: string };
+      if (!res.ok) throw new Error(j.error ?? "Upload failed");
+      setBgCard(key, { uploading: false, hasCustom: true, url: j.url ?? null });
+    } catch (e) {
+      setBgCard(key, { uploading: false, error: e instanceof Error ? e.message : "Upload failed" });
+    }
+  }
+
+  async function removeBgCard(key: BgKey, uuid: string) {
+    setBgCard(key, { error: null });
+    try {
+      await fetch(`/api/dealers/${uuid}/buyers-guide-pdfs/${key}`, { method: "DELETE" });
+      setBgCard(key, { hasCustom: false, url: null });
+    } catch {
+      setBgCard(key, { error: "Remove failed" });
+    }
+  }
+
+  useEffect(() => {
+    if (!dealerUuid) return;
+    BG_KEYS.forEach(k => void loadBgCard(k, dealerUuid));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dealerUuid]);
 
   function setBgDefaults<K extends keyof BuyersGuideDefaults>(key: K, val: BuyersGuideDefaults[K]) {
     setSettings(s => ({
@@ -340,6 +402,75 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
             <label className="label">Dealer Email (optional)</label>
             <input className="input w-full" type="email" value={settings.buyers_guide_defaults?.dealer_email ?? ""} onChange={e => setBgDefaults("dealer_email", e.target.value)} placeholder="sales@dealer.com" />
           </div>
+
+          {dealerUuid && (
+            <>
+              <hr style={{ margin: "16px 0 14px", border: "none", borderTop: "1px solid var(--border)" }} />
+              <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+                Custom PDF Backgrounds
+              </p>
+              <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
+                Upload state-specific versions. Data fields and checkboxes stay in fixed positions.
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {BG_KEYS.map(key => {
+                  const c = bgCards[key];
+                  return (
+                    <div key={key} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "12px 14px" }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.4 }}>
+                            {BG_LABELS[key]}
+                          </div>
+                          <div style={{ marginTop: 4 }}>
+                            {c.loading ? (
+                              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading…</span>
+                            ) : c.hasCustom ? (
+                              <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 20, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" }}>
+                                Dealer Custom
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 20, background: "var(--bg-subtle)", color: "var(--text-muted)", border: "1px solid var(--border)" }}>
+                                System Default
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {c.url && (
+                          <a href={c.url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "var(--blue)", textDecoration: "none", flexShrink: 0, marginLeft: 4 }}>
+                            Preview ↗
+                          </a>
+                        )}
+                      </div>
+                      {c.error && <div style={{ fontSize: 11, color: "var(--error)", marginBottom: 6 }}>{c.error}</div>}
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          ref={el => { if (el) bgFileRefs.current[key] = el; }}
+                          type="file" accept="application/pdf" style={{ display: "none" }}
+                          onChange={e => { const f = e.target.files?.[0]; if (f) void uploadBgCard(key, f, dealerUuid); e.target.value = ""; }}
+                        />
+                        <button
+                          onClick={() => bgFileRefs.current[key]?.click()}
+                          disabled={c.uploading || c.loading}
+                          style={{ height: 28, padding: "0 10px", background: "var(--blue)", color: "#fff", border: "none", borderRadius: 4, fontSize: 11, fontWeight: 500, cursor: "pointer", opacity: c.uploading ? 0.6 : 1 }}
+                        >
+                          {c.uploading ? "Uploading…" : c.hasCustom ? "Replace" : "Upload"}
+                        </button>
+                        {c.hasCustom && (
+                          <button
+                            onClick={() => void removeBgCard(key, dealerUuid)}
+                            style={{ height: 28, padding: "0 8px", background: "#fff", color: "var(--error)", border: "1px solid var(--error)", borderRadius: 4, fontSize: 11, cursor: "pointer" }}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       )}
 
