@@ -47,8 +47,8 @@ const P0 = {
   dlrW:    { cx: 92, cy: 535, sz: 11 } as CB,  // large dealer warranty checkbox
   full:    { cx: 99, cy: 510, sz:  4 } as CB,  // small sub-checkbox
   lim:     { cx: 99, cy: 492, sz:  4 } as CB,
-  laborX:  293, laborY:  493,                   // inline percent overlay (over blank underline)
-  partsX:  383, partsY:  493,
+  laborX:  280, laborY:  489,                   // inline percent overlay (over blank underline)
+  partsX:  370, partsY:  489,
   sysX:     68, sysY:    419,                   // systems covered / duration lines
   durX:    315, durY:    419,
   mfrNew:  { cx: 85, cy: 325, sz: 4 } as CB,   // non-dealer boxes x=80.4-89.3, cy confirmed
@@ -64,8 +64,8 @@ const P1 = {
   dlrW:    { cx: 92, cy: 513, sz: 11 } as CB,  // 535-22
   full:    { cx: 99, cy: 488, sz:  4 } as CB,  // 510-22
   lim:     { cx: 99, cy: 470, sz:  4 } as CB,  // 492-22
-  laborX:  293, laborY:  471,
-  partsX:  383, partsY:  471,
+  laborX:  280, laborY:  467,
+  partsX:  370, partsY:  467,
   sysX:     68, sysY:    397,
   durX:    315, durY:    397,
   mfrNew:  { cx: 85, cy: 303, sz: 4 } as CB,   // 325-22
