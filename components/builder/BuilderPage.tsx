@@ -704,7 +704,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (isAll || saveVtypes.has('used')) settingsPatch[`default_${dtKey}_used`] = savedId;
         if (isAll || saveVtypes.has('cpo'))  settingsPatch[`default_${dtKey}_cpo`]  = savedId;
         if (Object.keys(settingsPatch).length > 0) {
-          await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settingsPatch) });
+          const settingsRes = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settingsPatch) });
+          if (!settingsRes.ok) {
+            showToast('Template saved, but could not set as default. Please assign it manually in Settings.');
+            return;
+          }
           const label = isAll ? 'All' : vtypes.map(v => v.charAt(0).toUpperCase() + v.slice(1)).join('/');
           showToast(`✓ Template ${wasUpdate ? 'updated' : 'saved'} and set as default for ${label} vehicles`);
           return;

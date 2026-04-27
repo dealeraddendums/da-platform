@@ -431,6 +431,7 @@ export default function SettingsForm({ fixedDealerId, role, groupId, initialSett
                       {label}
                     </label>
                     <select
+                      key={`${key}-${templates.length}`}
                       className="input flex-1"
                       value={(settings[key] as string | null) ?? ""}
                       onChange={(e) => setSettings((s) => ({ ...s, [key]: e.target.value || null }))}
