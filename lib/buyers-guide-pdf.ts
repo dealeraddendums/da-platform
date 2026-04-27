@@ -87,7 +87,8 @@ const ES_P0 = {
   svcCont: { cx: 85, cy: 235, sz: 4 } as CB,
 };
 
-// ── Spanish IMPLIED coords — pending calibration, start from EN_P1 ────────────
+// ── Spanish IMPLIED coords — EN_P1 base with same non-dealer offsets as ES_P0 ─
+// mfrNew -14pt (3/16"), mfrUsed -9pt (1/8"), othUsed -5pt (1/16")
 const ES_P1 = {
   implied: { cx: 92, cy: 586, sz: 11 } as CB,
   dlrW:    { cx: 92, cy: 536, sz: 11 } as CB,
@@ -97,9 +98,9 @@ const ES_P1 = {
   partsX:  370, partsY:  490,
   sysX:     68, sysY:    420,
   durX:    315, durY:    420,
-  mfrNew:  { cx: 85, cy: 326, sz: 4 } as CB,
-  mfrUsed: { cx: 85, cy: 302, sz: 4 } as CB,
-  othUsed: { cx: 85, cy: 286, sz: 4 } as CB,
+  mfrNew:  { cx: 85, cy: 312, sz: 4 } as CB,
+  mfrUsed: { cx: 85, cy: 293, sz: 4 } as CB,
+  othUsed: { cx: 85, cy: 281, sz: 4 } as CB,
   svcCont: { cx: 85, cy: 236, sz: 4 } as CB,
 };
 
