@@ -41,16 +41,16 @@ type CB = { cx: number; cy: number; sz: number };
 const P0 = {
   asIs:    { cx: 79, cy: 630, sz: 9 } as CB,   // large primary checkbox
   dlrW:    { cx: 79, cy: 537, sz: 9 } as CB,   // full-warranty checkbox
-  full:    { cx: 87, cy: 515, sz: 6 } as CB,   // small sub-checkbox
-  lim:     { cx: 87, cy: 495, sz: 6 } as CB,
-  laborX:  175, laborY:  493,                   // inline percent overlay
-  partsX:  310, partsY:  493,
+  full:    { cx: 74, cy: 515, sz: 7 } as CB,   // small sub-checkbox (inside section col x=54-94)
+  lim:     { cx: 74, cy: 495, sz: 7 } as CB,
+  laborX:  293, laborY:  493,                   // inline percent overlay (over blank underline)
+  partsX:  383, partsY:  493,
   sysX:     68, sysY:    419,                   // systems covered / duration lines
   durX:    315, durY:    419,
-  mfrNew:  { cx: 79, cy: 319, sz: 5 } as CB,
-  mfrUsed: { cx: 79, cy: 299, sz: 5 } as CB,
-  othUsed: { cx: 79, cy: 281, sz: 5 } as CB,
-  svcCont: { cx: 79, cy: 237, sz: 5 } as CB,
+  mfrNew:  { cx: 85, cy: 319, sz: 5 } as CB,   // centered in form □ box at x=80-89
+  mfrUsed: { cx: 85, cy: 299, sz: 5 } as CB,
+  othUsed: { cx: 85, cy: 281, sz: 5 } as CB,
+  svcCont: { cx: 85, cy: 237, sz: 5 } as CB,
 };
 
 // Page 1 coords (IMPLIED WARRANTIES ONLY / SOLO GARANTÍAS IMPLÍCITAS)
@@ -58,24 +58,24 @@ const P0 = {
 const P1 = {
   implied: { cx: 79, cy: 630, sz: 9 } as CB,
   dlrW:    { cx: 79, cy: 515, sz: 9 } as CB,
-  full:    { cx: 87, cy: 493, sz: 6 } as CB,
-  lim:     { cx: 87, cy: 473, sz: 6 } as CB,
-  laborX:  175, laborY:  471,
-  partsX:  310, partsY:  471,
+  full:    { cx: 74, cy: 493, sz: 7 } as CB,
+  lim:     { cx: 74, cy: 473, sz: 7 } as CB,
+  laborX:  293, laborY:  471,
+  partsX:  383, partsY:  471,
   sysX:     68, sysY:    397,
   durX:    315, durY:    397,
-  mfrNew:  { cx: 79, cy: 297, sz: 5 } as CB,
-  mfrUsed: { cx: 79, cy: 277, sz: 5 } as CB,
-  othUsed: { cx: 79, cy: 259, sz: 5 } as CB,
-  svcCont: { cx: 79, cy: 215, sz: 5 } as CB,
+  mfrNew:  { cx: 85, cy: 297, sz: 5 } as CB,
+  mfrUsed: { cx: 85, cy: 277, sz: 5 } as CB,
+  othUsed: { cx: 85, cy: 259, sz: 5 } as CB,
+  svcCont: { cx: 85, cy: 215, sz: 5 } as CB,
 };
 
 // Back page (page 2) dealer info fields — same layout for EN and ES
 const BACK = {
-  nameX:  68, nameY:  175,
-  addrX:  68, addrY:  153,
-  phoneX: 68, phoneY: 130,
-  emailX: 310, emailY: 130,
+  nameX:  68, nameY:  197,
+  addrX:  68, addrY:  175,
+  phoneX: 68, phoneY: 152,
+  emailX: 310, emailY: 152,
 };
 
 // ── Drawing helpers ───────────────────────────────────────────────────────────
