@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import puppeteer from "puppeteer";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { DealerSettingsRow, AddendumDataInsert } from "@/lib/db";
+import type { DealerSettingsRow, AddendumDataInsert, BuyersGuideDefaults } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf } from "@/lib/s3-upload";
+import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimer } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
@@ -143,6 +144,57 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           .maybeSingle();
         const textDealerId = dealer?.dealer_id ?? "";
 
+        // ── Buyer Guide: use dedicated PDF builder, bypass widget pipeline ──────
+        if (docType === "buyer_guide") {
+          const { data: bgSettings } = await admin
+            .from("dealer_settings")
+            .select("buyers_guide_defaults")
+            .eq("dealer_id", dv.dealer_id)
+            .maybeSingle<{ buyers_guide_defaults: BuyersGuideDefaults | null }>();
+
+          const warranty: BuyersGuideDefaults = {
+            warranty_type: "as_is",
+            ...(bgSettings?.buyers_guide_defaults ?? {}),
+          };
+
+          const pdfBuffer = await buildBuyersGuidePdf({
+            language: "en",
+            dealerUuid: dealer?.id ?? null,
+            vehicle: {
+              make: dv.make ?? null,
+              model: dv.model ?? null,
+              year: dv.year ? String(dv.year) : null,
+              vin: dv.vin ?? null,
+            },
+            dealer: {
+              name: dealer?.name ?? null,
+              address: dealer?.address ?? null,
+              city: dealer?.city ?? null,
+              state: dealer?.state ?? null,
+              zip: dealer?.zip ?? null,
+              phone: dealer?.phone ?? null,
+              email: warranty.dealer_email ?? null,
+            },
+            warranty,
+          });
+
+          const s3Key = `${dv.dealer_id}/${vehicleId}/buyers_guide_en_${Date.now()}.pdf`;
+          const pdfUrl = await uploadPdf(pdfBuffer, s3Key);
+
+          await admin.from("print_history").insert({
+            vehicle_id: vehicleId,
+            dealer_id: dv.dealer_id,
+            document_type: "buyer_guide",
+            printed_by: claims.sub,
+            pdf_url: pdfUrl,
+          });
+
+          pdfBuffers.push(pdfBuffer);
+          results.push({ vehicleId, pdfUrl });
+          console.log(`[BULK]   buyers_guide done vehicleId=${vehicleId}`);
+          continue;
+        }
+
         // ── Dealer settings (cached per dealer) ─────────────────────────────
         if (!dealerSettingsCache.has(dv.dealer_id)) {
           const { data: settings } = await admin
@@ -169,7 +221,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         if (dealerSettings) {
           const condKey = dv.condition === "New" ? "new" : dv.condition === "Used" ? "used" : "cpo";
-          const docKey = docType === "buyer_guide" ? "buyersguide" : docType;
+          const docKey = docType; // "addendum" | "infosheet" — buyer_guide handled above
           const col = `default_${docKey}_${condKey}`;
           const ds = dealerSettings as Record<string, unknown>;
           const templateId = (ds[col] as string | null)
