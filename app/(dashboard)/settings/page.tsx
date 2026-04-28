@@ -22,9 +22,7 @@ export default async function SettingsPage() {
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user") as UserRole;
 
-  if (role === "dealer_user") redirect("/dashboard");
-
-  const isDealer = role === "dealer_admin";
+  const isDealer = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";
   const dealerId = isDealer ? (profile?.dealer_id ?? null) : null;
 
   let initialSettings: DealerSettingsRow | null = null;

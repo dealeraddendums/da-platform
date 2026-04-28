@@ -61,6 +61,10 @@ const NON_DEALER = [
 type DocTab = "addendum" | "infosheet" | "buyers_guide";
 
 export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, groupId, initialSettings }: Props) {
+  const isReadOnly = role === "dealer_user" || role === "dealer_restricted";
+  const isAdminPicker = role === "super_admin" || role === "group_admin";
+  const canEdit = role === "dealer_admin" || isAdminPicker;
+
   const [dealerId, setDealerId] = useState<string | null>(fixedDealerId);
   const [dealerUuid, setDealerUuid] = useState<string | null>(fixedDealerUuid);
   const [dealerName, setDealerName] = useState<string>("");
@@ -96,7 +100,8 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
       : { ...SETTING_DEFAULTS }
   );
 
-  const [docTab, setDocTab] = useState<DocTab>("addendum");
+  // isReadOnly roles default to buyers_guide tab; they can't switch tabs
+  const [docTab, setDocTab] = useState<DocTab>(isReadOnly ? "buyers_guide" : "addendum");
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
@@ -106,8 +111,6 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
     () => Object.fromEntries(BG_KEYS.map(k => [k, { loading: false, hasCustom: false, url: null, uploading: false, error: null }])) as Record<BgKey, BgCardState>
   );
   const bgFileRefs = useRef<Partial<Record<BgKey, HTMLInputElement>>>({});
-
-  const isAdminPicker = role === "super_admin" || role === "group_admin";
 
   // Fetch dealers for picker
   useEffect(() => {
@@ -175,8 +178,9 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
   }, [role]);
 
   useEffect(() => {
-    if (dealerId) fetchSettingsAndTemplates(dealerId);
-  }, [dealerId, fetchSettingsAndTemplates]);
+    // Read-only roles only need BG cards (loaded separately); skip full settings fetch
+    if (dealerId && !isReadOnly) void fetchSettingsAndTemplates(dealerId);
+  }, [dealerId, isReadOnly, fetchSettingsAndTemplates]);
 
   function selectDealer(d: DealerOption) {
     setDealerId(d.dealer_id);
@@ -319,6 +323,151 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
     );
   }
 
+  // ── Buyer's Guide tab content ──────────────────────────────────────────────
+  function BuyersGuideTabContent() {
+    return (
+      <>
+        {/* Warranty defaults — dealer_admin + admins only */}
+        {canEdit && dealerId && (
+          <>
+            <div className="mb-3">
+              <label className="label">Default Warranty Type</label>
+              <select className="input w-full" value={settings.buyers_guide_defaults?.warranty_type ?? "as_is"} onChange={e => setBgDefaults("warranty_type", e.target.value as BuyersGuideDefaults["warranty_type"])}>
+                {Object.entries(WARRANTY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+            {settings.buyers_guide_defaults?.warranty_type === "limited" && (
+              <>
+                <div className="flex gap-3 mb-3">
+                  <div className="flex-1">
+                    <label className="label">Labor %</label>
+                    <input className="input w-full" type="number" min={0} max={100} value={settings.buyers_guide_defaults?.labor_pct ?? ""} onChange={e => setBgDefaults("labor_pct", Number(e.target.value))} placeholder="50" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="label">Parts %</label>
+                    <input className="input w-full" type="number" min={0} max={100} value={settings.buyers_guide_defaults?.parts_pct ?? ""} onChange={e => setBgDefaults("parts_pct", Number(e.target.value))} placeholder="50" />
+                  </div>
+                </div>
+                <div className="mb-3">
+                  <label className="label">Systems Covered</label>
+                  <textarea className="input w-full" rows={2} style={{ height: "auto", resize: "vertical" }} value={settings.buyers_guide_defaults?.systems_covered ?? ""} onChange={e => setBgDefaults("systems_covered", e.target.value)} placeholder="Powertrain, Engine, Transmission" />
+                </div>
+                <div className="mb-3">
+                  <label className="label">Duration</label>
+                  <input className="input w-full" value={settings.buyers_guide_defaults?.duration ?? ""} onChange={e => setBgDefaults("duration", e.target.value)} placeholder="30 days or 1,000 miles" />
+                </div>
+              </>
+            )}
+            <div className="mb-3">
+              <label className="label mb-2" style={{ display: "block" }}>Non-Dealer Warranties</label>
+              {NON_DEALER.map(({ key, label }) => (
+                <label key={key} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6, cursor: "pointer" }}>
+                  <input type="checkbox" checked={settings.buyers_guide_defaults?.non_dealer_warranties?.includes(key) ?? false} onChange={() => toggleNdw(key)} style={{ marginTop: 2, flexShrink: 0 }} />
+                  <span className="text-xs" style={{ color: "var(--text-secondary)", lineHeight: 1.4 }}>{label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="mb-3">
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={settings.buyers_guide_defaults?.service_contract ?? false} onChange={e => setBgDefaults("service_contract", e.target.checked)} />
+                <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Service contract available</span>
+              </label>
+            </div>
+            <div className="mb-4">
+              <label className="label">Dealer Email (optional)</label>
+              <input className="input w-full" type="email" value={settings.buyers_guide_defaults?.dealer_email ?? ""} onChange={e => setBgDefaults("dealer_email", e.target.value)} placeholder="sales@dealer.com" />
+            </div>
+            <hr style={{ margin: "0 0 14px", border: "none", borderTop: "1px solid var(--border)" }} />
+          </>
+        )}
+
+        {/* Custom PDF Backgrounds — visible to all roles that have a dealerUuid */}
+        {dealerUuid ? (
+          <>
+            <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+              Custom PDF Backgrounds
+            </p>
+            <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
+              {canEdit
+                ? "Upload state-specific versions. Data fields and checkboxes stay in fixed positions."
+                : "Download the PDF background currently in use for each form type."}
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {BG_KEYS.map(key => {
+                const c = bgCards[key];
+                return (
+                  <div key={key} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "12px 14px" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.4 }}>
+                          {BG_LABELS[key]}
+                        </div>
+                        <div style={{ marginTop: 4 }}>
+                          {c.loading ? (
+                            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading…</span>
+                          ) : c.hasCustom ? (
+                            <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 20, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" }}>
+                              Dealer Custom
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 20, background: "var(--bg-subtle)", color: "var(--text-muted)", border: "1px solid var(--border)" }}>
+                              System Default
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {c.error && <div style={{ fontSize: 11, color: "var(--error)", marginBottom: 6 }}>{c.error}</div>}
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {canEdit && (
+                        <>
+                          <input
+                            ref={el => { if (el) bgFileRefs.current[key] = el; }}
+                            type="file" accept="application/pdf" style={{ display: "none" }}
+                            onChange={e => { const f = e.target.files?.[0]; if (f) void uploadBgCard(key, f, dealerUuid); e.target.value = ""; }}
+                          />
+                          <button
+                            onClick={() => bgFileRefs.current[key]?.click()}
+                            disabled={c.uploading || c.loading}
+                            style={{ height: 28, padding: "0 10px", background: "var(--blue)", color: "#fff", border: "none", borderRadius: 4, fontSize: 11, fontWeight: 500, cursor: "pointer", opacity: c.uploading ? 0.6 : 1 }}
+                          >
+                            {c.uploading ? "Uploading…" : c.hasCustom ? "Replace" : "Upload"}
+                          </button>
+                          {c.hasCustom && (
+                            <button
+                              onClick={() => void removeBgCard(key, dealerUuid)}
+                              style={{ height: 28, padding: "0 8px", background: "#fff", color: "var(--error)", border: "1px solid var(--error)", borderRadius: 4, fontSize: 11, cursor: "pointer" }}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </>
+                      )}
+                      {c.url && (
+                        <button
+                          onClick={() => window.open(c.url!, "_blank")}
+                          style={{ height: 28, padding: "0 10px", background: "#fff", color: "var(--blue)", border: "1px solid var(--blue)", borderRadius: 4, fontSize: 11, cursor: "pointer" }}
+                        >
+                          Download
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          !canEdit && (
+            <p className="text-sm" style={{ color: "var(--text-muted)", fontStyle: "italic" }}>
+              No dealer selected.
+            </p>
+          )
+        )}
+      </>
+    );
+  }
+
   // ── Settings form ──────────────────────────────────────────────────────────
   return (
     <div style={{ maxWidth: 640 }}>
@@ -337,220 +486,101 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
         </div>
       )}
 
-      {/* Dealer Logo */}
-      {(role === "dealer_admin" || isAdminPicker) && dealerId && (
-        <div className="card p-5 mb-4">
-          <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
-            Dealer Logo
-          </p>
-          <DealerLogoUploader
-            dealerId={dealerId}
-            currentLogoUrl={logoUrl}
-            onUpdated={(url) => setLogoUrl(url)}
-          />
-        </div>
+      {/* Sections only visible to dealer_admin + admins */}
+      {!isReadOnly && (
+        <>
+          {/* Dealer Logo */}
+          {(role === "dealer_admin" || isAdminPicker) && dealerId && (
+            <div className="card p-5 mb-4">
+              <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+                Dealer Logo
+              </p>
+              <DealerLogoUploader
+                dealerId={dealerId}
+                currentLogoUrl={logoUrl}
+                onUpdated={(url) => setLogoUrl(url)}
+              />
+            </div>
+          )}
+
+          {/* AI Content */}
+          <div className="card p-5 mb-4">
+            <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+              AI Content
+            </p>
+            <div className="flex items-center gap-4">
+              <button
+                className="px-4 py-2 text-sm font-medium rounded"
+                style={{
+                  background: !settings.ai_content_default ? "var(--blue)" : "var(--bg-subtle)",
+                  color: !settings.ai_content_default ? "#fff" : "var(--text-secondary)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+                onClick={() => setSettings((s) => ({ ...s, ai_content_default: false }))}
+              >
+                DB (Database)
+              </button>
+              <button
+                className="px-4 py-2 text-sm font-medium"
+                style={{
+                  background: settings.ai_content_default ? "var(--blue)" : "var(--bg-subtle)",
+                  color: settings.ai_content_default ? "#fff" : "var(--text-secondary)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+                onClick={() => setSettings((s) => ({ ...s, ai_content_default: true }))}
+              >
+                AI (Claude)
+              </button>
+            </div>
+            <p className="text-xs mt-3" style={{ color: "var(--text-muted)" }}>
+              {settings.ai_content_default
+                ? "Vehicle descriptions and features will be AI-generated by Claude by default."
+                : "Vehicle descriptions and features will use database content by default."}
+            </p>
+          </div>
+        </>
       )}
 
-      {/* Buyer's Guide Defaults */}
-      {(role === "dealer_admin" || isAdminPicker) && dealerId && (
-        <div className="card p-5 mb-4">
-          <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>Buyer's Guide Defaults</p>
-          <div className="mb-3">
-            <label className="label">Default Warranty Type</label>
-            <select className="input w-full" value={settings.buyers_guide_defaults?.warranty_type ?? "as_is"} onChange={e => setBgDefaults("warranty_type", e.target.value as BuyersGuideDefaults["warranty_type"])}>
-              {Object.entries(WARRANTY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
-          {settings.buyers_guide_defaults?.warranty_type === "limited" && (
-            <>
-              <div className="flex gap-3 mb-3">
-                <div className="flex-1">
-                  <label className="label">Labor %</label>
-                  <input className="input w-full" type="number" min={0} max={100} value={settings.buyers_guide_defaults?.labor_pct ?? ""} onChange={e => setBgDefaults("labor_pct", Number(e.target.value))} placeholder="50" />
-                </div>
-                <div className="flex-1">
-                  <label className="label">Parts %</label>
-                  <input className="input w-full" type="number" min={0} max={100} value={settings.buyers_guide_defaults?.parts_pct ?? ""} onChange={e => setBgDefaults("parts_pct", Number(e.target.value))} placeholder="50" />
-                </div>
-              </div>
-              <div className="mb-3">
-                <label className="label">Systems Covered</label>
-                <textarea className="input w-full" rows={2} style={{ height: "auto", resize: "vertical" }} value={settings.buyers_guide_defaults?.systems_covered ?? ""} onChange={e => setBgDefaults("systems_covered", e.target.value)} placeholder="Powertrain, Engine, Transmission" />
-              </div>
-              <div className="mb-3">
-                <label className="label">Duration</label>
-                <input className="input w-full" value={settings.buyers_guide_defaults?.duration ?? ""} onChange={e => setBgDefaults("duration", e.target.value)} placeholder="30 days or 1,000 miles" />
-              </div>
-            </>
-          )}
-          <div className="mb-3">
-            <label className="label mb-2" style={{ display: "block" }}>Non-Dealer Warranties</label>
-            {NON_DEALER.map(({ key, label }) => (
-              <label key={key} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6, cursor: "pointer" }}>
-                <input type="checkbox" checked={settings.buyers_guide_defaults?.non_dealer_warranties?.includes(key) ?? false} onChange={() => toggleNdw(key)} style={{ marginTop: 2, flexShrink: 0 }} />
-                <span className="text-xs" style={{ color: "var(--text-secondary)", lineHeight: 1.4 }}>{label}</span>
-              </label>
-            ))}
-          </div>
-          <div className="mb-3">
-            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-              <input type="checkbox" checked={settings.buyers_guide_defaults?.service_contract ?? false} onChange={e => setBgDefaults("service_contract", e.target.checked)} />
-              <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Service contract available</span>
-            </label>
-          </div>
-          <div>
-            <label className="label">Dealer Email (optional)</label>
-            <input className="input w-full" type="email" value={settings.buyers_guide_defaults?.dealer_email ?? ""} onChange={e => setBgDefaults("dealer_email", e.target.value)} placeholder="sales@dealer.com" />
-          </div>
-
-          {dealerUuid && (
-            <>
-              <hr style={{ margin: "16px 0 14px", border: "none", borderTop: "1px solid var(--border)" }} />
-              <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
-                Custom PDF Backgrounds
-              </p>
-              <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
-                Upload state-specific versions. Data fields and checkboxes stay in fixed positions.
-              </p>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {BG_KEYS.map(key => {
-                  const c = bgCards[key];
-                  return (
-                    <div key={key} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "12px 14px" }}>
-                      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.4 }}>
-                            {BG_LABELS[key]}
-                          </div>
-                          <div style={{ marginTop: 4 }}>
-                            {c.loading ? (
-                              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading…</span>
-                            ) : c.hasCustom ? (
-                              <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 20, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" }}>
-                                Dealer Custom
-                              </span>
-                            ) : (
-                              <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 20, background: "var(--bg-subtle)", color: "var(--text-muted)", border: "1px solid var(--border)" }}>
-                                System Default
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        {c.url && (
-                          <a href={c.url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "var(--blue)", textDecoration: "none", flexShrink: 0, marginLeft: 4 }}>
-                            Preview ↗
-                          </a>
-                        )}
-                      </div>
-                      {c.error && <div style={{ fontSize: 11, color: "var(--error)", marginBottom: 6 }}>{c.error}</div>}
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <input
-                          ref={el => { if (el) bgFileRefs.current[key] = el; }}
-                          type="file" accept="application/pdf" style={{ display: "none" }}
-                          onChange={e => { const f = e.target.files?.[0]; if (f) void uploadBgCard(key, f, dealerUuid); e.target.value = ""; }}
-                        />
-                        <button
-                          onClick={() => bgFileRefs.current[key]?.click()}
-                          disabled={c.uploading || c.loading}
-                          style={{ height: 28, padding: "0 10px", background: "var(--blue)", color: "#fff", border: "none", borderRadius: 4, fontSize: 11, fontWeight: 500, cursor: "pointer", opacity: c.uploading ? 0.6 : 1 }}
-                        >
-                          {c.uploading ? "Uploading…" : c.hasCustom ? "Replace" : "Upload"}
-                        </button>
-                        {c.hasCustom && (
-                          <button
-                            onClick={() => void removeBgCard(key, dealerUuid)}
-                            style={{ height: 28, padding: "0 8px", background: "#fff", color: "var(--error)", border: "1px solid var(--error)", borderRadius: 4, fontSize: 11, cursor: "pointer" }}
-                          >
-                            Remove
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* AI Content */}
-      <div className="card p-5 mb-4">
-        <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
-          AI Content
-        </p>
-        <div className="flex items-center gap-4">
-          <button
-            className="px-4 py-2 text-sm font-medium rounded"
-            style={{
-              background: !settings.ai_content_default ? "var(--blue)" : "var(--bg-subtle)",
-              color: !settings.ai_content_default ? "#fff" : "var(--text-secondary)",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              cursor: "pointer",
-            }}
-            onClick={() => setSettings((s) => ({ ...s, ai_content_default: false }))}
-          >
-            DB (Database)
-          </button>
-          <button
-            className="px-4 py-2 text-sm font-medium"
-            style={{
-              background: settings.ai_content_default ? "var(--blue)" : "var(--bg-subtle)",
-              color: settings.ai_content_default ? "#fff" : "var(--text-secondary)",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              cursor: "pointer",
-            }}
-            onClick={() => setSettings((s) => ({ ...s, ai_content_default: true }))}
-          >
-            AI (Claude)
-          </button>
-        </div>
-        <p className="text-xs mt-3" style={{ color: "var(--text-muted)" }}>
-          {settings.ai_content_default
-            ? "Vehicle descriptions and features will be AI-generated by Claude by default."
-            : "Vehicle descriptions and features will use database content by default."}
-        </p>
-      </div>
-
-      {/* Default Templates */}
+      {/* Default Templates — visible to all roles */}
       <div className="card mb-4" style={{ overflow: "hidden" }}>
         <div className="p-5 pb-0">
           <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
-            Default Templates
+            {isReadOnly ? "Buyer's Guide" : "Default Templates"}
           </p>
-          {/* Tabs */}
-          <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 20, gap: 0 }}>
-            {([ ["addendum", "Addendum"], ["infosheet", "Infosheet"], ["buyers_guide", "Buyer's Guide"] ] as [DocTab, string][]).map(([tab, label]) => (
-              <button
-                key={tab}
-                onClick={() => setDocTab(tab)}
-                style={{
-                  padding: "8px 18px",
-                  fontSize: 13,
-                  fontWeight: docTab === tab ? 600 : 400,
-                  color: docTab === tab ? "var(--blue)" : "var(--text-secondary)",
-                  background: "none",
-                  border: "none",
-                  borderBottom: docTab === tab ? "2px solid var(--blue)" : "2px solid transparent",
-                  marginBottom: -1,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          {/* Tabs — only for dealer_admin + admins */}
+          {!isReadOnly && (
+            <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 20, gap: 0 }}>
+              {([ ["addendum", "Addendum"], ["infosheet", "Infosheet"], ["buyers_guide", "Buyer's Guide"] ] as [DocTab, string][]).map(([tab, label]) => (
+                <button
+                  key={tab}
+                  onClick={() => setDocTab(tab)}
+                  style={{
+                    padding: "8px 18px",
+                    fontSize: 13,
+                    fontWeight: docTab === tab ? 600 : 400,
+                    color: docTab === tab ? "var(--blue)" : "var(--text-secondary)",
+                    background: "none",
+                    border: "none",
+                    borderBottom: docTab === tab ? "2px solid var(--blue)" : "2px solid transparent",
+                    marginBottom: -1,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="px-5 pb-5">
-          {docTab === "buyers_guide" ? (
-            <p className="text-sm" style={{ color: "var(--text-muted)", fontStyle: "italic" }}>
-              Buyer&apos;s Guide templates are coming soon. Create them in the Builder once support is added.
-            </p>
-          ) : (
+          {/* Addendum / Infosheet tab content */}
+          {!isReadOnly && docTab !== "buyers_guide" && (
             <>
               {(["new", "used", "cpo"] as const).map((vtype) => {
                 const key = `default_${docTab === "addendum" ? "addendum" : "infosheet"}_${vtype}` as keyof typeof settings;
@@ -582,61 +612,68 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
               )}
             </>
           )}
+
+          {/* Buyer's Guide tab content (also shown to isReadOnly roles) */}
+          {(isReadOnly || docTab === "buyers_guide") && <BuyersGuideTabContent />}
         </div>
       </div>
 
-      {/* Printer Nudge Margins */}
-      <div className="card p-5 mb-6">
-        <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
-          Printer Nudge Margins
-        </p>
-        <p className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
-          Fine-tune print alignment per printer (pixels). Set once, applies to all prints.
-        </p>
-        <div className="grid grid-cols-2 gap-4">
-          {(["left", "right", "top", "bottom"] as const).map((side) => {
-            const key = `nudge_${side}` as keyof typeof settings;
-            return (
-              <div key={side}>
-                <label className="block text-xs mb-1 capitalize" style={{ color: "var(--text-secondary)" }}>
-                  {side} (px)
-                </label>
-                <input
-                  type="number"
-                  className="input w-full"
-                  value={(settings[key] as number) ?? 0}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, [key]: parseInt(e.target.value, 10) || 0 }))
-                  }
-                />
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* Sections only visible to dealer_admin + admins */}
+      {!isReadOnly && (
+        <>
+          {/* Printer Nudge Margins */}
+          <div className="card p-5 mb-6">
+            <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+              Printer Nudge Margins
+            </p>
+            <p className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
+              Fine-tune print alignment per printer (pixels). Set once, applies to all prints.
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              {(["left", "right", "top", "bottom"] as const).map((side) => {
+                const key = `nudge_${side}` as keyof typeof settings;
+                return (
+                  <div key={side}>
+                    <label className="block text-xs mb-1 capitalize" style={{ color: "var(--text-secondary)" }}>
+                      {side} (px)
+                    </label>
+                    <input
+                      type="number"
+                      className="input w-full"
+                      value={(settings[key] as number) ?? 0}
+                      onChange={(e) =>
+                        setSettings((s) => ({ ...s, [key]: parseInt(e.target.value, 10) || 0 }))
+                      }
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
-      {/* Print History */}
-      {(role === "dealer_admin" || isAdminPicker) && dealerId && (
-        <PrintHistorySection dealerId={dealerId} />
+          {/* Print History */}
+          {(role === "dealer_admin" || isAdminPicker) && dealerId && (
+            <PrintHistorySection dealerId={dealerId} />
+          )}
+
+          {/* Save */}
+          <div className="flex items-center gap-3">
+            <button
+              className="btn btn-primary"
+              onClick={handleSave}
+              disabled={saving || !dealerId}
+            >
+              {saving ? "Saving…" : "Save Settings"}
+            </button>
+            {saveStatus === "saved" && (
+              <span className="text-sm" style={{ color: "var(--success)" }}>Saved</span>
+            )}
+            {saveStatus === "error" && (
+              <span className="text-sm" style={{ color: "var(--error)" }}>{error}</span>
+            )}
+          </div>
+        </>
       )}
-
-      {/* Save */}
-      <div className="flex items-center gap-3">
-        <button
-          className="btn btn-primary"
-          onClick={handleSave}
-          disabled={saving || !dealerId}
-        >
-          {saving ? "Saving…" : "Save Settings"}
-        </button>
-        {saveStatus === "saved" && (
-          <span className="text-sm" style={{ color: "var(--success)" }}>Saved</span>
-        )}
-        {saveStatus === "error" && (
-          <span className="text-sm" style={{ color: "var(--error)" }}>{error}</span>
-        )}
-      </div>
-
     </div>
   );
 }
