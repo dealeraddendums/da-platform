@@ -44,6 +44,7 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
 
   useEffect(() => {
     if (!pdfUrl) return;
+    if (pdfUrl.startsWith("blob:")) { setBlobUrl(pdfUrl); return; }
     let objectUrl: string;
     fetch(pdfUrl)
       .then(r => r.blob())
@@ -88,9 +89,12 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
         return;
       }
 
-      const json = await res.json() as { url?: string; error?: string };
-      if (!res.ok) throw new Error(json.error ?? "Generation failed");
-      setPdfUrl(json.url!);
+      if (!res.ok) {
+        const json = await res.json() as { error?: string };
+        throw new Error(json.error ?? "Generation failed");
+      }
+      const blob = await res.blob();
+      setPdfUrl(URL.createObjectURL(blob));
     } catch (e) {
       setGenError(e instanceof Error ? e.message : "Generation failed");
     } finally {
@@ -223,7 +227,7 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
             </button>
             {pdfUrl && blobUrl && (
               <>
-                <a href={pdfUrl} download={filename} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, color: "var(--text-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
+                <a href={blobUrl} download={filename} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, color: "var(--text-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
                   Download PDF
                 </a>
                 <button onClick={() => { const w = window.open(blobUrl!, '_blank'); if (w) { let redirected = false; const doRedirect = () => { if (redirected) return; redirected = true; try { w.close(); } catch { /* ignore */ } onClose(); window.location.href = '/dashboard'; }; setTimeout(() => { w.print(); w.addEventListener('afterprint', doRedirect); setTimeout(doRedirect, 5000); }, 500); } }}

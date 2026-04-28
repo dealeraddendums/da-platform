@@ -632,18 +632,20 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           docType,
         }),
       });
-      const json = await res.json() as { url?: string; error?: string };
-      if (!res.ok || !json.url) {
+      if (!res.ok) {
+        const json = await res.json() as { error?: string };
         showToast(json.error ?? 'PDF generation failed');
         return;
       }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = json.url;
+      a.href = blobUrl;
       a.download = `${vehicle.year ?? ''}_${vehicle.make ?? ''}_${vehicle.model ?? ''}_${vehicle.stock_number || vehicle.id}.pdf`.replace(/\s+/g, '_');
-      a.target = '_blank';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
       showToast('PDF downloaded');
     } catch {
       showToast('PDF generation failed');

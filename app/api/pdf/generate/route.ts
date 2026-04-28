@@ -5,6 +5,91 @@ import type { VehicleAuditLogInsert, AddendumHistoryInsert, AddendumDataInsert, 
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf } from "@/lib/s3-upload";
+
+type BgOption = { option_name: string; option_price?: string; description?: string | null };
+
+async function logGeneratePdf(
+  pdfBuffer: Buffer,
+  s3Key: string,
+  dealerVehicleId: string,
+  dv: { dealer_id: string; vin: string | null; stock_number: string | null },
+  dealer: { id: string; dealer_id: string } | null,
+  claims: { sub: string },
+  docType: "addendum" | "infosheet" | "buyer_guide",
+  options: BgOption[],
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+): Promise<void> {
+  let pdfUrl = "";
+  let uploadedKey: string | null = null;
+  try {
+    pdfUrl = await uploadPdf(pdfBuffer, s3Key);
+    uploadedKey = s3Key;
+  } catch (err) {
+    console.error("[pdf/generate] S3 upload failed:", err instanceof Error ? err.message : err);
+  }
+
+  const { error: phErr } = await admin.from("print_history").insert({
+    vehicle_id: dealerVehicleId,
+    dealer_id: dv.dealer_id,
+    document_type: docType,
+    printed_by: claims.sub,
+    pdf_url: pdfUrl || null,
+  });
+  if (phErr) console.error("[pdf/generate] print_history insert failed:", phErr.message, phErr.code);
+
+  await admin.from("vehicle_audit_log").insert({
+    dealer_id: dv.dealer_id,
+    vehicle_id: dealerVehicleId,
+    stock_number: dv.stock_number,
+    action: "print",
+    method: "print",
+    changed_by: claims.sub,
+    document_type: docType,
+  } as VehicleAuditLogInsert);
+
+  if (dealer?.id && options.length > 0) {
+    const printedAt = new Date().toISOString();
+    const adRows: AddendumDataInsert[] = options.map((o, i) => ({
+      dealer_id: dealer.id,
+      legacy_dealer_id: dv.dealer_id,
+      vehicle_id: dealerVehicleId,
+      vin_number: dv.vin,
+      item_name: o.option_name,
+      item_description: o.description ?? null,
+      item_price: o.option_price ?? null,
+      active: "1",
+      or_or_ad: 1,
+      order_by: i,
+      separator_spaces: 2,
+      editable: 1,
+      printed_at: printedAt,
+      document_type: docType,
+      s3_key: uploadedKey,
+    }));
+    const { error: adErr } = await admin.from("addendum_data").insert(adRows);
+    if (adErr) console.error("[pdf/generate] addendum_data insert failed:", adErr.message);
+  }
+
+  const today = new Date().toISOString().split("T")[0];
+  const historyRows: AddendumHistoryInsert[] = options.map((o, i) => ({
+    legacy_id: null,
+    vehicle_id: null,
+    vin: dv.vin,
+    dealer_id: dv.dealer_id,
+    item_name: o.option_name,
+    item_description: null,
+    item_price: o.option_price ?? null,
+    active: "Yes",
+    creation_date: today,
+    order_by: i,
+    source: "platform",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }));
+  if (historyRows.length > 0) {
+    await admin.from("addendum_history").insert(historyRows);
+  }
+}
 import {
   BG_DEFAULT,
   IS_BG_DEFAULT,
@@ -449,86 +534,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: err instanceof Error ? err.message : "PDF render failed" }, { status: 500 });
     }
 
-    const timestamp = Date.now();
-    const s3Key = `${dealer?.internal_id ?? dv.dealer_id}/${dealerVehicleId}/${docType}_${timestamp}.pdf`;
+    const s3Key = `${dealer?.internal_id ?? dv.dealer_id}/${dealerVehicleId}/${docType}_${Date.now()}.pdf`;
 
-    let pdfUrl: string;
-    try {
-      pdfUrl = await uploadPdf(pdfBuffer, s3Key);
-    } catch (err) {
-      console.error("[pdf/generate] S3 upload failed (non-blocking):", err instanceof Error ? err.message : err);
-      pdfUrl = `data:application/pdf;base64,${pdfBuffer.toString("base64")}`;
-    }
+    // S3 upload + all DB logging happen in the background — PDF bytes returned immediately
+    void logGeneratePdf(pdfBuffer, s3Key, dealerVehicleId, dv, dealer, claims, docType, options, admin)
+      .catch(err => console.error("[pdf/generate] background logging error:", err instanceof Error ? err.message : err));
 
-    // ── Print history — source of truth for dashboard stats ──────────────────
-    // vehicle_id is stored as the dealer_vehicles UUID string (text column after migration 030)
-    // dealer_id matches dealers.dealer_id and profiles.dealer_id
-    const { error: phErr } = await admin.from("print_history").insert({
-      vehicle_id: dealerVehicleId,
-      dealer_id:  dv.dealer_id,
-      document_type: docType,
-      printed_by: claims.sub,
-      pdf_url:    pdfUrl,
+    return new NextResponse(pdfBuffer as unknown as BodyInit, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Length": String(pdfBuffer.length),
+      },
     });
-    if (phErr) console.error("[pdf/generate] print_history insert failed:", phErr.message, phErr.code, "dealer_id:", dv.dealer_id, "vehicle_id:", dealerVehicleId);
-
-    // ── Audit log ─────────────────────────────────────────────────────────────
-    await admin.from("vehicle_audit_log").insert({
-      dealer_id: dv.dealer_id,
-      vehicle_id: dealerVehicleId,
-      stock_number: dv.stock_number,
-      action: "print",
-      method: "print",
-      changed_by: claims.sub,
-      document_type: docType,
-    } as VehicleAuditLogInsert);
-
-    // ── Write addendum_data — one row per option, permanent compliance record ──
-    if (dealer?.id && options.length > 0) {
-      const printedAt = new Date().toISOString();
-      const adRows: AddendumDataInsert[] = options.map((o, i) => ({
-        dealer_id: dealer.id,
-        legacy_dealer_id: dv.dealer_id,
-        vehicle_id: dealerVehicleId,
-        vin_number: dv.vin ?? null,
-        item_name: o.option_name,
-        item_description: (o as { description?: string | null }).description ?? null,
-        item_price: (o as { option_price?: string }).option_price ?? null,
-        active: "1",
-        or_or_ad: 1,
-        order_by: i,
-        separator_spaces: 2,
-        editable: 1,
-        printed_at: printedAt,
-        document_type: docType,
-        s3_key: pdfUrl.startsWith("data:") ? null : s3Key,
-      }));
-      const { error: adErr } = await admin.from("addendum_data").insert(adRows);
-      if (adErr) console.error("[pdf/generate] addendum_data insert failed:", adErr.message, adErr.code);
-    }
-
-    // ── Write per-option history rows ─────────────────────────────────────────
-    const today = new Date().toISOString().split("T")[0];
-    const historyRows: AddendumHistoryInsert[] = options.map((o, i) => ({
-      legacy_id:    null,
-      vehicle_id:   null,
-      vin:          dv.vin ?? null,
-      dealer_id:    dv.dealer_id,
-      item_name:    "option_name" in o ? o.option_name : (o as { option_name: string }).option_name,
-      item_description: null,
-      item_price:   "option_price" in o ? (o as { option_price: string }).option_price : null,
-      active:       "Yes",
-      creation_date: today,
-      order_by:     i,
-      source:       "platform",
-      created_at:   new Date().toISOString(),
-      updated_at:   new Date().toISOString(),
-    }));
-    if (historyRows.length > 0) {
-      await admin.from("addendum_history").insert(historyRows);
-    }
-
-    return NextResponse.json({ url: pdfUrl });
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : "PDF generation failed";

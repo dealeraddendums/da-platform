@@ -86,44 +86,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const dealerUuid = dealer?.id ?? null;
 
-  async function generateOneLang(lang: 'en' | 'es'): Promise<{ url: string; buffer: Buffer }> {
-    const buffer = await buildBuyersGuidePdf({
-      language: lang,
-      dealerUuid,
-      vehicle: vehicleData,
-      dealer: dealerData,
-      warranty,
-    });
-    const key = `${dealer?.internal_id ?? dvDealerId}/${vehicleId}/buyers_guide_${lang}_${Date.now()}.pdf`;
-    let url: string;
-    try {
-      url = await uploadPdf(buffer, key);
-    } catch (err) {
-      console.error("[buyers-guide] S3 upload failed (non-blocking):", err instanceof Error ? err.message : err);
-      url = `data:application/pdf;base64,${buffer.toString("base64")}`;
-    }
-    return { url, buffer };
+  function generateOneLang(lang: 'en' | 'es'): Promise<Buffer> {
+    return buildBuyersGuidePdf({ language: lang, dealerUuid, vehicle: vehicleData, dealer: dealerData, warranty });
   }
 
-  async function logPrint(pdfUrl: string) {
+  async function logPrint(buffer: Buffer, s3Key: string): Promise<void> {
+    let pdfUrl = "";
+    try {
+      pdfUrl = await uploadPdf(buffer, s3Key);
+    } catch (err) {
+      console.error("[buyers-guide] S3 upload failed:", err instanceof Error ? err.message : err);
+    }
     await admin.from("print_history").insert({
       vehicle_id: vehicleId,
       dealer_id: dvDealerId,
       document_type: "buyer_guide",
       printed_by: claimsSub,
-      pdf_url: pdfUrl,
+      pdf_url: pdfUrl || null,
     });
   }
 
   // ── Generate ──────────────────────────────────────────────────────────────
   if (both) {
-    const [en, es] = await Promise.all([generateOneLang('en'), generateOneLang('es')]);
-    await logPrint(en.url);
+    const [enBuffer, esBuffer] = await Promise.all([generateOneLang('en'), generateOneLang('es')]);
+    const enKey = `${dealer?.internal_id ?? dvDealerId}/${vehicleId}/buyers_guide_en_${Date.now()}.pdf`;
+    void logPrint(enBuffer, enKey).catch(err =>
+      console.error("[buyers-guide] background logging error:", err instanceof Error ? err.message : err)
+    );
 
     const zip = new JSZip();
     const base = `${dv.make ?? 'vehicle'}_${dv.year ?? ''}_buyers_guide`.replace(/\s+/g, '_');
-    zip.file(`${base}_english.pdf`, en.buffer);
-    zip.file(`${base}_spanish.pdf`, es.buffer);
+    zip.file(`${base}_english.pdf`, enBuffer);
+    zip.file(`${base}_spanish.pdf`, esBuffer);
     const zipBuffer = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 
     return new NextResponse(zipBuffer as BodyInit, {
@@ -136,7 +130,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  const { url } = await generateOneLang(language);
-  await logPrint(url);
-  return NextResponse.json({ url });
+  const buffer = await generateOneLang(language);
+  const s3Key = `${dealer?.internal_id ?? dvDealerId}/${vehicleId}/buyers_guide_${language}_${Date.now()}.pdf`;
+  void logPrint(buffer, s3Key).catch(err =>
+    console.error("[buyers-guide] background logging error:", err instanceof Error ? err.message : err)
+  );
+  return new NextResponse(buffer as unknown as BodyInit, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Length": String(buffer.length),
+    },
+  });
 }

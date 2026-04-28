@@ -17,6 +17,64 @@ import type { Widget, PaperSize } from "@/components/builder/types";
 
 type LibRow = Record<string, unknown>;
 
+interface BulkBgJob {
+  vehicleId: string;
+  pdfBuffer: Buffer;
+  s3Key: string;
+  dvDealerId: string;
+  dvVin: string | null;
+  dealerUuid: string | null;
+  docType: "addendum" | "infosheet" | "buyer_guide";
+  options: { option_name: string; option_price: string; description: string | null }[];
+}
+
+async function uploadAndLogBulkJob(
+  job: BulkBgJob,
+  claimsSub: string,
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+): Promise<void> {
+  let pdfUrl = "";
+  let uploadedKey: string | null = null;
+  try {
+    pdfUrl = await uploadPdf(job.pdfBuffer, job.s3Key);
+    uploadedKey = job.s3Key;
+  } catch (err) {
+    console.error(`[BULK] S3 upload failed vehicleId=${job.vehicleId}:`, err instanceof Error ? err.message : err);
+  }
+
+  const { error: phErr } = await admin.from("print_history").insert({
+    vehicle_id: job.vehicleId,
+    dealer_id: job.dvDealerId,
+    document_type: job.docType,
+    printed_by: claimsSub,
+    pdf_url: pdfUrl || null,
+  });
+  if (phErr) console.error(`[BULK] print_history insert failed vehicleId=${job.vehicleId}:`, phErr.message);
+
+  if (job.dealerUuid && job.options.length > 0) {
+    const printedAt = new Date().toISOString();
+    const adRows: AddendumDataInsert[] = job.options.map((o, i) => ({
+      dealer_id: job.dealerUuid!,
+      legacy_dealer_id: job.dvDealerId,
+      vehicle_id: job.vehicleId,
+      vin_number: job.dvVin,
+      item_name: o.option_name,
+      item_description: o.description,
+      item_price: o.option_price,
+      active: "1",
+      or_or_ad: 1,
+      order_by: i,
+      separator_spaces: 2,
+      editable: 1,
+      printed_at: printedAt,
+      document_type: job.docType,
+      s3_key: uploadedKey,
+    }));
+    const { error: adErr } = await admin.from("addendum_data").insert(adRows);
+    if (adErr) console.error(`[BULK] addendum_data insert failed vehicleId=${job.vehicleId}:`, adErr.message);
+  }
+}
+
 function listMatchesLib(val: string | null, field: string | null, notFlag: boolean): boolean {
   if (!field || field.toUpperCase() === "ALL") return true;
   const v = (val ?? "").toLowerCase().trim();
@@ -103,7 +161,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const knownSizes = new Set(["standard", "narrow", "infosheet"]);
   const admin = createAdminSupabaseClient();
   const pdfBuffers: Buffer[] = [];
-  const results: { vehicleId: string; pdfUrl?: string; error?: string }[] = [];
+  const bgJobs: BulkBgJob[] = [];
   let firstDealerInternalId: string | null = null;
 
   const dealerSettingsCache = new Map<string, DealerSettingsRow | null>();
@@ -128,12 +186,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         console.log(`[BULK] vehicleId=${vehicleId} dvErr=${dvErr?.message ?? "none"} found=${!!dv} stock=${dv?.stock_number} vin=${dv?.vin} dealer_id=${dv?.dealer_id}`);
 
-        if (!dv) { results.push({ vehicleId, error: "not found" }); continue; }
+        if (!dv) { continue; }
 
         if (claims.role === "dealer_admin" || claims.role === "dealer_user") {
-          if (dv.dealer_id !== claims.dealer_id) {
-            results.push({ vehicleId, error: "forbidden" }); continue;
-          }
+          if (dv.dealer_id !== claims.dealer_id) { continue; }
         }
 
         // ── Dealer ──────────────────────────────────────────────────────────
@@ -183,25 +239,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           });
 
           const s3Key = `${dealer?.internal_id ?? dv.dealer_id}/${vehicleId}/buyers_guide_en_${Date.now()}.pdf`;
-          let pdfUrl: string;
-          try {
-            pdfUrl = await uploadPdf(pdfBuffer, s3Key);
-          } catch (err) {
-            console.error(`[BULK] S3 upload failed buyers_guide vehicleId=${vehicleId} (non-blocking):`, err instanceof Error ? err.message : err);
-            pdfUrl = `data:application/pdf;base64,${pdfBuffer.toString("base64")}`;
-          }
-
-          await admin.from("print_history").insert({
-            vehicle_id: vehicleId,
-            dealer_id: dv.dealer_id,
-            document_type: "buyer_guide",
-            printed_by: claims.sub,
-            pdf_url: pdfUrl,
-          });
-
+          bgJobs.push({ vehicleId, pdfBuffer, s3Key, dvDealerId: dv.dealer_id, dvVin: dv.vin ?? null, dealerUuid: dealer?.id ?? null, docType: "buyer_guide", options: [] });
           pdfBuffers.push(pdfBuffer);
-          results.push({ vehicleId, pdfUrl });
-          console.log(`[BULK]   buyers_guide done vehicleId=${vehicleId}`);
+          console.log(`[BULK]   buyers_guide rendered vehicleId=${vehicleId}`);
           continue;
         }
 
@@ -578,74 +618,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const pdfBuffer = await renderPdf(html, effectivePaperSizeStr, { customDims: customPaperDims, browser: sharedBrowser });
         console.log(`[BULK]   pdf_rendered vehicleId=${vehicleId} bytes=${pdfBuffer.length}`);
 
-        const timestamp = Date.now();
-        const s3Key = `${dealer?.internal_id ?? dv.dealer_id}/${vehicleId}/${docType}_${timestamp}.pdf`;
-        let pdfUrl: string;
-        try {
-          pdfUrl = await uploadPdf(pdfBuffer, s3Key);
-        } catch (err) {
-          console.error(`[BULK] S3 upload failed vehicleId=${vehicleId} (non-blocking):`, err instanceof Error ? err.message : err);
-          pdfUrl = `data:application/pdf;base64,${pdfBuffer.toString("base64")}`;
-        }
-
-        // ── Print history ────────────────────────────────────────────────────
-        const { error: phErr } = await admin.from("print_history").insert({
-          vehicle_id: vehicleId, dealer_id: dv.dealer_id,
-          document_type: docType, printed_by: claims.sub, pdf_url: pdfUrl,
-        });
-        if (phErr) console.error(`[BULK]   print_history insert failed vehicleId=${vehicleId}:`, phErr.message);
-
-        // ── addendum_data — one row per option, permanent compliance record ──
-        if (dealer?.id && options.length > 0) {
-          const printedAt = new Date().toISOString();
-          const adRows: AddendumDataInsert[] = options.map((o, i) => ({
-            dealer_id: dealer.id,
-            legacy_dealer_id: dv.dealer_id,
-            vehicle_id: vehicleId,
-            vin_number: dv.vin ?? null,
-            item_name: o.option_name,
-            item_description: o.description ?? null,
-            item_price: o.option_price ?? null,
-            active: "1",
-            or_or_ad: 1,
-            order_by: i,
-            separator_spaces: 2,
-            editable: 1,
-            printed_at: printedAt,
-            document_type: docType,
-            s3_key: pdfUrl.startsWith("data:") ? null : s3Key,
-          }));
-          const { error: adErr } = await admin.from("addendum_data").insert(adRows);
-          if (adErr) console.error(`[BULK]   addendum_data insert failed vehicleId=${vehicleId}:`, adErr.message);
-          else console.log(`[BULK]   addendum_data written vehicleId=${vehicleId} rows=${adRows.length}`);
-        }
-
+        const s3Key = `${dealer?.internal_id ?? dv.dealer_id}/${vehicleId}/${docType}_${Date.now()}.pdf`;
+        bgJobs.push({ vehicleId, pdfBuffer, s3Key, dvDealerId: dv.dealer_id, dvVin: dv.vin ?? null, dealerUuid: dealer?.id ?? null, docType, options });
         pdfBuffers.push(pdfBuffer);
-        results.push({ vehicleId, pdfUrl });
-        console.log(`[BULK]   done vehicleId=${vehicleId}`);
+        console.log(`[BULK]   rendered vehicleId=${vehicleId}`);
 
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "error";
-        console.error(`[BULK]   FAILED vehicleId=${vehicleId}:`, msg);
-        results.push({ vehicleId, error: msg });
+        console.error(`[BULK]   FAILED vehicleId=${vehicleId}:`, err instanceof Error ? err.message : err);
       }
     }
   } finally {
     await sharedBrowser.close();
   }
 
-  const succeeded = results.filter(r => !r.error);
-  console.log(`[BULK] Complete — succeeded=${succeeded.length} failed=${results.length - succeeded.length}`);
+  console.log(`[BULK] Complete — rendered=${pdfBuffers.length} failed=${vehicleIds.length - pdfBuffers.length}`);
 
-  if (!succeeded.length) {
-    return NextResponse.json({ error: "All vehicles failed", results }, { status: 500 });
+  if (!pdfBuffers.length) {
+    return NextResponse.json({ error: "All vehicles failed to render" }, { status: 500 });
   }
 
-  if (pdfBuffers.length === 1) {
-    return NextResponse.json({ url: succeeded[0].pdfUrl, results });
-  }
-
-  // Merge all PDFs into one document
+  // Merge all rendered PDFs into one document
   const merged = await PDFDocument.create();
   for (const buf of pdfBuffers) {
     const src = await PDFDocument.load(buf);
@@ -653,14 +645,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     pages.forEach(p => merged.addPage(p));
   }
   const mergedBuffer = Buffer.from(await merged.save());
-  const mergedKey = `${firstDealerInternalId ?? vehicleIds[0]}/${vehicleIds[0]}/${docType}_bulk_${vehicleIds.length}_${Date.now()}.pdf`;
-  let mergedUrl: string;
-  try {
-    mergedUrl = await uploadPdf(mergedBuffer, mergedKey);
-  } catch (err) {
-    console.error("[BULK] S3 upload failed for merged PDF (non-blocking):", err instanceof Error ? err.message : err);
-    mergedUrl = `data:application/pdf;base64,${mergedBuffer.toString("base64")}`;
-  }
 
-  return NextResponse.json({ url: mergedUrl, results });
+  // S3 upload + DB logging — all happen in the background
+  const mergedKey = `${firstDealerInternalId ?? vehicleIds[0]}/${vehicleIds[0]}/${docType}_bulk_${vehicleIds.length}_${Date.now()}.pdf`;
+  void Promise.all([
+    ...bgJobs.map(job =>
+      uploadAndLogBulkJob(job, claims.sub, admin).catch(err =>
+        console.error(`[BULK] background logging failed vehicleId=${job.vehicleId}:`, err instanceof Error ? err.message : err)
+      )
+    ),
+    uploadPdf(mergedBuffer, mergedKey).catch(err =>
+      console.error("[BULK] merged S3 upload failed:", err instanceof Error ? err.message : err)
+    ),
+  ]);
+
+  return new NextResponse(mergedBuffer, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Length": String(mergedBuffer.length),
+    },
+  });
 }

@@ -56,14 +56,13 @@ export default function PrintPreviewModal({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const ct = res.headers.get("content-type") ?? "";
-        if (!ct.includes("application/json")) {
-          throw new Error(`PDF generation failed (HTTP ${res.status})`);
+        if (!res.ok) {
+          const json = await res.json() as { error?: string };
+          throw new Error(json.error ?? "PDF generation failed");
         }
-        const json = await res.json() as { url?: string; error?: string };
         if (cancelled) return;
-        if (!res.ok) throw new Error(json.error ?? "PDF generation failed");
-        setPdfUrl(json.url!);
+        const blob = await res.blob();
+        setPdfUrl(URL.createObjectURL(blob));
         onPrinted?.();
       } catch (e) {
         if (!cancelled) setGenError(e instanceof Error ? e.message : "PDF generation failed");
@@ -79,6 +78,7 @@ export default function PrintPreviewModal({
 
   useEffect(() => {
     if (!pdfUrl) return;
+    if (pdfUrl.startsWith("blob:")) { setBlobUrl(pdfUrl); return; }
     let objectUrl: string;
     fetch(pdfUrl)
       .then(r => r.blob())
@@ -182,7 +182,7 @@ export default function PrintPreviewModal({
           {pdfUrl && blobUrl && (
             <>
               <a
-                href={pdfUrl}
+                href={blobUrl}
                 download={filename}
                 style={{
                   height: 36, padding: "0 16px", background: "#fff",

@@ -136,11 +136,10 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
         return;
       }
 
-      const json = await res.json() as { url?: string };
-      if (json.url) {
-        setBulkModal({ url: json.url, docType, count: ids.length });
-        setCheckedIds(new Set());
-      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setBulkModal({ url, docType, count: ids.length });
+      setCheckedIds(new Set());
     } catch {
       alert("Bulk PDF generation failed");
     } finally {
