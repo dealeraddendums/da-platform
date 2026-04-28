@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
+import { PageHeader } from "@/components/PageHeader";
 
 type Props = {
   dealer: DealerRow;
@@ -158,16 +159,11 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6 gap-4">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <h1
-              className="text-xl font-semibold"
-              style={{ color: "var(--text-inverse)" }}
-            >
-              {dealer.name}
-            </h1>
+      <PageHeader
+        title={dealer.name}
+        subtitle={`Inventory ID: ${dealer.inventory_dealer_id ?? dealer.dealer_id}`}
+        action={
+          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
             <span
               className="text-xs font-semibold px-2 py-0.5 rounded-full"
               style={{
@@ -181,47 +177,34 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
             {hubspotCompanyId && (
               <HubSpotPill href={`https://app.hubspot.com/contacts/23896347/record/0-2/${hubspotCompanyId}`} />
             )}
-          </div>
-          <p className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-            Inventory ID: {dealer.inventory_dealer_id ?? dealer.dealer_id}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {isSuperAdmin && !editing && (
-            <button
-              className="btn btn-secondary"
-              onClick={() => void toggleActive()}
-              disabled={toggling}
-              style={{ fontSize: 13 }}
-            >
-              {toggling ? "…" : dealer.active ? "Deactivate" : "Activate"}
-            </button>
-          )}
-          {canEdit && !editing && (
-            <button className="btn btn-primary" onClick={startEdit}>
-              Edit Profile
-            </button>
-          )}
-          {editing && (
-            <>
+            {isSuperAdmin && !editing && (
               <button
                 className="btn btn-secondary"
-                onClick={cancelEdit}
-                disabled={saving}
+                onClick={() => void toggleActive()}
+                disabled={toggling}
+                style={{ fontSize: 13 }}
               >
-                Cancel
+                {toggling ? "…" : dealer.active ? "Deactivate" : "Activate"}
               </button>
-              <button
-                className="btn btn-success"
-                onClick={() => void saveEdit()}
-                disabled={saving}
-              >
-                {saving ? "Saving…" : "Save Changes"}
+            )}
+            {canEdit && !editing && (
+              <button className="btn btn-primary" onClick={startEdit}>
+                Edit Profile
               </button>
-            </>
-          )}
-        </div>
-      </div>
+            )}
+            {editing && (
+              <>
+                <button className="btn btn-secondary" onClick={cancelEdit} disabled={saving}>
+                  Cancel
+                </button>
+                <button className="btn btn-success" onClick={() => void saveEdit()} disabled={saving}>
+                  {saving ? "Saving…" : "Save Changes"}
+                </button>
+              </>
+            )}
+          </div>
+        }
+      />
 
       {error && (
         <div

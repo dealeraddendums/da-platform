@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import GroupList from "@/components/GroupList";
+import { PageHeader } from "@/components/PageHeader";
 
 export const metadata = { title: "Groups — DA Platform" };
 
@@ -29,9 +30,7 @@ export default async function GroupsPage() {
     if (profile?.group_id) redirect(`/groups/${profile.group_id}`);
     return (
       <div>
-        <h1 className="text-xl font-semibold mb-2" style={{ color: "var(--text-inverse)" }}>
-          Group
-        </h1>
+        <PageHeader title="Group" />
         <div className="card p-6">
           <p style={{ color: "var(--text-secondary)" }}>
             No group has been assigned to your account. Contact your administrator.

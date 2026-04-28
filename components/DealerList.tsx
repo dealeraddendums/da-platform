@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { createClient } from "@/lib/supabase/client";
+import { PageHeader } from "@/components/PageHeader";
 
 type DealerListRow = DealerRow & {
   group_name: string | null;
@@ -232,25 +233,20 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
         </div>
       )}
 
-      {/* Page header */}
-      <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>
-            Dealers
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.6)" }}>
-            {total > 0
-              ? dateRange === "all"
-                ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""}`
-                : dateRange === "week"  ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined in the last 7 days`
-                : dateRange === "30d"   ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined in the last 30 days`
-                : dateRange === "90d"   ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined in the last 90 days`
-                : `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined this year`
-              : "No dealers match your filters"
-            }
-          </p>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
+      <PageHeader
+        title="Dealers"
+        subtitle={
+          total > 0
+            ? dateRange === "all"
+              ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""}`
+              : dateRange === "week" ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined in the last 7 days`
+              : dateRange === "30d"  ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined in the last 30 days`
+              : dateRange === "90d"  ? `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined in the last 90 days`
+              : `${total.toLocaleString()} dealer${total !== 1 ? "s" : ""} joined this year`
+            : "No dealers match your filters"
+        }
+        action={
+          <div className="flex items-center gap-3 flex-wrap">
           {role === "super_admin" && (
             <div className="flex flex-col items-end gap-0.5">
               <button
@@ -288,8 +284,9 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
           >
             {showNewForm ? "Cancel" : "+ New Dealer"}
           </button>
-        </div>
-      </div>
+          </div>
+        }
+      />
 
       {/* New dealer form */}
       {showNewForm && (

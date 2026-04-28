@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
+import { PageHeader } from "@/components/PageHeader";
 
 type Props = {
   group: GroupRow;
@@ -139,13 +140,11 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6 gap-4">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>
-              {group.name}
-            </h1>
+      <PageHeader
+        title={group.name}
+        subtitle={`Group ID: ${group.id.slice(0, 8)}…`}
+        action={
+          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
             <span
               className="text-xs font-semibold px-2 py-0.5 rounded-full"
               style={{
@@ -159,39 +158,34 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
             {hubspotCompanyId && (
               <HubSpotPill href={`https://app.hubspot.com/contacts/23896347/record/0-2/${hubspotCompanyId}`} />
             )}
+            {isSuperAdmin && !editing && (
+              <button
+                className="btn btn-secondary"
+                onClick={() => void toggleActive()}
+                disabled={toggling}
+                style={{ fontSize: 13 }}
+              >
+                {toggling ? "…" : group.active ? "Deactivate" : "Activate"}
+              </button>
+            )}
+            {canEdit && !editing && (
+              <button className="btn btn-primary" onClick={startEdit}>
+                Edit Group
+              </button>
+            )}
+            {editing && (
+              <>
+                <button className="btn btn-secondary" onClick={cancelEdit} disabled={saving}>
+                  Cancel
+                </button>
+                <button className="btn btn-success" onClick={() => void saveEdit()} disabled={saving}>
+                  {saving ? "Saving…" : "Save Changes"}
+                </button>
+              </>
+            )}
           </div>
-          <p className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-            Group ID: {group.id.slice(0, 8)}…
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {isSuperAdmin && !editing && (
-            <button
-              className="btn btn-secondary"
-              onClick={() => void toggleActive()}
-              disabled={toggling}
-              style={{ fontSize: 13 }}
-            >
-              {toggling ? "…" : group.active ? "Deactivate" : "Activate"}
-            </button>
-          )}
-          {canEdit && !editing && (
-            <button className="btn btn-primary" onClick={startEdit}>
-              Edit Group
-            </button>
-          )}
-          {editing && (
-            <>
-              <button className="btn btn-secondary" onClick={cancelEdit} disabled={saving}>
-                Cancel
-              </button>
-              <button className="btn btn-success" onClick={() => void saveEdit()} disabled={saving}>
-                {saving ? "Saving…" : "Save Changes"}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+        }
+      />
 
       {error && (
         <div className="mb-4 px-4 py-3 rounded text-sm" style={{ background: "#ffebee", color: "var(--error)" }}>

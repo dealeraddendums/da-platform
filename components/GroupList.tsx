@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { PageHeader } from "@/components/PageHeader";
 import { createClient } from "@/lib/supabase/client";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
 
@@ -170,23 +171,18 @@ export default function GroupList() {
 
   return (
     <div>
-      {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>
-            Groups
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.6)" }}>
-            {subtitle()}
-          </p>
-        </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowNewForm((v) => !v)}
-        >
-          {showNewForm ? "Cancel" : "+ New Group"}
-        </button>
-      </div>
+      <PageHeader
+        title="Groups"
+        subtitle={subtitle()}
+        action={
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowNewForm((v) => !v)}
+          >
+            {showNewForm ? "Cancel" : "+ New Group"}
+          </button>
+        }
+      />
 
       {/* New group form */}
       {showNewForm && (

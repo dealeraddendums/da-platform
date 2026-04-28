@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { PageHeader } from "@/components/PageHeader";
 
 export const metadata = { title: "Billing — DA Platform" };
 
@@ -20,13 +21,8 @@ export default async function BillingPage() {
   if (role !== "super_admin") redirect("/dashboard");
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Billing</h1>
-        <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.6)" }}>
-          Manage dealer billing, invoices, and account status.
-        </p>
-      </div>
+    <div>
+      <PageHeader title="Billing" />
 
       <div
         className="rounded-lg p-10 flex flex-col items-center justify-center text-center"

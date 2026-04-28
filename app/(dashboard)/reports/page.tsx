@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { PageHeader } from "@/components/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -250,12 +251,7 @@ function DealerActivityReport() {
 export default function ReportsPage() {
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Reports</h1>
-        <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.6)" }}>
-          Historical addendum data across all dealers
-        </p>
-      </div>
+      <PageHeader title="Reports" subtitle="Historical addendum data across all dealers" />
       <OptionsUsageReport />
       <DealerActivityReport />
     </div>

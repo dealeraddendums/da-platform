@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import DealerList from "@/components/DealerList";
+import { PageHeader } from "@/components/PageHeader";
 
 export const metadata = { title: "Dealers — DA Platform" };
 
@@ -37,9 +38,7 @@ export default async function DealersPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold mb-2" style={{ color: "var(--text-inverse)" }}>
-        Dealer Profile — Debug
-      </h1>
+      <PageHeader title="Dealer Profile — Debug" />
       <div className="card p-6 font-mono text-sm space-y-1">
         <p>session.user.id: {session.user.id}</p>
         <p>session.user.email: {session.user.email}</p>
