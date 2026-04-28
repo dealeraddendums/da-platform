@@ -849,9 +849,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
 
         {/* PALETTE */}
         {!previewMode && (
-          <div style={{ width: 190, background: '#fff', borderRight: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
-            <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid #e0e0e0' }}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.06em' }}>Widgets — drag to canvas</div>
+          <div style={{ width: 190, background: 'transparent', borderRight: '1px solid rgba(255,255,255,0.12)', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
+            <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid rgba(255,255,255,0.12)' }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Widgets — drag to canvas</div>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px 20px' }}>
               {(['content','infosheet','structural','infobox'] as const).map(group => {
@@ -859,7 +859,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 if (!tiles.length) return null;
                 return (
                   <div key={group}>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.05em', margin: '10px 0 5px' }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '.05em', margin: '10px 0 5px' }}>
                       {group === 'infosheet' ? 'Infosheet' : group === 'infobox' ? 'Infobox' : group === 'content' ? 'Content' : 'Structural'}
                     </div>
                     {tiles.map(tile => {
@@ -876,18 +876,18 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                           onClick={() => !used && addWidget(tile.type)}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 7,
-                            padding: '7px 8px', border: '1px solid #e0e0e0', borderRadius: 4,
+                            padding: '7px 8px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4,
                             marginBottom: 3, cursor: used ? 'default' : 'grab',
-                            background: '#fff', opacity: used ? 0.22 : 1,
+                            background: 'transparent', opacity: used ? 0.22 : 1,
                             filter: used ? 'grayscale(1)' : 'none',
                             pointerEvents: used ? 'none' : 'auto',
                             transition: 'all .12s',
                           }}
                         >
-                          <div style={{ width: 26, height: 26, borderRadius: 5, background: '#f0f4ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}>{tile.emoji}</div>
+                          <div style={{ width: 26, height: 26, borderRadius: 5, background: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}>{tile.emoji}</div>
                           <div>
-                            <div style={{ fontSize: 11, fontWeight: 500, color: '#333' }}>{tile.label}</div>
-                            <div style={{ fontSize: 10, color: '#78828c', marginTop: 1 }}>{tile.hint}</div>
+                            <div style={{ fontSize: 11, fontWeight: 500, color: 'rgba(255,255,255,0.85)' }}>{tile.label}</div>
+                            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 1 }}>{tile.hint}</div>
                           </div>
                         </div>
                       );
