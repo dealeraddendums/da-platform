@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerSettingsRow, UserRole } from "@/lib/db";
 import SettingsForm from "@/components/SettingsForm";
+import { PageHeader } from "@/components/PageHeader";
 
 export const metadata = { title: "Settings — DA Platform" };
 
@@ -38,14 +39,10 @@ export default async function SettingsPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>
-          Settings
-        </h1>
-        <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
-          AI content defaults, template assignments, and printer margins
-        </p>
-      </div>
+      <PageHeader
+        title="Settings"
+        subtitle="AI content defaults, template assignments, and printer margins"
+      />
       <SettingsForm
         fixedDealerId={dealerId}
         fixedDealerUuid={fixedDealerUuid}

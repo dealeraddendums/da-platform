@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { DealerRow } from "@/lib/db";
+import { PageHeader } from "@/components/PageHeader";
 import type { LabelProduct } from "@/lib/label-products";
 import { LABEL_PRODUCTS } from "@/lib/label-products";
 
@@ -751,17 +752,8 @@ export default function ProfileClient({ dealer, canEdit, userEmail, userName }: 
   });
 
   return (
-    <div className="p-6">
-      <h1
-        style={{
-          fontSize: 22,
-          fontWeight: 600,
-          color: "#fff",
-          marginBottom: 20,
-        }}
-      >
-        {dealer.name}
-      </h1>
+    <div>
+      <PageHeader title={dealer.name} />
 
       {/* Tab bar */}
       <div

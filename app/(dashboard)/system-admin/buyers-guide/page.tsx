@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { BG_KEYS, BG_LABELS, type BgKey } from "@/lib/buyers-guide-constants";
+import { PageHeader } from "@/components/PageHeader";
 
 type CardState = {
   loading: boolean;
@@ -75,29 +76,27 @@ export default function BuyersGuidePdfsPage() {
     setSeedingAll(false);
   }
 
+  const seedButton = (
+    <button
+      onClick={() => void seedAll()}
+      disabled={seedingAll}
+      style={{
+        height: 36, padding: "0 18px", background: "#fff", border: "1px solid #e0e0e0",
+        borderRadius: 4, fontSize: 13, fontWeight: 500, cursor: "pointer", color: "#333",
+        opacity: seedingAll ? 0.6 : 1,
+      }}
+    >
+      {seedingAll ? "Seeding…" : "Seed All from Local Files"}
+    </button>
+  );
+
   return (
-    <div className="p-6">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: "#fff", margin: 0 }}>
-            Buyer&apos;s Guide PDF Backgrounds
-          </h1>
-          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", marginTop: 4, marginBottom: 0 }}>
-            Manage the 4 system-default FTC Buyer&apos;s Guide backgrounds. Dealers may upload their own replacements.
-          </p>
-        </div>
-        <button
-          onClick={() => void seedAll()}
-          disabled={seedingAll}
-          style={{
-            height: 36, padding: "0 18px", background: "#fff", border: "1px solid #e0e0e0",
-            borderRadius: 4, fontSize: 13, fontWeight: 500, cursor: "pointer", color: "#333",
-            opacity: seedingAll ? 0.6 : 1,
-          }}
-        >
-          {seedingAll ? "Seeding…" : "Seed All from Local Files"}
-        </button>
-      </div>
+    <div>
+      <PageHeader
+        title="Buyer's Guide PDF Backgrounds"
+        subtitle="Manage the 4 system-default FTC Buyer's Guide backgrounds. Dealers may upload their own replacements."
+        action={seedButton}
+      />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, maxWidth: 900 }}>
         {BG_KEYS.map(key => {

@@ -24,7 +24,7 @@ export default async function ProfilePage() {
   // Non-dealer roles: show a redirect card
   if (role === "super_admin" || role === "group_admin") {
     return (
-      <div className="p-6">
+      <div>
         <div
           style={{
             background: "#fff",
@@ -64,7 +64,7 @@ export default async function ProfilePage() {
   // Dealer roles: fetch the dealer record
   if (!profile?.dealer_id) {
     return (
-      <div className="p-6">
+      <div>
         <div
           style={{
             background: "#fff",
@@ -91,7 +91,7 @@ export default async function ProfilePage() {
   const dealer = rawDealer as DealerRow | null;
   if (!dealer) {
     return (
-      <div className="p-6">
+      <div>
         <div
           style={{
             background: "#fff",

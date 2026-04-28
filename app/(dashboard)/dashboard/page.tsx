@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import VehicleInventory from "@/components/VehicleInventory";
+import { PageHeader } from "@/components/PageHeader";
 
 function isManualDealer(accountType: string | null): boolean {
   return !accountType || accountType === "Trial" || accountType === "Monthly Subscription Manual";
@@ -64,12 +65,7 @@ function SuperAdminView({
   ];
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Dashboard</h1>
-        <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.6)" }}>
-          {greeting(hour, firstName)}
-        </p>
-      </div>
+      <PageHeader title="Dashboard" />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {cards.map((c) => (
           <div key={c.label} className="card p-4">
@@ -112,10 +108,7 @@ function GroupAdminView({
   ];
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Dashboard</h1>
-      </div>
-
+      <PageHeader title="Dashboard" />
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         {stats.map((s) => (
           <div key={s.label} className="card p-4">
@@ -246,7 +239,7 @@ export default async function DashboardPage() {
     if (!groupId) {
       return (
         <div>
-          <h1 className="text-xl font-semibold mb-4" style={{ color: "var(--text-inverse)" }}>Dashboard</h1>
+          <PageHeader title="Dashboard" />
           <div className="card p-6"><p style={{ color: "var(--text-muted)" }}>No group assigned to your account.</p></div>
         </div>
       );
@@ -334,7 +327,7 @@ export default async function DashboardPage() {
   if (!dealerId) {
     return (
       <div>
-        <h1 className="text-xl font-semibold mb-4" style={{ color: "var(--text-inverse)" }}>Dashboard</h1>
+        <PageHeader title="Dashboard" />
         <div className="card p-6"><p style={{ color: "var(--text-muted)" }}>No dealer assigned to your account. Contact your administrator.</p></div>
       </div>
     );
@@ -377,9 +370,7 @@ export default async function DashboardPage() {
     ];
     return (
       <div>
-        <div className="mb-5">
-          <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Dashboard</h1>
-        </div>
+        <PageHeader title="Dashboard" />
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
           {manualStats.map((s) => (
             <div key={s.label} className="card p-3">
@@ -403,9 +394,7 @@ export default async function DashboardPage() {
 
   return (
     <div>
-      <div className="mb-5">
-        <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Dashboard</h1>
-      </div>
+      <PageHeader title="Dashboard" />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {auroraStats.map((s) => (
           <div key={s.label} className="card p-3">

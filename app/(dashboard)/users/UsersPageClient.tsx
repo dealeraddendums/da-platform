@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
+import { PageHeader } from "@/components/PageHeader";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -633,17 +634,12 @@ export default function UsersPageClient({ viewerRole, viewerDealerId }: Props) {
   const colSpan = tableHeaders.length;
 
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>Users</h1>
-          <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.55)" }}>
-            {dealerMode ? "Your team" : `${total.toLocaleString()} total user${total !== 1 ? "s" : ""}`}
-          </p>
-        </div>
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add User</button>
-      </div>
+    <div>
+      <PageHeader
+        title="Users"
+        subtitle={dealerMode ? "Your team" : `${total.toLocaleString()} total user${total !== 1 ? "s" : ""}`}
+        action={<button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add User</button>}
+      />
 
       {/* Filters */}
       <div className="card p-4 mb-4">

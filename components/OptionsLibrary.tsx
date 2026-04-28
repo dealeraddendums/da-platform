@@ -670,8 +670,8 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: "#fff", margin: 0 }}>Addendum Options</h1>
-          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginTop: 3 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.2, color: "#fff", margin: 0 }}>Addendum Options</h1>
+          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.7)", marginTop: 4, marginBottom: 0 }}>
             {total > 0 ? `${total} option${total !== 1 ? "s" : ""}` : "Define options that auto-apply to vehicle addendums"}
           </p>
         </div>
