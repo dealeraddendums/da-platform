@@ -75,7 +75,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // dealer_vehicles.dealer_id is the TEXT dealer_id (matches dealers.dealer_id, not dealers.id UUID)
     const { data: dealer } = await admin
       .from("dealers")
-      .select("id, dealer_id, name, address, city, state, zip, phone, logo_url")
+      .select("id, dealer_id, internal_id, name, address, city, state, zip, phone, logo_url")
       .eq("dealer_id", dv.dealer_id)
       .maybeSingle();
 
@@ -450,13 +450,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const timestamp = Date.now();
-    const s3Key = `${dv.dealer_id}/${dealerVehicleId}/${timestamp}.pdf`;
+    const s3Key = `${dealer?.internal_id ?? dv.dealer_id}/${dealerVehicleId}/${docType}_${timestamp}.pdf`;
 
     let pdfUrl: string;
     try {
       pdfUrl = await uploadPdf(pdfBuffer, s3Key);
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : "S3 upload failed" }, { status: 500 });
+      console.error("[pdf/generate] S3 upload failed (non-blocking):", err instanceof Error ? err.message : err);
+      pdfUrl = `data:application/pdf;base64,${pdfBuffer.toString("base64")}`;
     }
 
     // ── Print history — source of truth for dashboard stats ──────────────────
@@ -500,6 +501,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         editable: 1,
         printed_at: printedAt,
         document_type: docType,
+        s3_key: pdfUrl.startsWith("data:") ? null : s3Key,
       }));
       const { error: adErr } = await admin.from("addendum_data").insert(adRows);
       if (adErr) console.error("[pdf/generate] addendum_data insert failed:", adErr.message, adErr.code);

@@ -104,6 +104,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient();
   const pdfBuffers: Buffer[] = [];
   const results: { vehicleId: string; pdfUrl?: string; error?: string }[] = [];
+  let firstDealerInternalId: string | null = null;
 
   const dealerSettingsCache = new Map<string, DealerSettingsRow | null>();
   const templateCache = new Map<string, Widget[] | null>();
@@ -139,10 +140,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // id (UUID) is required for addendum_data FK
         const { data: dealer } = await admin
           .from("dealers")
-          .select("id, dealer_id, name, address, city, state, zip, phone, logo_url")
+          .select("id, dealer_id, internal_id, name, address, city, state, zip, phone, logo_url")
           .eq("dealer_id", dv.dealer_id)
           .maybeSingle();
         const textDealerId = dealer?.dealer_id ?? "";
+        if (firstDealerInternalId === null) {
+          firstDealerInternalId = dealer?.internal_id ?? dv.dealer_id;
+        }
 
         // ── Buyer Guide: use dedicated PDF builder, bypass widget pipeline ──────
         if (docType === "buyer_guide") {
@@ -178,8 +182,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             warranty,
           });
 
-          const s3Key = `${dv.dealer_id}/${vehicleId}/buyers_guide_en_${Date.now()}.pdf`;
-          const pdfUrl = await uploadPdf(pdfBuffer, s3Key);
+          const s3Key = `${dealer?.internal_id ?? dv.dealer_id}/${vehicleId}/buyers_guide_en_${Date.now()}.pdf`;
+          let pdfUrl: string;
+          try {
+            pdfUrl = await uploadPdf(pdfBuffer, s3Key);
+          } catch (err) {
+            console.error(`[BULK] S3 upload failed buyers_guide vehicleId=${vehicleId} (non-blocking):`, err instanceof Error ? err.message : err);
+            pdfUrl = `data:application/pdf;base64,${pdfBuffer.toString("base64")}`;
+          }
 
           await admin.from("print_history").insert({
             vehicle_id: vehicleId,
@@ -569,8 +579,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         console.log(`[BULK]   pdf_rendered vehicleId=${vehicleId} bytes=${pdfBuffer.length}`);
 
         const timestamp = Date.now();
-        const s3Key = `${dv.dealer_id}/${vehicleId}/${timestamp}.pdf`;
-        const pdfUrl = await uploadPdf(pdfBuffer, s3Key);
+        const s3Key = `${dealer?.internal_id ?? dv.dealer_id}/${vehicleId}/${docType}_${timestamp}.pdf`;
+        let pdfUrl: string;
+        try {
+          pdfUrl = await uploadPdf(pdfBuffer, s3Key);
+        } catch (err) {
+          console.error(`[BULK] S3 upload failed vehicleId=${vehicleId} (non-blocking):`, err instanceof Error ? err.message : err);
+          pdfUrl = `data:application/pdf;base64,${pdfBuffer.toString("base64")}`;
+        }
 
         // ── Print history ────────────────────────────────────────────────────
         const { error: phErr } = await admin.from("print_history").insert({
@@ -597,6 +613,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             editable: 1,
             printed_at: printedAt,
             document_type: docType,
+            s3_key: pdfUrl.startsWith("data:") ? null : s3Key,
           }));
           const { error: adErr } = await admin.from("addendum_data").insert(adRows);
           if (adErr) console.error(`[BULK]   addendum_data insert failed vehicleId=${vehicleId}:`, adErr.message);
@@ -636,8 +653,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     pages.forEach(p => merged.addPage(p));
   }
   const mergedBuffer = Buffer.from(await merged.save());
-  const mergedKey = `bulk/${claims.sub}/${docType}_${Date.now()}.pdf`;
-  const mergedUrl = await uploadPdf(mergedBuffer, mergedKey);
+  const mergedKey = `${firstDealerInternalId ?? vehicleIds[0]}/${vehicleIds[0]}/${docType}_bulk_${vehicleIds.length}_${Date.now()}.pdf`;
+  let mergedUrl: string;
+  try {
+    mergedUrl = await uploadPdf(mergedBuffer, mergedKey);
+  } catch (err) {
+    console.error("[BULK] S3 upload failed for merged PDF (non-blocking):", err instanceof Error ? err.message : err);
+    mergedUrl = `data:application/pdf;base64,${mergedBuffer.toString("base64")}`;
+  }
 
   return NextResponse.json({ url: mergedUrl, results });
 }

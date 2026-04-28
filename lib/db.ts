@@ -586,6 +586,7 @@ export type AddendumDataRow = {
   editable: number | null;
   printed_at: string | null;
   document_type: string | null;
+  s3_key: string | null;
   created_at: string;
   updated_at: string | null;
 };
@@ -608,6 +609,7 @@ export type AddendumDataInsert = {
   editable?: number | null;
   printed_at?: string | null;
   document_type?: string | null;
+  s3_key?: string | null;
   created_at?: string;
   updated_at?: string | null;
 };

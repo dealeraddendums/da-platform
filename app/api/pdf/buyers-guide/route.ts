@@ -46,7 +46,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── Dealer ────────────────────────────────────────────────────────────────
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, name, address, city, state, zip, phone")
+    .select("id, internal_id, name, address, city, state, zip, phone")
     .eq("dealer_id", dv.dealer_id)
     .maybeSingle();
 
@@ -94,8 +94,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       dealer: dealerData,
       warranty,
     });
-    const key = `${dvDealerId}/${vehicleId}/buyers_guide_${lang}_${Date.now()}.pdf`;
-    const url = await uploadPdf(buffer, key);
+    const key = `${dealer?.internal_id ?? dvDealerId}/${vehicleId}/buyers_guide_${lang}_${Date.now()}.pdf`;
+    let url: string;
+    try {
+      url = await uploadPdf(buffer, key);
+    } catch (err) {
+      console.error("[buyers-guide] S3 upload failed (non-blocking):", err instanceof Error ? err.message : err);
+      url = `data:application/pdf;base64,${buffer.toString("base64")}`;
+    }
     return { url, buffer };
   }
 
