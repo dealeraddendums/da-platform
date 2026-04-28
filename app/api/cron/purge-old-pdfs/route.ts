@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { S3Client, ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { createAdminSupabaseClient } from "@/lib/db";
 
-export const maxDuration = 300; // 5 minutes — Next.js App Router config
+export const dynamic = "force-dynamic";
 
 const BUCKET = "dealer-addendums";
 const DELETE_CONCURRENCY = 25;
