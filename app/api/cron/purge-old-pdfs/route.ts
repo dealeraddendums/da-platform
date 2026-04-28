@@ -1,26 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { createAdminSupabaseClient } from "@/lib/db";
 
 const BUCKET = "dealer-addendums";
-const BATCH_SIZE = 100;
+const DELETE_CONCURRENCY = 25;
 
-function getS3Client(): S3Client {
-  return new S3Client({
-    region: "us-west-1",
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-    },
-  });
-}
+const s3 = new S3Client({
+  region: "us-west-1",
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
 
 /**
  * POST /api/cron/purge-old-pdfs
- * Deletes S3 PDF objects for addendum_data rows older than 12 months,
- * then nulls out the s3_key so the record is kept but the file is gone.
- * Protected by x-cron-secret header.
- * Schedule: 0 3 1 * * (3 AM UTC on the 1st of each month)
+ * S3-first: paginates all objects in dealer-addendums, deletes any with
+ * LastModified older than 12 months. Also nulls s3_key in addendum_data
+ * for each deleted key (cleanup only — never blocks deletion).
+ * Schedule: 0 3 1 * * (3 AM UTC, 1st of each month)
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const secret = req.headers.get("x-cron-secret");
@@ -29,63 +27,71 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const admin = createAdminSupabaseClient();
-  const s3 = getS3Client();
 
-  const twelveMonthsAgo = new Date();
-  twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
-  const cutoff = twelveMonthsAgo.toISOString();
+  const cutoff = new Date();
+  cutoff.setFullYear(cutoff.getFullYear() - 1);
 
+  let totalScanned = 0;
   let totalDeleted = 0;
   let totalFailed = 0;
   const errors: string[] = [];
 
-  // Process in batches until no rows remain
-  while (true) {
-    const { data: rows, error: fetchErr } = await admin
-      .from("addendum_data")
-      .select("id, s3_key")
-      .not("s3_key", "is", null)
-      .lt("printed_at", cutoff)
-      .limit(BATCH_SIZE);
+  let continuationToken: string | undefined;
 
-    if (fetchErr) {
-      console.error("[purge-old-pdfs] DB fetch error:", fetchErr.message);
-      errors.push(`DB fetch error: ${fetchErr.message}`);
-      break;
-    }
+  do {
+    // ── List one page of S3 objects (up to 1000) ─────────────────────────────
+    const listRes = await s3.send(new ListObjectsV2Command({
+      Bucket: BUCKET,
+      ContinuationToken: continuationToken,
+    }));
 
-    if (!rows || rows.length === 0) break;
+    const objects = listRes.Contents ?? [];
+    totalScanned += objects.length;
 
-    for (const row of rows) {
-      const key = row.s3_key as string;
-      try {
-        await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
+    // ── Filter to objects older than 12 months ────────────────────────────────
+    const stale = objects.filter(
+      o => o.Key && o.LastModified && o.LastModified < cutoff
+    ) as { Key: string; LastModified: Date }[];
 
-        const { error: updateErr } = await admin
-          .from("addendum_data")
-          .update({ s3_key: null })
-          .eq("id", row.id as string);
+    // ── Delete in parallel batches of DELETE_CONCURRENCY ─────────────────────
+    for (let i = 0; i < stale.length; i += DELETE_CONCURRENCY) {
+      const chunk = stale.slice(i, i + DELETE_CONCURRENCY);
 
-        if (updateErr) {
-          console.error(`[purge-old-pdfs] Failed to null s3_key for id=${row.id}:`, updateErr.message);
-          errors.push(`id=${row.id} update failed: ${updateErr.message}`);
-          totalFailed++;
-        } else {
+      const settled = await Promise.allSettled(
+        chunk.map(async ({ Key }) => {
+          await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key }));
+
+          // Null out matching addendum_data row — cleanup only, non-blocking
+          const { error: dbErr } = await admin
+            .from("addendum_data")
+            .update({ s3_key: null })
+            .eq("s3_key", Key);
+          if (dbErr) {
+            console.error(`[purge-old-pdfs] DB cleanup failed for key=${Key}:`, dbErr.message);
+          }
+        })
+      );
+
+      for (let j = 0; j < settled.length; j++) {
+        const result = settled[j];
+        if (result.status === "fulfilled") {
           totalDeleted++;
+        } else {
+          totalFailed++;
+          const msg = result.reason instanceof Error ? result.reason.message : String(result.reason);
+          const key = chunk[j].Key;
+          console.error(`[purge-old-pdfs] Delete failed key=${key}:`, msg);
+          errors.push(`key=${key}: ${msg}`);
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[purge-old-pdfs] S3 delete failed for key=${key}:`, msg);
-        errors.push(`key=${key}: ${msg}`);
-        totalFailed++;
       }
     }
 
-    // If we got fewer than BATCH_SIZE rows, we've processed everything
-    if (rows.length < BATCH_SIZE) break;
-  }
+    continuationToken = listRes.NextContinuationToken;
+  } while (continuationToken);
 
-  console.log(`[purge-old-pdfs] PDF purge complete: deleted ${totalDeleted} files, failed ${totalFailed} files`);
+  console.log(
+    `[purge-old-pdfs] PDF purge complete: scanned ${totalScanned} files, deleted ${totalDeleted} files, failed ${totalFailed} files`
+  );
 
-  return NextResponse.json({ deleted: totalDeleted, failed: totalFailed, errors });
+  return NextResponse.json({ deleted: totalDeleted, failed: totalFailed, scanned: totalScanned, errors });
 }
