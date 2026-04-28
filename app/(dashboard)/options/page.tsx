@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import OptionsLibrary from "@/components/OptionsLibrary";
-import VehicleSubNav from "@/components/VehicleSubNav";
 
 export const metadata = { title: "Addendum Options — DA Platform" };
 
@@ -38,7 +37,6 @@ export default async function OptionsPage() {
 
   return (
     <div>
-      <VehicleSubNav />
       <OptionsLibrary dealerId={profile.dealer_id} />
     </div>
   );
