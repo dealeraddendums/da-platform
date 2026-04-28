@@ -56,7 +56,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const sfs = Math.round(8 * fs * ((d.labelFontSize as number) || 1));
     const lc = (d.labelColor as string) || '#ffffff';
     const vc = (d.valueColor as string) || '#000000';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;width:100%;height:100%;padding:0 4px"><div><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div>${d.subtitle ? `<div style="font-size:${sfs}px;color:${lc};font-style:italic;margin-top:1px">${d.subtitle}</div>` : ''}</div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;background:#ffffff;">${d.value}</div></div>`;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;width:100%;height:100%;padding:0 4px"><div><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div>${d.subtitle ? `<div style="font-size:${sfs}px;color:${lc};font-style:italic;margin-top:1px">${d.subtitle}</div>` : ''}</div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;">${d.value}</div></div>`;
   }
 
   if (type === 'dealer') {
