@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
+// requireSuperAdmin is used only for POST (assign dealer)
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
 
@@ -82,15 +83,23 @@ export async function POST(
 
 /**
  * DELETE /api/groups/[id]/dealers
- * Remove a dealer from this group (set group_id = null). super_admin only.
+ * Remove a dealer from this group (set group_id = null).
+ * super_admin: any group. group_admin: own group only.
  * Body: { dealer_id: string }  (the dealers.id UUID)
  */
 export async function DELETE(
   req: NextRequest,
-  { params: _ }: Params
+  { params }: Params
 ): Promise<NextResponse> {
-  const { error } = await requireSuperAdmin();
+  const { claims, error } = await requireAuth();
   if (error) return error;
+
+  if (claims.role !== "super_admin" && claims.role !== "group_admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  if (claims.role === "group_admin" && params.id !== claims.group_id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   let body: { dealer_id?: string };
   try {
@@ -104,6 +113,18 @@ export async function DELETE(
   }
 
   const admin = createAdminSupabaseClient();
+
+  // Verify dealer belongs to this group before removing
+  const { data: check } = await admin
+    .from("dealers")
+    .select("id, group_id")
+    .eq("id", body.dealer_id)
+    .maybeSingle<{ id: string; group_id: string | null }>();
+
+  if (!check || check.group_id !== params.id) {
+    return NextResponse.json({ error: "Dealer not found in this group" }, { status: 404 });
+  }
+
   const { data, error: dbError } = await admin
     .from("dealers")
     .update({ group_id: null })

@@ -25,25 +25,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: inv } = await (admin as any)
     .from("invitations")
-    .select("id, email, first_name, last_name, role, dealer_id, expires_at, accepted_at")
+    .select("id, email, first_name, last_name, role, dealer_id, group_id, expires_at, accepted_at")
     .eq("token", token)
     .maybeSingle() as { data: {
       id: string; email: string; first_name: string; last_name: string;
-      role: string; dealer_id: string; expires_at: string; accepted_at: string | null;
+      role: string; dealer_id: string | null; group_id: string | null;
+      expires_at: string; accepted_at: string | null;
     } | null };
 
   if (!inv) return NextResponse.json({ error: "Invalid invitation" }, { status: 404 });
   if (inv.accepted_at) return NextResponse.json({ error: "Invitation already accepted" }, { status: 410 });
   if (new Date(inv.expires_at) < new Date()) return NextResponse.json({ error: "Invitation expired" }, { status: 410 });
 
-  // Resolve dealer text dealer_id for profile
-  const { data: dealer } = await admin
-    .from("dealers")
-    .select("dealer_id, name")
-    .eq("id", inv.dealer_id)
-    .maybeSingle<{ dealer_id: string; name: string }>();
+  const isGroupInvite = !!inv.group_id && !inv.dealer_id;
 
-  if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
+  // For dealer invitations, resolve the dealer's text dealer_id
+  let dealerTextId: string | null = null;
+  if (!isGroupInvite) {
+    const { data: dealer } = await admin
+      .from("dealers")
+      .select("dealer_id, name")
+      .eq("id", inv.dealer_id!)
+      .maybeSingle<{ dealer_id: string; name: string }>();
+
+    if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
+    dealerTextId = dealer.dealer_id;
+  }
 
   // Create auth user (admin API skips email confirmation)
   const fullName = `${inv.first_name} ${inv.last_name}`;
@@ -58,13 +65,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: authErr?.message ?? "Failed to create account" }, { status: 400 });
   }
 
-  // Create profile
+  // Create profile — group invites get group_id set, dealer invites get dealer_id set
   const { error: profileErr } = await admin.from("profiles").insert({
     id: authData.user.id,
     email: inv.email,
     full_name: fullName,
     role: inv.role as UserRole,
-    dealer_id: dealer.dealer_id,
+    dealer_id: isGroupInvite ? null : dealerTextId,
+    group_id: isGroupInvite ? inv.group_id : null,
     active: true,
   });
 

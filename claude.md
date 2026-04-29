@@ -1,5 +1,5 @@
 # DealerAddendums Platform — CLAUDE.md
-## Last updated: 2026-04-26
+## Last updated: 2026-04-29
 
 ---
 
@@ -108,7 +108,8 @@ Badges:    radius=20px, 11px bold text
 | Service | Details |
 |---|---|
 | DA Platform EC2 **(LEGACY — DO NOT DEPLOY HERE)** | `ssh -i ~/ssh/DA2026.pem ubuntu@ec2-54-89-142-76.compute-1.amazonaws.com` |
-| da-platform EC2 **(NEW — deploy here only)** | `ssh -i ~/ssh/daplatform2026.pem ubuntu@ec2-54-167-226-23.compute-1.amazonaws.com` |
+| da-platform EC2 **(us-east-1, DECOMMISSIONED — do not deploy here)** | `ec2-54-167-226-23.compute-1.amazonaws.com` |
+| da-platform EC2 **(NEW us-west-1b, behind ALB — deploy here only)** | `ssh -i ~/ssh/DA_Platform_2026.pem ubuntu@ec2-18-145-132-52.us-west-1.compute.amazonaws.com` |
 | DA Billing EC2 | `ssh -i ~/ssh/dabilling2026.pem ubuntu@ec2-98-89-5-190.compute-1.amazonaws.com` |
 | QuietReady EC2 | `ssh -i ~/ssh/QuietReady2026.pem ubuntu@ec2-54-160-4-222.compute-1.amazonaws.com` |
 | ZoomTrainer EC2 | `ec2-44-202-168-181.compute-1.amazonaws.com`, key `~/ssh/zoom2026.pem` |
@@ -119,7 +120,10 @@ Badges:    radius=20px, 11px bold text
 | Anthropic API | `allan@dealeraddendums.com` enterprise key |
 | AWS IAM | User `da-platform-app`, group `FileserverS3` (AmazonS3FullAccess) |
 
-### New EC2 server specs
+### New EC2 server specs (us-west-1b, behind ALB)
+- Host: `ec2-18-145-132-52.us-west-1.compute.amazonaws.com`
+- Production URL: `https://app.dealeraddendums.com`
+- SSH key: `~/ssh/DA_Platform_2026.pem`
 - Ubuntu 24.04, t3.medium, 30GB
 - Node 20, PM2 6.0.14, nginx 1.24.0
 - App dir: `/var/www/da-platform`
@@ -127,7 +131,7 @@ Badges:    radius=20px, 11px bold text
 - Deploy: `git pull && npm ci && npm run build && pm2 restart da-platform`
 - Logs: `/var/log/da-platform/`
 - GitHub Action: push to `main` → auto-deploys via `.github/workflows/deploy.yml`
-- GitHub secret: `EC2_SSH_KEY` = contents of `~/ssh/daplatform2026.pem` ✅
+- GitHub secret: `EC2_SSH_KEY` = contents of `~/ssh/DA_Platform_2026.pem`
 
 ### S3 Buckets (all: Block Public Access OFF, s3:GetObject *, CORS GET *)
 
@@ -149,8 +153,11 @@ AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION=us-ea
 **CRITICAL: Never deploy da-platform code to the legacy EC2 (`ec2-54-89-142-76`).**
 That server runs the live platform for 2,079 active accounts.
 
-All new code goes to `ec2-54-167-226-23.compute-1.amazonaws.com` only.
-Push to `main` → GitHub Action auto-deploys.
+**CRITICAL: `ec2-54-167-226-23` (us-east-1) is decommissioned. Do not deploy there.**
+
+All new code goes to `ec2-18-145-132-52.us-west-1.compute.amazonaws.com` only.
+Push to `main` → GitHub Action auto-deploys to the us-west-1b server behind the ALB.
+Production URL: `https://app.dealeraddendums.com`
 First-time deploy: SSH in, clone repo, set `.env.production`, `npm ci && npm run build && pm2 start ecosystem.config.js`.
 
 ---
@@ -591,11 +598,65 @@ research and inspections before making any purchasing decisions.
 - Value in .env.local: `da_cron_7f3a9e2b1c8d4f6e0a5b9c3d7e1f2a4b`
 - Use a different, strong random value in production
 
-### EasyCron setup
+### EasyCron setup — vehicle archive
 - URL: http://ec2-54-167-226-23.compute-1.amazonaws.com/api/cron/archive-vehicles
 - Header: x-cron-secret: [production CRON_SECRET value]
 - Schedule: 0 3 * * 0 (3 AM UTC every Sunday)
 - Method: POST
+
+### EasyCron setup — PDF purge
+- URL: http://ec2-54-167-226-23.compute-1.amazonaws.com/api/cron/purge-old-pdfs
+- Header: x-cron-secret: [production CRON_SECRET value] (same CRON_SECRET as archive job)
+- Schedule: 0 3 1 * * (3 AM UTC on the 1st of each month)
+- Method: POST
+- What it does: deletes S3 PDF objects from `dealer-addendums` bucket for any
+  `addendum_data` row where `printed_at < NOW() - 12 months` AND `s3_key IS NOT NULL`.
+  After successful S3 delete, sets `s3_key = NULL` on the row (record is kept).
+  Processes in batches of 100. Returns `{ deleted, failed, errors }`.
+- Returns: JSON `{ deleted: N, failed: N, errors: string[] }`
+- S3 bucket: dealer-addendums (us-west-1)
+- Table: addendum_data (s3_key column added in migration 039)
+
+### EasyCron setup — Supabase backup
+- URL: https://app.dealeraddendums.com/api/cron/backup-supabase
+- Header: x-cron-secret: [same CRON_SECRET value]
+- Schedule: 0 2 * * * (2 AM UTC daily — runs before the 3 AM purge job)
+- Method: POST
+- What it does: exports all rows from configured tables in both Supabase projects
+  (DA Platform + DA Billing), gzips them, uploads to S3 `da-platform-backups` bucket.
+  Each table is backed up independently — one failure does not abort the rest.
+- Returns: JSON `{ date, da-platform: { success, failed, tables }, da-billing: { success, failed, tables } }`
+- S3 bucket: da-platform-backups (us-west-1), versioning enabled, 90-day lifecycle
+- S3 key pattern: `{project}/{YYYY-MM-DD}/{table}.json.gz`
+
+### S3 bucket: da-platform-backups
+- Region: us-west-1
+- Versioning: enabled
+- Lifecycle rule (add manually via AWS Console or CLI after deploy):
+  ```json
+  {"Rules":[{"ID":"delete-old-backups","Status":"Enabled","Filter":{"Prefix":""},"NoncurrentVersionExpiration":{"NoncurrentDays":90},"Expiration":{"Days":90}}]}
+  ```
+  Keeps 90 days of daily backups, then auto-deletes.
+
+### Supabase backup — tables backed up
+
+**DA Platform** (`byouefbebqgffhtfdggu`):
+dealers, profiles, templates, dealer_vehicles, label_orders, addendum_data,
+invitations, groups, dealer_settings, dealer_template_assignments, dealer_option_assignments
+
+**DA Billing** (`pzkrvgohxojqscdsmegc`):
+kv_store_0ecc29ad (active), dealers/invoices/recurring_templates/payments (pending — will
+succeed once billing migrates from KV store to relational tables)
+
+### Supabase backup — required env vars
+```
+DA_BILLING_SUPABASE_URL=https://pzkrvgohxojqscdsmegc.supabase.co
+DA_BILLING_SERVICE_ROLE_KEY=<billing project service role key>
+BACKUP_BUCKET=da-platform-backups
+BACKUP_BUCKET_REGION=us-west-1
+```
+Add to `.env.local` for dev and `.env.production` on the new EC2.
+SUPABASE_SERVICE_ROLE_KEY and AWS credentials are already set.
 
 ---
 
@@ -620,6 +681,67 @@ research and inspections before making any purchasing decisions.
 | `dealer_vehicles_archive` | Mirror of dealer_vehicles + archived_at/archive_reason for 6mo+ inactive |
 | `vehicle_audit_log_archive` | Mirror of vehicle_audit_log without FK constraints (for archived vehicles) |
 | `ai_content_cache` | Per-VIN+dealer_id AI description + features cache |
+| `dealer_template_assignments` | Group assigns a group_template to specific dealers (locked or editable copy) |
+| `dealer_option_assignments` | Group assigns a suggested group_option to specific dealers (locked or copied to library) |
+
+---
+
+## Group Admin Feature Set (Migration 041, 2026-04-29)
+
+### Migration 041 — supabase/migrations/041_group_admin_features.sql
+1. Extends `invitations` table: `dealer_id` made nullable, `group_id` column added, role CHECK expanded to include `group_admin` and `group_user`
+2. Adds `is_suggested boolean DEFAULT false` to `group_options` (false=corporate/locked, true=suggested/assignable)
+3. Creates `dealer_template_assignments` (group → dealer template assignment)
+4. Creates `dealer_option_assignments` (group → dealer option assignment)
+
+### Group Users (Feature 1)
+- `GET/POST /api/groups/[id]/users` — list or invite group users
+- `PATCH/DELETE /api/groups/[id]/users/[userId]` — edit or delete a group user
+- Users tab added to `GroupOptionsPanel` (first tab) — shows group_admin/group_user profiles
+- Invite modal sends email via Mandrill using the same invitation flow as dealer invites
+- `app/api/invite/accept` updated: if `group_id` is set and `dealer_id` is null, creates profile with `group_id` and group role
+
+### Group Builder Access (Feature 2)
+- Builder added to group_admin sidebar nav (always accessible)
+- `BuilderPage` accepts `groupId` prop; group_admin builder route passes group context
+- Save Template modal shows "Group Template" toggle when `groupId` is available
+- When toggled: saves to `/api/group-templates/[groupId]` instead of dealer templates
+
+### Template Assignment (Feature 3)
+- `GET/POST/DELETE /api/groups/[id]/template-assignments`
+- Templates tab in `GroupOptionsPanel` has "Assign to Dealers" button per row
+- Assignment modal: dealer checkboxes, Select All/None, dealer_editable toggle
+  - `dealer_editable=false`: locked assignment (dealer can load/preview, not save)
+  - `dealer_editable=true`: copies template to dealer's own templates library
+
+### Group Options — Suggested (Feature 4)
+- `group_options.is_suggested` distinguishes corporate (false) from suggested (true)
+- `GET/POST/DELETE /api/groups/[id]/option-assignments`
+- Options tab now has two sections: Corporate Options (Locked) and Suggested Options
+- Suggested options have "Assign to Dealers" button with same dealer selection modal
+  - `dealer_editable=false`: added as locked option to dealer addendums
+  - `dealer_editable=true`: copied to dealer's `addendum_library` for self-service use
+
+### Group Admin Dealer Management (Feature 5)
+- `group_admin` can create dealers via "+ Add Dealer" in Member Dealers section (uses `CreateDealerInGroup` form)
+- `group_admin` can remove dealers from their group ("Remove from Group" button)
+- `DELETE /api/groups/[id]/dealers` now allows `group_admin` to remove their own dealers (with group membership verification)
+- `GroupProfileCard` passes `isGroupAdmin` to `GroupDealers` component
+- Sidebar: `group_admin` now sees "My Group" (links to `/groups`) and "Builder"
+
+### Permission summary
+
+| Action | super_admin | group_admin | dealer_admin |
+|--------|-------------|-------------|--------------|
+| Create dealer in group | ✅ | ✅ own group only | ❌ |
+| Assign dealer to group | ✅ | ❌ | ❌ |
+| Remove dealer from group | ✅ | ✅ own group only | ❌ |
+| Delete dealer | ✅ | ❌ | ❌ |
+| Manage group users | ✅ | ✅ own group only | ❌ |
+| Create group templates | ✅ | ✅ own group only | ❌ |
+| Assign templates to dealers | ✅ | ✅ own group only | ❌ |
+| Create group options | ✅ | ✅ own group only | ❌ |
+| Assign options to dealers | ✅ | ✅ own group only | ❌ |
 
 ---
 

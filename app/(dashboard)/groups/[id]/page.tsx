@@ -65,9 +65,15 @@ export default async function GroupPage({ params }: Props) {
           </Link>
         </nav>
       )}
-      <GroupProfileCard group={group} canEdit={canEdit} isSuperAdmin={isSuperAdmin} hubspotCompanyId={hubspotCompanyId} />
+      <GroupProfileCard
+        group={group}
+        canEdit={canEdit}
+        isSuperAdmin={isSuperAdmin}
+        isGroupAdmin={isGroupAdmin}
+        hubspotCompanyId={hubspotCompanyId}
+      />
       {(isSuperAdmin || isGroupAdmin) && (
-        <GroupOptionsPanel groupId={params.id} />
+        <GroupOptionsPanel groupId={params.id} isSuperAdmin={isSuperAdmin} />
       )}
     </div>
   );

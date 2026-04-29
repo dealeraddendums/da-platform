@@ -126,9 +126,10 @@ interface Props {
   customSizes?: CustomSize[];
   dealerId?: string;
   dealerLogoUrl?: string | null;
+  groupId?: string;
 }
 
-export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl }: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, groupId }: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
@@ -160,6 +161,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [saveVtypes, setSaveVtypes] = useState<Set<string>>(new Set(['new']));
   const [saveTname, setSaveTname] = useState('');
   const [saveDocType, setSaveDocType] = useState<'addendum' | 'infosheet'>('addendum');
+  const [saveAsGroupTemplate, setSaveAsGroupTemplate] = useState(false);
   const [nudge, setNudge] = useState({ left: 0, right: 0, top: 0, bottom: 0 });
   const [printAiOverride, setPrintAiOverride] = useState<'db'|'ai'|'default'>('default');
   const [localCustomSizes, setLocalCustomSizes] = useState<CustomSize[]>(customSizes);
@@ -668,6 +670,15 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       is_active: !isDraft,
     };
     try {
+      // Group template path: save to group_templates table
+      if (saveAsGroupTemplate && groupId) {
+        const r = await fetch(`/api/group-templates/${groupId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!r.ok) { showToast('Save failed — try again'); return; }
+        setShowSave(false);
+        showToast(`✓ Group template saved: ${name}`);
+        return;
+      }
+
       // Determine whether to update an existing template or create a new one:
       // 1. If a template was loaded and the name is unchanged → PATCH that ID
       // 2. If a template with this name already exists for this dealer → PATCH it
@@ -722,7 +733,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {
       showToast('Save failed — try again');
     }
-  }, [saveTname, templateName, saveDocType, saveVtypes, nid, bgUrl, fontScale, showToast, loadedTemplateId, savedTemplates]);
+  }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, showToast, loadedTemplateId, savedTemplates]);
 
   // ── Load templates list ────────────────────────────────────────────
   const openTemplates = useCallback(async () => {
@@ -1232,8 +1243,31 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
               <div><strong>Applies to:</strong> <span style={{ color: '#1976d2', fontWeight: 600 }}>{Array.from(saveVtypes).map(v => v.charAt(0).toUpperCase() + v.slice(1)).join(', ')}</span></div>
             </div>
           </div>
+          {groupId && (
+            <div style={{ padding: '0 24px 20px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+                <div
+                  onClick={() => setSaveAsGroupTemplate(v => !v)}
+                  style={{
+                    width: 36, height: 20, borderRadius: 10, background: saveAsGroupTemplate ? '#1976d2' : '#e0e0e0',
+                    position: 'relative', transition: 'background 150ms', cursor: 'pointer', flexShrink: 0,
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute', top: 2, left: saveAsGroupTemplate ? 18 : 2, width: 16, height: 16,
+                    borderRadius: '50%', background: '#fff', transition: 'left 150ms',
+                  }} />
+                </div>
+                <span style={{ fontSize: 13, color: '#333' }}>
+                  Save as Group Template — shared with all dealers in your group
+                </span>
+              </label>
+            </div>
+          )}
           <div style={{ padding: '16px 24px', borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: '#78828c' }}>Templates saved per dealer</span>
+            <span style={{ fontSize: 12, color: '#78828c' }}>
+              {saveAsGroupTemplate && groupId ? 'Saving to group template library' : 'Templates saved per dealer'}
+            </span>
             <div style={{ display: 'flex', gap: 12 }}>
               <button onClick={() => setShowSave(false)} style={mfClose}>Cancel</button>
               <button onClick={saveTemplate} style={mfSave}>Save Template</button>

@@ -36,7 +36,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = await req.json() as { option_name?: string; option_price?: string; sort_order?: number };
+  const body = await req.json() as { option_name?: string; option_price?: string; sort_order?: number; is_suggested?: boolean };
   if (!body.option_name?.trim()) {
     return NextResponse.json({ error: "option_name required" }, { status: 400 });
   }
@@ -49,6 +49,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       option_name: body.option_name.trim(),
       option_price: body.option_price?.trim() ?? "NC",
       sort_order: body.sort_order ?? 0,
+      is_suggested: body.is_suggested ?? false,
     })
     .select("*")
     .single();

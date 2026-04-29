@@ -11,6 +11,7 @@ type Props = {
   group: GroupRow;
   canEdit: boolean;
   isSuperAdmin: boolean;
+  isGroupAdmin?: boolean;
   hubspotCompanyId?: number | null;
 };
 
@@ -67,7 +68,7 @@ function HubSpotPill({ href }: { href: string }) {
   );
 }
 
-export default function GroupProfileCard({ group: initialGroup, canEdit, isSuperAdmin, hubspotCompanyId }: Props) {
+export default function GroupProfileCard({ group: initialGroup, canEdit, isSuperAdmin, isGroupAdmin = false, hubspotCompanyId }: Props) {
   const [group, setGroup] = useState(initialGroup);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<FormData>(groupToForm(initialGroup));
@@ -228,7 +229,7 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
       </div>
 
       {/* Member dealers */}
-      <GroupDealers groupId={group.id} isSuperAdmin={isSuperAdmin} />
+      <GroupDealers groupId={group.id} isSuperAdmin={isSuperAdmin} isGroupAdmin={isGroupAdmin} />
 
       {/* Metadata */}
       <div className="mt-4 text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
@@ -241,7 +242,7 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
 
 // ── Member Dealers section ────────────────────────────────────────────────────
 
-function GroupDealers({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: boolean }) {
+function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string; isSuperAdmin: boolean; isGroupAdmin: boolean }) {
   const [dealers, setDealers] = useState<DealerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -324,7 +325,7 @@ function GroupDealers({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin
         <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
           Member Dealers ({dealers.length})
         </p>
-        {isSuperAdmin && (
+        {(isSuperAdmin || isGroupAdmin) && (
           <button
             className="btn btn-secondary"
             style={{ fontSize: 12, height: 30, padding: "0 12px" }}
@@ -335,15 +336,26 @@ function GroupDealers({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin
         )}
       </div>
 
-      {showAddForm && isSuperAdmin && (
-        <AddDealerToGroup
-          groupId={groupId}
-          existingDealerIds={dealers.map((d) => d.id)}
-          onAdded={(dealer) => {
-            setDealers((d) => [...d, dealer].sort((a, b) => a.name.localeCompare(b.name)));
-            setShowAddForm(false);
-          }}
-        />
+      {showAddForm && (isSuperAdmin || isGroupAdmin) && (
+        isSuperAdmin ? (
+          <AddDealerToGroup
+            groupId={groupId}
+            existingDealerIds={dealers.map((d) => d.id)}
+            onAdded={(dealer) => {
+              setDealers((d) => [...d, dealer].sort((a, b) => a.name.localeCompare(b.name)));
+              setShowAddForm(false);
+            }}
+          />
+        ) : (
+          <CreateDealerInGroup
+            groupId={groupId}
+            onCreated={(dealer) => {
+              setDealers((d) => [...d, dealer].sort((a, b) => a.name.localeCompare(b.name)));
+              setShowAddForm(false);
+            }}
+            onCancel={() => setShowAddForm(false)}
+          />
+        )
       )}
 
       {loading ? (
@@ -406,15 +418,23 @@ function GroupDealers({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin
                   {[d.city, d.state].filter(Boolean).join(", ") || "—"}
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {isSuperAdmin ? (
-                    <button
-                      className="text-xs"
-                      style={{ color: "var(--error)" }}
-                      disabled={removing === d.id}
-                      onClick={() => void removeDealer(d.id)}
-                    >
-                      {removing === d.id ? "Removing…" : "Remove"}
-                    </button>
+                  {(isSuperAdmin || isGroupAdmin) ? (
+                    <div className="flex items-center justify-end gap-3">
+                      <Link href={`/dealers/${d.id}`} className="text-xs font-medium" style={{ color: "var(--blue)" }}>
+                        View
+                      </Link>
+                      <button
+                        className="text-xs"
+                        style={{ color: "var(--error)" }}
+                        disabled={removing === d.id}
+                        onClick={() => {
+                          const confirmMsg = `Remove ${d.name} from this group?\n\nThe dealer account will remain active but will no longer be associated with your group.`;
+                          if (confirm(confirmMsg)) void removeDealer(d.id);
+                        }}
+                      >
+                        {removing === d.id ? "Removing…" : "Remove from Group"}
+                      </button>
+                    </div>
                   ) : (
                     <Link href={`/dealers/${d.id}`} className="text-xs font-medium" style={{ color: "var(--blue)" }}>
                       View →
@@ -525,6 +545,115 @@ function AddDealerToGroup({ groupId, existingDealerIds, onAdded }: AddDealerProp
         <p className="text-xs" style={{ color: "var(--text-muted)" }}>No unassigned dealers found.</p>
       )}
     </div>
+  );
+}
+
+// ── Create Dealer in Group (group_admin only) ─────────────────────────────────
+
+const US_STATES_SHORT = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
+  "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
+  "VA","WA","WV","WI","WY",
+];
+
+type CreateDealerProps = {
+  groupId: string;
+  onCreated: (dealer: DealerRow) => void;
+  onCancel: () => void;
+};
+
+function CreateDealerInGroup({ groupId: _groupId, onCreated, onCancel }: CreateDealerProps) {
+  const [fields, setFields] = useState({
+    name: "", address: "", city: "", state: "", zip: "",
+    phone: "", primary_contact: "", primary_contact_email: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function set(k: string) {
+    return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setFields((f) => ({ ...f, [k]: e.target.value }));
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!fields.name.trim()) { setErr("Dealer Name is required."); return; }
+    setSaving(true);
+    setErr(null);
+    const res = await fetch("/api/dealers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: fields.name.trim(),
+        address: fields.address.trim() || null,
+        city: fields.city.trim() || null,
+        state: fields.state || null,
+        zip: fields.zip.trim() || null,
+        phone: fields.phone.trim() || null,
+        primary_contact: fields.primary_contact.trim() || null,
+        primary_contact_email: fields.primary_contact_email.trim() || null,
+      }),
+    });
+    const json = (await res.json()) as { data?: DealerRow; error?: string };
+    if (!res.ok || !json.data) { setErr(json.error ?? "Failed to create dealer"); setSaving(false); return; }
+    onCreated(json.data);
+  }
+
+  return (
+    <form onSubmit={(e) => void submit(e)} className="px-6 py-4" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
+      <p className="text-xs font-semibold mb-3" style={{ color: "var(--text-secondary)" }}>
+        Create a new dealer in your group
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label className="label">Dealer Name *</label>
+          <input className="input" style={{ height: 32, fontSize: 13 }} value={fields.name} onChange={set("name")} placeholder="ABC Motors" required />
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label className="label">Address</label>
+          <input className="input" style={{ height: 32, fontSize: 13 }} value={fields.address} onChange={set("address")} placeholder="123 Main St" />
+        </div>
+        <div>
+          <label className="label">City</label>
+          <input className="input" style={{ height: 32, fontSize: 13 }} value={fields.city} onChange={set("city")} placeholder="Cincinnati" />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div>
+            <label className="label">State</label>
+            <select className="input" style={{ height: 32, fontSize: 13 }} value={fields.state} onChange={set("state")}>
+              <option value="">—</option>
+              {US_STATES_SHORT.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Zip</label>
+            <input className="input" style={{ height: 32, fontSize: 13 }} value={fields.zip} onChange={set("zip")} placeholder="45202" />
+          </div>
+        </div>
+        <div>
+          <label className="label">Phone</label>
+          <input className="input" style={{ height: 32, fontSize: 13 }} value={fields.phone} onChange={set("phone")} placeholder="(513) 555-0100" />
+        </div>
+        <div>
+          <label className="label">Contact Name</label>
+          <input className="input" style={{ height: 32, fontSize: 13 }} value={fields.primary_contact} onChange={set("primary_contact")} placeholder="Jane Smith" />
+        </div>
+        <div>
+          <label className="label">Contact Email</label>
+          <input className="input" style={{ height: 32, fontSize: 13 }} type="email" value={fields.primary_contact_email} onChange={set("primary_contact_email")} placeholder="jane@dealer.com" />
+        </div>
+      </div>
+      {err && <p className="text-xs mb-2" style={{ color: "var(--error)" }}>{err}</p>}
+      <div className="flex gap-2">
+        <button type="submit" className="btn btn-primary text-xs" style={{ height: 32 }} disabled={saving}>
+          {saving ? "Creating…" : "Create Dealer"}
+        </button>
+        <button type="button" className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 

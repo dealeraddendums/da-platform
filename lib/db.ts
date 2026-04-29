@@ -737,6 +737,7 @@ export type GroupOptionRow = {
   option_price: string;
   sort_order: number;
   active: boolean;
+  is_suggested: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -747,6 +748,7 @@ type GroupOptionInsert = {
   option_price?: string;
   sort_order?: number;
   active?: boolean;
+  is_suggested?: boolean;
 };
 
 type GroupOptionUpdate = {
@@ -815,6 +817,26 @@ type GroupTemplateUpdate = {
   is_locked?: boolean;
   is_active?: boolean;
   updated_at?: string;
+};
+
+export type DealerTemplateAssignmentRow = {
+  id: string;
+  dealer_id: string | null;
+  template_id: string | null;
+  group_id: string | null;
+  dealer_editable: boolean;
+  assigned_at: string;
+  assigned_by: string | null;
+};
+
+export type DealerOptionAssignmentRow = {
+  id: string;
+  dealer_id: string | null;
+  option_id: string;
+  group_id: string | null;
+  dealer_editable: boolean;
+  assigned_at: string;
+  assigned_by: string | null;
 };
 
 export type DealerVehicleRow = {
@@ -1301,6 +1323,32 @@ export type Database = {
           model_year?: number | null; engine?: string | null; displacement?: string | null;
           cylinders?: string | null; fuel_type?: string | null; transmission?: string | null;
           drivetrain?: string | null; doors?: number | null;
+        };
+        Update: Record<string, unknown>;
+        Relationships: [];
+      };
+      dealer_template_assignments: {
+        Row: DealerTemplateAssignmentRow;
+        Insert: {
+          dealer_id?: string | null;
+          template_id?: string | null;
+          group_id?: string | null;
+          dealer_editable?: boolean;
+          assigned_at?: string;
+          assigned_by?: string | null;
+        };
+        Update: Record<string, unknown>;
+        Relationships: [];
+      };
+      dealer_option_assignments: {
+        Row: DealerOptionAssignmentRow;
+        Insert: {
+          dealer_id?: string | null;
+          option_id: string;
+          group_id?: string | null;
+          dealer_editable?: boolean;
+          assigned_at?: string;
+          assigned_by?: string | null;
         };
         Update: Record<string, unknown>;
         Relationships: [];

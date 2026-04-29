@@ -13,11 +13,25 @@ export default async function BuilderRoute() {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("dealer_id")
+    .select("dealer_id, role, group_id, active_dealer_id")
     .eq("id", session.user.id)
-    .maybeSingle<{ dealer_id: string | null }>();
+    .maybeSingle<{ dealer_id: string | null; role: string; group_id: string | null; active_dealer_id: string | null }>();
 
-  const dealerId = profile?.dealer_id ?? null;
+  const role = profile?.role ?? "dealer_user";
+  const isGroupAdmin = role === "group_admin";
+
+  // Resolve effective dealer_id: group_admin with active_dealer_id uses that dealer's text ID
+  let dealerId = profile?.dealer_id ?? null;
+  if (isGroupAdmin && profile?.active_dealer_id) {
+    const { data: activeDlr } = await admin
+      .from("dealers")
+      .select("dealer_id")
+      .eq("id", profile.active_dealer_id)
+      .maybeSingle<{ dealer_id: string }>();
+    if (activeDlr) dealerId = activeDlr.dealer_id;
+  }
+
+  const groupId = (isGroupAdmin && profile?.group_id) ? profile.group_id : null;
 
   const [{ data: customSizeRows }, { data: dealerData }] = await Promise.all([
     dealerId
@@ -32,5 +46,5 @@ export default async function BuilderRoute() {
   const rawLogo = dealerData?.logo_url ?? null;
   const resolvedLogo = rawLogo ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo) : null;
 
-  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} />;
+  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} groupId={groupId ?? undefined} />;
 }

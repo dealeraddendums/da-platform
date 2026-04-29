@@ -5,14 +5,16 @@ import type { GroupOptionRow, GroupDisclaimerRow, GroupTemplateRow } from "@/lib
 
 type Props = {
   groupId: string;
+  isSuperAdmin?: boolean;
 };
 
-type Tab = "options" | "disclaimers" | "templates";
+type Tab = "users" | "options" | "disclaimers" | "templates";
 
-export default function GroupOptionsPanel({ groupId }: Props) {
-  const [tab, setTab] = useState<Tab>("options");
+export default function GroupOptionsPanel({ groupId, isSuperAdmin = false }: Props) {
+  const [tab, setTab] = useState<Tab>("users");
 
   const tabs: { id: Tab; label: string }[] = [
+    { id: "users", label: "Users" },
     { id: "options", label: "Corporate Options" },
     { id: "disclaimers", label: "Disclaimers" },
     { id: "templates", label: "Templates" },
@@ -41,6 +43,7 @@ export default function GroupOptionsPanel({ groupId }: Props) {
       </div>
 
       <div className="mt-4">
+        {tab === "users" && <UsersTab groupId={groupId} isSuperAdmin={isSuperAdmin} />}
         {tab === "options" && <OptionsTab groupId={groupId} />}
         {tab === "disclaimers" && <DisclaimersTab groupId={groupId} />}
         {tab === "templates" && <TemplatesTab groupId={groupId} />}
@@ -49,9 +52,310 @@ export default function GroupOptionsPanel({ groupId }: Props) {
   );
 }
 
+// ── Users Tab ─────────────────────────────────────────────────────────────────
+
+type GroupUserProfile = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: string;
+  active: boolean;
+  last_login: string | null;
+  created_at: string;
+};
+
+function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: boolean }) {
+  const [users, setUsers] = useState<GroupUserProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showInvite, setShowInvite] = useState(false);
+  const [invFields, setInvFields] = useState({ firstName: "", lastName: "", email: "", role: "group_user" });
+  const [inviting, setInviting] = useState(false);
+  const [invError, setInvError] = useState<string | null>(null);
+  const [invSuccess, setInvSuccess] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editRole, setEditRole] = useState("");
+  const [editActive, setEditActive] = useState(true);
+  const [editName, setEditName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [impersonating, setImpersonating] = useState<string | null>(null);
+
+  const fetchUsers = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const res = await fetch(`/api/groups/${groupId}/users`);
+    if (res.ok) {
+      const json = await res.json() as { data: GroupUserProfile[] };
+      setUsers(json.data ?? []);
+    } else {
+      setError("Failed to load users");
+    }
+    setLoading(false);
+  }, [groupId]);
+
+  useEffect(() => { void fetchUsers(); }, [fetchUsers]);
+
+  async function sendInvite(e: React.FormEvent) {
+    e.preventDefault();
+    setInviting(true);
+    setInvError(null);
+    const res = await fetch(`/api/groups/${groupId}/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(invFields),
+    });
+    if (res.ok) {
+      setInvSuccess(true);
+      setInvFields({ firstName: "", lastName: "", email: "", role: "group_user" });
+      setTimeout(() => { setInvSuccess(false); setShowInvite(false); }, 2000);
+    } else {
+      const json = await res.json() as { error?: string };
+      setInvError(json.error ?? "Failed to send invitation");
+    }
+    setInviting(false);
+  }
+
+  function startEdit(u: GroupUserProfile) {
+    setEditingId(u.id);
+    setEditRole(u.role);
+    setEditActive(u.active);
+    setEditName(u.full_name ?? "");
+  }
+
+  async function saveEdit(u: GroupUserProfile) {
+    setSaving(true);
+    const res = await fetch(`/api/groups/${groupId}/users/${u.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: editRole, active: editActive, full_name: editName }),
+    });
+    if (res.ok) {
+      const json = await res.json() as { data: GroupUserProfile };
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? json.data : x)));
+      setEditingId(null);
+    }
+    setSaving(false);
+  }
+
+  async function deleteUser(u: GroupUserProfile) {
+    if (!confirm(`Delete user ${u.full_name ?? u.email}? This cannot be undone.`)) return;
+    const res = await fetch(`/api/groups/${groupId}/users/${u.id}`, { method: "DELETE" });
+    if (res.ok) {
+      setUsers((prev) => prev.filter((x) => x.id !== u.id));
+    }
+  }
+
+  async function handleImpersonate(u: GroupUserProfile) {
+    setImpersonating(u.id);
+    // Group users don't have a dealer — impersonate is only for dealer context
+    // For now, just show a toast-style message
+    setTimeout(() => setImpersonating(null), 1500);
+    alert("Group user impersonation: Coming soon. Use the dealer switcher to impersonate a dealer in context.");
+  }
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+            Group Users
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+            Manage who has access to this group&apos;s admin portal.
+          </p>
+        </div>
+        <button
+          className="btn btn-primary"
+          style={{ fontSize: 12, height: 30, padding: "0 12px" }}
+          onClick={() => { setShowInvite(true); setInvSuccess(false); setInvError(null); }}
+        >
+          + Invite User
+        </button>
+      </div>
+
+      {error && (
+        <div className="px-5 py-2 text-xs" style={{ background: "#ffebee", color: "var(--error)" }}>{error}</div>
+      )}
+
+      {showInvite && (
+        <form onSubmit={(e) => void sendInvite(e)} className="px-5 py-4 space-y-3" style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}>
+          <p className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Invite a new group user</p>
+          {invSuccess && (
+            <div className="text-xs px-3 py-2 rounded" style={{ background: "#e8f5e9", color: "#2e7d32" }}>
+              Invitation sent!
+            </div>
+          )}
+          {invError && (
+            <div className="text-xs px-3 py-2 rounded" style={{ background: "#ffebee", color: "var(--error)" }}>{invError}</div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">First Name *</label>
+              <input className="input text-sm" style={{ height: 32 }} value={invFields.firstName}
+                onChange={(e) => setInvFields((f) => ({ ...f, firstName: e.target.value }))} required />
+            </div>
+            <div>
+              <label className="label">Last Name *</label>
+              <input className="input text-sm" style={{ height: 32 }} value={invFields.lastName}
+                onChange={(e) => setInvFields((f) => ({ ...f, lastName: e.target.value }))} required />
+            </div>
+          </div>
+          <div>
+            <label className="label">Email *</label>
+            <input className="input text-sm" style={{ height: 32 }} type="email" value={invFields.email}
+              onChange={(e) => setInvFields((f) => ({ ...f, email: e.target.value }))} required />
+          </div>
+          <div>
+            <label className="label">Role</label>
+            <select className="input text-sm" style={{ height: 32 }} value={invFields.role}
+              onChange={(e) => setInvFields((f) => ({ ...f, role: e.target.value }))}>
+              <option value="group_user">Group User (read-only)</option>
+              <option value="group_admin">Group Admin</option>
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <button type="submit" className="btn btn-primary text-xs" style={{ height: 32 }} disabled={inviting}>
+              {inviting ? "Sending…" : "Send Invitation"}
+            </button>
+            <button type="button" className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={() => setShowInvite(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {loading ? (
+        <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading…</div>
+      ) : users.length === 0 ? (
+        <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+          No group users yet. Use &quot;+ Invite User&quot; to add team members.
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
+              {["Name", "Email", "Role", "Status", "Last Sign In", ""].map((h) => (
+                <th key={h} className="px-4 py-2 text-left font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((u, i) => {
+              const isEditing = editingId === u.id;
+              return (
+                <tr key={u.id} style={{ borderBottom: i < users.length - 1 ? "1px solid var(--border)" : "none", opacity: u.active ? 1 : 0.55 }}>
+                  <td className="px-4 py-2.5 font-medium">
+                    {isEditing ? (
+                      <input className="input text-sm" style={{ height: 28, width: 140 }} value={editName}
+                        onChange={(e) => setEditName(e.target.value)} />
+                    ) : (
+                      <span style={{ color: "var(--text-primary)" }}>{u.full_name || "—"}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text-secondary)" }}>{u.email}</td>
+                  <td className="px-4 py-2.5">
+                    {isEditing ? (
+                      <select className="input text-xs" style={{ height: 26, width: 130 }} value={editRole}
+                        onChange={(e) => setEditRole(e.target.value)}>
+                        <option value="group_user">Group User</option>
+                        <option value="group_admin">Group Admin</option>
+                      </select>
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 rounded" style={{ background: u.role === "group_admin" ? "#e3f2fd" : "#f5f6f7", color: u.role === "group_admin" ? "#1565c0" : "#55595c", border: "1px solid var(--border)" }}>
+                        {u.role === "group_admin" ? "Group Admin" : "Group User"}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {isEditing ? (
+                      <select className="input text-xs" style={{ height: 26, width: 90 }} value={editActive ? "active" : "inactive"}
+                        onChange={(e) => setEditActive(e.target.value === "active")}>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                      </select>
+                    ) : (
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                        style={{ background: u.active ? "#e8f5e9" : "#fafafa", color: u.active ? "#2e7d32" : "#78828c", border: `1px solid ${u.active ? "#c8e6c9" : "#e0e0e0"}` }}>
+                        {u.active ? "Active" : "Inactive"}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text-muted)" }}>
+                    {u.last_login ? new Date(u.last_login).toLocaleDateString() : "Never"}
+                  </td>
+                  <td className="px-4 py-2.5 text-right" style={{ whiteSpace: "nowrap" }}>
+                    {isEditing ? (
+                      <>
+                        <button className="text-xs mr-2" style={{ color: "var(--blue)" }} disabled={saving} onClick={() => void saveEdit(u)}>
+                          {saving ? "Saving…" : "Save"}
+                        </button>
+                        <button className="text-xs" style={{ color: "var(--text-muted)" }} onClick={() => setEditingId(null)}>Cancel</button>
+                      </>
+                    ) : (
+                      <div className="flex items-center justify-end gap-3">
+                        <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => startEdit(u)} title="Edit">Edit</button>
+                        {isSuperAdmin && (
+                          <button
+                            className="text-xs"
+                            style={{ color: "var(--text-muted)" }}
+                            disabled={impersonating === u.id}
+                            onClick={() => void handleImpersonate(u)}
+                            title="Impersonate"
+                          >
+                            {impersonating === u.id ? "…" : "Impersonate"}
+                          </button>
+                        )}
+                        <button className="text-xs" style={{ color: "var(--error)" }} onClick={() => void deleteUser(u)} title="Delete">Delete</button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 // ── Corporate Options Tab ─────────────────────────────────────────────────────
 
 function OptionsTab({ groupId }: { groupId: string }) {
+  return (
+    <div className="space-y-6">
+      <OptionSection
+        groupId={groupId}
+        isSuggested={false}
+        title="Corporate Options (Locked)"
+        description="Automatically prepended to every dealer addendum in this group. Dealers cannot remove or edit these."
+        emptyText="No corporate options yet. These appear locked on all dealer addendums."
+        addLabel="+ Add Corporate Option"
+      />
+      <OptionSection
+        groupId={groupId}
+        isSuggested={true}
+        title="Suggested Options"
+        description="Make these options available to dealers. Use &ldquo;Assign to Dealers&rdquo; to push them to specific dealers."
+        emptyText="No suggested options yet. Add options here to make them available for dealer assignment."
+        addLabel="+ Add Suggested Option"
+      />
+    </div>
+  );
+}
+
+type OptionSectionProps = {
+  groupId: string;
+  isSuggested: boolean;
+  title: string;
+  description: string;
+  emptyText: string;
+  addLabel: string;
+};
+
+type DealerBasic = { id: string; name: string };
+
+function OptionSection({ groupId, isSuggested, title, description, emptyText, addLabel }: OptionSectionProps) {
   const [options, setOptions] = useState<GroupOptionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,17 +367,25 @@ function OptionsTab({ groupId }: { groupId: string }) {
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState("");
 
+  // Assign modal state (suggested only)
+  const [assigningOpt, setAssigningOpt] = useState<GroupOptionRow | null>(null);
+  const [dealers, setDealers] = useState<DealerBasic[]>([]);
+  const [selectedDealers, setSelectedDealers] = useState<Set<string>>(new Set());
+  const [dealerEditable, setDealerEditable] = useState(true);
+  const [assigning, setAssigning] = useState(false);
+  const [assignSuccess, setAssignSuccess] = useState(false);
+
   const fetchOptions = useCallback(async () => {
     setLoading(true);
     const res = await fetch(`/api/group-options/${groupId}`);
     if (res.ok) {
       const json = await res.json() as { data: GroupOptionRow[] };
-      setOptions(json.data);
+      setOptions(json.data.filter((o) => (o.is_suggested ?? false) === isSuggested));
     } else {
       setError("Failed to load options");
     }
     setLoading(false);
-  }, [groupId]);
+  }, [groupId, isSuggested]);
 
   useEffect(() => { void fetchOptions(); }, [fetchOptions]);
 
@@ -85,7 +397,12 @@ function OptionsTab({ groupId }: { groupId: string }) {
     const res = await fetch(`/api/group-options/${groupId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ option_name: newName.trim(), option_price: newPrice.trim() || "NC", sort_order: options.length }),
+      body: JSON.stringify({
+        option_name: newName.trim(),
+        option_price: newPrice.trim() || "NC",
+        sort_order: options.length,
+        is_suggested: isSuggested,
+      }),
     });
     if (res.ok) {
       const json = await res.json() as { data: GroupOptionRow };
@@ -120,7 +437,8 @@ function OptionsTab({ groupId }: { groupId: string }) {
   }
 
   async function deleteOption(id: string) {
-    if (!confirm("Remove this corporate option?")) return;
+    const label = isSuggested ? "suggested option" : "corporate option";
+    if (!confirm(`Remove this ${label}?`)) return;
     const res = await fetch(`/api/group-options/${groupId}/${id}`, { method: "DELETE" });
     if (res.ok) setOptions((prev) => prev.filter((o) => o.id !== id));
   }
@@ -137,134 +455,193 @@ function OptionsTab({ groupId }: { groupId: string }) {
     }
   }
 
+  async function openAssignModal(opt: GroupOptionRow) {
+    setAssigningOpt(opt);
+    setSelectedDealers(new Set());
+    setDealerEditable(true);
+    setAssignSuccess(false);
+    if (dealers.length === 0) {
+      const res = await fetch(`/api/groups/${groupId}/dealers`);
+      if (res.ok) {
+        const json = await res.json() as { data: DealerBasic[] };
+        setDealers(json.data ?? []);
+      }
+    }
+  }
+
+  function toggleDealer(id: string) {
+    setSelectedDealers((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function submitAssign() {
+    if (!assigningOpt || selectedDealers.size === 0) return;
+    setAssigning(true);
+    const res = await fetch(`/api/groups/${groupId}/option-assignments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        option_id: assigningOpt.id,
+        dealer_ids: Array.from(selectedDealers),
+        dealer_editable: dealerEditable,
+      }),
+    });
+    if (res.ok) {
+      setAssignSuccess(true);
+      setTimeout(() => { setAssigningOpt(null); setAssignSuccess(false); }, 1500);
+    }
+    setAssigning(false);
+  }
+
   return (
-    <div className="card overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-            Corporate Options
-          </p>
-          <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-            These options are locked and prepended to every dealer&apos;s addendum in this group.
-          </p>
+    <>
+      <div className="card overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{title}</p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }} dangerouslySetInnerHTML={{ __html: description }} />
+          </div>
+          <button className="btn btn-primary" style={{ fontSize: 12, height: 30, padding: "0 12px" }} onClick={() => setShowAddForm(true)}>
+            {addLabel}
+          </button>
         </div>
-        <button
-          className="btn btn-primary"
-          style={{ fontSize: 12, height: 30, padding: "0 12px" }}
-          onClick={() => setShowAddForm(true)}
-        >
-          + Add Option
-        </button>
+
+        {error && <div className="px-5 py-2 text-xs" style={{ background: "#ffebee", color: "var(--error)" }}>{error}</div>}
+
+        {showAddForm && (
+          <form onSubmit={(e) => void addOption(e)} className="px-5 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}>
+            <input autoFocus className="input text-sm flex-1" style={{ height: 32 }} placeholder="Option name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+            <input className="input text-sm" style={{ height: 32, width: 90 }} placeholder="NC" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} />
+            <button type="submit" className="btn btn-primary text-xs" style={{ height: 32 }} disabled={saving}>{saving ? "Adding…" : "Add"}</button>
+            <button type="button" className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={() => setShowAddForm(false)}>Cancel</button>
+          </form>
+        )}
+
+        {loading ? (
+          <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading…</div>
+        ) : options.length === 0 ? (
+          <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>{emptyText}</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
+                {["Option", "Price", "Active", ""].map((h) => (
+                  <th key={h} className="px-4 py-2 text-left font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {options.map((opt, i) => {
+                const isEditing = editingId === opt.id;
+                return (
+                  <tr key={opt.id} style={{ borderBottom: i < options.length - 1 ? "1px solid var(--border)" : "none", opacity: opt.active ? 1 : 0.5 }}>
+                    <td className="px-4 py-2.5">
+                      {isEditing ? (
+                        <input autoFocus className="input text-sm" style={{ height: 28, width: "100%" }} value={editName} onChange={(e) => setEditName(e.target.value)} />
+                      ) : (
+                        <span style={{ color: "var(--text-primary)" }}>{opt.option_name}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5" style={{ width: 120 }}>
+                      {isEditing ? (
+                        <input className="input text-sm" style={{ height: 28, width: 90 }} value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
+                      ) : (
+                        <span style={{ color: "var(--text-secondary)" }}>{opt.option_price}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <button
+                        className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                        style={{ background: opt.active ? "#e8f5e9" : "#fafafa", color: opt.active ? "#2e7d32" : "#78828c", border: `1px solid ${opt.active ? "#c8e6c9" : "#e0e0e0"}` }}
+                        onClick={() => void toggleActive(opt)}
+                      >
+                        {opt.active ? "Active" : "Inactive"}
+                      </button>
+                    </td>
+                    <td className="px-4 py-2.5 text-right" style={{ whiteSpace: "nowrap" }}>
+                      {isEditing ? (
+                        <>
+                          <button className="text-xs mr-2" style={{ color: "var(--blue)" }} onClick={() => void saveEdit(opt)}>Save</button>
+                          <button className="text-xs" style={{ color: "var(--text-muted)" }} onClick={() => setEditingId(null)}>Cancel</button>
+                        </>
+                      ) : (
+                        <div className="flex items-center justify-end gap-3">
+                          <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => startEdit(opt)}>Edit</button>
+                          {isSuggested && (
+                            <button className="text-xs" style={{ color: "#7b1fa2" }} onClick={() => void openAssignModal(opt)}>Assign to Dealers</button>
+                          )}
+                          <button className="text-xs" style={{ color: "var(--error)" }} onClick={() => void deleteOption(opt.id)}>Delete</button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
 
-      {error && (
-        <div className="px-5 py-2 text-xs" style={{ background: "#ffebee", color: "var(--error)" }}>{error}</div>
-      )}
-
-      {showAddForm && (
-        <form onSubmit={(e) => void addOption(e)} className="px-5 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}>
-          <input
-            autoFocus
-            className="input text-sm flex-1"
-            style={{ height: 32 }}
-            placeholder="Option name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-          />
-          <input
-            className="input text-sm"
-            style={{ height: 32, width: 90 }}
-            placeholder="NC"
-            value={newPrice}
-            onChange={(e) => setNewPrice(e.target.value)}
-          />
-          <button type="submit" className="btn btn-primary text-xs" style={{ height: 32 }} disabled={saving}>
-            {saving ? "Adding…" : "Add"}
-          </button>
-          <button type="button" className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={() => setShowAddForm(false)}>
-            Cancel
-          </button>
-        </form>
-      )}
-
-      {loading ? (
-        <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading…</div>
-      ) : options.length === 0 ? (
-        <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>
-          No corporate options yet. These will appear locked on all dealer addendums.
+      {/* Assign Modal */}
+      {assigningOpt && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="card" style={{ width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
+              <h3 className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
+                Assign &ldquo;{assigningOpt.option_name}&rdquo; to Dealers
+              </h3>
+            </div>
+            <div className="px-5 py-3 overflow-y-auto flex-1">
+              {assignSuccess ? (
+                <div className="text-sm text-center py-4" style={{ color: "#2e7d32" }}>Assigned successfully!</div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>SELECT DEALERS</span>
+                    <div className="flex gap-2">
+                      <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => setSelectedDealers(new Set(dealers.map((d) => d.id)))}>All</button>
+                      <button className="text-xs" style={{ color: "var(--text-muted)" }} onClick={() => setSelectedDealers(new Set())}>None</button>
+                    </div>
+                  </div>
+                  <div className="space-y-1 mb-4">
+                    {dealers.length === 0 ? (
+                      <p className="text-xs" style={{ color: "var(--text-muted)" }}>No dealers in this group.</p>
+                    ) : dealers.map((d) => (
+                      <label key={d.id} className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer" style={{ background: selectedDealers.has(d.id) ? "#e3f2fd" : "transparent" }}>
+                        <input type="checkbox" checked={selectedDealers.has(d.id)} onChange={() => toggleDealer(d.id)} />
+                        <span className="text-sm" style={{ color: "var(--text-primary)" }}>{d.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+                    <p className="text-xs font-semibold mb-2" style={{ color: "var(--text-muted)" }}>DEALER ACCESS</p>
+                    <label className="flex items-center gap-2 cursor-pointer mb-1">
+                      <input type="radio" checked={!dealerEditable} onChange={() => setDealerEditable(false)} />
+                      <span className="text-sm">Locked — dealer cannot edit or remove</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="radio" checked={dealerEditable} onChange={() => setDealerEditable(true)} />
+                      <span className="text-sm">Editable — copied to dealer&apos;s library (they can modify)</span>
+                    </label>
+                  </div>
+                </>
+              )}
+            </div>
+            {!assignSuccess && (
+              <div className="px-5 py-3 flex gap-2 justify-end" style={{ borderTop: "1px solid var(--border)" }}>
+                <button className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={() => setAssigningOpt(null)}>Cancel</button>
+                <button className="btn btn-primary text-xs" style={{ height: 32 }} disabled={assigning || selectedDealers.size === 0} onClick={() => void submitAssign()}>
+                  {assigning ? "Assigning…" : `Assign to ${selectedDealers.size} dealer${selectedDealers.size !== 1 ? "s" : ""}`}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
-              {["Option", "Price", "Active", ""].map((h) => (
-                <th key={h} className="px-4 py-2 text-left font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {options.map((opt, i) => {
-              const isEditing = editingId === opt.id;
-              return (
-                <tr key={opt.id} style={{ borderBottom: i < options.length - 1 ? "1px solid var(--border)" : "none", opacity: opt.active ? 1 : 0.5 }}>
-                  <td className="px-4 py-2.5">
-                    {isEditing ? (
-                      <input
-                        autoFocus
-                        className="input text-sm"
-                        style={{ height: 28, width: "100%" }}
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                      />
-                    ) : (
-                      <span style={{ color: "var(--text-primary)" }}>{opt.option_name}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5" style={{ width: 120 }}>
-                    {isEditing ? (
-                      <input
-                        className="input text-sm"
-                        style={{ height: 28, width: 90 }}
-                        value={editPrice}
-                        onChange={(e) => setEditPrice(e.target.value)}
-                      />
-                    ) : (
-                      <span style={{ color: "var(--text-secondary)" }}>{opt.option_price}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <button
-                      className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                      style={{
-                        background: opt.active ? "#e8f5e9" : "#fafafa",
-                        color: opt.active ? "#2e7d32" : "#78828c",
-                        border: `1px solid ${opt.active ? "#c8e6c9" : "#e0e0e0"}`,
-                      }}
-                      onClick={() => void toggleActive(opt)}
-                    >
-                      {opt.active ? "Active" : "Inactive"}
-                    </button>
-                  </td>
-                  <td className="px-4 py-2.5 text-right" style={{ whiteSpace: "nowrap" }}>
-                    {isEditing ? (
-                      <>
-                        <button className="text-xs mr-2" style={{ color: "var(--blue)" }} onClick={() => void saveEdit(opt)}>Save</button>
-                        <button className="text-xs" style={{ color: "var(--text-muted)" }} onClick={() => setEditingId(null)}>Cancel</button>
-                      </>
-                    ) : (
-                      <>
-                        <button className="text-xs mr-3" style={{ color: "var(--blue)" }} onClick={() => startEdit(opt)}>Edit</button>
-                        <button className="text-xs" style={{ color: "var(--error)" }} onClick={() => void deleteOption(opt.id)}>Delete</button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
       )}
-    </div>
+    </>
   );
 }
 
@@ -545,6 +922,14 @@ function TemplatesTab({ groupId }: { groupId: string }) {
   const [newLocked, setNewLocked] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Assignment modal state
+  const [assigningTpl, setAssigningTpl] = useState<GroupTemplateRow | null>(null);
+  const [dealers, setDealers] = useState<DealerBasic[]>([]);
+  const [selectedDealers, setSelectedDealers] = useState<Set<string>>(new Set());
+  const [dealerEditable, setDealerEditable] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [assignSuccess, setAssignSuccess] = useState(false);
+
   const vehicleTypeOpts = ["New", "Used", "CPO"];
 
   const fetchTemplates = useCallback(async () => {
@@ -622,7 +1007,49 @@ function TemplatesTab({ groupId }: { groupId: string }) {
     );
   }
 
+  async function openAssignModal(tpl: GroupTemplateRow) {
+    setAssigningTpl(tpl);
+    setSelectedDealers(new Set());
+    setDealerEditable(false);
+    setAssignSuccess(false);
+    if (dealers.length === 0) {
+      const res = await fetch(`/api/groups/${groupId}/dealers`);
+      if (res.ok) {
+        const json = await res.json() as { data: DealerBasic[] };
+        setDealers(json.data ?? []);
+      }
+    }
+  }
+
+  function toggleDealer(id: string) {
+    setSelectedDealers((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function submitAssign() {
+    if (!assigningTpl || selectedDealers.size === 0) return;
+    setAssigning(true);
+    const res = await fetch(`/api/groups/${groupId}/template-assignments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        template_id: assigningTpl.id,
+        dealer_ids: Array.from(selectedDealers),
+        dealer_editable: dealerEditable,
+      }),
+    });
+    if (res.ok) {
+      setAssignSuccess(true);
+      setTimeout(() => { setAssigningTpl(null); setAssignSuccess(false); }, 1500);
+    }
+    setAssigning(false);
+  }
+
   return (
+    <>
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
         <div>
@@ -756,8 +1183,11 @@ function TemplatesTab({ groupId }: { groupId: string }) {
                     {t.is_active ? "Active" : "Inactive"}
                   </button>
                 </td>
-                <td className="px-4 py-2.5 text-right">
-                  <button className="text-xs" style={{ color: "var(--error)" }} onClick={() => void deleteTemplate(t.id)}>Delete</button>
+                <td className="px-4 py-2.5 text-right" style={{ whiteSpace: "nowrap" }}>
+                  <div className="flex items-center justify-end gap-3">
+                    <button className="text-xs" style={{ color: "#7b1fa2" }} onClick={() => void openAssignModal(t)}>Assign to Dealers</button>
+                    <button className="text-xs" style={{ color: "var(--error)" }} onClick={() => void deleteTemplate(t.id)}>Delete</button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -765,5 +1195,63 @@ function TemplatesTab({ groupId }: { groupId: string }) {
         </table>
       )}
     </div>
+
+    {/* Assign Modal */}
+    {assigningTpl && (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="card" style={{ width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+          <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
+            <h3 className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
+              Assign &ldquo;{assigningTpl.name}&rdquo; to Dealers
+            </h3>
+          </div>
+          <div className="px-5 py-3 overflow-y-auto flex-1">
+            {assignSuccess ? (
+              <div className="text-sm text-center py-4" style={{ color: "#2e7d32" }}>Assigned successfully!</div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>SELECT DEALERS</span>
+                  <div className="flex gap-2">
+                    <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => setSelectedDealers(new Set(dealers.map((d) => d.id)))}>All</button>
+                    <button className="text-xs" style={{ color: "var(--text-muted)" }} onClick={() => setSelectedDealers(new Set())}>None</button>
+                  </div>
+                </div>
+                <div className="space-y-1 mb-4">
+                  {dealers.length === 0 ? (
+                    <p className="text-xs" style={{ color: "var(--text-muted)" }}>No dealers in this group.</p>
+                  ) : dealers.map((d) => (
+                    <label key={d.id} className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer" style={{ background: selectedDealers.has(d.id) ? "#e3f2fd" : "transparent" }}>
+                      <input type="checkbox" checked={selectedDealers.has(d.id)} onChange={() => toggleDealer(d.id)} />
+                      <span className="text-sm" style={{ color: "var(--text-primary)" }}>{d.name}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+                  <p className="text-xs font-semibold mb-2" style={{ color: "var(--text-muted)" }}>DEALER ACCESS</p>
+                  <label className="flex items-center gap-2 cursor-pointer mb-1">
+                    <input type="radio" checked={!dealerEditable} onChange={() => setDealerEditable(false)} />
+                    <span className="text-sm">Locked — dealer can load but cannot save changes</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" checked={dealerEditable} onChange={() => setDealerEditable(true)} />
+                    <span className="text-sm">Editable — copied to dealer&apos;s template library</span>
+                  </label>
+                </div>
+              </>
+            )}
+          </div>
+          {!assignSuccess && (
+            <div className="px-5 py-3 flex gap-2 justify-end" style={{ borderTop: "1px solid var(--border)" }}>
+              <button className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={() => setAssigningTpl(null)}>Cancel</button>
+              <button className="btn btn-primary text-xs" style={{ height: 32 }} disabled={assigning || selectedDealers.size === 0} onClick={() => void submitAssign()}>
+                {assigning ? "Assigning…" : `Assign to ${selectedDealers.size} dealer${selectedDealers.size !== 1 ? "s" : ""}`}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+    </>
   );
 }
