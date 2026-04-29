@@ -374,11 +374,13 @@ type EditForm = {
   confirmPassword: string;
 };
 
-function EditUserModal({ user, onClose, onSuccess, dealerMode }: {
+function EditUserModal({ user, onClose, onSuccess, dealerMode, canImpersonate, onImpersonate }: {
   user: UserRow;
   onClose: () => void;
   onSuccess: (msg: string) => void;
   dealerMode?: boolean;
+  canImpersonate?: boolean;
+  onImpersonate?: () => void;
 }) {
   const availableRoles = dealerMode ? DEALER_ROLES : ALL_ROLES;
   const [form, setForm] = useState<EditForm>({
@@ -499,6 +501,21 @@ function EditUserModal({ user, onClose, onSuccess, dealerMode }: {
           </div>
           {err && <p style={{ fontSize: 13, color: "#ff5252", margin: 0 }}>{err}</p>}
         </div>
+        {canImpersonate && onImpersonate && (
+          <div style={{ padding: "0 24px 16px" }}>
+            <button
+              type="button"
+              onClick={onImpersonate}
+              style={{ width: "100%", height: 36, borderRadius: 4, border: "1px solid #1976d2", background: "#fff", color: "#1976d2", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+              Impersonate User
+            </button>
+          </div>
+        )}
         <div style={{ padding: "12px 24px 20px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Saving…" : "Save Changes"}</button>
@@ -654,6 +671,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
   const [editUser, setEditUser]       = useState<UserRow | null>(null);
   const [deleteUser, setDeleteUser]   = useState<UserRow | null>(null);
   const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
+  const [impersonating, setImpersonating] = useState<string | null>(null);
 
   useEffect(() => {
     createClient().auth.getUser().then(({ data }) => {
@@ -697,6 +715,47 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
     e.preventDefault();
     setPage(1);
     setSearch(searchInput);
+  }
+
+  async function handleImpersonate(u: UserRow) {
+    setImpersonating(u.id);
+    const supabase = createClient();
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+    const res = await fetch(`/api/admin/users/${u.id}/impersonate`, { method: "POST" });
+    const json = await res.json() as { access_token?: string; refresh_token?: string; dealer_name?: string; dealer_id?: string; error?: string };
+
+    if (!res.ok || !json.access_token || !json.refresh_token) {
+      showToast(json.error ?? "Failed to impersonate", false);
+      setImpersonating(null);
+      return;
+    }
+
+    localStorage.setItem("da_impersonate", JSON.stringify({
+      dealer_name: json.dealer_name,
+      dealer_id: json.dealer_id,
+      original_access_token: currentSession?.access_token ?? "",
+      original_refresh_token: currentSession?.refresh_token ?? "",
+    }));
+
+    const { error: setError } = await supabase.auth.setSession({
+      access_token: json.access_token,
+      refresh_token: json.refresh_token,
+    });
+
+    if (setError) {
+      localStorage.removeItem("da_impersonate");
+      showToast(setError.message, false);
+      setImpersonating(null);
+      return;
+    }
+
+    document.cookie = "da_impersonating=1; path=/; max-age=86400; SameSite=Lax";
+    window.location.href = "/dashboard";
+  }
+
+  function canImpersonate(u: UserRow) {
+    return viewerRole === "super_admin" && u.id !== currentUserId && u.role !== "super_admin";
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -812,6 +871,19 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                       </svg>
                     </button>
+                    {canImpersonate(u) && (
+                      <button
+                        title="Impersonate user"
+                        onClick={() => void handleImpersonate(u)}
+                        disabled={impersonating === u.id}
+                        style={{ width: 28, height: 28, borderRadius: 4, border: "1px solid var(--border)", background: "#fff", cursor: impersonating === u.id ? "wait" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#1976d2", opacity: impersonating === u.id ? 0.5 : 1 }}
+                      >
+                        {impersonating === u.id
+                          ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeDasharray="30" strokeDashoffset="10" /></svg>
+                          : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+                        }
+                      </button>
+                    )}
                     <button
                       title={u.id === currentUserId ? "Cannot delete your own account" : "Delete user"}
                       onClick={() => { if (u.id !== currentUserId) setDeleteUser(u); }}
@@ -868,6 +940,8 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
           onClose={() => setEditUser(null)}
           onSuccess={handleSuccess}
           dealerMode={dealerMode}
+          canImpersonate={canImpersonate(editUser)}
+          onImpersonate={() => { setEditUser(null); void handleImpersonate(editUser); }}
         />
       )}
       {deleteUser && (
