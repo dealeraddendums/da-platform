@@ -4,7 +4,8 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-const APP_VERSION = "0.1.0";
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "5.0.0";
+const BUILD_NUMBER = process.env.NEXT_PUBLIC_BUILD_NUMBER ?? "209";
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
@@ -364,14 +365,12 @@ const LOGIN_CSS = `
     color: #fff;
   }
   .lp-logo {
-    font-family: 'Newsreader', Georgia, serif;
-    font-size: 20px; letter-spacing: -0.01em; font-weight: 500;
-    color: #fff; text-decoration: none;
+    text-decoration: none;
     display: inline-flex; align-items: center;
   }
   .lp-logo img {
     height: 36px; width: auto;
-    filter: brightness(0) invert(1);
+    display: block;
   }
   .lp-topbar-right {
     display: flex; align-items: center; gap: 18px;
@@ -616,7 +615,7 @@ function LoginPageInner() {
         {/* Topbar */}
         <header className="lp-topbar">
           <a href="/" className="lp-logo" aria-label="Dealer Addendums home">
-            DEALER ADDENDUMS
+            <img src="/images/login-logo.svg" alt="Dealer Addendums" />
           </a>
           <div className="lp-topbar-right">
             <span className="lp-status-pill">
@@ -646,7 +645,7 @@ function LoginPageInner() {
             <a href="/terms">Terms</a> ·{" "}
             <a href="/privacy">Privacy</a>
           </div>
-          <div className="lp-footer-version">v {APP_VERSION}</div>
+          <div className="lp-footer-version">v {APP_VERSION} · build {BUILD_NUMBER}</div>
         </footer>
       </div>
     </>
