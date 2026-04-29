@@ -15,11 +15,16 @@ export default async function ProfilePage() {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("role, dealer_id, full_name")
+    .select("role, dealer_id, full_name, active_dealer_id")
     .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null; full_name: string | null }>();
+    .single<{ role: string; dealer_id: string | null; full_name: string | null; active_dealer_id: string | null }>();
 
   const role = profile?.role ?? "dealer_user";
+
+  // group_admin in dealer context → redirect to that dealer's profile
+  if (role === "group_admin" && profile?.active_dealer_id) {
+    redirect(`/dealers/${profile.active_dealer_id}`);
+  }
 
   // Non-dealer roles: show a redirect card
   if (role === "super_admin" || role === "group_admin") {

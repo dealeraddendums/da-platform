@@ -17,7 +17,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (error) return error;
 
   const { role, dealer_id } = claims;
-  if (role !== "super_admin" && role !== "dealer_admin") {
+  const isGroupAdminContext = role === "group_admin" && !!claims.active_dealer_id && !!dealer_id;
+  if (role !== "super_admin" && role !== "dealer_admin" && !isGroupAdminContext) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -31,8 +32,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const admin = createAdminSupabaseClient();
 
-  // ── dealer_admin: scoped query ───────────────────────────────────────────────
-  if (role === "dealer_admin") {
+  // ── dealer_admin or group_admin in dealer context: scoped query ─────────────
+  if (role === "dealer_admin" || isGroupAdminContext) {
     if (!dealer_id) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     let q = admin
@@ -157,7 +158,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (error) return error;
 
   const { role, dealer_id: callerDealerId } = claims;
-  if (role !== "super_admin" && role !== "dealer_admin") {
+  const isGroupAdminCtx = role === "group_admin" && !!claims.active_dealer_id && !!callerDealerId;
+  if (role !== "super_admin" && role !== "dealer_admin" && !isGroupAdminCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -184,7 +186,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let targetDealerId: string | null;
   let targetGroupId: string | null;
 
-  if (role === "dealer_admin") {
+  if (role === "dealer_admin" || isGroupAdminCtx) {
     if (!callerDealerId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     if (!body.role || !DEALER_ROLES.includes(body.role)) {
       return NextResponse.json({ error: "Invalid role for dealer admin" }, { status: 400 });

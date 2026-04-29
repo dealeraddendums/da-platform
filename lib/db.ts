@@ -17,6 +17,7 @@ export type ProfileRow = {
   role: UserRole;
   dealer_id: string | null;
   group_id: string | null;
+  active_dealer_id: string | null;
   legacy_user_id: number | null;
   phone: string | null;
   user_image: string | null;
@@ -56,6 +57,7 @@ type ProfileUpdate = {
   role?: UserRole;
   dealer_id?: string | null;
   group_id?: string | null;
+  active_dealer_id?: string | null;
   phone?: string | null;
   user_image?: string | null;
   hubspot_contact_id?: string | null;

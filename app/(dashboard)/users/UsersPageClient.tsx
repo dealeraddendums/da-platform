@@ -555,15 +555,89 @@ function DeleteConfirmModal({ user, onClose, onSuccess }: {
   );
 }
 
+// ── InviteUserModal ───────────────────────────────────────────────────────────
+
+function InviteUserModal({ onClose, onSuccess }: {
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}) {
+  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", role: "dealer_user" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function setField(k: keyof typeof form, v: string) {
+    setForm(f => ({ ...f, [k]: v }));
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    if (!form.firstName.trim()) { setErr("First name is required."); return; }
+    if (!form.lastName.trim())  { setErr("Last name is required.");  return; }
+    if (!form.email.trim())     { setErr("Email is required.");      return; }
+    setSaving(true);
+    const res = await fetch("/api/invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    const json = await res.json() as { error?: string };
+    setSaving(false);
+    if (!res.ok) { setErr(json.error ?? "Failed to send invitation"); return; }
+    onSuccess("Invitation sent successfully.");
+  }
+
+  return (
+    <ModalOverlay onClose={onClose}>
+      <form onSubmit={e => void submit(e)}>
+        <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #e0e0e0" }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, color: "#333", margin: 0 }}>Invite Staff Member</h2>
+          <p style={{ fontSize: 12, color: "#78828c", marginTop: 4 }}>
+            They&apos;ll receive an email with a link to set their password.
+          </p>
+        </div>
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <label style={labelStyle}>First Name *</label>
+              <input style={inputStyle} value={form.firstName} onChange={e => setField("firstName", e.target.value)} placeholder="Jane" required />
+            </div>
+            <div>
+              <label style={labelStyle}>Last Name *</label>
+              <input style={inputStyle} value={form.lastName} onChange={e => setField("lastName", e.target.value)} placeholder="Smith" required />
+            </div>
+          </div>
+          <div>
+            <label style={labelStyle}>Email *</label>
+            <input style={inputStyle} type="email" value={form.email} onChange={e => setField("email", e.target.value)} placeholder="jane@dealership.com" required />
+          </div>
+          <div>
+            <label style={labelStyle}>Role</label>
+            <select style={selectStyle} value={form.role} onChange={e => setField("role", e.target.value)}>
+              {DEALER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+          </div>
+          {err && <p style={{ fontSize: 13, color: "#ff5252", margin: 0 }}>{err}</p>}
+        </div>
+        <div style={{ padding: "12px 24px 20px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Sending…" : "Send Invitation"}</button>
+        </div>
+      </form>
+    </ModalOverlay>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 type Props = {
   viewerRole: string;
   viewerDealerId: string | null;
+  isGroupAdminContext?: boolean;
 };
 
-export default function UsersPageClient({ viewerRole, viewerDealerId }: Props) {
-  const dealerMode = viewerRole === "dealer_admin";
+export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdminContext = false }: Props) {
+  const dealerMode = viewerRole === "dealer_admin" || isGroupAdminContext;
   const availableRoles = dealerMode ? DEALER_ROLES : ALL_ROLES;
 
   const [users, setUsers]               = useState<UserRow[]>([]);
@@ -576,6 +650,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId }: Props) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const [showAdd, setShowAdd]         = useState(false);
+  const [showInvite, setShowInvite]   = useState(false);
   const [editUser, setEditUser]       = useState<UserRow | null>(null);
   const [deleteUser, setDeleteUser]   = useState<UserRow | null>(null);
   const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
@@ -611,6 +686,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId }: Props) {
 
   function handleSuccess(msg: string) {
     setShowAdd(false);
+    setShowInvite(false);
     setEditUser(null);
     setDeleteUser(null);
     showToast(msg);
@@ -638,7 +714,14 @@ export default function UsersPageClient({ viewerRole, viewerDealerId }: Props) {
       <PageHeader
         title="Users"
         subtitle={dealerMode ? "Your team" : `${total.toLocaleString()} total user${total !== 1 ? "s" : ""}`}
-        action={<button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add User</button>}
+        action={
+          <div className="flex gap-2">
+            {dealerMode && (
+              <button className="btn btn-secondary" onClick={() => setShowInvite(true)}>+ Invite User</button>
+            )}
+            <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add User</button>
+          </div>
+        }
       />
 
       {/* Filters */}
@@ -765,6 +848,12 @@ export default function UsersPageClient({ viewerRole, viewerDealerId }: Props) {
       )}
 
       {/* Modals */}
+      {showInvite && (
+        <InviteUserModal
+          onClose={() => setShowInvite(false)}
+          onSuccess={handleSuccess}
+        />
+      )}
       {showAdd && (
         <AddUserModal
           onClose={() => setShowAdd(false)}

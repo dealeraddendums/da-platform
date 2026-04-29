@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSuperAdmin } from "@/lib/auth";
+import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerUpdate } from "@/lib/db";
 import { getPool } from "@/lib/aurora";
@@ -55,8 +55,34 @@ const DB_SORT_COL_MAP: Partial<Record<SortableCol, string>> = { created_at: "leg
  * Query params: q, active (true|false), at_risk (true), page, per_page, sort, sort_dir
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const { error } = await requireSuperAdmin();
+  const { claims, error } = await requireAuth();
   if (error) return error;
+
+  // group_admin: return their group's dealers (no Aurora enrichment needed)
+  if (claims.role === "group_admin") {
+    if (!claims.group_id) return NextResponse.json({ data: [], total: 0 });
+    const admin = createAdminSupabaseClient();
+    const { searchParams } = req.nextUrl;
+    const q = searchParams.get("q") ?? "";
+    const activeFilter = searchParams.get("active");
+    let query = admin
+      .from("dealers")
+      .select("id, dealer_id, name, active, city, state, phone, primary_contact, primary_contact_email, account_type, group_id, internal_id", { count: "exact" })
+      .eq("group_id", claims.group_id)
+      .order("name");
+    if (q) query = query.or(`name.ilike.%${q}%`);
+    if (activeFilter === "true")  query = query.eq("active", true);
+    if (activeFilter === "false") query = query.eq("active", false);
+    const { data, count } = await query;
+    return NextResponse.json({
+      data: (data ?? []).map(d => ({ ...d, lifetime_prints: 0, last_30_prints: 0, hubspot_company_id: null, group_name: null })),
+      total: count ?? 0, page: 1, per_page: count ?? 0,
+    });
+  }
+
+  if (claims.role !== "super_admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const admin = createAdminSupabaseClient();
   const { searchParams } = req.nextUrl;
@@ -150,13 +176,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 /**
  * POST /api/dealers
- * Create a new dealer. super_admin only.
- * Optional: username + password to create a dealer_admin auth user.
- * Optional: sendNotify=true for placeholder welcome email.
+ * Create a new dealer. super_admin or group_admin.
+ * group_admin: auto-generates dealer_id, auto-sets group_id.
+ * super_admin: optional username + password to create a dealer_admin auth user.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const { error } = await requireSuperAdmin();
+  const { claims, error } = await requireAuth();
   if (error) return error;
+
+  if (claims.role !== "super_admin" && claims.role !== "group_admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   let body: {
     dealer_id?: string;
@@ -172,14 +202,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { dealer_id, name, username, password, sendNotify, ...rest } = body;
-  if (!dealer_id || !name) {
-    return NextResponse.json({ error: "dealer_id and name are required" }, { status: 400 });
+  const { name, username, password, sendNotify, ...rest } = body;
+  if (!name?.trim()) {
+    return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
   const internalId = Date.now().toString();
+  // group_admin: auto-generate dealer_id and force their group_id
+  const dealer_id = claims.role === "group_admin"
+    ? `ga_${internalId}`
+    : (body.dealer_id?.trim() ?? "");
+  if (claims.role === "super_admin" && !dealer_id) {
+    return NextResponse.json({ error: "dealer_id is required" }, { status: 400 });
+  }
+  if (claims.role === "group_admin") {
+    rest.group_id = claims.group_id;
+  }
+
   const admin = createAdminSupabaseClient();
-  const insertPayload = { dealer_id, name, internal_id: internalId, inventory_dealer_id: dealer_id, ...rest };
+  const insertPayload = { dealer_id, name: name.trim(), internal_id: internalId, inventory_dealer_id: dealer_id, ...rest };
   let { data, error: dbError } = await admin.from("dealers").insert(insertPayload).select().single();
 
   if (dbError && dbError.message.includes("account_type")) {

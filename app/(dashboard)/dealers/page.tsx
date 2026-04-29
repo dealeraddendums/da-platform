@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import DealerList from "@/components/DealerList";
+import GroupDealerList from "@/components/GroupDealerList";
 import { PageHeader } from "@/components/PageHeader";
 
 export const metadata = { title: "Dealers — DA Platform" };
@@ -14,16 +15,20 @@ export default async function DealersPage() {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("role, dealer_id")
+    .select("role, dealer_id, group_id")
     .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null }>();
+    .single<{ role: string; dealer_id: string | null; group_id: string | null }>();
 
   const role = profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user";
 
-  if (role === "super_admin" || role === "group_admin") {
+  if (role === "super_admin") {
     return <DealerList role={role} />;
+  }
+
+  if (role === "group_admin") {
+    return <GroupDealerList groupId={profile?.group_id ?? null} />;
   }
 
   // dealer_admin / dealer_user: redirect to own dealer profile

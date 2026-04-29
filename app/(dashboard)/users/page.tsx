@@ -14,23 +14,37 @@ export default async function UsersPage() {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("role, dealer_id")
+    .select("role, dealer_id, group_id, active_dealer_id")
     .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null }>();
+    .single<{ role: string; dealer_id: string | null; group_id: string | null; active_dealer_id: string | null }>();
 
   const role = (profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user") as UserRole;
 
-  // Only super_admin and dealer_admin may access this page
-  if (role !== "super_admin" && role !== "dealer_admin") {
+  const isGroupAdminInDealerContext = role === "group_admin" && !!profile?.active_dealer_id;
+
+  // Only super_admin, dealer_admin, and group_admin in dealer context may access
+  if (role !== "super_admin" && role !== "dealer_admin" && !isGroupAdminInDealerContext) {
     redirect("/dashboard");
+  }
+
+  // For group_admin in dealer context: resolve the text dealer_id for the active dealer
+  let effectiveDealerId = profile?.dealer_id ?? null;
+  if (isGroupAdminInDealerContext && profile?.active_dealer_id) {
+    const { data: activeDlr } = await admin
+      .from("dealers")
+      .select("dealer_id")
+      .eq("id", profile.active_dealer_id)
+      .maybeSingle<{ dealer_id: string }>();
+    if (activeDlr) effectiveDealerId = activeDlr.dealer_id;
   }
 
   return (
     <UsersPageClient
       viewerRole={role}
-      viewerDealerId={profile?.dealer_id ?? null}
+      viewerDealerId={effectiveDealerId}
+      isGroupAdminContext={isGroupAdminInDealerContext}
     />
   );
 }

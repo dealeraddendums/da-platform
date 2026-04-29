@@ -9,6 +9,8 @@ export type JwtClaims = {
   dealer_id: string | null;
   group_id: string | null;
   impersonating_dealer_id: string | null;
+  /** UUID of the dealer a group_admin has switched into; null otherwise. */
+  active_dealer_id: string | null;
 };
 
 export type ServerProfile = {
@@ -84,17 +86,34 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("role, dealer_id, group_id")
+    .select("role, dealer_id, group_id, active_dealer_id")
     .eq("id", session.user.id)
     .single();
+
+  const role = ((profile?.role as UserRole) ?? "dealer_user");
+  let dealerId = profile?.dealer_id ?? null;
+  let activeDealerUuid: string | null = null;
+
+  // When a group_admin has an active dealer selected, resolve the dealer's
+  // text dealer_id so all downstream routes work without special-casing.
+  if (role === "group_admin" && profile?.active_dealer_id) {
+    activeDealerUuid = profile.active_dealer_id;
+    const { data: activeDlr } = await admin
+      .from("dealers")
+      .select("dealer_id")
+      .eq("id", activeDealerUuid)
+      .maybeSingle<{ dealer_id: string }>();
+    if (activeDlr) dealerId = activeDlr.dealer_id;
+  }
 
   return {
     sub: session.user.id,
     email: session.user.email ?? "",
-    role: ((profile?.role as UserRole) ?? "dealer_user"),
-    dealer_id: profile?.dealer_id ?? null,
+    role,
+    dealer_id: dealerId,
     group_id: profile?.group_id ?? null,
     impersonating_dealer_id: impersonatingDealerId,
+    active_dealer_id: activeDealerUuid,
   };
 }
 
