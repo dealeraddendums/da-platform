@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { createClient } from "@/lib/supabase/client";
 import type { GroupOptionRow, GroupDisclaimerRow, GroupTemplateRow } from "@/lib/db";
 
 type Props = {
@@ -147,10 +148,39 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
 
   async function handleImpersonate(u: GroupUserProfile) {
     setImpersonating(u.id);
-    // Group users don't have a dealer — impersonate is only for dealer context
-    // For now, just show a toast-style message
-    setTimeout(() => setImpersonating(null), 1500);
-    alert("Group user impersonation: Coming soon. Use the dealer switcher to impersonate a dealer in context.");
+    const supabase = createClient();
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+    const res = await fetch(`/api/admin/users/${u.id}/impersonate`, { method: "POST" });
+    const json = await res.json() as { access_token?: string; refresh_token?: string; dealer_name?: string; error?: string };
+
+    if (!res.ok || !json.access_token || !json.refresh_token) {
+      setImpersonating(null);
+      alert(json.error ?? "Failed to impersonate user");
+      return;
+    }
+
+    localStorage.setItem("da_impersonate", JSON.stringify({
+      dealer_name: json.dealer_name ?? u.full_name ?? u.email,
+      dealer_id: u.id,
+      original_access_token: currentSession?.access_token ?? "",
+      original_refresh_token: currentSession?.refresh_token ?? "",
+    }));
+
+    const { error: setErr } = await supabase.auth.setSession({
+      access_token: json.access_token,
+      refresh_token: json.refresh_token,
+    });
+
+    if (setErr) {
+      localStorage.removeItem("da_impersonate");
+      setImpersonating(null);
+      alert(setErr.message);
+      return;
+    }
+
+    document.cookie = "da_impersonating=1; path=/; max-age=86400; SameSite=Lax";
+    window.location.href = `/groups/${groupId}`;
   }
 
   return (

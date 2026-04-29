@@ -381,20 +381,24 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--text-muted)" }}>{d.dealer_id}</td>
                 <td className="px-4 py-3 font-medium">
                   <div className="flex items-center gap-1.5 group">
-                    <button
-                      onClick={() => void handleImpersonate(d)}
-                      disabled={impersonating === d.dealer_id}
-                      title="Log in as this dealer"
-                      style={{
-                        background: "none", border: "none", padding: 0,
-                        fontWeight: 500, color: "var(--text-primary)",
-                        cursor: impersonating === d.dealer_id ? "wait" : "pointer",
-                        fontSize: "inherit",
-                      }}
-                      className="hover:underline"
-                    >
-                      {impersonating === d.dealer_id ? "…" : d.name}
-                    </button>
+                    {isSuperAdmin ? (
+                      <button
+                        onClick={() => void handleImpersonate(d)}
+                        disabled={impersonating === d.dealer_id}
+                        title="Log in as this dealer"
+                        style={{
+                          background: "none", border: "none", padding: 0,
+                          fontWeight: 500, color: "var(--text-primary)",
+                          cursor: impersonating === d.dealer_id ? "wait" : "pointer",
+                          fontSize: "inherit",
+                        }}
+                        className="hover:underline"
+                      >
+                        {impersonating === d.dealer_id ? "…" : d.name}
+                      </button>
+                    ) : (
+                      <span style={{ fontWeight: 500, color: "var(--text-primary)" }}>{d.name}</span>
+                    )}
                     <Link
                       href={`/dealers/${d.id}`}
                       title="View dealer profile"

@@ -20,9 +20,9 @@ export default async function GroupPage({ params }: Props) {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("role, group_id")
+    .select("role, group_id, active_dealer_id")
     .eq("id", session.user.id)
-    .single<{ role: string; group_id: string | null }>();
+    .single<{ role: string; group_id: string | null; active_dealer_id: string | null }>();
 
   const role = profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
