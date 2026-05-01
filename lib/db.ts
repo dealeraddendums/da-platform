@@ -1048,6 +1048,63 @@ export type NhtsaSyncLogRow = {
   notes: string | null;
 };
 
+export type StaffProfileRow = {
+  id: string;
+  user_id: string;
+  full_name: string | null;
+  title: string | null;
+  phone: string | null;
+  mobile: string | null;
+  sms_enabled: boolean;
+  avatar_url: string | null;
+  timezone: string;
+  on_call: boolean;
+  on_call_start: string | null;
+  on_call_end: string | null;
+  on_call_days: string[] | null;
+  notification_email: string | null;
+  notification_sms: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type StaffProfileInsert = {
+  user_id: string;
+  full_name?: string | null;
+  title?: string | null;
+  phone?: string | null;
+  mobile?: string | null;
+  sms_enabled?: boolean;
+  avatar_url?: string | null;
+  timezone?: string;
+  on_call?: boolean;
+  on_call_start?: string | null;
+  on_call_end?: string | null;
+  on_call_days?: string[] | null;
+  notification_email?: string | null;
+  notification_sms?: string | null;
+  notes?: string | null;
+};
+
+type StaffProfileUpdate = {
+  full_name?: string | null;
+  title?: string | null;
+  phone?: string | null;
+  mobile?: string | null;
+  sms_enabled?: boolean;
+  avatar_url?: string | null;
+  timezone?: string;
+  on_call?: boolean;
+  on_call_start?: string | null;
+  on_call_end?: string | null;
+  on_call_days?: string[] | null;
+  notification_email?: string | null;
+  notification_sms?: string | null;
+  notes?: string | null;
+  updated_at?: string;
+};
+
 export type PasskeyRow = {
   id: string;
   user_id: string;
@@ -1409,6 +1466,12 @@ export type Database = {
         Row: PasskeyChallengeRow;
         Insert: PasskeyChallengeInsert;
         Update: Record<string, never>;
+        Relationships: [];
+      };
+      staff_profiles: {
+        Row: StaffProfileRow;
+        Insert: StaffProfileInsert;
+        Update: StaffProfileUpdate;
         Relationships: [];
       };
     };

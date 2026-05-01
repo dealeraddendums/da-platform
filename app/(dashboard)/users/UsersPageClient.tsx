@@ -7,6 +7,21 @@ import { PageHeader } from "@/components/PageHeader";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+type StaffMember = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: string;
+  created_at: string;
+  staffProfile: {
+    title: string | null;
+    on_call: boolean;
+    on_call_start: string | null;
+    on_call_end: string | null;
+    on_call_days: string[] | null;
+  } | null;
+};
+
 type UserRow = {
   id: string;
   email: string;
@@ -657,6 +672,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
   const dealerMode = viewerRole === "dealer_admin" || isGroupAdminContext;
   const availableRoles = dealerMode ? DEALER_ROLES : ALL_ROLES;
 
+  const [activeTab, setActiveTab]       = useState<"users" | "staff">("users");
   const [users, setUsers]               = useState<UserRow[]>([]);
   const [total, setTotal]               = useState(0);
   const [loading, setLoading]           = useState(true);
@@ -665,6 +681,8 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
   const [roleFilter, setRoleFilter]     = useState("all");
   const [page, setPage]                 = useState(1);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [staff, setStaff]               = useState<StaffMember[]>([]);
+  const [staffLoading, setStaffLoading] = useState(false);
 
   const [showAdd, setShowAdd]         = useState(false);
   const [showInvite, setShowInvite]   = useState(false);
@@ -696,6 +714,16 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
 
   useEffect(() => { void fetchUsers(); }, [fetchUsers]);
   useEffect(() => { setPage(1); }, [search, roleFilter]);
+
+  useEffect(() => {
+    if (activeTab === "staff" && viewerRole === "super_admin") {
+      setStaffLoading(true);
+      fetch("/api/staff-profiles")
+        .then(r => r.ok ? r.json() as Promise<{ staff: StaffMember[] }> : Promise.resolve({ staff: [] }))
+        .then(d => setStaff(d.staff ?? []))
+        .finally(() => setStaffLoading(false));
+    }
+  }, [activeTab, viewerRole]);
 
   function showToast(msg: string, ok = true) {
     setToast({ msg, ok });
@@ -772,17 +800,103 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
     <div>
       <PageHeader
         title="Users"
-        subtitle={dealerMode ? "Your team" : `${total.toLocaleString()} total user${total !== 1 ? "s" : ""}`}
+        subtitle={
+          activeTab === "staff"
+            ? `${staff.length} staff member${staff.length !== 1 ? "s" : ""}`
+            : dealerMode ? "Your team" : `${total.toLocaleString()} total user${total !== 1 ? "s" : ""}`
+        }
         action={
-          <div className="flex gap-2">
-            {dealerMode && (
-              <button className="btn btn-secondary" onClick={() => setShowInvite(true)}>+ Invite User</button>
-            )}
-            <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add User</button>
-          </div>
+          activeTab === "users" ? (
+            <div className="flex gap-2">
+              {dealerMode && (
+                <button className="btn btn-secondary" onClick={() => setShowInvite(true)}>+ Invite User</button>
+              )}
+              <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add User</button>
+            </div>
+          ) : null
         }
       />
 
+      {/* Tabs — super_admin only */}
+      {viewerRole === "super_admin" && (
+        <div style={{ display: "flex", gap: 0, marginBottom: 16, borderBottom: "1px solid #e0e0e0" }}>
+          {(["users", "staff"] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                padding: "8px 20px",
+                fontSize: 13,
+                fontWeight: 500,
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === tab ? "2px solid #1976d2" : "2px solid transparent",
+                color: activeTab === tab ? "#1976d2" : "#78828c",
+                cursor: "pointer",
+                marginBottom: -1,
+              }}
+            >
+              {tab === "users" ? "All Users" : "Staff"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Staff tab content */}
+      {activeTab === "staff" && viewerRole === "super_admin" && (
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
+                {["Name", "Email", "Role", "Title", "On-Call", ""].map(h => (
+                  <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {staffLoading ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading…</td></tr>
+              ) : staff.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>No staff members found.</td></tr>
+              ) : staff.map((s, i) => (
+                <tr key={s.id} style={{ borderBottom: i < staff.length - 1 ? "1px solid var(--border)" : "none" }}>
+                  <td className="px-4 py-2.5 font-medium" style={{ color: "var(--text-primary)" }}>
+                    {s.full_name || <span style={{ color: "var(--text-muted)" }}>—</span>}
+                  </td>
+                  <td className="px-4 py-2.5 text-sm" style={{ color: "var(--text-secondary)" }}>{s.email}</td>
+                  <td className="px-4 py-2.5"><RoleBadge role={s.role} /></td>
+                  <td className="px-4 py-2.5 text-sm" style={{ color: "var(--text-secondary)" }}>
+                    {s.staffProfile?.title || <span style={{ color: "var(--text-muted)" }}>—</span>}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {s.staffProfile?.on_call ? (
+                      <span style={{ fontSize: 11, fontWeight: 700, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", padding: "2px 8px", borderRadius: 20 }}>
+                        On-Call
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11, fontWeight: 700, background: "#f5f6f7", color: "#78828c", border: "1px solid #e0e0e0", padding: "2px 8px", borderRadius: 20 }}>
+                        Off
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <a
+                      href={`/staff-profile/${s.id}`}
+                      style={{ fontSize: 12, color: "#1976d2", textDecoration: "none", fontWeight: 500 }}
+                    >
+                      View Profile →
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Filters — only shown in users tab */}
+      {activeTab === "users" && (
+      <>
       {/* Filters */}
       <div className="card p-4 mb-4">
         <form onSubmit={handleSearch} className="flex items-center gap-2 flex-wrap">
@@ -917,6 +1031,8 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
             <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Next →</button>
           </div>
         </div>
+      )}
+      </>
       )}
 
       {/* Modals */}

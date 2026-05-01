@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
@@ -21,49 +20,14 @@ export default async function ProfilePage() {
 
   const role = profile?.role ?? "dealer_user";
 
+  // super_admin / group_admin → staff profile page
+  if (role === "super_admin" || role === "group_admin") {
+    redirect("/staff-profile");
+  }
+
   // group_admin in dealer context → redirect to that dealer's profile
   if (role === "group_admin" && profile?.active_dealer_id) {
     redirect(`/dealers/${profile.active_dealer_id}`);
-  }
-
-  // Non-dealer roles: show a redirect card
-  if (role === "super_admin" || role === "group_admin") {
-    return (
-      <div>
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #e0e0e0",
-            borderRadius: 6,
-            padding: "32px 24px",
-            maxWidth: 480,
-          }}
-        >
-          <h2 style={{ fontSize: 18, fontWeight: 600, color: "#2a2b3c", marginBottom: 8 }}>
-            My Profile
-          </h2>
-          <p style={{ color: "#78828c", marginBottom: 20, fontSize: 14 }}>
-            As a{role === "super_admin" ? " super admin" : " group admin"}, dealer profiles are
-            managed from the Dealers section.
-          </p>
-          <Link
-            href="/dealers"
-            style={{
-              display: "inline-block",
-              background: "#1976d2",
-              color: "#fff",
-              padding: "8px 16px",
-              borderRadius: 4,
-              fontSize: 14,
-              fontWeight: 500,
-              textDecoration: "none",
-            }}
-          >
-            Go to Dealers
-          </Link>
-        </div>
-      </div>
-    );
   }
 
   // Dealer roles: fetch the dealer record
