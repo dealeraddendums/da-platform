@@ -1048,6 +1048,52 @@ export type NhtsaSyncLogRow = {
   notes: string | null;
 };
 
+export type PasskeyRow = {
+  id: string;
+  user_id: string;
+  credential_id: string;
+  credential_public_key: string;
+  counter: number;
+  device_type: string | null;
+  backed_up: boolean;
+  transports: string[] | null;
+  friendly_name: string;
+  created_at: string;
+  last_used_at: string | null;
+};
+
+type PasskeyInsert = {
+  user_id: string;
+  credential_id: string;
+  credential_public_key: string;
+  counter?: number;
+  device_type?: string | null;
+  backed_up?: boolean;
+  transports?: string[] | null;
+  friendly_name?: string;
+  last_used_at?: string | null;
+};
+
+type PasskeyUpdate = {
+  counter?: number;
+  friendly_name?: string;
+  last_used_at?: string | null;
+};
+
+type PasskeyChallengeRow = {
+  id: string;
+  user_id: string | null;
+  challenge: string;
+  created_at: string;
+  expires_at: string;
+};
+
+type PasskeyChallengeInsert = {
+  user_id?: string | null;
+  challenge: string;
+  expires_at?: string;
+};
+
 // Database type shaped exactly as Supabase's generated types expect.
 export type Database = {
   public: {
@@ -1351,6 +1397,18 @@ export type Database = {
           assigned_by?: string | null;
         };
         Update: Record<string, unknown>;
+        Relationships: [];
+      };
+      passkeys: {
+        Row: PasskeyRow;
+        Insert: PasskeyInsert;
+        Update: PasskeyUpdate;
+        Relationships: [];
+      };
+      passkey_challenges: {
+        Row: PasskeyChallengeRow;
+        Insert: PasskeyChallengeInsert;
+        Update: Record<string, never>;
         Relationships: [];
       };
     };

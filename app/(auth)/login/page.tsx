@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -119,6 +119,19 @@ function LoginForm() {
   const [shakeKey, setShakeKey] = useState(0);
   const [passkeyState, setPasskeyState] = useState<PasskeyState>("idle");
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  const [passkeySupported, setPasskeySupported] = useState(false);
+
+  useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      !!window.PublicKeyCredential &&
+      typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === "function"
+    ) {
+      window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+        .then(available => setPasskeySupported(available))
+        .catch(() => setPasskeySupported(false));
+    }
+  }, []);
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const pwValid = password.length >= 6;
@@ -161,19 +174,54 @@ function LoginForm() {
     setPasskeyError(null);
     setPasskeyState("prompting");
 
-    if (typeof window === "undefined" || !window.PublicKeyCredential) {
-      setPasskeyState("idle");
-      setPasskeyError("Passkeys are not supported on this device or browser.");
-      return;
-    }
-
     try {
-      // Passkey/WebAuthn challenge flow — endpoint to be implemented
-      const challengeRes = await fetch("/api/auth/passkey/challenge", { method: "POST" });
-      if (!challengeRes.ok) throw new Error("Passkey sign-in is not yet configured.");
-      // Full WebAuthn flow continues here once the endpoint is ready
+      const { startAuthentication } = await import("@simplewebauthn/browser");
+
+      // Get challenge from server
+      const startRes = await fetch("/api/auth/passkey/auth-start", { method: "POST" });
+      if (!startRes.ok) throw new Error("Could not start passkey authentication.");
+      const options = await startRes.json() as { challengeId: string; [key: string]: unknown };
+      const { challengeId, ...authOptions } = options;
+
+      // Browser shows passkey picker (Face ID / Touch ID / PIN)
+      let credential;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        credential = await startAuthentication({ optionsJSON: authOptions as any });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg.includes("cancelled") || msg.includes("NotAllowedError")) {
+          throw new Error("Authentication was cancelled.");
+        }
+        throw new Error("No passkey found for this device.");
+      }
+
+      // Verify with server
+      const completeRes = await fetch("/api/auth/passkey/auth-complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential, challengeId }),
+      });
+
+      if (!completeRes.ok) {
+        const d = await completeRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(d.error ?? "Passkey authentication failed.");
+      }
+
+      const { access_token, refresh_token } = await completeRes.json() as {
+        access_token: string;
+        refresh_token: string;
+      };
+
+      // Set the Supabase session
+      const supabase = createClient();
+      await supabase.auth.setSession({ access_token, refresh_token });
+
       setPasskeyState("success");
-      setTimeout(() => setPasskeyState("idle"), 2000);
+      setTimeout(() => {
+        router.push(next);
+        router.refresh();
+      }, 600);
     } catch (err) {
       setPasskeyState("idle");
       setPasskeyError(err instanceof Error ? err.message : "Passkey authentication failed. Please try again.");
@@ -273,30 +321,33 @@ function LoginForm() {
         )}
       </button>
 
-      {/* Divider */}
-      <div className="lp-divider"><span>or</span></div>
+      {/* Divider + Passkey — only shown when platform authenticator is available */}
+      {passkeySupported && (
+        <>
+          <div className="lp-divider"><span>or</span></div>
 
-      {/* Passkey */}
-      <button
-        type="button"
-        className="lp-btn lp-btn-passkey"
-        onClick={handlePasskey}
-        disabled={passkeyState !== "idle"}
-      >
-        {passkeyState === "success" ? (
-          <><IconCheck /> Authenticated</>
-        ) : passkeyState === "prompting" ? (
-          <><span className="lp-spinner" /> Waiting for device…</>
-        ) : (
-          <><IconPasskey /> Sign in with passkey</>
-        )}
-      </button>
+          <button
+            type="button"
+            className="lp-btn lp-btn-passkey"
+            onClick={handlePasskey}
+            disabled={passkeyState !== "idle"}
+          >
+            {passkeyState === "success" ? (
+              <><IconCheck /> Authenticated</>
+            ) : passkeyState === "prompting" ? (
+              <><span className="lp-spinner" /> Waiting for device…</>
+            ) : (
+              <><IconPasskey /> Sign in with passkey</>
+            )}
+          </button>
 
-      {passkeyError && (
-        <div role="alert" className="lp-server-error" style={{ marginTop: -6 }}>
-          <IconAlert style={{ marginTop: 2, flexShrink: 0, color: "var(--da-red)" }} />
-          <span>{passkeyError}</span>
-        </div>
+          {passkeyError && (
+            <div role="alert" className="lp-server-error" style={{ marginTop: -6 }}>
+              <IconAlert style={{ marginTop: 2, flexShrink: 0, color: "var(--da-red)" }} />
+              <span>{passkeyError}</span>
+            </div>
+          )}
+        </>
       )}
     </form>
   );

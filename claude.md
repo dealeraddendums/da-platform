@@ -1,5 +1,5 @@
 # DealerAddendums Platform — CLAUDE.md
-## Last updated: 2026-04-29
+## Last updated: 2026-04-30
 
 ---
 
@@ -742,6 +742,53 @@ SUPABASE_SERVICE_ROLE_KEY and AWS credentials are already set.
 | Assign templates to dealers | ✅ | ✅ own group only | ❌ |
 | Create group options | ✅ | ✅ own group only | ❌ |
 | Assign options to dealers | ✅ | ✅ own group only | ❌ |
+
+---
+
+## Passkey Authentication ✅ COMPLETE (2026-04-30)
+
+### Architecture
+- WebAuthn implemented via `@simplewebauthn/server` v13 + `@simplewebauthn/browser` v13
+- No Supabase MFA toggle required — fully self-contained
+- After WebAuthn verification, session created via magic-link token exchange (same pattern as impersonation)
+
+### Database tables (migration 042)
+- `passkeys` — stores credential_id, credential_public_key (base64url), counter, device_type, backed_up, transports, friendly_name per user
+- `passkey_challenges` — temporary 5-min challenge storage for in-flight WebAuthn flows
+
+### API routes
+- `POST /api/auth/passkey/register-start` — authenticated, starts passkey registration
+- `POST /api/auth/passkey/register-complete` — authenticated, verifies and saves credential
+- `POST /api/auth/passkey/auth-start` — unauthenticated, returns challenge for sign-in
+- `POST /api/auth/passkey/auth-complete` — unauthenticated, verifies assertion, returns access/refresh tokens
+- `GET /api/auth/passkey/list` — authenticated, lists user's passkeys
+- `DELETE /api/auth/passkey/[id]` — authenticated, removes a passkey
+- `PATCH /api/auth/passkey/[id]` — authenticated, renames a passkey
+
+### Login page
+- "Sign in with passkey" button only shown when `isUserVerifyingPlatformAuthenticatorAvailable()` returns true
+- Uses `startAuthentication` from `@simplewebauthn/browser` (dynamic import)
+- On success: calls `supabase.auth.setSession()` with returned tokens
+
+### Profile page (Passkeys card)
+- Security card at bottom of Dealership Info tab
+- Lists registered passkeys with device type, backed-up status, created/last-used dates
+- Inline rename, remove with confirmation
+- "+ Add Passkey" button uses `startRegistration` from `@simplewebauthn/browser` (dynamic import)
+
+### Required env vars
+```
+# .env.local (local dev)
+RP_ID=localhost
+RP_NAME=DealerAddendums
+RP_ORIGIN=http://localhost:3000
+
+# .env.production (EC2)
+RP_ID=app.dealeraddendums.com
+RP_NAME=DealerAddendums
+RP_ORIGIN=https://app.dealeraddendums.com
+```
+RP_ID and RP_ORIGIN **must** match the domain exactly — WebAuthn enforces this strictly.
 
 ---
 
