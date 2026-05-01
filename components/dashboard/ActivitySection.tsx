@@ -222,7 +222,7 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
             </p>
           </div>
         ) : (
-          <MapboxMap dealers={dealers} flashingDealerId={flashingId} token={TOKEN} />
+          <MapboxMap dealers={dealers} flashingDealerId={flashingId} token={TOKEN} visibleTab={tab} />
         )}
 
         {/* JUST NOW toast */}

@@ -21,17 +21,20 @@ type Props = {
   dealers: DealerMapPoint[];
   flashingDealerId: string | null;
   token: string;
+  visibleTab: "all" | "paid" | "trial";
 };
 
 type MarkerInfo = { marker: mapboxgl.Marker; el: HTMLElement; dealer: DealerMapPoint };
 
-export default function MapboxMap({ dealers, flashingDealerId, token }: Props) {
+export default function MapboxMap({ dealers, flashingDealerId, token, visibleTab }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef(new Map<string, MarkerInfo>());
   const prevFlashRef = useRef<string | null>(null);
   const dealersRef = useRef(dealers);
   dealersRef.current = dealers;
+  const visibleTabRef = useRef(visibleTab);
+  visibleTabRef.current = visibleTab;
 
   // Initialize map once
   useEffect(() => {
@@ -71,7 +74,7 @@ export default function MapboxMap({ dealers, flashingDealerId, token }: Props) {
         if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
 
         const isFlashing = dealer.id === prevFlashRef.current;
-        const color = isFlashing ? "#ff5252" : (dealer.active ? "#4caf50" : "#1976d2");
+        const color = isFlashing ? "#ff5252" : (dealer.active === true ? "#4caf50" : "#1976d2");
 
         const el = document.createElement("div");
         el.className = isFlashing ? "da-marker da-marker-flash" : "da-marker";
@@ -88,12 +91,27 @@ export default function MapboxMap({ dealers, flashingDealerId, token }: Props) {
           .addTo(map!);
 
         markersRef.current.set(dealer.id, { marker, el, dealer });
+
+        const tab = visibleTabRef.current;
+        const isPaid = dealer.active === true;
+        if (tab === "paid" && !isPaid) el.style.display = "none";
+        else if (tab === "trial" && isPaid) el.style.display = "none";
       });
     }
 
     if (map.loaded()) addMarkers();
     else map.on("load", addMarkers);
   }, [dealers]);
+
+  // Show/hide markers when tab changes
+  useEffect(() => {
+    markersRef.current.forEach(({ el, dealer }) => {
+      const isPaid = dealer.active === true;
+      if (visibleTab === "all") el.style.display = "";
+      else if (visibleTab === "paid") el.style.display = isPaid ? "" : "none";
+      else el.style.display = isPaid ? "none" : "";
+    });
+  }, [visibleTab]);
 
   // Update flash state imperatively (no full re-render of markers)
   useEffect(() => {
@@ -105,7 +123,7 @@ export default function MapboxMap({ dealers, flashingDealerId, token }: Props) {
       if (info) {
         info.el.className = "da-marker";
         const mc = info.el.querySelector(".mc") as HTMLElement | null;
-        if (mc) mc.style.background = info.dealer.active ? "#4caf50" : "#1976d2";
+        if (mc) mc.style.background = info.dealer.active === true ? "#4caf50" : "#1976d2";
       }
     }
     if (flashingDealerId) {
