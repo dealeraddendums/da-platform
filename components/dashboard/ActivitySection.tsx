@@ -368,7 +368,11 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
                 textAlign: "center",
               }}
             >
-              {prints.length === 0 ? "No recent prints." : "No prints in this category."}
+              {tab === "trial"
+                ? "No trial/inactive dealers."
+                : tab === "paid" && prints.length > 0
+                ? "No recent prints from active dealers."
+                : "No recent prints."}
             </div>
           ) : (
             filteredPrints.map(p => (
