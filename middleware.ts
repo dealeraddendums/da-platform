@@ -17,6 +17,8 @@ const SECURITY_HEADERS: Record<string, string> = {
     "img-src 'self' data: https: blob:",
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.s3.amazonaws.com https://s3.amazonaws.com https://xpsshipper.com https://api.anthropic.com https://api.qrserver.com https://api.mapbox.com https://events.mapbox.com",
     "worker-src blob:",
+    "frame-src 'self' blob:",
+    "object-src blob:",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
