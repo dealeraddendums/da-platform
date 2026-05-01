@@ -17,11 +17,14 @@ export type DealerMapPoint = {
   zip: string | null;
 };
 
-// Paid = any monthly subscription; everything else (Trial, Free, null) = trial/free
+// Paid = active subscription; Free/Trial/null = trial
+// Actual DB values (confirmed from production data):
 const PAID_TYPES = new Set([
-  "Monthly Subscription Manual",
-  "Monthly Subscription Automatic Web",
-  "Monthly Subscription Automatic DMS",
+  "Automatic Web",
+  "Automatic DMS",
+  "Manual",
+  "Standard",
+  "Automatic Web $135",
 ]);
 
 export function isPaidDealer(accountType: string | null | undefined): boolean {
