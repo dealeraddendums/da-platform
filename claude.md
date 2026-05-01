@@ -1,5 +1,5 @@
 # DealerAddendums Platform — CLAUDE.md
-## Last updated: 2026-04-30
+## Last updated: 2026-05-01
 
 ---
 
@@ -108,7 +108,7 @@ Badges:    radius=20px, 11px bold text
 | Service | Details |
 |---|---|
 | DA Platform EC2 **(LEGACY — DO NOT DEPLOY HERE)** | `ssh -i ~/ssh/DA2026.pem ubuntu@ec2-54-89-142-76.compute-1.amazonaws.com` |
-| da-platform EC2 **(us-east-1, DECOMMISSIONED — do not deploy here)** | `ec2-54-167-226-23.compute-1.amazonaws.com` |
+| da-platform EC2 **(us-east-1, DECOMMISSIONED — terminate when stable)** | `ec2-54-167-226-23.compute-1.amazonaws.com` |
 | da-platform EC2 **(NEW us-west-1b, behind ALB — deploy here only)** | `ssh -i ~/ssh/DA_Platform_2026.pem ubuntu@ec2-18-145-132-52.us-west-1.compute.amazonaws.com` |
 | DA Billing EC2 | `ssh -i ~/ssh/dabilling2026.pem ubuntu@ec2-98-89-5-190.compute-1.amazonaws.com` |
 | QuietReady EC2 | `ssh -i ~/ssh/QuietReady2026.pem ubuntu@ec2-54-160-4-222.compute-1.amazonaws.com` |
@@ -118,7 +118,7 @@ Badges:    radius=20px, 11px bold text
 | Supabase | https://byouefbebqgffhtfdggu.supabase.co |
 | GitHub | https://github.com/dealeraddendums/da-platform |
 | Anthropic API | `allan@dealeraddendums.com` enterprise key |
-| AWS IAM | User `da-platform-app`, group `FileserverS3` (AmazonS3FullAccess) |
+| AWS IAM | User `da-platform-app`, policy `da-platform-app-s3-scoped` (scoped to 7 specific buckets only — updated 2026-05-01) |
 
 ### New EC2 server specs (us-west-1b, behind ALB)
 - Host: `ec2-18-145-132-52.us-west-1.compute.amazonaws.com`
@@ -132,19 +132,33 @@ Badges:    radius=20px, 11px bold text
 - Logs: `/var/log/da-platform/`
 - GitHub Action: push to `main` → auto-deploys via `.github/workflows/deploy.yml`
 - GitHub secret: `EC2_SSH_KEY` = contents of `~/ssh/DA_Platform_2026.pem`
+- **ALB handles SSL termination** — EC2 nginx only sees HTTP on port 80; do not configure SSL on nginx
+- **nginx**: `server_tokens off` applied 2026-05-01 (manual)
+- **HSTS**: `Strict-Transport-Security` header set by Next.js `middleware.ts` (not nginx, since ALB terminates SSL)
 
 ### S3 Buckets (all: Block Public Access OFF, s3:GetObject *, CORS GET *)
 
-| Bucket | Contents | Native size |
-|---|---|---|
-| `dealer-addendums` | Generated PDFs (signed 24hr URLs) | variable |
-| `addendum-product-images` | Option/product images for addendum library | variable |
-| `new-dealer-logos` | Dealer logos | variable |
-| `new-infobox-images` | Infobox PNGs | 553×379px |
-| `new-infosheet-backgrounds` | Infosheet frame PNGs | 2657×3438px (~313dpi) |
-| `new-addendum-backgrounds` | Addendum frame PNGs | 638×1650px std, 469×1650px narrow |
+| Bucket | Region | Contents | Native size |
+|---|---|---|---|
+| `dealer-addendums` | us-west-1 | Generated PDFs (signed 24hr URLs) | variable |
+| `addendum-product-images` | us-east-1 | Option/product images for addendum library | variable |
+| `new-dealer-logos` | us-east-1 | Dealer logos | variable |
+| `new-infobox-images` | us-east-1 | Infobox PNGs | 553×379px |
+| `new-infosheet-backgrounds` | us-east-1 | Infosheet frame PNGs | 2657×3438px (~313dpi) |
+| `new-addendum-backgrounds` | us-east-1 | Addendum frame PNGs | 638×1650px std, 469×1650px narrow |
+| `da-platform-backups` | us-west-1 | Daily Supabase backups (90-day lifecycle) | variable |
 
 AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION=us-east-1`) are set in `.env.production` on the new EC2 and in `.env.local` for local dev.
+
+### Cron jobs (EasyCron)
+
+| Job | Schedule | URL | Notes |
+|---|---|---|---|
+| Supabase backup | `0 2 * * *` | `https://app.dealeraddendums.com/api/cron/backup-supabase` | Backs up DA Platform + DA Billing to `da-platform-backups` |
+| Vehicle archive | `0 3 * * 0` | `https://app.dealeraddendums.com/api/cron/archive-vehicles` | Archives inactive vehicles >6 months |
+| PDF purge | `0 3 1 * *` | `https://app.dealeraddendums.com/api/cron/purge-old-pdfs` | Deletes S3 PDFs >12 months old |
+
+All cron jobs require header `x-cron-secret: [CRON_SECRET]`.
 
 ---
 
@@ -167,8 +181,11 @@ First-time deploy: SSH in, clone repo, set `.env.production`, `npm ci && npm run
 | Phase | Domain | Status |
 |---|---|---|
 | 1 | Auth & users | ✅ COMPLETE |
+| 1b | Passkey authentication | ✅ COMPLETE (2026-04-30) |
 | 2 | Dealer profile | ✅ COMPLETE |
 | 3 | Group management | ✅ COMPLETE |
+| 3b | Group Admin feature set (migrations 040–041) | ✅ COMPLETE (2026-04-29) |
+| 3c | Security page + Staff profiles (migration 043) | ✅ COMPLETE (2026-04-30) |
 | 4 | Vehicle inventory | ✅ COMPLETE |
 | 5 | Addendum settings | ✅ COMPLETE |
 | 5b | Addendum Options Engine | ✅ COMPLETE |
@@ -179,6 +196,7 @@ First-time deploy: SSH in, clone repo, set `.env.production`, `npm ci && npm run
 | 11 | Admin ops | ⬜ Deferred |
 | 12 | Enterprise White Label | ⬜ Not started |
 | 13 | Dealer Migration & Onboarding | ⬜ Not started |
+| 14 | HubSpot + Billing Sync | ⬜ Not started |
 
 Phase 8 merged into Phase 6 — unified builder handles both document types.
 
@@ -686,7 +704,24 @@ SUPABASE_SERVICE_ROLE_KEY and AWS credentials are already set.
 
 ---
 
-## Group Admin Feature Set (Migration 041, 2026-04-29)
+## Group Admin Feature Set (Migrations 040–041, 2026-04-29)
+
+### Migration 040 — supabase/migrations/040_group_admin_dealer_context.sql
+- Adds `active_dealer_id uuid` to `profiles` (FK → dealers.id, nullable)
+- Tracks which dealer a group_admin has switched into (null = group context)
+- Updated JWT hook to include `active_dealer_id` in claims
+- `PATCH /api/profiles/active-dealer` — sets/clears active_dealer_id
+- `invitations` table extended with `group_id` column
+
+### Group Admin Dealer Switcher
+- group_admin sees "Select Dealer ▾" chip in topbar when in group context
+- Clicking opens a modal listing all dealers in their group
+- Selecting a dealer calls `PATCH /api/profiles/active-dealer`, sets `active_dealer_id`
+- Once in dealer context: sidebar shows dealer nav (Options, Builder, Users, Settings, Order Supplies)
+- "← Back to Group" link in topbar returns to group context (clears `active_dealer_id`)
+- super_admin impersonating a group_admin → redirects to that group's profile page
+- `/groups` route: group_admin is redirected directly to `/groups/[their_group_id]`
+- `/groups/[id]` full view parity: group_admin sees same tabs as super_admin (scoped to own group)
 
 ### Migration 041 — supabase/migrations/041_group_admin_features.sql
 1. Extends `invitations` table: `dealer_id` made nullable, `group_id` column added, role CHECK expanded to include `group_admin` and `group_user`
@@ -770,8 +805,8 @@ SUPABASE_SERVICE_ROLE_KEY and AWS credentials are already set.
 - Uses `startAuthentication` from `@simplewebauthn/browser` (dynamic import)
 - On success: calls `supabase.auth.setSession()` with returned tokens
 
-### Profile page (Passkeys card)
-- Security card at bottom of Dealership Info tab
+### Passkey management UI
+- Available at `/security` page for ALL roles (see Security & Staff Profile section below)
 - Lists registered passkeys with device type, backed-up status, created/last-used dates
 - Inline rename, remove with confirmation
 - "+ Add Passkey" button uses `startRegistration` from `@simplewebauthn/browser` (dynamic import)
@@ -789,6 +824,48 @@ RP_NAME=DealerAddendums
 RP_ORIGIN=https://app.dealeraddendums.com
 ```
 RP_ID and RP_ORIGIN **must** match the domain exactly — WebAuthn enforces this strictly.
+
+---
+
+## Security Page + Staff Profiles ✅ COMPLETE (2026-04-30)
+
+### /security — universal page (all roles)
+- Two cards: **Passkeys** (full management: list, add, rename, delete) + **Account Info** (read-only: email, role, member since, change password link)
+- Accessible to ALL authenticated roles
+- Security link added to ALL sidebars (ShieldCheck icon):
+  - super_admin: in Admin section
+  - group_admin: after Builder
+  - dealer roles: between Settings and Order Supplies
+
+### /staff-profile — personal + on-call info (super_admin + group_admin only)
+- Two-column layout: Personal Info + On-Call Settings
+- **Personal Info**: avatar (S3 upload), full name, title, email (read-only), office phone, mobile, SMS enabled toggle, timezone, notes
+- **On-Call Settings**: on_call toggle, hours (start/end time pickers), days of week checkboxes, notification email, notification SMS
+- `/profile` redirects super_admin and group_admin to `/staff-profile`
+- `My Profile` → `/staff-profile` added to super_admin and group_admin sidebars
+
+### /staff-profile/[userId] — super_admin can view/edit any staff member
+- Only accessible to super_admin
+- Same layout as own profile
+- Routes to non-super_admin/group_admin users → redirect to /users
+
+### Migration 043 — supabase/migrations/043_staff_profiles.sql
+```sql
+staff_profiles: user_id (unique FK), full_name, title, phone, mobile, sms_enabled,
+avatar_url, timezone, on_call, on_call_start, on_call_end, on_call_days text[],
+notification_email, notification_sms, notes, created_at, updated_at
+```
+RLS: users read/write own row; super_admin reads all via service role.
+
+### API routes
+- `GET/PATCH /api/staff-profile` — own profile (auto-creates row on first GET)
+- `GET /api/staff-profiles` — list all staff (super_admin only); joins profiles + staff_profiles
+- `PATCH /api/staff-profiles/[userId]` — super_admin edit another user's profile
+- `POST /api/staff-profile/avatar` — S3 upload to `addendum-product-images/staff-avatars/{userId}.{ext}`
+
+### Users page — Staff tab
+- super_admin sees "All Users | Staff" tab switcher
+- Staff tab fetches `/api/staff-profiles` and shows: Name, Email, Role, Title, On-Call badge, View Profile link
 
 ---
 
@@ -879,13 +956,14 @@ Run npm run build — must be clean before reporting complete.
 
 ---
 
-## Security hardening status (2026-04-30)
+## Security hardening status (2026-04-30 / 2026-05-01)
 
 Full audit completed. All programmatic fixes applied. See `security_audit_report.md` for details.
 
-### Applied automatically
+### Applied automatically (2026-04-30)
 - ✅ All 107 API routes audited — 100% protected (no unexpected auth bypasses)
-- ✅ Security headers on all responses (X-Frame-Options, CSP, HSTS, etc.) via middleware.ts
+- ✅ Security headers on all responses (X-Frame-Options, CSP, X-Content-Type-Options, Referrer-Policy, Permissions-Policy) via middleware.ts
+- ✅ HSTS (`Strict-Transport-Security`) set by middleware.ts (ALB terminates SSL; nginx header not needed)
 - ✅ Rate limiting: POST /api/auth/* → 10 req/min; POST /api/invite/accept → 5 req/hr
 - ✅ CORS: API routes restricted to app.dealeraddendums.com + billing.dealeraddendums.com
 - ✅ Input validation library created at lib/validators.ts (Zod schemas)
@@ -893,18 +971,22 @@ Full audit completed. All programmatic fixes applied. See `security_audit_report
 - ✅ next upgraded 14.2.30 → 14.2.35 (patches SSRF, HTTP smuggling, cache key confusion)
 - ✅ @anthropic-ai/sdk upgraded 0.90.0 → 0.92.0
 
-### Manual steps still required
-- [ ] Apply nginx security config: `server_tokens off` + HSTS header (see security_audit_report.md §FIX 3)
-- [ ] Rotate CRON_SECRET and update all 3 EasyCron jobs
-- [ ] Verify AWS IAM da-platform-app is scoped to S3 only (not EC2/RDS)
-- [ ] Replace `xlsx` with `exceljs` in components/AddVehicleModal.tsx (HIGH vuln, no fix available for xlsx)
+### Completed manually (2026-05-01)
+- ✅ nginx `server_tokens off` applied on production EC2
+- ✅ AWS IAM `da-platform-app`: replaced `AmazonS3FullAccess` (wildcard) with `da-platform-app-s3-scoped` (7 specific buckets only)
+
+### Still outstanding
+- [ ] Rotate CRON_SECRET: `openssl rand -hex 32` → update `.env.production` + all 3 EasyCron headers
+- [ ] Replace `xlsx` with `exceljs` in components/AddVehicleModal.tsx (HIGH severity, no upstream fix)
+- [ ] Aurora DB password rotation (legacy system compromised in prior hack incident)
+- [ ] Terminate decommissioned us-east-1 EC2 (ec2-54-167-226-23) once stable period confirmed
 - [ ] Plan Next.js 15 upgrade to resolve remaining moderate DoS CVEs
 
 ### Secrets rotation checklist
-- [ ] Rotate CRON_SECRET after audit → update .env.production + all 3 EasyCron headers
-- [ ] Rotate BILLING_API_SECRET after audit → update both da-platform and da-billing .env.production
+- [ ] Rotate CRON_SECRET → `openssl rand -hex 32`, update `.env.production`, update all 3 EasyCron job headers
+- [ ] Rotate BILLING_API_SECRET → update both da-platform and da-billing `.env.production`
 - [ ] Verify XPS_API_KEY is not shared with other systems
-- [ ] Confirm AWS IAM user `da-platform-app` has S3-only permissions (FileserverS3 group only)
+- ✅ AWS IAM `da-platform-app` scoped to S3 only (policy `da-platform-app-s3-scoped`, 7 buckets) — done 2026-05-01
 - [ ] Confirm SUPABASE_SERVICE_ROLE_KEY is not logged in PM2 logs (`pm2 logs da-platform | grep -i service_role`)
 - [ ] Aurora DB password — confirm it was changed after legacy hack incident
 - [ ] Review ANTHROPIC_API_KEY: confirm it's the enterprise key with spending limits
@@ -944,6 +1026,25 @@ All Supabase tables have Row Level Security enabled. Every table was audited.
 | passkeys | ✅ | Users read/update own only |
 | passkey_challenges | ✅ | Service role only |
 | staff_profiles | ✅ | Users read own; super_admin reads all |
+
+---
+
+## Known pending items (as of 2026-05-01)
+
+These are confirmed issues or next tasks that haven't been built yet:
+
+### Bugs
+- **Bulk print type param not read** — "Info Sheet (N)" and "Buyer Guide (N)" buttons on dashboard navigate to `/dealer-vehicles/[id]/addendum?type=infosheet` and `?type=buyer_guide`. The addendum page doesn't read the `type` query param and always generates a standard addendum. Fix: read `searchParams.type` and pass it to the builder/print flow.
+
+### Next features
+- **Phase 10 — Billing** (see prompt below) — UP NEXT
+- **Phase 14 — HubSpot + Billing Sync** — event-driven, non-blocking. DA Platform pushes dealer and print events to HubSpot portal `23896347` and DA Billing. Triggered on: dealer creation, plan change, print event. Uses existing `ANTHROPIC_API_KEY` account; HubSpot portal ID in env.
+- **exceljs migration** — replace `xlsx` (HIGH severity vulnerability, no fix available) with `exceljs` in `components/AddVehicleModal.tsx` lines 285–288.
+- **EasyCron URL update** — change all 3 job URLs from old EC2 IP to `https://app.dealeraddendums.com`.
+
+### Infrastructure
+- Terminate decommissioned us-east-1 EC2 (`ec2-54-167-226-23`) once 30-day stable period confirmed
+- Rotate `CRON_SECRET` (see secrets checklist above)
 
 ---
 
