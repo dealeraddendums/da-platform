@@ -879,6 +879,74 @@ Run npm run build — must be clean before reporting complete.
 
 ---
 
+## Security hardening status (2026-04-30)
+
+Full audit completed. All programmatic fixes applied. See `security_audit_report.md` for details.
+
+### Applied automatically
+- ✅ All 107 API routes audited — 100% protected (no unexpected auth bypasses)
+- ✅ Security headers on all responses (X-Frame-Options, CSP, HSTS, etc.) via middleware.ts
+- ✅ Rate limiting: POST /api/auth/* → 10 req/min; POST /api/invite/accept → 5 req/hr
+- ✅ CORS: API routes restricted to app.dealeraddendums.com + billing.dealeraddendums.com
+- ✅ Input validation library created at lib/validators.ts (Zod schemas)
+- ✅ All 44 Supabase tables have RLS enabled (100%)
+- ✅ next upgraded 14.2.30 → 14.2.35 (patches SSRF, HTTP smuggling, cache key confusion)
+- ✅ @anthropic-ai/sdk upgraded 0.90.0 → 0.92.0
+
+### Manual steps still required
+- [ ] Apply nginx security config: `server_tokens off` + HSTS header (see security_audit_report.md §FIX 3)
+- [ ] Rotate CRON_SECRET and update all 3 EasyCron jobs
+- [ ] Verify AWS IAM da-platform-app is scoped to S3 only (not EC2/RDS)
+- [ ] Replace `xlsx` with `exceljs` in components/AddVehicleModal.tsx (HIGH vuln, no fix available for xlsx)
+- [ ] Plan Next.js 15 upgrade to resolve remaining moderate DoS CVEs
+
+### Secrets rotation checklist
+- [ ] Rotate CRON_SECRET after audit → update .env.production + all 3 EasyCron headers
+- [ ] Rotate BILLING_API_SECRET after audit → update both da-platform and da-billing .env.production
+- [ ] Verify XPS_API_KEY is not shared with other systems
+- [ ] Confirm AWS IAM user `da-platform-app` has S3-only permissions (FileserverS3 group only)
+- [ ] Confirm SUPABASE_SERVICE_ROLE_KEY is not logged in PM2 logs (`pm2 logs da-platform | grep -i service_role`)
+- [ ] Aurora DB password — confirm it was changed after legacy hack incident
+- [ ] Review ANTHROPIC_API_KEY: confirm it's the enterprise key with spending limits
+
+---
+
+## RLS Audit (2026-04-30)
+
+All Supabase tables have Row Level Security enabled. Every table was audited.
+
+| Table | RLS | Key Policy |
+|-------|-----|-----------|
+| profiles | ✅ | Users read own; super_admin reads all via service role |
+| dealers | ✅ | dealer_admin reads own; super_admin reads all |
+| groups | ✅ | group_admin reads own; super_admin reads all |
+| dealer_settings | ✅ | Scoped to dealer |
+| templates | ✅ | Scoped to dealer |
+| ai_content_cache | ✅ | Service role only |
+| vehicle_options | ✅ | Scoped to dealer |
+| print_history | ✅ | Scoped to dealer |
+| addendum_library | ✅ | Scoped to dealer |
+| admin_audit | ✅ | Service role only |
+| nhtsa_* (9 tables) | ✅ | Service role only |
+| dealer_vehicles | ✅ | Scoped to dealer |
+| group_options/templates/disclaimers | ✅ | Scoped to group |
+| vehicle_audit_log | ✅ | Scoped to dealer |
+| admin_settings | ✅ | Service role only |
+| users_permissions | ✅ | Service role only |
+| dealer_vehicles_archive | ✅ | Service role only |
+| vehicle_audit_log_archive | ✅ | Service role only |
+| dealer_custom_sizes | ✅ | Scoped to dealer |
+| addendum_data | ✅ | Append-only; service role reads all |
+| label_orders | ✅ | Scoped to dealer |
+| invitations | ✅ | Scoped to dealer/group |
+| dealer_template_assignments | ✅ | Scoped to group |
+| dealer_option_assignments | ✅ | Scoped to group |
+| passkeys | ✅ | Users read/update own only |
+| passkey_challenges | ✅ | Service role only |
+| staff_profiles | ✅ | Users read own; super_admin reads all |
+
+---
+
 ## Legal note
 
 FTC CARS Rule struck down January 2025, formally withdrawn February 12, 2026.

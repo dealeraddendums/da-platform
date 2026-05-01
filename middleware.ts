@@ -1,23 +1,168 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function middleware(request: NextRequest) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+// ── Security headers ──────────────────────────────────────────────────────────
 
-  // Skip auth enforcement if Supabase isn't configured yet
-  if (!url || !key) {
-    return NextResponse.next();
+const SECURITY_HEADERS: Record<string, string> = {
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "X-XSS-Protection": "1; mode=block",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: https: blob:",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.s3.amazonaws.com https://s3.amazonaws.com https://xpsshipper.com https://api.anthropic.com https://api.qrserver.com",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; "),
+};
+
+function applySecurityHeaders(res: NextResponse): void {
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
+    res.headers.set(k, v);
+  }
+}
+
+// ── CORS ──────────────────────────────────────────────────────────────────────
+
+const ALLOWED_ORIGINS: string[] = [
+  "https://app.dealeraddendums.com",
+  "https://billing.dealeraddendums.com",
+  process.env.NEXT_PUBLIC_APP_URL ?? "",
+].filter(Boolean);
+
+// Routes accessible from external/dealer websites — exempt from CORS restriction
+const EXTERNAL_API_PREFIXES = [
+  "/api/health",
+  "/api/vehicle",
+  "/api/dealeron",
+  "/api/dealeronWS",
+  "/api/dealerdotcom",
+  "/api/dealerdotcomWS",
+  "/api/generate-addendum",
+  "/api/generate-button",
+];
+
+function isCorsExempt(pathname: string): boolean {
+  return EXTERNAL_API_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+
+type RateLimitEntry = { count: number; resetAt: number };
+const rateLimitStore = new Map<string, RateLimitEntry>();
+
+function checkRateLimit(
+  ip: string,
+  bucket: string,
+  limit: number,
+  windowMs: number
+): boolean {
+  const key = `${ip}:${bucket}`;
+  const now = Date.now();
+  const entry = rateLimitStore.get(key);
+
+  if (!entry || now > entry.resetAt) {
+    rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+    return true; // allowed
+  }
+  if (entry.count >= limit) return false; // blocked
+  entry.count++;
+  return true; // allowed
+}
+
+function getClientIp(request: NextRequest): string {
+  return (
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    request.headers.get("x-real-ip") ??
+    "unknown"
+  );
+}
+
+// ── Middleware ────────────────────────────────────────────────────────────────
+
+export async function middleware(request: NextRequest) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const { pathname } = request.nextUrl;
+  const method = request.method;
+  const ip = getClientIp(request);
+
+  // ── Rate limiting on authentication endpoints ────────────────────────────────
+  if (method === "POST") {
+    if (pathname.startsWith("/api/auth/")) {
+      if (!checkRateLimit(ip, "auth", 10, 60_000)) {
+        const res = new NextResponse("Too Many Requests", { status: 429 });
+        res.headers.set("Retry-After", "60");
+        applySecurityHeaders(res);
+        return res;
+      }
+    }
+    if (pathname === "/api/invite/accept") {
+      if (!checkRateLimit(ip, "invite_accept", 5, 3_600_000)) {
+        const res = new NextResponse("Too Many Requests", { status: 429 });
+        res.headers.set("Retry-After", "3600");
+        applySecurityHeaders(res);
+        return res;
+      }
+    }
+  }
+
+  // ── CORS restriction on API routes ───────────────────────────────────────────
+  if (pathname.startsWith("/api/") && !isCorsExempt(pathname)) {
+    const origin = request.headers.get("origin");
+
+    // Handle OPTIONS preflight
+    if (method === "OPTIONS") {
+      const allowedOrigin =
+        origin && ALLOWED_ORIGINS.includes(origin) ? origin : "";
+      const res = new NextResponse(null, { status: 204 });
+      if (allowedOrigin) {
+        res.headers.set("Access-Control-Allow-Origin", allowedOrigin);
+        res.headers.set(
+          "Access-Control-Allow-Methods",
+          "GET, POST, PATCH, DELETE, OPTIONS"
+        );
+        res.headers.set(
+          "Access-Control-Allow-Headers",
+          "Content-Type, Authorization, x-cron-secret"
+        );
+        res.headers.set("Access-Control-Max-Age", "86400");
+      }
+      applySecurityHeaders(res);
+      return res;
+    }
+
+    // Block cross-origin requests from unknown origins
+    if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+      const res = new NextResponse("Forbidden", { status: 403 });
+      applySecurityHeaders(res);
+      return res;
+    }
+  }
+
+  // Skip Supabase auth if env isn't configured (local dev without .env.local)
+  if (!supabaseUrl || !supabaseKey) {
+    const res = NextResponse.next();
+    applySecurityHeaders(res);
+    return res;
   }
 
   let response = NextResponse.next({ request });
 
-  const supabase = createServerClient(url, key, {
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll();
       },
-      setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
+      setAll(
+        cookiesToSet: { name: string; value: string; options: CookieOptions }[]
+      ) {
         cookiesToSet.forEach(({ name, value }) =>
           request.cookies.set(name, value)
         );
@@ -33,7 +178,6 @@ export async function middleware(request: NextRequest) {
     data: { session },
   } = await supabase.auth.getSession();
 
-  const { pathname } = request.nextUrl;
   const isAuthRoute = pathname === "/login" || pathname === "/signup";
   const isResetRoute = pathname === "/reset-password";
   const isApiAuth = pathname.startsWith("/api/auth/");
@@ -56,29 +200,47 @@ export async function middleware(request: NextRequest) {
   if (isProtected && !session) {
     const redirectUrl = new URL("/login", request.url);
     redirectUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(redirectUrl);
+    const redirectRes = NextResponse.redirect(redirectUrl);
+    applySecurityHeaders(redirectRes);
+    return redirectRes;
   }
 
   // Force password reset: redirect to /reset-password before any other access
-  // Skip this redirect during super_admin impersonation sessions
   const isImpersonating = request.cookies.get("da_impersonating")?.value === "1";
-  if (session && session.user.app_metadata?.force_password_reset === true && !isImpersonating) {
+  if (
+    session &&
+    session.user.app_metadata?.force_password_reset === true &&
+    !isImpersonating
+  ) {
     if (!isResetRoute && !isApiAuth) {
-      return NextResponse.redirect(new URL("/reset-password", request.url));
+      const redirectRes = NextResponse.redirect(
+        new URL("/reset-password", request.url)
+      );
+      applySecurityHeaders(redirectRes);
+      return redirectRes;
     }
+    applySecurityHeaders(response);
     return response;
   }
 
-  // Redirect authenticated users (without forced reset) away from auth pages
+  // Redirect authenticated users away from auth pages
   if (isAuthRoute && session) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    const redirectRes = NextResponse.redirect(
+      new URL("/dashboard", request.url)
+    );
+    applySecurityHeaders(redirectRes);
+    return redirectRes;
   }
 
-  // Redirect authenticated users away from reset-password (not needed)
   if (isResetRoute && session) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    const redirectRes = NextResponse.redirect(
+      new URL("/dashboard", request.url)
+    );
+    applySecurityHeaders(redirectRes);
+    return redirectRes;
   }
 
+  applySecurityHeaders(response);
   return response;
 }
 
