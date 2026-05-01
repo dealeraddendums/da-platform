@@ -46,17 +46,17 @@ function greeting(hour: number, firstName: string | null): string {
 function SuperAdminView({
   name,
   hour,
-  dealerCount,
+  payingCount,
+  trialCount,
   groupCount,
-  userCount,
   addendumMonth,
   dealers,
 }: {
   name: string | null;
   hour: number;
-  dealerCount: number;
+  payingCount: number;
+  trialCount: number;
   groupCount: number;
-  userCount: number;
   addendumMonth: number;
   dealers: DealerMapPoint[];
 }) {
@@ -64,9 +64,9 @@ function SuperAdminView({
   const _greeting = greeting(hour, firstName); // available for future use
   void _greeting;
   const cards = [
-    { label: "Active Dealers",      value: dealerCount.toLocaleString(),    note: "Active accounts" },
+    { label: "Paying Dealers",      value: payingCount.toLocaleString(),    note: "Paid subscriptions" },
+    { label: "Trial Dealers",       value: trialCount.toLocaleString(),      note: "Free / trial accounts" },
     { label: "Groups",              value: groupCount.toLocaleString(),      note: "Dealer groups" },
-    { label: "Active Users",        value: userCount.toLocaleString(),       note: "Platform accounts" },
     { label: "Addendums This Month",value: addendumMonth.toLocaleString(),   note: "Printed this month" },
   ];
   return (
@@ -215,16 +215,20 @@ export default async function DashboardPage() {
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
+    const PAID_TYPES = ["Automatic Web", "Automatic DMS", "Manual", "Standard", "Automatic Web $135"];
+
     const [
-      { count: dealerCount },
+      { count: payingCount },
+      { count: trialCount },
       { count: groupCount },
-      { count: userCount },
       { count: addendumMonth },
       { data: dealerRows },
     ] = await Promise.all([
-      admin.from("dealers").select("*", { count: "exact", head: true }).eq("active", true),
+      admin.from("dealers").select("*", { count: "exact", head: true })
+        .eq("active", true).in("account_type", PAID_TYPES),
+      admin.from("dealers").select("*", { count: "exact", head: true })
+        .eq("active", true).not("account_type", "in", `(${PAID_TYPES.map(t => `"${t}"`).join(",")})`),
       admin.from("groups").select("*", { count: "exact", head: true }),
-      admin.from("profiles").select("*", { count: "exact", head: true }).eq("active", true),
       admin.from("print_history").select("*", { count: "exact", head: true })
         .gte("created_at", startOfMonth.toISOString()),
       admin.from("dealers").select("id, dealer_id, name, account_type, lat, lng, address, city, state, zip").limit(5000),
@@ -247,9 +251,9 @@ export default async function DashboardPage() {
       <SuperAdminView
         name={profile?.full_name ?? null}
         hour={new Date().getHours()}
-        dealerCount={dealerCount ?? 0}
+        payingCount={payingCount ?? 0}
+        trialCount={trialCount ?? 0}
         groupCount={groupCount ?? 0}
-        userCount={userCount ?? 0}
         addendumMonth={addendumMonth ?? 0}
         dealers={dealers}
       />
