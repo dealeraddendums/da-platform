@@ -82,9 +82,6 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
   const [showNewForm, setShowNewForm] = useState(false);
   const [impersonating, setImpersonating] = useState<string | null>(null);
   const [impersonateError, setImpersonateError] = useState<{ dealerId: string; message: string } | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [syncToast, setSyncToast] = useState<{ msg: string; ok: boolean } | null>(null);
-  const [lastSync, setLastSync] = useState<string | null>(null);
 
   const fetchDealers = useCallback(async () => {
     setLoading(true);
@@ -126,14 +123,6 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
 
   useEffect(() => { void fetchDealers(); }, [fetchDealers]);
 
-  // Fetch last sync time (super_admin only)
-  useEffect(() => {
-    if (role !== "super_admin") return;
-    fetch("/api/admin/settings?key=last_dealer_sync")
-      .then(r => r.json() as Promise<{ value: string | null }>)
-      .then(j => setLastSync(j.value ?? null))
-      .catch(() => null);
-  }, [role]);
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -156,26 +145,6 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
     }
   }
 
-  async function handleSync() {
-    setSyncing(true);
-    setSyncToast(null);
-    try {
-      const res = await fetch("/api/admin/sync-legacy", { method: "POST" });
-      const json = await res.json() as { dealers_imported?: number; groups_imported?: number; synced_at?: string; error?: string };
-      if (!res.ok) {
-        setSyncToast({ msg: `Sync failed — ${json.error ?? "check server logs"}`, ok: false });
-      } else {
-        setSyncToast({ msg: `Sync complete — ${json.dealers_imported} active dealers and ${json.groups_imported} groups updated`, ok: true });
-        setLastSync(json.synced_at ?? new Date().toISOString());
-        void fetchDealers();
-      }
-    } catch {
-      setSyncToast({ msg: "Sync failed — check server logs", ok: false });
-    } finally {
-      setSyncing(false);
-      setTimeout(() => setSyncToast(null), 6000);
-    }
-  }
 
   const totalPages = Math.ceil(total / PER_PAGE);
   const from = (page - 1) * PER_PAGE + 1;
@@ -225,13 +194,6 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
 
   return (
     <div>
-      {/* Sync toast */}
-      {syncToast && (
-        <div className="mb-4 px-4 py-2.5 rounded text-sm font-medium"
-          style={{ background: syncToast.ok ? "#e8f5e9" : "#ffebee", color: syncToast.ok ? "#2e7d32" : "#c62828", border: `1px solid ${syncToast.ok ? "#c8e6c9" : "#ffcdd2"}` }}>
-          {syncToast.msg}
-        </div>
-      )}
 
       <PageHeader
         title="Dealers"
@@ -247,37 +209,6 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
         }
         action={
           <div className="flex items-center gap-3 flex-wrap">
-          {role === "super_admin" && (
-            <div className="flex flex-col items-end gap-0.5">
-              <button
-                type="button"
-                disabled={syncing}
-                onClick={() => void handleSync()}
-                style={{
-                  height: 36, padding: "0 14px", fontSize: 13, fontWeight: 600,
-                  borderRadius: 4, cursor: syncing ? "not-allowed" : "pointer",
-                  background: "transparent", color: "rgba(255,255,255,0.85)",
-                  border: "1.5px solid rgba(255,255,255,0.4)",
-                  opacity: syncing ? 0.7 : 1,
-                  display: "flex", alignItems: "center", gap: 6,
-                }}
-              >
-                {syncing ? (
-                  <>
-                    <span style={{ display: "inline-block", width: 13, height: 13, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
-                    Syncing…
-                  </>
-                ) : (
-                  <>↻ Sync from Legacy</>
-                )}
-              </button>
-              {lastSync && (
-                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>
-                  Last synced: {new Date(lastSync).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                </span>
-              )}
-            </div>
-          )}
           <button
             className="btn btn-primary"
             onClick={() => setShowNewForm((v) => !v)}
