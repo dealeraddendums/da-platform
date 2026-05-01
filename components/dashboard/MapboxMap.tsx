@@ -8,7 +8,7 @@ export type DealerMapPoint = {
   id: string;
   dealer_id: string;
   name: string;
-  active: boolean;
+  account_type: string | null;
   lat: string | null;
   lng: string | null;
   address: string | null;
@@ -16,6 +16,17 @@ export type DealerMapPoint = {
   state: string | null;
   zip: string | null;
 };
+
+// Paid = any monthly subscription; everything else (Trial, Free, null) = trial/free
+const PAID_TYPES = new Set([
+  "Monthly Subscription Manual",
+  "Monthly Subscription Automatic Web",
+  "Monthly Subscription Automatic DMS",
+]);
+
+export function isPaidDealer(accountType: string | null | undefined): boolean {
+  return !!accountType && PAID_TYPES.has(accountType);
+}
 
 type Props = {
   dealers: DealerMapPoint[];
@@ -74,7 +85,8 @@ export default function MapboxMap({ dealers, flashingDealerId, token, visibleTab
         if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
 
         const isFlashing = dealer.id === prevFlashRef.current;
-        const color = isFlashing ? "#ff5252" : (dealer.active === true ? "#4caf50" : "#1976d2");
+        const paid = isPaidDealer(dealer.account_type);
+        const color = isFlashing ? "#ff5252" : (paid ? "#4caf50" : "#1976d2");
 
         const el = document.createElement("div");
         el.className = isFlashing ? "da-marker da-marker-flash" : "da-marker";
@@ -93,9 +105,8 @@ export default function MapboxMap({ dealers, flashingDealerId, token, visibleTab
         markersRef.current.set(dealer.id, { marker, el, dealer });
 
         const tab = visibleTabRef.current;
-        const isPaid = dealer.active === true;
-        if (tab === "paid" && !isPaid) el.style.display = "none";
-        else if (tab === "trial" && isPaid) el.style.display = "none";
+        if (tab === "paid" && !paid) el.style.display = "none";
+        else if (tab === "trial" && paid) el.style.display = "none";
       });
     }
 
@@ -106,10 +117,10 @@ export default function MapboxMap({ dealers, flashingDealerId, token, visibleTab
   // Show/hide markers when tab changes
   useEffect(() => {
     markersRef.current.forEach(({ el, dealer }) => {
-      const isPaid = dealer.active === true;
+      const paid = isPaidDealer(dealer.account_type);
       if (visibleTab === "all") el.style.display = "";
-      else if (visibleTab === "paid") el.style.display = isPaid ? "" : "none";
-      else el.style.display = isPaid ? "none" : "";
+      else if (visibleTab === "paid") el.style.display = paid ? "" : "none";
+      else el.style.display = paid ? "none" : "";
     });
   }, [visibleTab]);
 
@@ -123,7 +134,7 @@ export default function MapboxMap({ dealers, flashingDealerId, token, visibleTab
       if (info) {
         info.el.className = "da-marker";
         const mc = info.el.querySelector(".mc") as HTMLElement | null;
-        if (mc) mc.style.background = info.dealer.active === true ? "#4caf50" : "#1976d2";
+        if (mc) mc.style.background = isPaidDealer(info.dealer.account_type) ? "#4caf50" : "#1976d2";
       }
     }
     if (flashingDealerId) {

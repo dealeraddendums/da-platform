@@ -227,14 +227,14 @@ export default async function DashboardPage() {
       admin.from("profiles").select("*", { count: "exact", head: true }).eq("active", true),
       admin.from("print_history").select("*", { count: "exact", head: true })
         .gte("created_at", startOfMonth.toISOString()),
-      admin.from("dealers").select("id, dealer_id, name, active, lat, lng, address, city, state, zip").limit(5000),
+      admin.from("dealers").select("id, dealer_id, name, account_type, lat, lng, address, city, state, zip").limit(5000),
     ]);
 
     const dealers: DealerMapPoint[] = (dealerRows ?? []).map((d) => ({
       id: d.id as string,
       dealer_id: d.dealer_id as string,
       name: d.name as string,
-      active: d.active as boolean,
+      account_type: (d.account_type as string | null) ?? null,
       lat: (d.lat as string | null) ?? null,
       lng: (d.lng as string | null) ?? null,
       address: (d.address as string | null) ?? null,

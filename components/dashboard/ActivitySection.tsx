@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { createClient } from "@/lib/supabase/client";
 import type { DealerMapPoint } from "./MapboxMap";
+import { isPaidDealer } from "./MapboxMap";
 
 const MapboxMap = dynamic(() => import("./MapboxMap"), { ssr: false });
 
@@ -14,7 +15,7 @@ export type PrintEvent = {
   dealerUuid: string;
   dealerLegacyId: string;
   dealerName: string;
-  dealerActive: boolean;
+  accountType: string | null;
   printedAt: string;
 };
 
@@ -87,7 +88,7 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
             dealerUuid: dealer.id,
             dealerLegacyId: dealer.dealer_id,
             dealerName: dealer.name,
-            dealerActive: dealer.active,
+            accountType: dealer.account_type,
             printedAt: row.printed_at ?? new Date().toISOString(),
           };
 
@@ -151,14 +152,14 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
 
   // Tab-filtered prints and counts
   const filteredPrints = prints.filter(p =>
-    tab === "paid" ? p.dealerActive :
-    tab === "trial" ? !p.dealerActive :
+    tab === "paid" ? isPaidDealer(p.accountType) :
+    tab === "trial" ? !isPaidDealer(p.accountType) :
     true
   );
   const counts = {
     all: prints.length,
-    paid: prints.filter(p => p.dealerActive).length,
-    trial: prints.filter(p => !p.dealerActive).length,
+    paid: prints.filter(p => isPaidDealer(p.accountType)).length,
+    trial: prints.filter(p => !isPaidDealer(p.accountType)).length,
   };
 
   function timeAgo(iso: string) {
@@ -403,7 +404,7 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
                       width: 7,
                       height: 7,
                       borderRadius: "50%",
-                      background: p.dealerActive ? "#4caf50" : "#1976d2",
+                      background: isPaidDealer(p.accountType) ? "#4caf50" : "#1976d2",
                       flexShrink: 0,
                     }}
                   />
