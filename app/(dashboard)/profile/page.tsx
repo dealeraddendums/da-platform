@@ -14,23 +14,30 @@ export default async function ProfilePage() {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("role, dealer_id, full_name, active_dealer_id")
+    .select("role, dealer_id, full_name, active_dealer_id, created_at")
     .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null; full_name: string | null; active_dealer_id: string | null }>();
+    .single<{ role: string; dealer_id: string | null; full_name: string | null; active_dealer_id: string | null; created_at: string }>();
 
   const role = profile?.role ?? "dealer_user";
+  const userEmail = session.user.email ?? "";
+  const userName = profile?.full_name ?? userEmail;
+  const memberSince = profile?.created_at ?? session.user.created_at;
 
-  // super_admin / group_admin → staff profile page
+  // super_admin / group_admin — no dealer data; show only Security tab
   if (role === "super_admin" || role === "group_admin") {
-    redirect("/staff-profile");
+    return (
+      <ProfileClient
+        dealer={null}
+        canEdit={false}
+        userEmail={userEmail}
+        userName={userName}
+        userRole={role}
+        memberSince={memberSince}
+      />
+    );
   }
 
-  // group_admin in dealer context → redirect to that dealer's profile
-  if (role === "group_admin" && profile?.active_dealer_id) {
-    redirect(`/dealers/${profile.active_dealer_id}`);
-  }
-
-  // Dealer roles: fetch the dealer record
+  // Dealer roles: require a dealer_id
   if (!profile?.dealer_id) {
     return (
       <div>
@@ -79,8 +86,6 @@ export default async function ProfilePage() {
   }
 
   const canEdit = role === "dealer_admin";
-  const userEmail = session.user.email ?? "";
-  const userName = profile?.full_name ?? userEmail;
 
   return (
     <ProfileClient
@@ -88,6 +93,8 @@ export default async function ProfilePage() {
       canEdit={canEdit}
       userEmail={userEmail}
       userName={userName}
+      userRole={role}
+      memberSince={memberSince}
     />
   );
 }

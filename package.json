@@ -25,6 +25,7 @@
     "@supabase/supabase-js": "^2.47.3",
     "@types/sharp": "^0.31.1",
     "jszip": "^3.10.1",
+    "mapbox-gl": "^3.23.0",
     "mysql2": "^3.22.1",
     "next": "^14.2.35",
     "pdf-lib": "^1.17.1",

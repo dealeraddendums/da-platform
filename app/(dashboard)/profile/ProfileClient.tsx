@@ -7,13 +7,15 @@ import { PageHeader } from "@/components/PageHeader";
 import type { LabelProduct } from "@/lib/label-products";
 import { LABEL_PRODUCTS } from "@/lib/label-products";
 
-type Tab = "info" | "shipping" | "labels" | "billing";
+type Tab = "info" | "shipping" | "labels" | "billing" | "security";
 
 type Props = {
-  dealer: DealerRow;
+  dealer?: DealerRow | null;
   canEdit: boolean;
   userEmail: string;
   userName: string;
+  userRole: string;
+  memberSince: string;
 };
 
 // ── Dealership Info Tab ──────────────────────────────────────────────────────
@@ -107,7 +109,6 @@ function InfoTab({ dealer, canEdit }: { dealer: DealerRow; canEdit: boolean }) {
         </div>
       )}
 
-      <PasskeyCard />
     </div>
   );
 }
@@ -362,6 +363,86 @@ function PasskeyCard() {
           Passkeys require a device with Face ID, Touch ID, or a PIN. Not supported in this browser.
         </p>
       )}
+    </div>
+  );
+}
+
+// ── Account Info Card ────────────────────────────────────────────────────────
+
+const ROLE_LABELS: Record<string, string> = {
+  super_admin: "Super Admin",
+  group_admin: "Group Admin",
+  group_user: "Group User",
+  dealer_admin: "Dealer Admin",
+  dealer_user: "Dealer User",
+  dealer_restricted: "Dealer User",
+};
+
+function AccountInfoCard({
+  userEmail,
+  userRole,
+  memberSince,
+}: {
+  userEmail: string;
+  userRole: string;
+  memberSince: string;
+}) {
+  const memberDate = new Date(memberSince).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: "24px" }}>
+      <h2 style={{ fontSize: 16, fontWeight: 600, color: "#2a2b3c", margin: "0 0 16px" }}>
+        Account Info
+      </h2>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em", color: "#78828c", marginBottom: 2 }}>Email</div>
+          <div style={{ fontSize: 14, color: "#2a2b3c" }}>{userEmail}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em", color: "#78828c", marginBottom: 4 }}>Role</div>
+          <span style={{ display: "inline-block", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20, background: "#e3f2fd", color: "#1565c0" }}>
+            {ROLE_LABELS[userRole] ?? userRole}
+          </span>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em", color: "#78828c", marginBottom: 2 }}>Member Since</div>
+          <div style={{ fontSize: 14, color: "#2a2b3c" }}>{memberDate}</div>
+        </div>
+        <div style={{ paddingTop: 4 }}>
+          <a
+            href="/reset-password"
+            style={{ display: "inline-block", fontSize: 13, color: "#1976d2", textDecoration: "none", fontWeight: 500 }}
+          >
+            Change Password →
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Security Tab ─────────────────────────────────────────────────────────────
+
+function SecurityTab({
+  userEmail,
+  userRole,
+  memberSince,
+}: {
+  userEmail: string;
+  userRole: string;
+  memberSince: string;
+}) {
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <PasskeyCard />
+      <div style={{ marginTop: 20 }}>
+        <AccountInfoCard userEmail={userEmail} userRole={userRole} memberSince={memberSince} />
+      </div>
     </div>
   );
 }
@@ -993,23 +1074,31 @@ const tdStyle: React.CSSProperties = {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "info", label: "Dealership Info" },
-  { id: "shipping", label: "Shipping Address" },
-  { id: "labels", label: "Order Labels" },
-  { id: "billing", label: "Invoices & Billing" },
+const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean }[] = [
+  { id: "info", label: "Dealership Info", dealerOnly: true },
+  { id: "shipping", label: "Shipping Address", dealerOnly: true },
+  { id: "labels", label: "Order Labels", dealerOnly: true },
+  { id: "billing", label: "Invoices & Billing", dealerOnly: true },
+  { id: "security", label: "Security" },
 ];
 
-export default function ProfileClient({ dealer, canEdit, userEmail, userName }: Props) {
+export default function ProfileClient({ dealer, canEdit, userEmail, userName, userRole, memberSince }: Props) {
   const searchParams = useSearchParams();
+  const hasDealer = !!dealer;
+  const visibleTabs = ALL_TABS.filter(t => !t.dealerOnly || hasDealer);
+
   const [tab, setTab] = useState<Tab>(() => {
     const t = searchParams.get("tab");
-    return (t === "labels" || t === "info" || t === "shipping" || t === "billing") ? t : "info";
+    if (t === "security") return "security";
+    if (!hasDealer) return "security";
+    return (t === "labels" || t === "info" || t === "shipping" || t === "billing") ? t as Tab : "info";
   });
+
+  const title = dealer?.name ?? "My Account";
 
   return (
     <div>
-      <PageHeader title={dealer.name} />
+      <PageHeader title={title} />
 
       {/* Tab bar */}
       <div
@@ -1023,7 +1112,7 @@ export default function ProfileClient({ dealer, canEdit, userEmail, userName }: 
           overflow: "hidden",
         }}
       >
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -1054,9 +1143,9 @@ export default function ProfileClient({ dealer, canEdit, userEmail, userName }: 
           padding: "24px",
         }}
       >
-        {tab === "info" && <InfoTab dealer={dealer} canEdit={canEdit} />}
-        {tab === "shipping" && <ShippingTab dealer={dealer} canEdit={canEdit} />}
-        {tab === "labels" && (
+        {tab === "info" && dealer && <InfoTab dealer={dealer} canEdit={canEdit} />}
+        {tab === "shipping" && dealer && <ShippingTab dealer={dealer} canEdit={canEdit} />}
+        {tab === "labels" && dealer && (
           <OrderLabelsTab
             dealer={dealer}
             canEdit={canEdit}
@@ -1065,6 +1154,9 @@ export default function ProfileClient({ dealer, canEdit, userEmail, userName }: 
           />
         )}
         {tab === "billing" && <BillingTab />}
+        {tab === "security" && (
+          <SecurityTab userEmail={userEmail} userRole={userRole} memberSince={memberSince} />
+        )}
       </div>
     </div>
   );

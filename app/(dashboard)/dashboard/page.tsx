@@ -6,6 +6,8 @@ import type { UserRole } from "@/lib/db";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import VehicleInventory from "@/components/VehicleInventory";
 import { PageHeader } from "@/components/PageHeader";
+import ActivitySection from "@/components/dashboard/ActivitySection";
+import type { DealerMapPoint } from "@/components/dashboard/ActivitySection";
 
 function isManualDealer(accountType: string | null): boolean {
   return !accountType || accountType === "Trial" || accountType === "Monthly Subscription Manual";
@@ -48,6 +50,7 @@ function SuperAdminView({
   groupCount,
   userCount,
   addendumMonth,
+  dealers,
 }: {
   name: string | null;
   hour: number;
@@ -55,8 +58,11 @@ function SuperAdminView({
   groupCount: number;
   userCount: number;
   addendumMonth: number;
+  dealers: DealerMapPoint[];
 }) {
   const firstName = name ? name.split(" ")[0] : null;
+  const _greeting = greeting(hour, firstName); // available for future use
+  void _greeting;
   const cards = [
     { label: "Active Dealers",      value: dealerCount.toLocaleString(),    note: "Active accounts" },
     { label: "Groups",              value: groupCount.toLocaleString(),      note: "Dealer groups" },
@@ -75,6 +81,7 @@ function SuperAdminView({
           </div>
         ))}
       </div>
+      <ActivitySection dealers={dealers} />
     </div>
   );
 }
@@ -213,13 +220,28 @@ export default async function DashboardPage() {
       { count: groupCount },
       { count: userCount },
       { count: addendumMonth },
+      { data: dealerRows },
     ] = await Promise.all([
       admin.from("dealers").select("*", { count: "exact", head: true }).eq("active", true),
       admin.from("groups").select("*", { count: "exact", head: true }),
       admin.from("profiles").select("*", { count: "exact", head: true }).eq("active", true),
       admin.from("print_history").select("*", { count: "exact", head: true })
         .gte("created_at", startOfMonth.toISOString()),
+      admin.from("dealers").select("id, dealer_id, name, active, lat, lng, address, city, state, zip").limit(5000),
     ]);
+
+    const dealers: DealerMapPoint[] = (dealerRows ?? []).map((d) => ({
+      id: d.id as string,
+      dealer_id: d.dealer_id as string,
+      name: d.name as string,
+      active: d.active as boolean,
+      lat: (d.lat as string | null) ?? null,
+      lng: (d.lng as string | null) ?? null,
+      address: (d.address as string | null) ?? null,
+      city: (d.city as string | null) ?? null,
+      state: (d.state as string | null) ?? null,
+      zip: (d.zip as string | null) ?? null,
+    }));
 
     return (
       <SuperAdminView
@@ -229,6 +251,7 @@ export default async function DashboardPage() {
         groupCount={groupCount ?? 0}
         userCount={userCount ?? 0}
         addendumMonth={addendumMonth ?? 0}
+        dealers={dealers}
       />
     );
   }

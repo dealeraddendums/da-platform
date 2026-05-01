@@ -44,6 +44,38 @@ async function getHubspotCompanyIds(inventoryIds: (string | null | undefined)[])
   }
 }
 
+// Geocode a dealer address via Mapbox and write lat/lng back to the dealers table.
+// Fire-and-forget: errors are logged but do NOT fail dealer creation.
+async function geocodeDealer(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  dealer: { id: string; lat: unknown; lng: unknown },
+  fields: Record<string, unknown>
+) {
+  if (dealer.lat != null && dealer.lng != null) return; // already geocoded
+  const address = [fields.address, fields.city, fields.state, fields.zip].filter(Boolean).join(", ");
+  if (!address) return;
+
+  const token = process.env.MAPBOX_PUBLIC_TOKEN;
+  if (!token || token === "pk.your_token_here") return;
+
+  try {
+    const encoded = encodeURIComponent(address);
+    const res = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encoded}.json?access_token=${token}&country=US&limit=1`
+    );
+    if (!res.ok) return;
+    const json = await res.json() as {
+      features?: Array<{ center: [number, number] }>;
+    };
+    const coords = json.features?.[0]?.center;
+    if (!coords) return;
+    const [lng, lat] = coords;
+    await admin.from("dealers").update({ lat: String(lat), lng: String(lng) }).eq("id", dealer.id);
+  } catch (err) {
+    console.error("[dealers/geocode]", err instanceof Error ? err.message : err);
+  }
+}
+
 type SortableCol = "name" | "active" | "account_type" | "created_at" | "lifetime_prints" | "last_30_prints" | "group_name";
 // Use legacy_id for "created" sort — it's the Aurora _ID (sequential int) and more reliable than created_at
 const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "created_at"]);
@@ -232,6 +264,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (dbError.code === "23505") return NextResponse.json({ error: "Dealer ID already exists" }, { status: 409 });
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
+
+  // Geocode the new dealer's address if coordinates are missing
+  void geocodeDealer(admin, data as { id: string; lat: unknown; lng: unknown }, rest);
 
   if (username?.trim() && password?.trim()) {
     const rawUsername = username.trim();

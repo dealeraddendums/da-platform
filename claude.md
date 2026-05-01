@@ -1,5 +1,5 @@
 # DealerAddendums Platform — CLAUDE.md
-## Last updated: 2026-05-01
+## Last updated: 2026-05-02
 
 ---
 
@@ -1026,6 +1026,54 @@ All Supabase tables have Row Level Security enabled. Every table was audited.
 | passkeys | ✅ | Users read/update own only |
 | passkey_challenges | ✅ | Service role only |
 | staff_profiles | ✅ | Users read own; super_admin reads all |
+
+---
+
+## Dashboard Activity Section (2026-05-01)
+
+Added to super_admin Dashboard page, below the 4 stat cards.
+
+### Layout
+600px white card, 70/30 split:
+- **Left (70%):** Mapbox GL JS map — all dealer locations as colored circle markers
+- **Right (30%):** Live print activity ticker with ALL/PAID/TRIAL tabs
+
+### Map
+- `mapbox-gl` v3, style `mapbox://styles/mapbox/light-v11`, centered on continental US
+- Green marker = active dealer; Blue = inactive/trial; Red pulsing = printed in last 5 min
+- Popup on marker click: dealer name + address
+- `NEXT_PUBLIC_MAPBOX_TOKEN` env var required in `.env.local` and `.env.production`
+- Also used server-side as `MAPBOX_PUBLIC_TOKEN` for geocoding new dealers
+
+### Ticker
+- Initial data: `GET /api/dashboard/recent-prints` (last 50 from `print_history`)
+- Realtime: Supabase `postgres_changes` on `addendum_data` INSERT events
+- Deduplication: `(dealer_id, printed_at)` key to coalesce multi-row print jobs
+- Click = impersonation (same flow as `/dealers` list)
+- Toast popup: dealer name "printed just now" auto-dismisses after 6s
+
+### Required manual step — Supabase Realtime
+Enable Realtime for `addendum_data` in Supabase Dashboard:
+`Database → Replication → supabase_realtime → Tables → addendum_data → Enable`
+(Migration 044 attempts this automatically but may fail due to permissions)
+
+### Required env vars
+```
+NEXT_PUBLIC_MAPBOX_TOKEN=pk.xxx  # client-side map + auth
+MAPBOX_PUBLIC_TOKEN=pk.xxx       # server-side geocoding (same value, no NEXT_PUBLIC_ needed on EC2)
+```
+
+### Geocoding
+`POST /api/dealers` now geocodes new dealer addresses via Mapbox Geocoding API (server-side).
+Writes `lat` + `lng` back to the dealers table. Failure is non-fatal (logs error, continues).
+
+### Files
+| File | Purpose |
+|------|---------|
+| `components/dashboard/MapboxMap.tsx` | Mapbox GL JS map (dynamic import, ssr:false) |
+| `components/dashboard/ActivitySection.tsx` | Main client component (map + ticker) |
+| `app/api/dashboard/recent-prints/route.ts` | Initial ticker data API |
+| `supabase/migrations/044_realtime_addendum_data.sql` | Realtime publication setup |
 
 ---
 
