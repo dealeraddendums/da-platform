@@ -35,6 +35,7 @@ export default async function StaffProfilePage() {
       userId={session.user.id}
       userEmail={session.user.email ?? ""}
       userRole={role}
+      memberSince={profile?.created_at ?? ""}
       initialProfile={staffProfile ?? null}
     />
   );

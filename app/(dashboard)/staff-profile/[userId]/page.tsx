@@ -49,6 +49,7 @@ export default async function StaffProfileByIdPage({
       userId={params.userId}
       userEmail={targetProfile.email}
       userRole={targetProfile.role}
+      memberSince={targetProfile.created_at}
       initialProfile={staffProfile ?? null}
       viewerIsSuperAdmin
     />
