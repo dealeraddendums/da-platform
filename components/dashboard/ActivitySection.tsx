@@ -28,12 +28,20 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
   const [flashingId, setFlashingId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ name: string } | null>(null);
   const [tab, setTab] = useState<Tab>("all");
-  const [impersonating, setImpersonating] = useState<string | null>(null);
+
+  // PDF preview state
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const [hoveredPrint, setHoveredPrint] = useState<PrintEvent | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const seenRef = useRef(new Set<string>());
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dealerByUuidRef = useRef(new Map<string, DealerMapPoint>());
+  const pdfCacheRef = useRef(new Map<string, string | null>());
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Build UUID lookup map when dealers change
   useEffect(() => {
@@ -50,7 +58,6 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
         if (!d.prints) return;
         for (const p of d.prints) seenRef.current.add(p.key);
         setPrints(d.prints);
-        // Flash most recent dealer if within last 5 min
         const cutoff = Date.now() - 5 * 60 * 1000;
         const recent = d.prints.find(p => new Date(p.printedAt).getTime() > cutoff);
         if (recent) setFlashingId(recent.dealerUuid);
@@ -59,7 +66,6 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
   }, []);
 
   // Supabase Realtime — subscribe to addendum_data INSERTs
-  // Note: enable Realtime for addendum_data in Supabase Dashboard → Database → Replication
   useEffect(() => {
     const supabase = createClient();
 
@@ -75,7 +81,6 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
             vin_number: string | null;
           };
 
-          // Deduplicate: all rows from the same print job share dealer_id + printed_at
           const key = `${row.dealer_id}:${row.printed_at ?? row.vin_number ?? String(Date.now())}`;
           if (seenRef.current.has(key)) return;
           seenRef.current.add(key);
@@ -110,44 +115,76 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
     };
   }, []);
 
-  // Impersonate dealer on ticker item click
-  async function handleImpersonate(legacyDealerId: string) {
-    if (impersonating) return;
-    setImpersonating(legacyDealerId);
-    const supabase = createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    const res = await fetch("/api/admin/impersonate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dealer_id: legacyDealerId }),
-    });
-
-    const json = await res.json() as {
-      access_token?: string; refresh_token?: string;
-      dealer_name?: string; dealer_id?: string; error?: string;
-    };
-
-    if (!res.ok || !json.access_token || !json.refresh_token) {
-      alert(json.error ?? "Impersonation failed");
-      setImpersonating(null);
+  // PDF preview fetch
+  async function fetchPreview(p: PrintEvent) {
+    const cached = pdfCacheRef.current.get(p.key);
+    if (cached !== undefined) {
+      setPreviewUrl(cached);
+      setPreviewLoading(false);
       return;
     }
+    setPreviewLoading(true);
+    setPreviewUrl(null);
+    try {
+      const res = await fetch(
+        `/api/dashboard/pdf-preview?dealer_id=${encodeURIComponent(p.dealerUuid)}&printed_at=${encodeURIComponent(p.printedAt)}`
+      );
+      const data = await res.json() as { url: string | null };
+      pdfCacheRef.current.set(p.key, data.url ?? null);
+      setPreviewUrl(data.url ?? null);
+    } catch {
+      pdfCacheRef.current.set(p.key, null);
+      setPreviewUrl(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
 
-    localStorage.setItem("da_impersonate", JSON.stringify({
-      dealer_name: json.dealer_name,
-      dealer_id: json.dealer_id,
-      original_access_token: session?.access_token ?? "",
-      original_refresh_token: session?.refresh_token ?? "",
-    }));
+  function handleRowEnter(p: PrintEvent) {
+    if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      setHoveredKey(p.key);
+      setHoveredPrint(p);
+      void fetchPreview(p);
+    }, 180);
+  }
 
-    await supabase.auth.setSession({
-      access_token: json.access_token,
-      refresh_token: json.refresh_token,
-    });
+  function handleRowLeave() {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    leaveTimerRef.current = setTimeout(() => {
+      setHoveredKey(null);
+      setHoveredPrint(null);
+      setPreviewUrl(null);
+      setPreviewLoading(false);
+    }, 350);
+  }
 
-    document.cookie = "da_impersonating=1; path=/; max-age=86400; SameSite=Lax";
-    window.location.href = "/dashboard";
+  function handlePreviewEnter() {
+    if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+  }
+
+  function handleRowClick(p: PrintEvent) {
+    const cached = pdfCacheRef.current.get(p.key);
+    if (cached) {
+      window.open(cached, "_blank", "noopener,noreferrer");
+      return;
+    }
+    // Fetch and immediately open
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/dashboard/pdf-preview?dealer_id=${encodeURIComponent(p.dealerUuid)}&printed_at=${encodeURIComponent(p.printedAt)}`
+        );
+        const data = await res.json() as { url: string | null };
+        if (data.url) {
+          pdfCacheRef.current.set(p.key, data.url);
+          window.open(data.url, "_blank", "noopener,noreferrer");
+        }
+      } catch {
+        // ignore
+      }
+    })();
   }
 
   // Tab-filtered prints and counts
@@ -295,6 +332,107 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
         </div>
       </div>
 
+      {/* ── PDF Preview overlay ──────────────────────────────────────────────── */}
+      {hoveredKey && (
+        <div
+          onMouseEnter={handlePreviewEnter}
+          onMouseLeave={handleRowLeave}
+          style={{
+            position: "absolute",
+            right: "calc(30% + 10px)",
+            top: "50%",
+            transform: "translateY(-50%)",
+            width: 224,
+            height: 548,
+            background: "#fff",
+            border: "1px solid #c0c0c0",
+            borderRadius: 6,
+            boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+            zIndex: 20,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          {/* Preview header */}
+          <div
+            style={{
+              padding: "7px 12px",
+              borderBottom: "1px solid #e0e0e0",
+              background: "#f5f6f7",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#2a2b3c", textTransform: "uppercase", letterSpacing: ".04em" }}>
+              PDF Preview
+            </span>
+            {hoveredPrint && (
+              <span style={{ fontSize: 10, color: "#78828c" }}>
+                {timeAgo(hoveredPrint.printedAt)}
+              </span>
+            )}
+          </div>
+
+          {/* Preview body */}
+          <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+            {previewLoading && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 8 }}>
+                <div style={{
+                  width: 20, height: 20, borderRadius: "50%",
+                  border: "2px solid #e0e0e0", borderTopColor: "#1976d2",
+                  animation: "spin 0.8s linear infinite",
+                }} />
+                <span style={{ fontSize: 11, color: "#78828c" }}>Loading…</span>
+              </div>
+            )}
+            {!previewLoading && previewUrl && (
+              <iframe
+                src={previewUrl}
+                style={{ width: "100%", height: "100%", border: "none", display: "block" }}
+                title="PDF Preview"
+              />
+            )}
+            {!previewLoading && !previewUrl && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 8, padding: 16 }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#c0c0c0" strokeWidth="1.5">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                <span style={{ fontSize: 11, color: "#78828c", textAlign: "center" }}>
+                  PDF not available
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Open full PDF link */}
+          {previewUrl && (
+            <a
+              href={previewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "block",
+                padding: "6px 12px",
+                fontSize: 11,
+                color: "#1976d2",
+                borderTop: "1px solid #e0e0e0",
+                textAlign: "center",
+                fontWeight: 500,
+                background: "#fff",
+                textDecoration: "none",
+                flexShrink: 0,
+              }}
+            >
+              Open full PDF ↗
+            </a>
+          )}
+        </div>
+      )}
+
       {/* ── Divider ───────────────────────────────────────────────────────────── */}
       <div style={{ width: 1, background: "#e0e0e0", flexShrink: 0 }} />
 
@@ -357,7 +495,12 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
               from { opacity: 0; transform: translateY(-6px); }
               to   { opacity: 1; transform: translateY(0); }
             }
-            .ticker-row:hover { background: #f5f6f7; }
+            @keyframes spin {
+              to { transform: rotate(360deg); }
+            }
+            .ticker-row { transition: background 0.1s; }
+            .ticker-row:hover { background: #f0f7ff; cursor: pointer; }
+            .ticker-row.active { background: #e3f2fd; }
           `}</style>
 
           {filteredPrints.length === 0 ? (
@@ -379,14 +522,14 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
             filteredPrints.map(p => (
               <div
                 key={p.key}
-                className="ticker-row"
-                title={`Click to impersonate ${p.dealerName}`}
-                onClick={() => void handleImpersonate(p.dealerLegacyId)}
+                className={`ticker-row${hoveredKey === p.key ? " active" : ""}`}
+                title="Hover to preview PDF · Click to open"
+                onMouseEnter={() => handleRowEnter(p)}
+                onMouseLeave={handleRowLeave}
+                onClick={() => handleRowClick(p)}
                 style={{
                   padding: "9px 14px",
                   borderBottom: "1px solid #f0f0f0",
-                  cursor: impersonating ? "default" : "pointer",
-                  opacity: impersonating === p.dealerLegacyId ? 0.6 : 1,
                   display: "flex",
                   flexDirection: "column",
                   gap: 2,
@@ -420,6 +563,14 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
                   >
                     {p.dealerName}
                   </span>
+                  {/* PDF icon hint */}
+                  <svg
+                    width="11" height="11" viewBox="0 0 24 24" fill="none"
+                    stroke="#c0c0c0" strokeWidth="2" style={{ flexShrink: 0, marginLeft: "auto" }}
+                  >
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
                 </div>
                 <div style={{ fontSize: 12, color: "#78828c", paddingLeft: 13 }}>
                   printed {timeAgo(p.printedAt)}
