@@ -23,7 +23,7 @@ export default async function ProfilePage() {
   const userName = profile?.full_name ?? userEmail;
   const memberSince = profile?.created_at ?? session.user.created_at;
 
-  // super_admin / group_admin — no dealer data; show only Security tab
+  // super_admin / group_admin — no dealer; Security tab only
   if (role === "super_admin" || role === "group_admin") {
     return (
       <ProfileClient

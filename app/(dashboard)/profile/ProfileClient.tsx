@@ -1076,9 +1076,9 @@ const tdStyle: React.CSSProperties = {
 
 const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean }[] = [
   { id: "info", label: "Dealership Info", dealerOnly: true },
-  { id: "shipping", label: "Shipping Address", dealerOnly: true },
+  { id: "shipping", label: "Shipping", dealerOnly: true },
   { id: "labels", label: "Order Labels", dealerOnly: true },
-  { id: "billing", label: "Invoices & Billing", dealerOnly: true },
+  { id: "billing", label: "Invoices", dealerOnly: true },
   { id: "security", label: "Security" },
 ];
 
@@ -1094,7 +1094,7 @@ export default function ProfileClient({ dealer, canEdit, userEmail, userName, us
     return (t === "labels" || t === "info" || t === "shipping" || t === "billing") ? t as Tab : "info";
   });
 
-  const title = dealer?.name ?? "My Account";
+  const title = "My Profile";
 
   return (
     <div>
