@@ -660,6 +660,20 @@ function InviteUserModal({ onClose, onSuccess }: {
   );
 }
 
+// ── Role tabs for super_admin ─────────────────────────────────────────────────
+
+type SuperAdminTab = "all" | "super_admin" | "group_admin" | "dealer_admin" | "dealer_user" | "dealer_restricted" | "staff";
+
+const SUPER_ADMIN_TABS: { value: SuperAdminTab; label: string }[] = [
+  { value: "all",               label: "All" },
+  { value: "super_admin",       label: "Super Admin" },
+  { value: "group_admin",       label: "Group Admin" },
+  { value: "dealer_admin",      label: "Dealer Admin" },
+  { value: "dealer_user",       label: "Dealer User" },
+  { value: "dealer_restricted", label: "Dealer Restricted" },
+  { value: "staff",             label: "Staff" },
+];
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 type Props = {
@@ -672,7 +686,8 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
   const dealerMode = viewerRole === "dealer_admin" || isGroupAdminContext;
   const availableRoles = dealerMode ? DEALER_ROLES : ALL_ROLES;
 
-  const [activeTab, setActiveTab]       = useState<"users" | "staff">("users");
+  const [superAdminTab, setSuperAdminTab] = useState<SuperAdminTab>("all");
+  const activeTab = superAdminTab === "staff" ? "staff" : "users";
   const [users, setUsers]               = useState<UserRow[]>([]);
   const [total, setTotal]               = useState(0);
   const [loading, setLoading]           = useState(true);
@@ -697,11 +712,16 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
     });
   }, []);
 
+  // For super_admin: tab drives the role filter; for others: use the dropdown
+  const effectiveRoleFilter = viewerRole === "super_admin" && superAdminTab !== "all" && superAdminTab !== "staff"
+    ? superAdminTab
+    : roleFilter;
+
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
-    if (search)               params.set("search", search);
-    if (roleFilter !== "all") params.set("role", roleFilter);
+    if (search)                          params.set("search", search);
+    if (effectiveRoleFilter !== "all")   params.set("role", effectiveRoleFilter);
     try {
       const res = await fetch(`/api/users?${params.toString()}`);
       if (res.ok) {
@@ -710,10 +730,10 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
         setTotal(data.total ?? 0);
       }
     } finally { setLoading(false); }
-  }, [page, search, roleFilter]);
+  }, [page, search, effectiveRoleFilter]);
 
   useEffect(() => { void fetchUsers(); }, [fetchUsers]);
-  useEffect(() => { setPage(1); }, [search, roleFilter]);
+  useEffect(() => { setPage(1); }, [search, effectiveRoleFilter]);
 
   useEffect(() => {
     if (activeTab === "staff" && viewerRole === "super_admin") {
@@ -803,7 +823,9 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
         subtitle={
           activeTab === "staff"
             ? `${staff.length} staff member${staff.length !== 1 ? "s" : ""}`
-            : dealerMode ? "Your team" : `${total.toLocaleString()} total user${total !== 1 ? "s" : ""}`
+            : dealerMode
+              ? "Your team"
+              : `${total.toLocaleString()} user${total !== 1 ? "s" : ""}`
         }
         action={
           activeTab === "users" ? (
@@ -819,24 +841,25 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
 
       {/* Tabs — super_admin only */}
       {viewerRole === "super_admin" && (
-        <div style={{ display: "flex", gap: 0, marginBottom: 16, borderBottom: "1px solid #e0e0e0" }}>
-          {(["users", "staff"] as const).map(tab => (
+        <div style={{ display: "flex", gap: 0, marginBottom: 16, borderBottom: "2px solid #e0e0e0", flexWrap: "wrap" }}>
+          {SUPER_ADMIN_TABS.map(tab => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
+              key={tab.value}
+              onClick={() => { setSuperAdminTab(tab.value); setPage(1); }}
               style={{
-                padding: "8px 20px",
+                padding: "8px 16px",
                 fontSize: 13,
                 fontWeight: 500,
                 background: "none",
                 border: "none",
-                borderBottom: activeTab === tab ? "2px solid #1976d2" : "2px solid transparent",
-                color: activeTab === tab ? "#1976d2" : "#78828c",
+                borderBottom: superAdminTab === tab.value ? "2px solid #1976d2" : "2px solid transparent",
+                color: superAdminTab === tab.value ? "#1976d2" : "#78828c",
                 cursor: "pointer",
-                marginBottom: -1,
+                marginBottom: -2,
+                whiteSpace: "nowrap",
               }}
             >
-              {tab === "users" ? "All Users" : "Staff"}
+              {tab.label}
             </button>
           ))}
         </div>
@@ -915,15 +938,17 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
               Clear
             </button>
           )}
-          <select
-            value={roleFilter}
-            onChange={e => { setRoleFilter(e.target.value); setPage(1); }}
-            className="input"
-            style={{ width: 180 }}
-          >
-            <option value="all">All roles</option>
-            {availableRoles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-          </select>
+          {viewerRole !== "super_admin" && (
+            <select
+              value={roleFilter}
+              onChange={e => { setRoleFilter(e.target.value); setPage(1); }}
+              className="input"
+              style={{ width: 180 }}
+            >
+              <option value="all">All roles</option>
+              {availableRoles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+          )}
         </form>
       </div>
 
