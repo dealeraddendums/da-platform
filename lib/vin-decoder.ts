@@ -2,8 +2,6 @@
 // Import only from API routes and server components.
 
 import { createAdminSupabaseClient } from './db';
-import { getPool } from './aurora';
-import type { RowDataPacket } from 'mysql2/promise';
 
 export type DecodeResult = {
   vin: string;
@@ -17,7 +15,7 @@ export type DecodeResult = {
   drivetrain: string | null;
   fuel_type: string | null;
   doors: number | null;
-  source: 'override' | 'nhtsa' | 'dealer_vehicles' | 'aurora' | 'partial';
+  source: 'override' | 'nhtsa' | 'dealer_vehicles' | 'partial';
   decode_flagged: boolean;
   confidence: 'high' | 'medium' | 'low';
 };
@@ -167,42 +165,7 @@ export async function decodeVin(vin: string): Promise<DecodeResult> {
     };
   }
 
-  // ── Step 4: Aurora legacy inventory ───────────────────────────────────────
-  // TODO: REMOVE AFTER AURORA MIGRATION COMPLETE
-  try {
-    type ARow = RowDataPacket & {
-      YEAR: string; MAKE: string; MODEL: string; TRIM: string;
-      BODYSTYLE: string; ENGINE: string; TRANSMISSION: string; DRIVETRAIN: string;
-    };
-    const pool = getPool();
-    const [rows] = await pool.execute<ARow[]>(
-      'SELECT YEAR, MAKE, MODEL, TRIM, BODYSTYLE, ENGINE, TRANSMISSION, DRIVETRAIN FROM vehicles WHERE VIN_NUMBER = ? LIMIT 1',
-      [vinUpper]
-    );
-    const row = rows[0];
-    if (row?.MAKE) {
-      return {
-        vin: vinUpper,
-        year: row.YEAR ? parseInt(row.YEAR, 10) : null,
-        make: row.MAKE || null,
-        model: row.MODEL || null,
-        trim: row.TRIM || null,
-        body_style: row.BODYSTYLE || null,
-        engine: row.ENGINE || null,
-        transmission: row.TRANSMISSION || null,
-        drivetrain: row.DRIVETRAIN || null,
-        fuel_type: null,
-        doors: null,
-        source: 'aurora',
-        decode_flagged: true,
-        confidence: 'medium',
-      };
-    }
-  } catch {
-    // Aurora unavailable — continue
-  }
-
-  // ── Step 5: WMI partial decode ────────────────────────────────────────────
+  // ── Step 4: WMI partial decode ────────────────────────────────────────────
   const wmi = vinUpper.substring(0, 3);
   const { data: wmiRow } = await admin
     .from('nhtsa_wmi')

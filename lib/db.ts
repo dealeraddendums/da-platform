@@ -170,7 +170,7 @@ export type DealerRow = {
   dealer_id: string;
   /** Never-changing billing ID (_ID). Used by da-billing for lineItemDescription. Never update. */
   internal_id: string | null;
-  /** Inventory supplier-assigned ID. Matches Aurora DEALER_ID for inventory queries. */
+  /** Inventory supplier-assigned ID. Used to match vehicles in dealer_vehicles. */
   inventory_dealer_id: string | null;
   legacy_id: number | null;
   name: string;
@@ -865,7 +865,7 @@ export type DealerVehicleRow = {
   created_by: string | null;
   date_added: string;
   updated_at: string;
-  // Extended fields matching legacy dealer_inventory schema (migration 020)
+  // Extended vehicle fields (migration 020)
   doors: string | null;
   fuel: string | null;
   photos: string | null;

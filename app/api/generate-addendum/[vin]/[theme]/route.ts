@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPool } from "@/lib/aurora";
+import { createAdminSupabaseClient } from "@/lib/db";
 import { checkPdfExists, buildButtonHtml } from "@/lib/addendum";
-import type { RowDataPacket } from "mysql2/promise";
 
 // Public endpoint — returns HTML embed. No JWT required.
 // Called via script/iframe on dealer inventory pages.
@@ -25,23 +24,26 @@ export async function GET(req: NextRequest, { params }: Params): Promise<NextRes
 
   // feature=pricing or feature=both — include pricing HTML with options table
   if ((feature === "pricing" || feature === "both") && stock) {
-    try {
-      const pool = getPool();
-      const [vehicleRows] = await pool.query<RowDataPacket[]>(
-        "SELECT MSRP, INTERNET_PRICE FROM dealer_inventory WHERE VIN_NUMBER = ? AND STOCK_NUMBER = ? LIMIT 1",
-        [vin, stock]
-      );
-      const [optionRows] = await pool.query<RowDataPacket[]>(
-        "SELECT ITEM_NAME, ITEM_DESCRIPTION, ITEM_PRICE FROM addendum_data WHERE VIN_NUMBER = ? AND ACTIVE = '1' ORDER BY RE_ORDER, _ID",
-        [vin]
-      );
+    const admin = createAdminSupabaseClient();
+    const { data: vehicle } = await admin
+      .from("dealer_vehicles")
+      .select("id, msrp, internet_price")
+      .eq("vin", vin)
+      .eq("stock_number", stock)
+      .maybeSingle();
 
-      const v = vehicleRows[0];
-      const msrp = v ? formatCurrency(v.MSRP) : "$0.00";
-      const internetPrice = v ? formatCurrency(v.INTERNET_PRICE) : "$0.00";
+    if (vehicle) {
+      const { data: optRows } = await admin
+        .from("vehicle_options")
+        .select("option_name, description, option_price")
+        .eq("vehicle_id", vehicle.id)
+        .order("sort_order", { ascending: true });
 
-      const optionsHtml = (optionRows as RowDataPacket[]).map((o) =>
-        `<li>${o.ITEM_NAME}: ${o.ITEM_DESCRIPTION} — ${formatCurrency(o.ITEM_PRICE)}</li>`
+      const msrp = vehicle.msrp ? formatCurrency(vehicle.msrp) : "$0.00";
+      const internetPrice = vehicle.internet_price ? formatCurrency(vehicle.internet_price) : msrp;
+
+      const optionsHtml = (optRows ?? []).map((o) =>
+        `<li>${o.option_name}: ${o.description ?? ""} — ${formatCurrency(o.option_price)}</li>`
       ).join("");
 
       const pricingHtml = `<div class="dealer-addendums__pricing">
@@ -54,9 +56,8 @@ export async function GET(req: NextRequest, { params }: Params): Promise<NextRes
       const html = `<div class="${safeTheme}">${pricingHtml}${feature === "both" ? buttonHtml : ""}</div>`;
 
       return new NextResponse(html, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
-    } catch {
-      // Fall through to simple button on Aurora error
     }
+    // Vehicle not found — fall through to simple button
   }
 
   // Default: simple download button (or empty if no PDF)

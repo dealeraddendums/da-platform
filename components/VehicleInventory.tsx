@@ -357,7 +357,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
           <p className="text-sm font-medium" style={{ color: "var(--error)" }}>
             {error}
           </p>
-          {error.includes("Aurora") || error.includes("connect") ? (
+          {error.includes("connect") || error.includes("ENOTFOUND") ? (
             <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
               Vehicle inventory is only available when the app is running on the production server.
             </p>

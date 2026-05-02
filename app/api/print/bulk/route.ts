@@ -6,7 +6,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
  * POST /api/print/bulk
  * Logs print events for multiple dealer_vehicles.
  * Body: { vehicle_ids: string[], document_type: 'addendum'|'infosheet'|'buyer_guide', template_id?: string }
- * vehicle_ids are dealer_vehicles UUIDs (Supabase only — no Aurora).
+ * vehicle_ids are dealer_vehicles UUIDs.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const admin = createAdminSupabaseClient();
 
-  // Look up vehicles from dealer_vehicles (Supabase only — no Aurora)
+  // Look up vehicles from dealer_vehicles
   const { data: dvRows, error: dvErr } = await admin
     .from("dealer_vehicles")
     .select("id, dealer_id")

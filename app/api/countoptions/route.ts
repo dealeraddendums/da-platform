@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { getPool } from "@/lib/aurora";
-import type { RowDataPacket } from "mysql2/promise";
+import { createAdminSupabaseClient } from "@/lib/db";
 
 // Legacy: key + option + optional from/to. New: JWT + option + optional from/to.
 // Returns how many times a specific option name appears for the dealer's vehicles.
+// Data source: Supabase addendum_data (print compliance log)
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
@@ -22,22 +22,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const from = searchParams.get("from") ?? null;
   const to   = searchParams.get("to") ?? null;
 
-  try {
-    const pool = getPool();
-    const conditions = ["DEALER_ID = ?", "ITEM_NAME = ?"];
-    const params: unknown[] = [claims.dealer_id, option];
+  const admin = createAdminSupabaseClient();
 
-    if (from) { conditions.push("CREATION_DATE >= ?"); params.push(from); }
-    if (to)   { conditions.push("CREATION_DATE <= ?"); params.push(to); }
+  // addendum_data.dealer_id is the UUID; use legacy_dealer_id for text-based lookup
+  let query = admin
+    .from("addendum_data")
+    .select("id", { count: "exact", head: true })
+    .eq("legacy_dealer_id", claims.dealer_id)
+    .ilike("item_name", option);
 
-    const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT COUNT(*) as total_count FROM addendum_data WHERE ${conditions.join(" AND ")}`,
-      params
-    );
-    const total = (rows[0] as unknown as { total_count: number }).total_count;
-    return NextResponse.json({ option, total_count: total });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Server error";
-    return NextResponse.json({ status: "failed", message: msg }, { status: 503 });
+  if (from) query = query.gte("printed_at", from) as typeof query;
+  if (to)   query = query.lte("printed_at", to) as typeof query;
+
+  const { count, error: dbErr } = await query;
+
+  if (dbErr) {
+    return NextResponse.json({ status: "failed", message: dbErr.message }, { status: 500 });
   }
+
+  return NextResponse.json({ option, total_count: count ?? 0 });
 }

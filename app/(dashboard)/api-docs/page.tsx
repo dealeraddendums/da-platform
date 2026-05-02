@@ -76,10 +76,10 @@ const NEW_PLATFORM_SECTIONS: Section[] = [
     ],
   },
   {
-    title: "Vehicle Inventory (Aurora — read-only)",
+    title: "Vehicle Inventory",
     endpoints: [
-      { method: "GET", path: "/api/vehicles",     description: "List vehicles for a dealer; supports q, condition (new/used/cpo/all), status, page, per_page filters", role: "authenticated (scoped)" },
-      { method: "GET", path: "/api/vehicles/[id]", description: "Get a single vehicle's full record including OPTIONS, DESCRIPTION, and all photos", role: "authenticated (scoped)" },
+      { method: "GET", path: "/api/vehicles",     description: "List vehicles for a dealer from Supabase dealer_vehicles; supports q, condition (new/used/cpo/all), status, page, per_page filters", role: "authenticated (scoped)" },
+      { method: "GET", path: "/api/vehicles/[id]", description: "Get a single vehicle by UUID from Supabase dealer_vehicles; returns full record", role: "authenticated (scoped)" },
     ],
   },
   {
@@ -177,15 +177,15 @@ export default async function ApiDocsPage() {
           {
             title: "Dealer Data (key→JWT)",
             endpoints: [
-              { method: "GET" as Method, path: "/api/search",                              description: "Search dealer_inventory by VIN; optionally scoped to dealership_id", role: "authenticated" },
-              { method: "GET" as Method, path: "/api/getalldealerships",                   description: "List all dealerships from dealer_dim; super_admin gets all, others get own", role: "authenticated" },
-              { method: "GET" as Method, path: "/api/getallvehicles",                      description: "List all active vehicles for a dealer from dealer_inventory; pass ?dealer= for admin override", role: "authenticated" },
-              { method: "GET" as Method, path: "/api/getdealeroptions",                    description: "List addendum options for the dealer's vehicles from addendum_data; optional ?from=&to= date filter", role: "authenticated" },
-              { method: "GET" as Method, path: "/api/getdealerdefaults",                   description: "List default addendum items for the dealer from addendum_defaults", role: "authenticated" },
-              { method: "GET" as Method, path: "/api/getvehicleoptions",                   description: "List addendum options for a specific VIN from addendum_data; requires ?vin=", role: "authenticated" },
-              { method: "GET" as Method, path: "/api/countoptions",                        description: "Count how many times a named option was added for the dealer; requires ?option=; optional ?from=&to=", role: "authenticated" },
-              { method: "GET" as Method, path: "/api/countgroupoptions",                   description: "Count option appearances across all dealers in the same group; requires ?option=; optional ?from=&to=", role: "authenticated" },
-              { method: "GET" as Method, path: "/api/getdealernames",                      description: "List dealer_dim IDs and names; super_admin gets all, others get own", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/search",                              description: "Search dealer_vehicles by VIN; optionally scoped to dealership_id", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getalldealerships",                   description: "List all dealerships from Supabase dealers table; super_admin gets all, others get own", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getallvehicles",                      description: "List all active vehicles for a dealer from dealer_vehicles; pass ?dealer= for admin override", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getdealeroptions",                    description: "List printed addendum options for the dealer from addendum_data; optional ?from=&to= date filter", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getdealerdefaults",                   description: "List default addendum items for the dealer from addendum_library", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getvehicleoptions",                   description: "List printed addendum options for a specific VIN from addendum_data; requires ?vin=", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/countoptions",                        description: "Count how many times a named option was printed for the dealer; requires ?option=; optional ?from=&to=", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/countgroupoptions",                   description: "Count option print appearances across all dealers in the same group; requires ?option=; optional ?from=&to=", role: "authenticated" },
+              { method: "GET" as Method, path: "/api/getdealernames",                      description: "List dealer IDs and names from Supabase dealers; super_admin gets all, others get own", role: "authenticated" },
             ],
           },
           {

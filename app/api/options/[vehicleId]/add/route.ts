@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { getPool } from "@/lib/aurora";
-import type { VehicleRowPacket } from "@/lib/aurora";
 
 type Params = { params: { vehicleId: string } };
 
@@ -33,32 +31,17 @@ export async function POST(
   let dealerId: string;
 
   if (isManual(vid)) {
-    // Manual vehicle — use effective dealer context, no Aurora lookup
+    // Manual vehicle — use effective dealer context
     if (!effectiveDealerId) {
       return NextResponse.json({ error: "No dealer context" }, { status: 403 });
     }
     dealerId = effectiveDealerId;
   } else {
-    // Aurora vehicle — look up dealer from Aurora
-    const vehicleIdNum = parseInt(vid, 10);
-    if (isNaN(vehicleIdNum)) {
-      return NextResponse.json({ error: "Invalid vehicleId" }, { status: 400 });
+    // Non-UUID, non-"0" vehicleId: use dealer context from JWT
+    if (!effectiveDealerId) {
+      return NextResponse.json({ error: "No dealer context" }, { status: 403 });
     }
-    const pool = getPool();
-    const [vrows] = await pool.execute<VehicleRowPacket[]>(
-      "SELECT DEALER_ID FROM dealer_inventory WHERE id = ? LIMIT 1",
-      [vehicleIdNum]
-    );
-    if (!vrows.length) {
-      return NextResponse.json({ error: "Vehicle not found" }, { status: 404 });
-    }
-    dealerId = vrows[0].DEALER_ID;
-    if (
-      (claims.role === "dealer_admin" || claims.role === "dealer_user") &&
-      effectiveDealerId !== dealerId
-    ) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    dealerId = effectiveDealerId;
   }
 
   // Get current max sort_order

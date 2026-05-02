@@ -32,7 +32,7 @@ export type VehicleRow = {
   CMPG: string | null;
   MPG: string | null;
   UPDATE_DATE?: string | null;
-  // Extended fields — populated from dealer_vehicles (migration 020) or Aurora
+  // Extended fields — populated from dealer_vehicles (migration 020)
   DOORS?: string | null;
   VDP_LINK?: string | null;
   WARRANTY_EXPIRES?: string | null;

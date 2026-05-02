@@ -4,7 +4,7 @@ import { getDealerOptionLibrary } from "@/lib/options-engine";
 
 /**
  * GET /api/options/library?dealer_id=XXX
- * Returns all active default options for a dealer from addendum_defaults.
+ * Returns all active default options for a dealer from Supabase addendum_library.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
@@ -15,7 +15,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
   }
 
-  // TODO: verify this should use inventory_dealer_id (claims.dealer_id is Supabase; dealerId param matches Aurora DEALER_ID)
+  
   // Scope check: dealer roles can only fetch their own library
   if (
     (claims.role === "dealer_admin" || claims.role === "dealer_user") &&

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { getPool } from "@/lib/aurora";
-import type { RowDataPacket } from "mysql2/promise";
+import { createAdminSupabaseClient } from "@/lib/db";
 
 // Legacy: key + option + optional from/to (group resolved from key's dealer group).
-// New: JWT + option + optional from/to; group resolved from dealer_dim.DEALER_GROUP.
+// New: JWT + option + optional from/to; group resolved from Supabase dealers table.
+// Data source: Supabase addendum_data
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
@@ -22,36 +22,45 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const from = searchParams.get("from") ?? null;
   const to   = searchParams.get("to") ?? null;
 
-  try {
-    const pool = getPool();
+  const admin = createAdminSupabaseClient();
 
-    // Find this dealer's group name
-    const [groupRows] = await pool.query<RowDataPacket[]>(
-      "SELECT DEALER_GROUP FROM dealer_dim WHERE DEALER_ID = ? LIMIT 1",
-      [claims.dealer_id]
-    );
-    if (!groupRows.length || !groupRows[0].DEALER_GROUP) {
-      return NextResponse.json({ option, total_count: 0 });
-    }
-    const dealerGroup = groupRows[0].DEALER_GROUP as string;
+  // Find this dealer's group_id
+  const { data: dealerRow } = await admin
+    .from("dealers")
+    .select("group_id")
+    .eq("dealer_id", claims.dealer_id)
+    .maybeSingle();
 
-    // Count options across all dealers in the same group
-    const conditions = [
-      "a.DEALER_ID IN (SELECT DEALER_ID FROM dealer_dim WHERE DEALER_GROUP = ?)",
-      "a.ITEM_NAME = ?",
-    ];
-    const params: unknown[] = [dealerGroup, option];
-    if (from) { conditions.push("a.CREATION_DATE >= ?"); params.push(from); }
-    if (to)   { conditions.push("a.CREATION_DATE <= ?"); params.push(to); }
-
-    const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT COUNT(*) as total_count FROM addendum_data a WHERE ${conditions.join(" AND ")}`,
-      params
-    );
-    const total = (rows[0] as unknown as { total_count: number }).total_count;
-    return NextResponse.json({ option, total_count: total });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Server error";
-    return NextResponse.json({ status: "failed", message: msg }, { status: 503 });
+  if (!dealerRow?.group_id) {
+    return NextResponse.json({ option, total_count: 0 });
   }
+
+  // Find all dealers in this group (text dealer_ids)
+  const { data: groupDealers } = await admin
+    .from("dealers")
+    .select("dealer_id")
+    .eq("group_id", dealerRow.group_id);
+
+  const dealerIds = (groupDealers ?? []).map((d) => d.dealer_id);
+  if (dealerIds.length === 0) {
+    return NextResponse.json({ option, total_count: 0 });
+  }
+
+  // Count from Supabase addendum_data using legacy_dealer_id
+  let query = admin
+    .from("addendum_data")
+    .select("id", { count: "exact", head: true })
+    .in("legacy_dealer_id", dealerIds)
+    .ilike("item_name", option);
+
+  if (from) query = query.gte("printed_at", from) as typeof query;
+  if (to)   query = query.lte("printed_at", to) as typeof query;
+
+  const { count, error: dbErr } = await query;
+
+  if (dbErr) {
+    return NextResponse.json({ status: "failed", message: dbErr.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ option, total_count: count ?? 0 });
 }

@@ -131,7 +131,7 @@ function libRowMatchesVehicle(
 /**
  * POST /api/pdf/bulk
  * Generates PDFs for multiple dealer_vehicles, merges into one PDF.
- * vehicleIds are dealer_vehicles UUIDs (Supabase only — no Aurora).
+ * vehicleIds are dealer_vehicles UUIDs.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();

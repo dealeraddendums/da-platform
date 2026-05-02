@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPool } from "@/lib/aurora";
-import type { RowDataPacket } from "mysql2/promise";
+import { createAdminSupabaseClient } from "@/lib/db";
 
 // Public endpoint — called by Dealer.com DMS for wholesale price lookup. No auth required.
 // Returns a plain-text price string (e.g. "$1234.56").
@@ -14,22 +13,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ status: "failed", message: "VIN and stock are required." }, { status: 422 });
   }
 
-  try {
-    const pool = getPool();
-    const [rows] = await pool.query<RowDataPacket[]>(
-      "SELECT INTERNET_PRICE FROM dealer_inventory WHERE VIN_NUMBER = ? AND STOCK_NUMBER = ? LIMIT 1",
-      [vin, stock]
-    );
+  const admin = createAdminSupabaseClient();
+  const { data: vehicle } = await admin
+    .from("dealer_vehicles")
+    .select("internet_price, msrp")
+    .eq("vin", vin)
+    .eq("stock_number", stock)
+    .maybeSingle();
 
-    if (!rows.length) {
-      return NextResponse.json({ status: "failed", message: "Vehicle not found." }, { status: 422 });
-    }
-
-    const price = parseFloat(String(rows[0].INTERNET_PRICE || 0));
-    const formatted = `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    return new NextResponse(formatted, { status: 200, headers: { "Content-Type": "text/plain" } });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Server error";
-    return NextResponse.json({ status: "failed", message: msg }, { status: 503 });
+  if (!vehicle) {
+    return NextResponse.json({ status: "failed", message: "Vehicle not found." }, { status: 422 });
   }
+
+  const price = parseFloat(String(vehicle.internet_price ?? vehicle.msrp ?? 0));
+  const formatted = `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return new NextResponse(formatted, { status: 200, headers: { "Content-Type": "text/plain" } });
 }

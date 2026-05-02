@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server';
-import { getPool, type VehicleRowPacket } from '@/lib/aurora';
 import { decodeVin } from '@/lib/vinquery';
 import { generateVehicleContent } from '@/lib/ai-content';
-import { parseOptions, vehicleCondition } from '@/lib/vehicles';
+import { vehicleCondition } from '@/lib/vehicles';
+import type { VehicleRow } from '@/lib/vehicles';
 
 export async function GET(request: Request) {
   const supabase = createClient();
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
   }
 
   // 3. Generate fresh content
-  const content = await generateContent(vin, dealerId);
+  const content = await generateContent(vin, dealerId, admin);
   if (!content) {
     return NextResponse.json({ description: null, features: null, source: 'db' });
   }
@@ -73,29 +73,44 @@ export async function GET(request: Request) {
   });
 }
 
-async function generateContent(vin: string, dealerId: string) {
+async function generateContent(
+  vin: string,
+  dealerId: string,
+  admin: ReturnType<typeof createAdminSupabaseClient>
+) {
   try {
-    // Fetch vehicle from Aurora
-    const pool = getPool();
-    const [rows] = await pool.execute<VehicleRowPacket[]>(
-      `SELECT VIN_NUMBER, YEAR, MAKE, MODEL, TRIM, EXT_COLOR, MILEAGE, MSRP,
-              NEW_USED, CERTIFIED, OPTIONS
-       FROM dealer_inventory
-       WHERE VIN_NUMBER = ? AND DEALER_ID = ? LIMIT 1`, // TODO: verify this should use inventory_dealer_id
-      [vin, dealerId]
-    );
-    const row = rows[0];
+    // Fetch vehicle from Supabase dealer_vehicles
+    const { data: row } = await admin
+      .from('dealer_vehicles')
+      .select('year, make, model, trim, exterior_color, mileage, msrp, condition, description')
+      .eq('vin', vin)
+      .eq('dealer_id', dealerId)
+      .maybeSingle();
+
+    const vehicleRow: Partial<VehicleRow> = row
+      ? {
+          YEAR: row.year ? String(row.year) : null,
+          MAKE: row.make ?? null,
+          MODEL: row.model ?? null,
+          TRIM: row.trim ?? null,
+          EXT_COLOR: row.exterior_color ?? null,
+          MILEAGE: row.mileage ? String(row.mileage) : null,
+          MSRP: row.msrp ? String(row.msrp) : null,
+          NEW_USED: row.condition === 'Used' ? 'Used' : 'New',
+          CERTIFIED: row.condition === 'CPO' ? 'Yes' : 'No',
+        }
+      : {};
 
     const vehicleInput = {
-      year: row?.YEAR,
-      make: row?.MAKE,
-      model: row?.MODEL,
-      trim: row?.TRIM,
-      colorExt: row?.EXT_COLOR,
-      mileage: row?.MILEAGE,
-      condition: row ? vehicleCondition(row) : undefined,
-      options: row?.OPTIONS ? parseOptions(row.OPTIONS) : [],
-      msrp: row?.MSRP ? Number(row.MSRP) : null,
+      year: vehicleRow.YEAR ?? undefined,
+      make: vehicleRow.MAKE ?? undefined,
+      model: vehicleRow.MODEL ?? undefined,
+      trim: vehicleRow.TRIM ?? undefined,
+      colorExt: vehicleRow.EXT_COLOR ?? undefined,
+      mileage: vehicleRow.MILEAGE ?? undefined,
+      condition: row ? vehicleCondition(vehicleRow as VehicleRow) : undefined,
+      options: [],
+      msrp: vehicleRow.MSRP ? Number(vehicleRow.MSRP) : null,
     };
 
     // Enrich with VINQuery if key is configured

@@ -255,7 +255,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                     className="ml-1 text-xs font-normal"
                     style={{ color: "var(--text-muted)", textTransform: "none", letterSpacing: 0 }}
                   >
-                    (supplier-assigned, matches Aurora DEALER_ID)
+                    (supplier-assigned inventory ID)
                   </span>
                 </label>
                 <input
@@ -276,13 +276,13 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                     className="ml-1 text-xs font-medium px-1.5 py-0.5 rounded"
                     style={{ background: "#e3f2fd", color: "#1565c0", verticalAlign: "middle" }}
                   >
-                    Aurora
+                    Inventory
                   </span>
                 </div>
                 <span
                   className="text-sm font-mono font-medium text-right"
                   style={{ color: "var(--text-primary)" }}
-                  title="Matches Aurora DEALER_ID for inventory queries."
+                  title="Supplier-assigned inventory dealer ID."
                 >
                   {dealer.inventory_dealer_id ?? <span style={{ color: "var(--text-muted)" }}>—</span>}
                 </span>

@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
-import { getPool } from "@/lib/aurora";
-import type { RowDataPacket } from "mysql2/promise";
 
 const DEALER_ROLES: UserRole[] = ["dealer_admin", "dealer_user", "dealer_restricted"];
 
@@ -79,7 +77,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   let q = admin
     .from("profiles")
     .select(
-      "id, email, full_name, role, dealer_id, group_id, active, force_password_reset, last_login, created_at",
+      "id, email, full_name, role, dealer_id, group_id, active, force_password_reset, last_login, created_at, hubspot_contact_id",
       { count: "exact" }
     )
     .order("full_name", { ascending: true, nullsFirst: false })
@@ -103,26 +101,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ? (admin as any).schema("auth").from("users").select("id, last_sign_in_at").in("id", userIds) as Promise<{ data: AuthUserRow[] | null }>
     : Promise.resolve({ data: [] as AuthUserRow[] });
 
-  const emails = rows.map(p => p.email).filter((e): e is string => !!e);
-  async function getHubspotContactIds(): Promise<Map<string, number>> {
-    if (emails.length === 0) return new Map();
-    try {
-      const placeholders = emails.map(() => "?").join(",");
-      const [hsRows] = await getPool().execute<RowDataPacket[]>(
-        `SELECT EMAIL, HUBSPOT_CONTACT_ID FROM users WHERE EMAIL IN (${placeholders}) AND HUBSPOT_CONTACT_ID IS NOT NULL`,
-        emails
-      );
-      return new Map(
-        (hsRows as RowDataPacket[])
-          .filter(r => r.EMAIL && r.HUBSPOT_CONTACT_ID)
-          .map(r => [String(r.EMAIL).toLowerCase(), r.HUBSPOT_CONTACT_ID as number])
-      );
-    } catch {
-      return new Map();
-    }
-  }
+  // hubspot_contact_id is stored directly in the Supabase profiles table
+  const hubspotContactMap = new Map(
+    rows
+      .filter(p => p.email && p.hubspot_contact_id)
+      .map(p => [p.email!.toLowerCase(), p.hubspot_contact_id as unknown as number])
+  );
 
-  const [dealerRes, groupRes, authUsersRes, hubspotContactMap] = await Promise.all([
+  const [dealerRes, groupRes, authUsersRes] = await Promise.all([
     dealerIds.length > 0
       ? admin.from("dealers").select("dealer_id, name").in("dealer_id", dealerIds)
       : Promise.resolve({ data: [] as { dealer_id: string; name: string }[] }),
@@ -130,7 +116,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ? admin.from("groups").select("id, name").in("id", groupIds)
       : Promise.resolve({ data: [] as { id: string; name: string }[] }),
     authUsersQuery,
-    getHubspotContactIds(),
   ]);
 
   const dealerMap     = new Map((dealerRes.data     ?? []).map(d => [d.dealer_id, d.name]));

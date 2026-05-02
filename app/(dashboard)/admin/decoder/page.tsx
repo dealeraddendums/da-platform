@@ -391,7 +391,7 @@ function FlaggedTab() {
   useEffect(() => { load(); }, [load]);
 
   const sourceLabel: Record<string, string> = {
-    dealer_vehicles: "Prior entry", aurora: "Legacy DB", partial: "WMI only", manual: "Manual",
+    dealer_vehicles: "Prior entry", aurora: "Legacy Import", partial: "WMI only", manual: "Manual",
   };
 
   return (
@@ -404,7 +404,7 @@ function FlaggedTab() {
           style={{ height: 36, border: "1px solid #e0e0e0", borderRadius: 4, padding: "0 8px", fontSize: 13 }}>
           <option value="all">All sources</option>
           <option value="dealer_vehicles">Prior entry</option>
-          <option value="aurora">Legacy DB</option>
+          <option value="aurora">Legacy Import</option>
           <option value="partial">WMI only</option>
           <option value="manual">Manual</option>
         </select>

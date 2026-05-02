@@ -725,7 +725,7 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
           <div>
             <label className="label">Dealer ID *</label>
             <input className="input" required value={fields.dealer_id} onChange={set("dealer_id")} placeholder="e.g. DA-12345" />
-            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Matches Aurora DEALER_ID</p>
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Supplier-assigned inventory dealer ID</p>
           </div>
           <div>
             <label className="label">Account Type</label>

@@ -28,7 +28,7 @@ export async function generateVehicleContent(
 ): Promise<AiContent> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  // Merge Aurora data with VINQuery enrichment
+  // Merge dealer_vehicles data with VINQuery enrichment
   const year = vehicle.year ?? vinData?.year ?? '';
   const make = vehicle.make ?? vinData?.make ?? '';
   const model = vehicle.model ?? vinData?.model ?? '';

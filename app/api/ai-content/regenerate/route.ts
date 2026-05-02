@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server';
-import { getPool, type VehicleRowPacket } from '@/lib/aurora';
 import { decodeVin } from '@/lib/vinquery';
 import { generateVehicleContent } from '@/lib/ai-content';
-import { parseOptions, vehicleCondition } from '@/lib/vehicles';
+import { vehicleCondition } from '@/lib/vehicles';
+import type { VehicleRow } from '@/lib/vehicles';
 
 export async function POST(request: Request) {
   const supabase = createClient();
@@ -23,34 +23,46 @@ export async function POST(request: Request) {
   }
 
   try {
-    // Fetch vehicle from Aurora
-    const pool = getPool();
-    const [rows] = await pool.execute<VehicleRowPacket[]>(
-      `SELECT VIN_NUMBER, YEAR, MAKE, MODEL, TRIM, EXT_COLOR, MILEAGE, MSRP,
-              NEW_USED, CERTIFIED, OPTIONS
-       FROM dealer_inventory
-       WHERE VIN_NUMBER = ? AND DEALER_ID = ? LIMIT 1`, // TODO: verify this should use inventory_dealer_id
-      [vin, dealerId]
-    );
-    const row = rows[0];
+    const admin = createAdminSupabaseClient();
+
+    // Fetch vehicle from Supabase dealer_vehicles
+    const { data: row } = await admin
+      .from('dealer_vehicles')
+      .select('year, make, model, trim, exterior_color, mileage, msrp, condition')
+      .eq('vin', vin)
+      .eq('dealer_id', dealerId)
+      .maybeSingle();
+
+    const vehicleRow: Partial<VehicleRow> = row
+      ? {
+          YEAR: row.year ? String(row.year) : null,
+          MAKE: row.make ?? null,
+          MODEL: row.model ?? null,
+          TRIM: row.trim ?? null,
+          EXT_COLOR: row.exterior_color ?? null,
+          MILEAGE: row.mileage ? String(row.mileage) : null,
+          MSRP: row.msrp ? String(row.msrp) : null,
+          NEW_USED: row.condition === 'Used' ? 'Used' : 'New',
+          CERTIFIED: row.condition === 'CPO' ? 'Yes' : 'No',
+        }
+      : {};
 
     const vehicleInput = {
-      year: row?.YEAR,
-      make: row?.MAKE,
-      model: row?.MODEL,
-      trim: row?.TRIM,
-      colorExt: row?.EXT_COLOR,
-      mileage: row?.MILEAGE,
-      condition: row ? vehicleCondition(row) : undefined,
-      options: row?.OPTIONS ? parseOptions(row.OPTIONS) : [],
-      msrp: row?.MSRP ? Number(row.MSRP) : null,
+      year: vehicleRow.YEAR ?? undefined,
+      make: vehicleRow.MAKE ?? undefined,
+      model: vehicleRow.MODEL ?? undefined,
+      trim: vehicleRow.TRIM ?? undefined,
+      colorExt: vehicleRow.EXT_COLOR ?? undefined,
+      mileage: vehicleRow.MILEAGE ?? undefined,
+      condition: row ? vehicleCondition(vehicleRow as VehicleRow) : undefined,
+      options: [],
+      msrp: vehicleRow.MSRP ? Number(vehicleRow.MSRP) : null,
     };
 
     const vinData = await decodeVin(vin);
     const content = await generateVehicleContent(vehicleInput, vinData);
 
     // Upsert cache
-    const admin = createAdminSupabaseClient();
     await admin.from('ai_content_cache').upsert({
       vin,
       dealer_id: dealerId,

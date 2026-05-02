@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { getPool } from "@/lib/aurora";
-import type { VehicleRowPacket } from "@/lib/aurora";
 import { createAdminSupabaseClient } from "@/lib/db";
 
 const PER_PAGE_DEFAULT = 50;
@@ -10,16 +8,14 @@ const PER_PAGE_MAX = 200;
 /**
  * GET /api/vehicles
  * Query params:
- *   dealer_id — the text DEALER_ID from dealer_dim / vehicles (required for super_admin / group_admin)
+ *   dealer_id — the text DEALER_ID (required for super_admin / group_admin)
  *   q         — search VIN, stock, make, model
  *   condition — new | used | cpo | all (default all)
  *   status    — active | all (default active)
  *   page      — 1-indexed
  *   per_page  — max 200
  *
- * Access control:
- *   dealer_admin / dealer_user — uses their own dealer's DEALER_ID (from profiles.dealer_id)
- *   group_admin / super_admin  — must pass dealer_id param
+ * Data source: Supabase dealer_vehicles
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
@@ -40,13 +36,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   let dealerId: string | null = null;
 
   if (claims.role === "dealer_admin" || claims.role === "dealer_user") {
-    // Their own dealer — look up legacy DEALER_ID from the dealers table
     if (!claims.dealer_id) {
       return NextResponse.json({ error: "No dealer assigned to your account" }, { status: 403 });
     }
-    dealerId = claims.dealer_id; // profiles.dealer_id == vehicles.DEALER_ID
+    dealerId = claims.dealer_id;
   } else {
-    // super_admin or group_admin — dealer_id param required
     const paramDealerId = searchParams.get("dealer_id");
     if (!paramDealerId) {
       return NextResponse.json(
@@ -71,56 +65,48 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     dealerId = paramDealerId;
   }
 
-  // ── Build query ────────────────────────────────────────────────────────────
-
-  // TODO: verify this should use inventory_dealer_id (dealerId here comes from profiles.dealer_id via claims)
-  const where: string[] = ["DEALER_ID = ?"];
-  const params: (string | number)[] = [dealerId];
-
-  if (statusParam === "active") {
-    where.push("STATUS = '1'");
-  }
-
-  if (conditionParam === "new") {
-    where.push("NEW_USED = 'New'", "CERTIFIED != 'Yes'");
-  } else if (conditionParam === "used") {
-    where.push("NEW_USED = 'Used'", "CERTIFIED != 'Yes'");
-  } else if (conditionParam === "cpo") {
-    where.push("CERTIFIED = 'Yes'");
-  }
-
-  if (q) {
-    const like = `%${q}%`;
-    where.push("(VIN_NUMBER LIKE ? OR STOCK_NUMBER LIKE ? OR MAKE LIKE ? OR MODEL LIKE ?)");
-    params.push(like, like, like, like);
-  }
-
-  const whereSQL = where.length ? `WHERE ${where.join(" AND ")}` : "";
-  const offset = (page - 1) * perPage;
-
-  const selectCols =
-    "id, DEALER_ID, VIN_NUMBER, STOCK_NUMBER, YEAR, MAKE, MODEL, TRIM, BODYSTYLE, " +
-    "EXT_COLOR, MILEAGE, MSRP, NEW_USED, CERTIFIED, STATUS, " +
-    "DATE_IN_STOCK, PHOTOS, HMPG, CMPG, MPG";
+  // ── Build Supabase query ───────────────────────────────────────────────────
 
   try {
-    const pool = getPool();
-
-    const [countRows] = await pool.query<VehicleRowPacket[]>(
-      `SELECT COUNT(*) as cnt FROM vehicles ${whereSQL}`,
-      params
-    );
-    const total = (countRows[0] as unknown as { cnt: number }).cnt;
-
-    const [rows] = await pool.query<VehicleRowPacket[]>(
-      `SELECT ${selectCols} FROM vehicles ${whereSQL} ORDER BY DATE_IN_STOCK DESC, id DESC LIMIT ? OFFSET ?`,
-      [...params, perPage, offset]
-    );
-
-    // Determine printed state from Supabase print_history (never from Aurora PRINT_STATUS)
-    // vehicle_id is text after migration 030 — convert integer IDs to strings for comparison
     const admin = createAdminSupabaseClient();
-    const vehicleIds = rows.map((r) => String((r as unknown as { id: number }).id));
+    const from = (page - 1) * perPage;
+
+    let query = admin
+      .from("dealer_vehicles")
+      .select(
+        "id, dealer_id, vin, stock_number, year, make, model, trim, body_style, exterior_color, mileage, msrp, condition, status, date_added",
+        { count: "exact" }
+      )
+      .eq("dealer_id", dealerId);
+
+    if (statusParam === "active") {
+      query = query.eq("status", "active");
+    }
+
+    if (conditionParam === "new") {
+      query = query.eq("condition", "New");
+    } else if (conditionParam === "used") {
+      query = query.eq("condition", "Used");
+    } else if (conditionParam === "cpo") {
+      query = query.eq("condition", "CPO");
+    }
+
+    if (q) {
+      query = query.or(`vin.ilike.%${q}%,stock_number.ilike.%${q}%,make.ilike.%${q}%,model.ilike.%${q}%`);
+    }
+
+    const { data: rows, error: dbErr, count } = await query
+      .order("date_added", { ascending: false, nullsFirst: false })
+      .range(from, from + perPage - 1);
+
+    if (dbErr) {
+      return NextResponse.json({ error: dbErr.message }, { status: 500 });
+    }
+
+    const total = count ?? 0;
+
+    // Determine printed state from Supabase print_history
+    const vehicleIds = (rows ?? []).map((r) => r.id as string);
     let printedSet = new Set<string>();
     if (vehicleIds.length > 0) {
       const { data: printedRows } = await admin
@@ -133,10 +119,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    const enriched = rows.map((r) => {
-      const id = String((r as unknown as { id: number }).id);
-      return { ...r, supabase_printed: printedSet.has(id) };
-    });
+    const enriched = (rows ?? []).map((r) => ({
+      ...r,
+      // Legacy field names for backward compat
+      DEALER_ID: r.dealer_id,
+      VIN_NUMBER: r.vin,
+      STOCK_NUMBER: r.stock_number,
+      YEAR: r.year ? String(r.year) : null,
+      MAKE: r.make,
+      MODEL: r.model,
+      TRIM: r.trim,
+      BODYSTYLE: r.body_style,
+      EXT_COLOR: r.exterior_color,
+      MILEAGE: r.mileage ? String(r.mileage) : null,
+      MSRP: r.msrp ? String(r.msrp) : null,
+      NEW_USED: r.condition === "Used" ? "Used" : "New",
+      CERTIFIED: r.condition === "CPO" ? "Yes" : "No",
+      STATUS: r.status === "active" ? "1" : "0",
+      DATE_IN_STOCK: r.date_added,
+      supabase_printed: printedSet.has(r.id as string),
+    }));
 
     return NextResponse.json({
       data: enriched,
@@ -146,7 +148,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       dealer_id: dealerId,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Aurora connection failed";
-    return NextResponse.json({ error: msg }, { status: 503 });
+    const msg = err instanceof Error ? err.message : "Query failed";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

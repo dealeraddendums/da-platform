@@ -75,3 +75,26 @@ BEGIN
     ALTER TABLE print_history ADD COLUMN legacy_vehicle_id int;
   END IF;
 END$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'print_history' AND column_name = 'legacy_history_id'
+  ) THEN
+    ALTER TABLE print_history ADD COLUMN legacy_history_id bigint UNIQUE;
+    COMMENT ON COLUMN print_history.legacy_history_id IS
+      'Aurora vehicle_histories.id (action_id=7) — used by ETL for incremental upsert.';
+    CREATE INDEX IF NOT EXISTS idx_print_history_legacy_history_id ON print_history (legacy_history_id);
+  END IF;
+END$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'print_history' AND column_name = 'legacy_user_id'
+  ) THEN
+    ALTER TABLE print_history ADD COLUMN legacy_user_id int;
+  END IF;
+END$$;

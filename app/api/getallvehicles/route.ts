@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { getPool } from "@/lib/aurora";
-import type { RowDataPacket } from "mysql2/promise";
+import { createAdminSupabaseClient } from "@/lib/db";
 
 // Legacy: required key + username + optional dealer + optional type.
 // New: Supabase JWT; dealer scoped by role; pass ?dealer= to override (super_admin only).
-
-const COLS = "DEALER_ID, VIN_NUMBER, STOCK_NUMBER, YEAR, MAKE, MODEL, BODYSTYLE, DOORS, TRIM, EXT_COLOR, INT_COLOR, ENGINE, FUEL, DRIVETRAIN, TRANSMISSION, MILEAGE, DATE_IN_STOCK, MSRP, INPUT_DATE, NEW_USED, STATUS";
+// Data source: Supabase dealer_vehicles
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
@@ -25,15 +23,39 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ status: "failed", message: "API Key, Username required." }, { status: 422 });
   }
 
-  try {
-    const pool = getPool();
-    const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT ${COLS} FROM dealer_inventory WHERE DEALER_ID = ? AND STATUS = '1' ORDER BY DATE_IN_STOCK DESC`,
-      [dealerId]
-    );
-    return NextResponse.json(rows);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Server error";
-    return NextResponse.json({ status: "failed", message: msg }, { status: 503 });
+  const admin = createAdminSupabaseClient();
+  const { data: rows, error: dbErr } = await admin
+    .from("dealer_vehicles")
+    .select("dealer_id, vin, stock_number, year, make, model, body_style, trim, exterior_color, interior_color, engine, drivetrain, transmission, mileage, date_added, msrp, condition, status")
+    .eq("dealer_id", dealerId)
+    .eq("status", "active")
+    .order("date_added", { ascending: false, nullsFirst: false });
+
+  if (dbErr) {
+    return NextResponse.json({ status: "failed", message: dbErr.message }, { status: 500 });
   }
+
+  // Map to legacy column names for backward compat
+  const mapped = (rows ?? []).map((r) => ({
+    DEALER_ID: r.dealer_id,
+    VIN_NUMBER: r.vin,
+    STOCK_NUMBER: r.stock_number,
+    YEAR: r.year ? String(r.year) : null,
+    MAKE: r.make,
+    MODEL: r.model,
+    BODYSTYLE: r.body_style,
+    TRIM: r.trim,
+    EXT_COLOR: r.exterior_color,
+    INT_COLOR: r.interior_color,
+    ENGINE: r.engine,
+    DRIVETRAIN: r.drivetrain,
+    TRANSMISSION: r.transmission,
+    MILEAGE: r.mileage ? String(r.mileage) : null,
+    DATE_IN_STOCK: r.date_added,
+    MSRP: r.msrp ? String(r.msrp) : null,
+    NEW_USED: r.condition === "Used" ? "Used" : "New",
+    STATUS: r.status === "active" ? "1" : "0",
+  }));
+
+  return NextResponse.json(mapped);
 }

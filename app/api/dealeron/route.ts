@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPool } from "@/lib/aurora";
-import type { RowDataPacket } from "mysql2/promise";
+import { createAdminSupabaseClient } from "@/lib/db";
 
 // Public endpoint — called by DealerOn DMS webhooks. No auth required.
 // Same shape as /dealerdotcom but options have a slightly trimmed schema.
@@ -14,26 +13,38 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ status: "failed", message: "VIN and stock are required." }, { status: 422 });
   }
 
-  try {
-    const pool = getPool();
-    const [vehicleRows] = await pool.query<RowDataPacket[]>(
-      "SELECT _ID, DEALER_ID, VIN_NUMBER, STOCK_NUMBER, MSRP, INTERNET_PRICE FROM dealer_inventory WHERE VIN_NUMBER = ? AND STOCK_NUMBER = ? LIMIT 1",
-      [vin, stock]
-    );
+  const admin = createAdminSupabaseClient();
+  const { data: vehicle } = await admin
+    .from("dealer_vehicles")
+    .select("id, dealer_id, vin, stock_number, msrp, internet_price")
+    .eq("vin", vin)
+    .eq("stock_number", stock)
+    .maybeSingle();
 
-    if (!vehicleRows.length) {
-      return NextResponse.json({ status: "failed", message: "Vehicle not found." }, { status: 422 });
-    }
-
-    const vehicle = vehicleRows[0];
-    const [optionRows] = await pool.query<RowDataPacket[]>(
-      "SELECT _ID, ITEM_NAME, ITEM_DESCRIPTION, ITEM_PRICE FROM addendum_data WHERE VIN_NUMBER = ? AND ACTIVE = '1' ORDER BY RE_ORDER, _ID",
-      [vin]
-    );
-
-    return NextResponse.json({ ...vehicle, options: optionRows });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Server error";
-    return NextResponse.json({ status: "failed", message: msg }, { status: 503 });
+  if (!vehicle) {
+    return NextResponse.json({ status: "failed", message: "Vehicle not found." }, { status: 422 });
   }
+
+  const { data: options } = await admin
+    .from("vehicle_options")
+    .select("id, option_name, description, option_price")
+    .eq("vehicle_id", vehicle.id)
+    .order("sort_order", { ascending: true });
+
+  const optionRows = (options ?? []).map((o) => ({
+    _ID: o.id,
+    ITEM_NAME: o.option_name,
+    ITEM_DESCRIPTION: o.description ?? "",
+    ITEM_PRICE: o.option_price ?? "NC",
+  }));
+
+  return NextResponse.json({
+    _ID: vehicle.id,
+    DEALER_ID: vehicle.dealer_id,
+    VIN_NUMBER: vehicle.vin,
+    STOCK_NUMBER: vehicle.stock_number,
+    MSRP: vehicle.msrp,
+    INTERNET_PRICE: vehicle.internet_price ?? vehicle.msrp,
+    options: optionRows,
+  });
 }

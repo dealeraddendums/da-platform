@@ -33,7 +33,7 @@ export async function POST(
 
   const admin = createAdminSupabaseClient();
 
-  // Look up dealer_id from dealer_vehicles (Supabase only — no Aurora)
+  // Look up dealer_id from dealer_vehicles
   const { data: dv } = await admin
     .from("dealer_vehicles")
     .select("dealer_id")
@@ -105,7 +105,7 @@ export async function GET(
   const vehicleId = params.vehicleId;
   const admin = createAdminSupabaseClient();
 
-  // Look up dealer_id from dealer_vehicles (Supabase only — no Aurora)
+  // Look up dealer_id from dealer_vehicles
   const { data: dv } = await admin
     .from("dealer_vehicles")
     .select("dealer_id")

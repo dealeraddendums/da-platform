@@ -1,79 +1,64 @@
-// Server-only: options matching engine — reads Aurora addendum_defaults.
-// All writes go to Supabase vehicle_options. Never INSERT/UPDATE/DELETE Aurora.
+// Server-only: options matching engine — reads Supabase addendum_library.
 
-import { getPool } from "@/lib/aurora";
-import type { RowDataPacket } from "mysql2/promise";
 import { vehicleCondition } from "@/lib/vehicles";
 import type { VehicleRow } from "@/lib/vehicles";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupOptionRow, GroupDisclaimerRow } from "@/lib/db";
 
-// ── Aurora row types ──────────────────────────────────────────────────────────
+// ── Supabase addendum_library row type ────────────────────────────────────────
 
-type DefaultRow = RowDataPacket & {
-  _ID: number;
-  DEALER_ID: string;
-  OPTION_NAME: string;
-  ITEM_PRICE: string;
-  AD_TYPE: string;
-  MAKES: string;
-  MAKES_NOT: number;
-  MODELS: string;
-  MODELS_NOT: number;
-  TRIMS: string;
-  TRIMS_NOT: number;
-  BODY_STYLES: string;
-  YEAR_CONDITION: number;
-  YEAR: number | null;
-  MILES_CONDITION: number;
-  MILES: number | null;
-  MSRP_CONDITION: number;
-  MSRP1: number | null;
-  MSRP2: number | null;
-  RE_ORDER: number;
-  ACTIVE: string;
-};
-
-type DataRow = RowDataPacket & {
-  _ID: number;
-  VEHICLE_ID: number;
-  OPTION_NAME: string;
-  ITEM_PRICE: string;
-  ORDER_BY: number;
-  ACTIVE: string;
+type LibraryRow = {
+  id: string;
+  dealer_id: string;
+  option_name: string;
+  item_price: string | null;
+  description: string | null;
+  applies_to: string | null; // 'all' | 'rules' | 'none'
+  makes: string | null;
+  makes_not: boolean;
+  models: string | null;
+  models_not: boolean;
+  trims: string | null;
+  trims_not: boolean;
+  body_styles: string | null;
+  year_condition: number;
+  year_value: number | null;
+  miles_condition: number;
+  miles_value: number | null;
+  msrp_condition: number;
+  msrp1: number | null;
+  msrp2: number | null;
+  sort_order: number;
+  active: boolean;
+  ad_types: string[] | null;
 };
 
 export type MatchedOption = {
-  default_id: number;
+  default_id: string;
   option_name: string;
   option_price: string;
   sort_order: number;
   source: "default";
 };
 
-export type AppliedOption = {
-  default_id: number;
-  option_name: string;
-  option_price: string;
-  sort_order: number;
-  source: "applied";
-};
 
 // ── Matching helpers ──────────────────────────────────────────────────────────
 
-function listMatches(
+function listMatchesWithNot(
   vehicleValue: string | null,
-  listField: string,
-  notFlag: number
+  listField: string | null,
+  notFlag: boolean
 ): boolean {
-  if (listField === "ALL" || !listField) return true;
+  if (!listField || listField === "ALL" || listField === "") return true;
   const val = (vehicleValue ?? "").toLowerCase().trim();
+  if (!val) return !notFlag; // empty vehicle value: matches "ALL" lists but not specific ones
   const items = listField.split(",").map((s) => s.toLowerCase().trim()).filter(Boolean);
+  if (items.length === 0) return true;
   const inList = items.some((item) => val === item || val.includes(item));
   return notFlag ? !inList : inList;
 }
 
-/** Check if a vehicle condition matches a Supabase library row's ad_types array. */
+/** Check if a vehicle condition matches a Supabase library row's applies_to field. */
 export function matchesAdTypes(
   adTypes: string[] | null | undefined,
   vehicleCond: "New" | "Used" | "CPO"
@@ -82,49 +67,53 @@ export function matchesAdTypes(
   return adTypes.includes(vehicleCond);
 }
 
-function matchesCondition(row: DefaultRow, vehicle: VehicleRow): boolean {
+function matchesLibraryRow(row: LibraryRow, vehicle: VehicleRow): boolean {
   const cond = vehicleCondition(vehicle);
 
-  // AD_TYPE: New / Used / Both
-  if (row.AD_TYPE === "New" && cond !== "New") return false;
-  if (row.AD_TYPE === "Used" && cond === "New") return false;
+  // applies_to: 'none' never matches; 'rules' defers to ad_types; 'all' always continues
+  if (row.applies_to === "none") return false;
+
+  // ad_types array (newer schema — 'New', 'Used', 'CPO')
+  if (row.ad_types && row.ad_types.length > 0) {
+    if (!row.ad_types.includes(cond)) return false;
+  }
 
   // Makes
-  if (!listMatches(vehicle.MAKE, row.MAKES, row.MAKES_NOT)) return false;
+  if (!listMatchesWithNot(vehicle.MAKE, row.makes, row.makes_not)) return false;
 
   // Models
-  if (!listMatches(vehicle.MODEL, row.MODELS, row.MODELS_NOT)) return false;
+  if (!listMatchesWithNot(vehicle.MODEL, row.models, row.models_not)) return false;
 
   // Trims
-  if (!listMatches(vehicle.TRIM, row.TRIMS, row.TRIMS_NOT)) return false;
+  if (!listMatchesWithNot(vehicle.TRIM, row.trims, row.trims_not)) return false;
 
-  // Body styles
-  if (row.BODY_STYLES && row.BODY_STYLES !== "NONE") {
-    if (!listMatches(vehicle.BODYSTYLE, row.BODY_STYLES, 0)) return false;
+  // Body styles (no NOT flag in library schema)
+  if (row.body_styles && row.body_styles !== "NONE" && row.body_styles !== "") {
+    if (!listMatchesWithNot(vehicle.BODYSTYLE, row.body_styles, false)) return false;
   }
 
   // Year condition
   const vehicleYear = vehicle.YEAR ? parseInt(vehicle.YEAR, 10) : null;
-  if (row.YEAR_CONDITION !== 0 && row.YEAR != null && vehicleYear != null) {
-    if (row.YEAR_CONDITION === 1 && vehicleYear !== row.YEAR) return false;
-    if (row.YEAR_CONDITION === 2 && vehicleYear > row.YEAR) return false;
-    if (row.YEAR_CONDITION === 3 && vehicleYear < row.YEAR) return false;
+  if (row.year_condition !== 0 && row.year_value != null && vehicleYear != null) {
+    if (row.year_condition === 1 && vehicleYear !== row.year_value) return false;
+    if (row.year_condition === 2 && vehicleYear > row.year_value) return false;
+    if (row.year_condition === 3 && vehicleYear < row.year_value) return false;
   }
 
   // Miles condition
   const vehicleMiles = vehicle.MILEAGE ? parseInt(vehicle.MILEAGE, 10) : null;
-  if (row.MILES_CONDITION !== 0 && row.MILES != null && vehicleMiles != null) {
-    if (row.MILES_CONDITION === 1 && vehicleMiles > row.MILES) return false;
-    if (row.MILES_CONDITION === 2 && vehicleMiles < row.MILES) return false;
+  if (row.miles_condition !== 0 && row.miles_value != null && vehicleMiles != null) {
+    if (row.miles_condition === 1 && vehicleMiles > row.miles_value) return false;
+    if (row.miles_condition === 2 && vehicleMiles < row.miles_value) return false;
   }
 
   // MSRP condition
   const vehicleMsrp = vehicle.MSRP ? parseFloat(vehicle.MSRP) : null;
-  if (row.MSRP_CONDITION !== 0 && vehicleMsrp != null) {
-    if (row.MSRP_CONDITION === 1 && row.MSRP1 != null && vehicleMsrp > row.MSRP1) return false;
-    if (row.MSRP_CONDITION === 2 && row.MSRP1 != null && vehicleMsrp < row.MSRP1) return false;
-    if (row.MSRP_CONDITION === 3 && row.MSRP1 != null && row.MSRP2 != null) {
-      if (vehicleMsrp < row.MSRP1 || vehicleMsrp > row.MSRP2) return false;
+  if (row.msrp_condition !== 0 && vehicleMsrp != null) {
+    if (row.msrp_condition === 1 && row.msrp1 != null && vehicleMsrp > row.msrp1) return false;
+    if (row.msrp_condition === 2 && row.msrp1 != null && vehicleMsrp < row.msrp1) return false;
+    if (row.msrp_condition === 3 && row.msrp1 != null && row.msrp2 != null) {
+      if (vehicleMsrp < row.msrp1 || vehicleMsrp > row.msrp2) return false;
     }
   }
 
@@ -141,26 +130,23 @@ export async function matchOptionsToVehicle(
   vehicle: VehicleRow,
   dealerId: string
 ): Promise<MatchedOption[]> {
-  const pool = getPool();
-  const [rows] = await pool.execute<DefaultRow[]>(
-    `SELECT _ID, DEALER_ID, OPTION_NAME, ITEM_PRICE, AD_TYPE,
-            MAKES, MAKES_NOT, MODELS, MODELS_NOT, TRIMS, TRIMS_NOT,
-            BODY_STYLES, YEAR_CONDITION, YEAR, MILES_CONDITION, MILES,
-            MSRP_CONDITION, MSRP1, MSRP2, RE_ORDER, ACTIVE
-     FROM addendum_defaults
-     WHERE DEALER_ID = ? AND ACTIVE = 'yes' -- TODO: verify this should use inventory_dealer_id
-     ORDER BY RE_ORDER ASC`,
-    [dealerId]
-  );
+  const admin = createAdminSupabaseClient();
+  const { data: rows } = await admin
+    .from("addendum_library")
+    .select("id, dealer_id, option_name, item_price, description, applies_to, makes, makes_not, models, models_not, trims, trims_not, body_styles, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2, sort_order, active, ad_types")
+    .eq("dealer_id", dealerId)
+    .eq("active", true)
+    .neq("applies_to", "none")
+    .order("sort_order", { ascending: true });
 
   const matched: MatchedOption[] = [];
-  for (const row of rows) {
-    if (matchesCondition(row, vehicle)) {
+  for (const row of (rows ?? []) as LibraryRow[]) {
+    if (matchesLibraryRow(row, vehicle)) {
       matched.push({
-        default_id: row._ID,
-        option_name: row.OPTION_NAME,
-        option_price: row.ITEM_PRICE ?? "NC",
-        sort_order: row.RE_ORDER,
+        default_id: row.id,
+        option_name: row.option_name,
+        option_price: row.item_price ?? "NC",
+        sort_order: row.sort_order,
         source: "default",
       });
     }
@@ -168,55 +154,27 @@ export async function matchOptionsToVehicle(
   return matched;
 }
 
-/**
- * Returns vehicle-specific saved options from addendum_data (Aurora, read-only).
- * Used to pre-seed the Supabase vehicle_options table on first open.
- */
-export async function getAuroraAppliedOptions(
-  vehicleId: number,
-  dealerId: string
-): Promise<AppliedOption[]> {
-  const pool = getPool();
-  try {
-    const [rows] = await pool.execute<DataRow[]>(
-      `SELECT _ID, VEHICLE_ID, OPTION_NAME, ITEM_PRICE, ORDER_BY
-       FROM addendum_data
-       WHERE VEHICLE_ID = ? AND DEALER_ID = ? AND ACTIVE = 'yes' -- TODO: verify this should use inventory_dealer_id
-       ORDER BY ORDER_BY ASC`,
-      [vehicleId, dealerId]
-    );
-    return rows.map((r) => ({
-      default_id: r._ID,
-      option_name: r.OPTION_NAME,
-      option_price: r.ITEM_PRICE ?? "NC",
-      sort_order: r.ORDER_BY,
-      source: "applied" as const,
-    }));
-  } catch {
-    // addendum_data may not exist for all dealers — return empty
-    return [];
-  }
-}
 
 /**
  * Fetches all active default options for a dealer (the library / picker).
+ * Reads from Supabase addendum_library.
  */
 export async function getDealerOptionLibrary(
   dealerId: string
 ): Promise<MatchedOption[]> {
-  const pool = getPool();
-  const [rows] = await pool.execute<DefaultRow[]>(
-    `SELECT _ID, OPTION_NAME, ITEM_PRICE, RE_ORDER
-     FROM addendum_defaults
-     WHERE DEALER_ID = ? AND ACTIVE = 'yes' -- TODO: verify this should use inventory_dealer_id
-     ORDER BY RE_ORDER ASC`,
-    [dealerId]
-  );
-  return rows.map((r) => ({
-    default_id: r._ID,
-    option_name: r.OPTION_NAME,
-    option_price: r.ITEM_PRICE ?? "NC",
-    sort_order: r.RE_ORDER,
+  const admin = createAdminSupabaseClient();
+  const { data: rows } = await admin
+    .from("addendum_library")
+    .select("id, option_name, item_price, sort_order")
+    .eq("dealer_id", dealerId)
+    .eq("active", true)
+    .order("sort_order", { ascending: true });
+
+  return (rows ?? []).map((r) => ({
+    default_id: r.id as string,
+    option_name: r.option_name as string,
+    option_price: (r.item_price ?? "NC") as string,
+    sort_order: r.sort_order as number,
     source: "default" as const,
   }));
 }
@@ -232,11 +190,11 @@ export type LockedOption = {
 };
 
 /**
- * Returns active group options for the dealer identified by their Aurora dealer_id.
+ * Returns active group options for the dealer identified by their dealer_id.
  * Looks up the Supabase group_id via dealers.dealer_id or inventory_dealer_id.
  */
 export async function getGroupOptionsForDealer(
-  auroraId: string
+  dealerTextId: string
 ): Promise<LockedOption[]> {
   const admin = createAdminSupabaseClient();
 
@@ -244,7 +202,7 @@ export async function getGroupOptionsForDealer(
   const { data: dealer } = await admin
     .from("dealers")
     .select("group_id")
-    .or(`dealer_id.eq.${auroraId},inventory_dealer_id.eq.${auroraId}`)
+    .or(`dealer_id.eq.${dealerTextId},inventory_dealer_id.eq.${dealerTextId}`)
     .maybeSingle<{ group_id: string | null }>();
 
   if (!dealer?.group_id) return [];
@@ -270,7 +228,7 @@ export async function getGroupOptionsForDealer(
  * Matches by state_code ('ALL' or exact match) and document_type ('all' or exact).
  */
 export async function getGroupDisclaimer(
-  auroraId: string,
+  dealerTextId: string,
   dealerState: string | null,
   docType: string
 ): Promise<string | null> {
@@ -279,7 +237,7 @@ export async function getGroupDisclaimer(
   const { data: dealer } = await admin
     .from("dealers")
     .select("group_id")
-    .or(`dealer_id.eq.${auroraId},inventory_dealer_id.eq.${auroraId}`)
+    .or(`dealer_id.eq.${dealerTextId},inventory_dealer_id.eq.${dealerTextId}`)
     .maybeSingle<{ group_id: string | null }>();
 
   if (!dealer?.group_id) return null;

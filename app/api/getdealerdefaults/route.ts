@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { getPool } from "@/lib/aurora";
-import type { RowDataPacket } from "mysql2/promise";
+import { createAdminSupabaseClient } from "@/lib/db";
 
 // Legacy: required key (resolves dealer_id). New: Supabase JWT.
+// Data source: Supabase addendum_library
 
 export async function GET(_req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
@@ -13,15 +13,29 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ status: "failed", message: "No dealer assigned." }, { status: 403 });
   }
 
-  try {
-    const pool = getPool();
-    const [rows] = await pool.query<RowDataPacket[]>(
-      "SELECT DEALER_ID, ITEM_NAME, ITEM_DESCRIPTION, ITEM_PRICE, MODELS, TRIMS, BODY_STYLES, created_at FROM addendum_defaults WHERE DEALER_ID = ? ORDER BY RE_ORDER, _ID",
-      [claims.dealer_id]
-    );
-    return NextResponse.json(rows);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Server error";
-    return NextResponse.json({ status: "failed", message: msg }, { status: 503 });
+  const admin = createAdminSupabaseClient();
+  const { data, error: dbErr } = await admin
+    .from("addendum_library")
+    .select("dealer_id, option_name, description, item_price, models, trims, body_styles, created_at")
+    .eq("dealer_id", claims.dealer_id)
+    .eq("active", true)
+    .order("sort_order", { ascending: true });
+
+  if (dbErr) {
+    return NextResponse.json({ status: "failed", message: dbErr.message }, { status: 500 });
   }
+
+  // Map to legacy column names
+  const mapped = (data ?? []).map((r) => ({
+    DEALER_ID: r.dealer_id,
+    ITEM_NAME: r.option_name,
+    ITEM_DESCRIPTION: r.description ?? "",
+    ITEM_PRICE: r.item_price ?? "NC",
+    MODELS: r.models ?? "",
+    TRIMS: r.trims ?? "",
+    BODY_STYLES: r.body_styles ?? "",
+    created_at: r.created_at,
+  }));
+
+  return NextResponse.json(mapped);
 }

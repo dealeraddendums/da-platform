@@ -2,10 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerUpdate } from "@/lib/db";
-import { getPool } from "@/lib/aurora";
-import type { RowDataPacket } from "mysql2/promise";
 
-// Strip HTML tags from dealer names imported from Aurora
+// Strip HTML tags from dealer names
 function sanitizeName(name: string | null | undefined): string {
   if (!name) return "";
   return name.replace(/<[^>]*>/g, "").trim();
@@ -25,23 +23,18 @@ async function getPrintCounts(admin: ReturnType<typeof createAdminSupabaseClient
   return { lifetime, recent };
 }
 
-async function getHubspotCompanyIds(inventoryIds: (string | null | undefined)[]): Promise<Record<string, number>> {
-  const ids = inventoryIds.filter((v): v is string => !!v);
-  if (ids.length === 0) return {};
-  try {
-    const placeholders = ids.map(() => "?").join(",");
-    const [rows] = await getPool().execute<RowDataPacket[]>(
-      `SELECT DEALER_ID, HUBSPOT_COMPANY_ID FROM dealer_dim WHERE DEALER_ID IN (${placeholders}) AND HUBSPOT_COMPANY_ID IS NOT NULL`,
-      ids
-    );
-    const map: Record<string, number> = {};
-    for (const row of rows) {
-      if (row.DEALER_ID && row.HUBSPOT_COMPANY_ID) map[row.DEALER_ID as string] = row.HUBSPOT_COMPANY_ID as number;
+// hubspot_company_id is stored directly in the Supabase dealers table.
+// This helper is retained as a no-op shim so call sites need no changes.
+function extractHubspotMap(dealers: Record<string, unknown>[]): Record<string, number | null> {
+  const map: Record<string, number | null> = {};
+  for (const d of dealers) {
+    const inventoryId = d.inventory_dealer_id as string | null;
+    const raw = d.hubspot_company_id as string | null;
+    if (inventoryId) {
+      map[inventoryId] = raw ? (parseInt(raw, 10) || null) : null;
     }
-    return map;
-  } catch {
-    return {};
   }
+  return map;
 }
 
 // Geocode a dealer address via Mapbox and write lat/lng back to the dealers table.
@@ -77,7 +70,7 @@ async function geocodeDealer(
 }
 
 type SortableCol = "name" | "active" | "account_type" | "created_at" | "lifetime_prints" | "last_30_prints" | "group_name";
-// Use legacy_id for "created" sort — it's the Aurora _ID (sequential int) and more reliable than created_at
+// Use legacy_id for "created" sort — sequential int, more reliable than created_at
 const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "created_at"]);
 const DB_SORT_COL_MAP: Partial<Record<SortableCol, string>> = { created_at: "legacy_id" };
 
@@ -90,7 +83,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  // group_admin: return their group's dealers (no Aurora enrichment needed)
+  // group_admin: return their group's dealers
   if (claims.role === "group_admin") {
     if (!claims.group_id) return NextResponse.json({ data: [], total: 0 });
     const admin = createAdminSupabaseClient();
@@ -137,10 +130,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (allErr) return NextResponse.json({ error: allErr.message }, { status: 500 });
 
     const dealerIds = (allDealers ?? []).map((d: Record<string, unknown>) => d.dealer_id as string);
-    const inventoryIds = (allDealers ?? []).map((d: Record<string, unknown>) => d.inventory_dealer_id as string | null);
-    const [{ lifetime, recent }, hubspotMap, atRiskProfileRows] = await Promise.all([
+    const hubspotMap = extractHubspotMap(allDealers ?? []);
+    const [{ lifetime, recent }, atRiskProfileRows] = await Promise.all([
       getPrintCounts(admin, dealerIds),
-      getHubspotCompanyIds(inventoryIds),
       admin
         .from("profiles")
         .select("dealer_id")
@@ -173,7 +165,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   else if (active === "false") query = query.eq("active", false);
   if (legacyIdGte) query = query.gte("legacy_id", parseInt(legacyIdGte, 10));
 
-  // Apply DB-level ordering; "created_at" sorts by legacy_id (Aurora _ID, sequential)
+  // Apply DB-level ordering; "created_at" sorts by legacy_id (sequential int)
   const dbSortCol = DB_SORT_COLS.has(sortCol)
     ? (DB_SORT_COL_MAP[sortCol] ?? sortCol)
     : "legacy_id";
@@ -183,10 +175,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
 
   const dealerIds = (data ?? []).map((d: Record<string, unknown>) => d.dealer_id as string);
-  const inventoryIds = (data ?? []).map((d: Record<string, unknown>) => d.inventory_dealer_id as string | null);
-  const [{ lifetime, recent }, hubspotMap, profileRows] = await Promise.all([
+  const hubspotMap = extractHubspotMap(data ?? []);
+  const [{ lifetime, recent }, profileRows] = await Promise.all([
     getPrintCounts(admin, dealerIds),
-    getHubspotCompanyIds(inventoryIds),
     admin
       .from("profiles")
       .select("dealer_id")

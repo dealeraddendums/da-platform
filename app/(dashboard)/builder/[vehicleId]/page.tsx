@@ -1,11 +1,13 @@
 import { redirect, notFound } from "next/navigation";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
-import { getPool } from "@/lib/aurora";
-import type { VehicleRowPacket } from "@/lib/aurora";
 import type { VehiclePreload } from "@/components/builder/types";
 import BuilderPage from "@/components/builder/BuilderPage";
 
 export const metadata = { title: "Document Builder — DA Platform" };
+
+function isUUID(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
 
 export default async function BuilderVehicleRoute({
   params,
@@ -16,18 +18,18 @@ export default async function BuilderVehicleRoute({
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect(`/login?next=/builder/${params.vehicleId}`);
 
-  const pool = getPool();
-  const [rows] = await pool.execute<VehicleRowPacket[]>(
-    `SELECT v.id, v.DEALER_ID, v.VIN_NUMBER, v.STOCK_NUMBER, v.YEAR, v.MAKE,
-            v.MODEL, v.TRIM, v.EXT_COLOR, v.MILEAGE, v.MSRP, v.NEW_USED, v.CERTIFIED
-     FROM dealer_inventory v
-     WHERE v.id = ? LIMIT 1`,
-    [params.vehicleId]
-  );
+  // Only UUID lookups (Supabase dealer_vehicles) are supported
+  if (!isUUID(params.vehicleId)) notFound();
 
-  if (!rows.length) notFound();
+  const admin = createAdminSupabaseClient();
 
-  const r = rows[0];
+  const { data: dv } = await admin
+    .from("dealer_vehicles")
+    .select("id, dealer_id, vin, stock_number, year, make, model, trim, exterior_color, mileage, msrp, condition, vdp_link")
+    .eq("id", params.vehicleId)
+    .maybeSingle();
+
+  if (!dv) notFound();
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -36,17 +38,15 @@ export default async function BuilderVehicleRoute({
     .single<{ role: string; dealer_id: string | null }>();
 
   if (profile?.role === "dealer_admin" || profile?.role === "dealer_user") {
-    if (profile.dealer_id && r.DEALER_ID !== profile.dealer_id) {
+    if (profile.dealer_id && dv.dealer_id !== profile.dealer_id) {
       redirect("/dashboard");
     }
   }
 
-  const admin = createAdminSupabaseClient();
-  const [{ data: settings }, { data: dealerRow }, { data: customSizeRows }, { data: dvRow }] = await Promise.all([
-    admin.from("dealer_settings").select("ai_content_default").eq("dealer_id", r.DEALER_ID).single<{ ai_content_default: boolean }>(),
-    admin.from("dealers").select("name, address, city, state, zip, phone, logo_url").eq("dealer_id", r.DEALER_ID).maybeSingle<{ name: string | null; address: string | null; city: string | null; state: string | null; zip: string | null; phone: string | null; logo_url: string | null }>(),
-    admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, created_at, updated_at").eq("dealer_id", r.DEALER_ID).order("name"),
-    admin.from("dealer_vehicles").select("vdp_link").eq("id", params.vehicleId).maybeSingle<{ vdp_link: string | null }>(),
+  const [{ data: settings }, { data: dealerRow }, { data: customSizeRows }] = await Promise.all([
+    admin.from("dealer_settings").select("ai_content_default").eq("dealer_id", dv.dealer_id).single<{ ai_content_default: boolean }>(),
+    admin.from("dealers").select("name, address, city, state, zip, phone, logo_url").eq("dealer_id", dv.dealer_id).maybeSingle<{ name: string | null; address: string | null; city: string | null; state: string | null; zip: string | null; phone: string | null; logo_url: string | null }>(),
+    admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, created_at, updated_at").eq("dealer_id", dv.dealer_id).order("name"),
   ]);
 
   const aiEnabled = settings?.ai_content_default ?? false;
@@ -57,21 +57,19 @@ export default async function BuilderVehicleRoute({
     ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
     : null;
 
-  // Supabase dealers table is the canonical source — matches what the PDF route uses.
-  // Fall back to Aurora dealer_dim fields if Supabase has no record yet.
   const vehicle: VehiclePreload = {
-    id: String(r.id),
-    vin: r.VIN_NUMBER,
-    stock_number: r.STOCK_NUMBER ?? "",
-    year: r.YEAR ? Number(r.YEAR) : null,
-    make: r.MAKE,
-    model: r.MODEL,
-    trim: r.TRIM,
-    color_ext: r.EXT_COLOR,
-    mileage: r.MILEAGE ? Number(r.MILEAGE) : null,
-    msrp: r.MSRP ? Number(r.MSRP) : null,
+    id: String(dv.id),
+    vin: dv.vin ?? "",
+    stock_number: dv.stock_number ?? "",
+    year: dv.year ?? null,
+    make: dv.make ?? null,
+    model: dv.model ?? null,
+    trim: dv.trim ?? null,
+    color_ext: dv.exterior_color ?? null,
+    mileage: dv.mileage ?? null,
+    msrp: dv.msrp ?? null,
     internet_price: null,
-    dealer_id: r.DEALER_ID,
+    dealer_id: dv.dealer_id,
     logo_url: resolvedLogoUrl,
     dealer_name: dealerRow?.name ?? null,
     dealer_address: dealerRow?.address ?? null,
@@ -79,8 +77,8 @@ export default async function BuilderVehicleRoute({
     dealer_state: dealerRow?.state ?? null,
     dealer_zip: dealerRow?.zip ?? null,
     dealer_phone: dealerRow?.phone ?? null,
-    vdp_link: dvRow?.vdp_link ?? null,
+    vdp_link: dv.vdp_link ?? null,
   };
 
-  return <BuilderPage vehicle={vehicle} aiEnabled={aiEnabled} customSizes={customSizeRows ?? []} dealerId={r.DEALER_ID} />;
+  return <BuilderPage vehicle={vehicle} aiEnabled={aiEnabled} customSizes={customSizeRows ?? []} dealerId={dv.dealer_id} />;
 }

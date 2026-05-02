@@ -1,5 +1,5 @@
 # DealerAddendums Platform — CLAUDE.md
-## Last updated: 2026-05-02
+## Last updated: 2026-05-05 (ETL service added)
 
 ---
 
@@ -110,11 +110,12 @@ Badges:    radius=20px, 11px bold text
 | DA Platform EC2 **(LEGACY — DO NOT DEPLOY HERE)** | `ssh -i ~/ssh/DA2026.pem ubuntu@ec2-54-89-142-76.compute-1.amazonaws.com` |
 | da-platform EC2 **(us-east-1, DECOMMISSIONED — terminate when stable)** | `ec2-54-167-226-23.compute-1.amazonaws.com` |
 | da-platform EC2 **(NEW us-west-1b, behind ALB — deploy here only)** | `ssh -i ~/ssh/DA_Platform_2026.pem ubuntu@ec2-18-145-132-52.us-west-1.compute.amazonaws.com` |
+| DA Legacy ETL EC2 **(us-east-1, Node.js ETL service)** | `ssh -i ~/ssh/da-legacy-etl.pem ubuntu@ec2-34-205-73-152.compute-1.amazonaws.com` |
 | DA Billing EC2 | `ssh -i ~/ssh/dabilling2026.pem ubuntu@ec2-98-89-5-190.compute-1.amazonaws.com` |
 | QuietReady EC2 | `ssh -i ~/ssh/QuietReady2026.pem ubuntu@ec2-54-160-4-222.compute-1.amazonaws.com` |
 | ZoomTrainer EC2 | `ec2-44-202-168-181.compute-1.amazonaws.com`, key `~/ssh/zoom2026.pem` |
 | FT-Tracker EC2 | `apps.dealeraddendums.com` |
-| Aurora (MySQL) | **BEING TERMINATED** — reference only. ~82 tables, 9.3M addendum rows, 2M vehicle rows. No new queries. |
+| Aurora (MySQL) | **BEING TERMINATED** — reference only. ~82 tables, 9.3M addendum rows, 2M vehicle rows. No new queries. Aurora (us-east-1) is **not reachable from the production EC2 (us-west-1)**. Use the file-based export/import workflow below. |
 | Supabase | https://byouefbebqgffhtfdggu.supabase.co |
 | GitHub | https://github.com/dealeraddendums/da-platform |
 | Anthropic API | `allan@dealeraddendums.com` enterprise key |
@@ -159,6 +160,105 @@ AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION=us-ea
 | PDF purge | `0 3 1 * *` | `https://app.dealeraddendums.com/api/cron/purge-old-pdfs` | Deletes S3 PDFs >12 months old |
 
 All cron jobs require header `x-cron-secret: [CRON_SECRET]`.
+
+---
+
+## Legacy sync — dealers + groups
+
+Aurora (us-east-1) cannot be reached from the production EC2 (us-west-1). Use the two-step
+file-based workflow to sync legacy dealer and group records into Supabase.
+
+### Step 1 — Export from Aurora (run locally, where Aurora is reachable)
+```
+npm run export:legacy
+```
+- Script: `scripts/export-legacy.ts`
+- Output: `legacy-export-YYYY-MM-DD.json` in the project root
+- Contains: all `dealer_dim` (ACTIVE='Yes') + all `dealer_group` rows, pre-mapped to Supabase column names
+- Safe to re-run — produces a fresh snapshot each time
+
+### Step 2 — Import into Supabase (via the app UI)
+1. Open the **Dealers** page in the app (super_admin only)
+2. Click **"📥 Import from File"** in the page header
+3. Select the `legacy-export-YYYY-MM-DD.json` file
+4. The app upserts groups then dealers (on `legacy_id`), links dealers to groups via `dealer_group_legacy`, and records a `last_dealer_sync` timestamp
+
+### API
+- `POST /api/admin/import-legacy` — super_admin only. Accepts the raw JSON body of the export file.
+  Returns `{ groups_imported, dealers_imported, duration_ms, synced_at, source: "file", file_exported_at }`.
+
+### Direct sync button
+The **"↻ Sync from Legacy"** button on the Dealers page calls `POST /api/admin/sync-legacy` which
+connects directly to Aurora. This will fail from the production EC2 due to the cross-region network
+block. It remains available in case Aurora connectivity is ever restored.
+
+---
+
+## DA Legacy ETL Service
+
+Temporary Node.js/TypeScript service that syncs legacy Aurora data → Supabase daily.
+Lives in its own repo and runs on a dedicated EC2 in us-east-1.
+
+### Repo
+- GitHub: `https://github.com/dealeraddendums/da-legacy-etl`
+- EC2: `ec2-34-205-73-152.compute-1.amazonaws.com`, key `~/ssh/da-legacy-etl.pem`
+- App dir: `/var/www/da-legacy-etl`
+- Log dir: `/var/log/da-legacy-etl/`
+- PM2 app name: `da-legacy-etl`
+- Schedule: `0 11 * * *` — 11:00 AM UTC daily via PM2 cron restart
+
+### Deploy
+```
+cd /var/www/da-legacy-etl
+git pull && npm ci && npm run build && pm2 restart da-legacy-etl
+```
+
+### Manual run
+```
+ssh -i ~/ssh/da-legacy-etl.pem ubuntu@ec2-34-205-73-152.compute-1.amazonaws.com
+cd /var/www/da-legacy-etl && node dist/index.js --run-now
+```
+
+### Jobs (run in order, each independent)
+1. **Dealers** — `dealer_dim` → `dealers` (upsert on `legacy_id`)
+2. **Groups** — `dealer_group` → `groups` (upsert on `legacy_id`)
+3. **Profiles** — `users` → `profiles` metadata only, no auth (upsert on `legacy_user_id`)
+4. **Dealer Settings** — `dealer_dim` extended cols → `dealer_settings` (upsert on `dealer_id`)
+5. **Addendum Options** — `addendum_defaults` → `vehicle_options` (upsert on `legacy_default_id`)
+6. **Print History** — `addendum_data` grouped → `print_history` (insert new events only)
+7. **Addendum Data** — `addendum_data` → `addendum_data` (upsert on `legacy_id`, incremental)
+
+### Skip logic
+- Jobs 3–7 only process dealers where `migration_status != 'migrated'`
+- If `migration_status` column doesn't exist (pre-migration 045), processes all dealers
+
+### Reporting
+After each run: writes to `etl_sync_log` table, sends email to `allan@dealeraddendums.com` via
+Mandrill. Subject: `DA Legacy ETL Run — [date] — SUCCESS/PARTIAL/FAILED`.
+Consecutive failure tracking per dealer — warns in email if 3+ failures in a row.
+
+### Required env vars (`.env` on ETL EC2)
+```
+AURORA_HOST, AURORA_USER, AURORA_PASSWORD, AURORA_DATABASE, AURORA_PORT
+SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+MANDRILL_API_KEY, REPORT_EMAIL
+ETL_ENV=production
+```
+
+### Aurora endpoint status
+**CRITICAL:** Aurora cluster `dealeraddendums-v5-cluster-green-e9nzxp` returns NXDOMAIN
+from ALL locations (local, legacy EC2, ETL EC2). The cluster has likely been renamed or
+terminated. **Update `AURORA_HOST` in `/var/www/da-legacy-etl/.env`** once the correct
+endpoint is known. All other ETL plumbing is complete and working.
+
+### Supabase migration
+`supabase/migrations/045_etl_sync_log.sql` — run via Supabase dashboard or CLI:
+```
+supabase db push  # from da-platform repo
+```
+Creates: `etl_sync_log` table, `migration_status` column on `dealers`,
+`legacy_default_id` on `vehicle_options`, `legacy_user_id` on `profiles`,
+`legacy_dealer_id/legacy_vehicle_id` on `print_history`.
 
 ---
 
@@ -1093,6 +1193,7 @@ These are confirmed issues or next tasks that haven't been built yet:
 ### Infrastructure
 - Terminate decommissioned us-east-1 EC2 (`ec2-54-167-226-23`) once 30-day stable period confirmed
 - Rotate `CRON_SECRET` (see secrets checklist above)
+- **Aurora cross-region** — Aurora is in us-east-1; production EC2 is in us-west-1. Direct sync from the app fails with ENOTFOUND. Use `npm run export:legacy` locally + "📥 Import from File" in the Dealers page. If Aurora ever needs to be reached from EC2, VPC peering or a bastion jump would be required.
 
 ---
 

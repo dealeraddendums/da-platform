@@ -3,16 +3,10 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
-import VehicleInventory from "@/components/VehicleInventory";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import VehicleSubNav from "@/components/VehicleSubNav";
 
 export const metadata = { title: "Inventory — DA Platform" };
-
-/** Returns true for dealers whose inventory lives in dealer_vehicles (not Aurora). */
-function isManualDealer(accountType: string | null): boolean {
-  return !accountType || accountType === "Trial" || accountType === "Monthly Subscription Manual";
-}
 
 export default async function VehiclesPage() {
   const supabase = createClient();
@@ -48,18 +42,6 @@ export default async function VehiclesPage() {
 
   // Effective dealer context: real dealer role OR impersonating OR ghost mode
   const isDealerContext = role === "dealer_admin" || role === "dealer_user" || !!impersonatingDealerId || !!ghostDealerId;
-  const effectiveDealerId = impersonatingDealerId ?? ghostDealerId ?? profile?.dealer_id ?? null;
-
-  // Fetch account_type to determine data source (manual vs Aurora)
-  let accountType: string | null = null;
-  if (isDealerContext && effectiveDealerId) {
-    const { data: dealer } = await admin
-      .from("dealers")
-      .select("account_type")
-      .eq("dealer_id", effectiveDealerId)
-      .single<{ account_type: string | null }>();
-    accountType = dealer?.account_type ?? null;
-  }
 
   let fixedDealerId: string | null = null;
   if (role === "dealer_admin" || role === "dealer_user") {
@@ -84,20 +66,26 @@ export default async function VehiclesPage() {
     fixedDealerId = ghostDealerId;
   }
 
-  const manual = isDealerContext && isManualDealer(accountType);
+  // super_admin or group_admin without a dealer context — show prompt to select a dealer
+  if (!fixedDealerId) {
+    return (
+      <div>
+        <h1 className="text-xl font-semibold mb-2" style={{ color: "var(--text-inverse)" }}>
+          Vehicle Inventory
+        </h1>
+        <div className="card p-6">
+          <p style={{ color: "var(--text-secondary)" }}>
+            Select a dealer to view their vehicle inventory. Use the dealer switcher or impersonation flow.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
       {isDealerContext && <VehicleSubNav />}
-      {manual ? (
-        <ManualVehicleInventory dealerId={fixedDealerId!} isSuperAdmin={role === "super_admin"} />
-      ) : (
-        <VehicleInventory
-          fixedDealerId={fixedDealerId}
-          role={role}
-          groupId={profile?.group_id ?? null}
-        />
-      )}
+      <ManualVehicleInventory dealerId={fixedDealerId} isSuperAdmin={role === "super_admin"} />
     </div>
   );
 }
