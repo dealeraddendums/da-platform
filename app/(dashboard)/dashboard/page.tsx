@@ -5,14 +5,9 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
-import VehicleInventory from "@/components/VehicleInventory";
 import { PageHeader } from "@/components/PageHeader";
 import ActivitySection from "@/components/dashboard/ActivitySection";
 import type { DealerMapPoint } from "@/components/dashboard/ActivitySection";
-
-function isManualDealer(accountType: string | null): boolean {
-  return !accountType || accountType === "Trial" || accountType === "Monthly Subscription Manual";
-}
 
 export const metadata = { title: "Dashboard — DA Platform" };
 
@@ -145,14 +140,6 @@ export default async function DashboardPage() {
     if (ghostCtx) {
       // Treat as dealer — fall through to dealer view below using ghost dealer_id
       const ghostDealerId = ghostCtx.dealer_text_id;
-      const { data: ghostDealerRow } = await admin
-        .from("dealers")
-        .select("account_type")
-        .eq("dealer_id", ghostDealerId)
-        .single<{ account_type: string | null }>();
-      const ghostAccountType = ghostDealerRow?.account_type ?? null;
-      const ghostManual = isManualDealer(ghostAccountType);
-
       const startOfMonthGhost = new Date();
       startOfMonthGhost.setDate(1);
       startOfMonthGhost.setHours(0, 0, 0, 0);
@@ -190,10 +177,7 @@ export default async function DashboardPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             {ghostStats.map(ghostStatCard)}
           </div>
-          {ghostManual
-            ? <ManualVehicleInventory dealerId={ghostDealerId} />
-            : <VehicleInventory fixedDealerId={ghostDealerId} role="dealer_admin" groupId={null} />
-          }
+          <ManualVehicleInventory dealerId={ghostDealerId} />
         </div>
       );
     }
@@ -337,15 +321,6 @@ export default async function DashboardPage() {
     );
   }
 
-  // Fetch account_type to determine rendering (manual vs Aurora)
-  const { data: dealerRow } = await admin
-    .from("dealers")
-    .select("account_type")
-    .eq("dealer_id", dealerId)
-    .single<{ account_type: string | null }>();
-  const accountType = dealerRow?.account_type ?? null;
-  const manual = isManualDealer(accountType);
-
   // ── Stats — always Supabase ───────────────────────────────────────────────
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
@@ -378,27 +353,13 @@ export default async function DashboardPage() {
     </div>
   );
 
-  // ── Manual dealer ─────────────────────────────────────────────────────────
-  if (manual) {
-    return (
-      <div>
-        <PageHeader title="Dashboard" />
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-          {dealerStats.map(statCard)}
-        </div>
-        <ManualVehicleInventory dealerId={dealerId} />
-      </div>
-    );
-  }
-
-  // ── Aurora dealer: full inventory view ────────────────────────────────────
   return (
     <div>
       <PageHeader title="Dashboard" />
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         {dealerStats.map(statCard)}
       </div>
-      <VehicleInventory fixedDealerId={dealerId} role={role} groupId={profile?.group_id ?? null} />
+      <ManualVehicleInventory dealerId={dealerId} />
     </div>
   );
 }
