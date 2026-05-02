@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
+import { verifyGhostToken } from "@/lib/ghost";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import VehicleInventory from "@/components/VehicleInventory";
 import { PageHeader } from "@/components/PageHeader";
@@ -134,7 +136,70 @@ export default async function DashboardPage() {
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user") as UserRole;
 
-  // ── super_admin ────────────────────────────────────────────────────────────
+  // ── Ghost mode: super_admin operating as a dealer ─────────────────────────
+  // Must be checked before the super_admin branch so ghost mode shows dealer view.
+  if (role === "super_admin") {
+    const cookieStore = cookies();
+    const ghostToken = cookieStore.get("da_ghost_token")?.value;
+    const ghostCtx = ghostToken ? verifyGhostToken(ghostToken) : null;
+    if (ghostCtx) {
+      // Treat as dealer — fall through to dealer view below using ghost dealer_id
+      const ghostDealerId = ghostCtx.dealer_text_id;
+      const { data: ghostDealerRow } = await admin
+        .from("dealers")
+        .select("account_type")
+        .eq("dealer_id", ghostDealerId)
+        .single<{ account_type: string | null }>();
+      const ghostAccountType = ghostDealerRow?.account_type ?? null;
+      const ghostManual = isManualDealer(ghostAccountType);
+
+      const startOfMonthGhost = new Date();
+      startOfMonthGhost.setDate(1);
+      startOfMonthGhost.setHours(0, 0, 0, 0);
+
+      const [{ count: ghostTotal }, ghostMonthRes, ghostLifetimeRes] = await Promise.all([
+        admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+          .eq("dealer_id", ghostDealerId).eq("status", "active"),
+        admin.from("print_history").select("vehicle_id")
+          .eq("dealer_id", ghostDealerId).gte("created_at", startOfMonthGhost.toISOString()),
+        admin.from("print_history").select("vehicle_id")
+          .eq("dealer_id", ghostDealerId).limit(100000),
+      ]);
+
+      const ghostTotalVehicles = ghostTotal ?? 0;
+      const ghostPrintedMonth = new Set((ghostMonthRes.data ?? []).map(r => r.vehicle_id)).size;
+      const ghostLifetimePrinted = new Set((ghostLifetimeRes.data ?? []).map(r => r.vehicle_id)).size;
+      const ghostUnprinted = Math.max(0, ghostTotalVehicles - ghostLifetimePrinted);
+
+      const ghostStats = [
+        { label: "Total Vehicles",     value: ghostTotalVehicles },
+        { label: "Printed This Month", value: ghostPrintedMonth },
+        { label: "Unprinted",          value: ghostUnprinted },
+      ];
+
+      const ghostStatCard = (s: { label: string; value: number }) => (
+        <div key={s.label} className="card p-4">
+          <p style={STAT_LABEL}>{s.label}</p>
+          <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{s.value.toLocaleString()}</p>
+        </div>
+      );
+
+      return (
+        <div>
+          <PageHeader title="Dashboard" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            {ghostStats.map(ghostStatCard)}
+          </div>
+          {ghostManual
+            ? <ManualVehicleInventory dealerId={ghostDealerId} />
+            : <VehicleInventory fixedDealerId={ghostDealerId} role="dealer_admin" groupId={null} />
+          }
+        </div>
+      );
+    }
+  }
+
+  // ── super_admin (not in ghost mode) ──────────────────────────────────────
   if (role === "super_admin") {
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
