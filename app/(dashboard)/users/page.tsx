@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
+import { verifyGhostToken } from "@/lib/ghost";
 import UsersPageClient from "./UsersPageClient";
 
 export const metadata = { title: "Users — DA Platform" };
@@ -24,13 +26,20 @@ export default async function UsersPage() {
 
   const isGroupAdminInDealerContext = role === "group_admin" && !!profile?.active_dealer_id;
 
+  // Check for ghost mode
+  const cookieStore = cookies();
+  const ghostCtx = role === "super_admin"
+    ? verifyGhostToken(cookieStore.get("da_ghost_token")?.value ?? "")
+    : null;
+  const ghostDealerId = ghostCtx?.dealer_text_id ?? null;
+
   // Only super_admin, dealer_admin, and group_admin in dealer context may access
   if (role !== "super_admin" && role !== "dealer_admin" && !isGroupAdminInDealerContext) {
     redirect("/dashboard");
   }
 
   // For group_admin in dealer context: resolve the text dealer_id for the active dealer
-  let effectiveDealerId = profile?.dealer_id ?? null;
+  let effectiveDealerId = profile?.dealer_id ?? ghostDealerId ?? null;
   if (isGroupAdminInDealerContext && profile?.active_dealer_id) {
     const { data: activeDlr } = await admin
       .from("dealers")
@@ -38,6 +47,8 @@ export default async function UsersPage() {
       .eq("id", profile.active_dealer_id)
       .maybeSingle<{ dealer_id: string }>();
     if (activeDlr) effectiveDealerId = activeDlr.dealer_id;
+  } else if (ghostDealerId) {
+    effectiveDealerId = ghostDealerId;
   }
 
   return (

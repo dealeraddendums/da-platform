@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { verifyGhostToken } from "@/lib/ghost";
 import VehicleInventory from "@/components/VehicleInventory";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import VehicleSubNav from "@/components/VehicleSubNav";
@@ -37,9 +39,16 @@ export default async function VehiclesPage() {
   const appMeta = session.user.app_metadata as Record<string, unknown>;
   const impersonatingDealerId = (appMeta?.impersonating_dealer_id as string | null) ?? null;
 
-  // Effective dealer context: real dealer role OR impersonating
-  const isDealerContext = role === "dealer_admin" || role === "dealer_user" || !!impersonatingDealerId;
-  const effectiveDealerId = impersonatingDealerId ?? profile?.dealer_id ?? null;
+  // Check for ghost mode
+  const cookieStore = cookies();
+  const ghostCtx = role === "super_admin"
+    ? verifyGhostToken(cookieStore.get("da_ghost_token")?.value ?? "")
+    : null;
+  const ghostDealerId = ghostCtx?.dealer_text_id ?? null;
+
+  // Effective dealer context: real dealer role OR impersonating OR ghost mode
+  const isDealerContext = role === "dealer_admin" || role === "dealer_user" || !!impersonatingDealerId || !!ghostDealerId;
+  const effectiveDealerId = impersonatingDealerId ?? ghostDealerId ?? profile?.dealer_id ?? null;
 
   // Fetch account_type to determine data source (manual vs Aurora)
   let accountType: string | null = null;
@@ -71,6 +80,8 @@ export default async function VehiclesPage() {
     fixedDealerId = profile.dealer_id;
   } else if (impersonatingDealerId) {
     fixedDealerId = impersonatingDealerId;
+  } else if (ghostDealerId) {
+    fixedDealerId = ghostDealerId;
   }
 
   const manual = isDealerContext && isManualDealer(accountType);

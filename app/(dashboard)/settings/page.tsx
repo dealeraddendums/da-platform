@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerSettingsRow, UserRole } from "@/lib/db";
+import { verifyGhostToken } from "@/lib/ghost";
 import SettingsForm from "@/components/SettingsForm";
 import { PageHeader } from "@/components/PageHeader";
 
@@ -23,8 +25,14 @@ export default async function SettingsPage() {
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user") as UserRole;
 
+  const cookieStore = cookies();
+  const ghostCtx = role === "super_admin"
+    ? verifyGhostToken(cookieStore.get("da_ghost_token")?.value ?? "")
+    : null;
+  const ghostDealerId = ghostCtx?.dealer_text_id ?? null;
+
   const isDealer = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";
-  const dealerId = isDealer ? (profile?.dealer_id ?? null) : null;
+  const dealerId = isDealer ? (profile?.dealer_id ?? null) : (ghostDealerId ?? null);
 
   let initialSettings: DealerSettingsRow | null = null;
   let fixedDealerUuid: string | null = null;

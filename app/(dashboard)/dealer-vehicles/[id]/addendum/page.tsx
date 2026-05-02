@@ -1,5 +1,7 @@
 import { redirect, notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
+import { verifyGhostToken } from "@/lib/ghost";
 import AddendumEditor from "@/components/AddendumEditor";
 import type { VehicleRow } from "@/lib/vehicles";
 
@@ -24,8 +26,14 @@ export default async function DealerVehicleAddendumPage({
     .eq("id", session.user.id)
     .single<{ role: string; dealer_id: string | null }>();
 
-  // Only dealer roles can access manual vehicles
-  if (profile?.role === "super_admin" || profile?.role === "group_admin") {
+  const cookieStore = cookies();
+  const ghostCtx = profile?.role === "super_admin"
+    ? verifyGhostToken(cookieStore.get("da_ghost_token")?.value ?? "")
+    : null;
+  const ghostDealerId = ghostCtx?.dealer_text_id ?? null;
+
+  // Only dealer roles (or ghost mode) can access manual vehicles
+  if ((profile?.role === "super_admin" && !ghostDealerId) || profile?.role === "group_admin") {
     redirect("/dashboard");
   }
 
@@ -37,8 +45,9 @@ export default async function DealerVehicleAddendumPage({
 
   if (!dv) notFound();
 
-  // Scope check
-  if (profile?.dealer_id && dv.dealer_id !== profile.dealer_id) {
+  // Scope check — ghost mode can access any dealer's vehicles
+  const effectiveDealerId = ghostDealerId ?? profile?.dealer_id ?? null;
+  if (effectiveDealerId && dv.dealer_id !== effectiveDealerId) {
     redirect("/vehicles");
   }
 
