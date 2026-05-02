@@ -25,6 +25,7 @@ export default async function UsersPage() {
     ?? "dealer_user") as UserRole;
 
   const isGroupAdminInDealerContext = role === "group_admin" && !!profile?.active_dealer_id;
+  const isGroupAdminInGroupContext  = role === "group_admin" && !profile?.active_dealer_id;
 
   // Check for ghost mode
   const cookieStore = cookies();
@@ -32,30 +33,33 @@ export default async function UsersPage() {
     ? verifyGhostToken(cookieStore.get("da_ghost_token")?.value ?? "")
     : null;
   const ghostDealerId = ghostCtx?.dealer_text_id ?? null;
+  const isGhostMode = !!ghostDealerId;
 
-  // Only super_admin, dealer_admin, and group_admin in dealer context may access
-  if (role !== "super_admin" && role !== "dealer_admin" && !isGroupAdminInDealerContext) {
+  // Access check: super_admin (incl. ghost), dealer_admin, group_admin (any context)
+  if (role !== "super_admin" && role !== "dealer_admin" && role !== "group_admin") {
     redirect("/dashboard");
   }
 
-  // For group_admin in dealer context: resolve the text dealer_id for the active dealer
-  let effectiveDealerId = profile?.dealer_id ?? ghostDealerId ?? null;
-  if (isGroupAdminInDealerContext && profile?.active_dealer_id) {
+  // Resolve effective dealer_id for scoped views
+  let effectiveDealerId: string | null = profile?.dealer_id ?? null;
+  if (isGhostMode) {
+    effectiveDealerId = ghostDealerId;
+  } else if (isGroupAdminInDealerContext && profile?.active_dealer_id) {
     const { data: activeDlr } = await admin
       .from("dealers")
       .select("dealer_id")
       .eq("id", profile.active_dealer_id)
       .maybeSingle<{ dealer_id: string }>();
     if (activeDlr) effectiveDealerId = activeDlr.dealer_id;
-  } else if (ghostDealerId) {
-    effectiveDealerId = ghostDealerId;
   }
 
   return (
     <UsersPageClient
       viewerRole={role}
       viewerDealerId={effectiveDealerId}
+      viewerGroupId={isGroupAdminInGroupContext ? (profile?.group_id ?? null) : null}
       isGroupAdminContext={isGroupAdminInDealerContext}
+      isGhostMode={isGhostMode}
     />
   );
 }

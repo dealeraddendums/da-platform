@@ -15,8 +15,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (error) return error;
 
   const { role, dealer_id } = claims;
-  const isGroupAdminContext = role === "group_admin" && !!claims.active_dealer_id && !!dealer_id;
-  if (role !== "super_admin" && role !== "dealer_admin" && !isGroupAdminContext) {
+  const isGhostMode           = claims.is_ghost === true;
+  const isGroupAdminContext    = role === "group_admin" && !!claims.active_dealer_id && !!dealer_id;
+  const isGroupAdminGroupCtx   = role === "group_admin" && !claims.active_dealer_id && !!claims.group_id;
+  if (role !== "super_admin" && role !== "dealer_admin" && !isGroupAdminContext && !isGroupAdminGroupCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -30,8 +32,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const admin = createAdminSupabaseClient();
 
-  // ── dealer_admin or group_admin in dealer context: scoped query ─────────────
-  if (role === "dealer_admin" || isGroupAdminContext) {
+  // ── dealer_admin, ghost mode, or group_admin in dealer context: scoped to dealer ──
+  if (role === "dealer_admin" || isGroupAdminContext || isGhostMode) {
     if (!dealer_id) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     let q = admin
@@ -67,6 +69,54 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       dealer_name:        null,
       group_name:         null,
       last_sign_in_at:    lastSignInMap.get(p.id) ?? null,
+      hubspot_contact_id: null,
+    }));
+
+    return NextResponse.json({ users, total: count ?? 0 });
+  }
+
+  // ── group_admin in group context: scoped to group dealers + group users ──────
+  if (isGroupAdminGroupCtx) {
+    const groupId = claims.group_id!;
+
+    // Get all dealer text_ids in this group
+    const { data: groupDealers } = await admin
+      .from("dealers")
+      .select("dealer_id")
+      .eq("group_id", groupId);
+    const groupDealerIds = (groupDealers ?? []).map(d => d.dealer_id as string);
+
+    let q = admin
+      .from("profiles")
+      .select("id, email, full_name, role, dealer_id, group_id, active, force_password_reset, last_login, created_at", { count: "exact" })
+      .order("full_name", { ascending: true, nullsFirst: false })
+      .range(from, to);
+
+    // Users who belong to a dealer in this group OR directly to this group
+    if (groupDealerIds.length > 0) {
+      q = q.or(`group_id.eq.${groupId},dealer_id.in.(${groupDealerIds.join(",")})`);
+    } else {
+      q = q.eq("group_id", groupId);
+    }
+
+    if (search)     q = q.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+    if (roleFilter) q = q.eq("role", roleFilter as UserRole);
+
+    const { data: profiles, count, error: dbErr } = await q;
+    if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
+
+    const rows = profiles ?? [];
+    const dealerIds = Array.from(new Set(rows.filter(p => p.dealer_id).map(p => p.dealer_id as string)));
+    const { data: dealerRows } = dealerIds.length > 0
+      ? await admin.from("dealers").select("dealer_id, name").in("dealer_id", dealerIds)
+      : { data: [] as { dealer_id: string; name: string }[] };
+    const dealerMap = new Map((dealerRows ?? []).map(d => [d.dealer_id, d.name]));
+
+    const users = rows.map(p => ({
+      ...p,
+      dealer_name: p.dealer_id ? (dealerMap.get(p.dealer_id) ?? null) : null,
+      group_name:  null,
+      last_sign_in_at: null,
       hubspot_contact_id: null,
     }));
 

@@ -679,11 +679,14 @@ const SUPER_ADMIN_TABS: { value: SuperAdminTab; label: string }[] = [
 type Props = {
   viewerRole: string;
   viewerDealerId: string | null;
+  viewerGroupId?: string | null;
   isGroupAdminContext?: boolean;
+  isGhostMode?: boolean;
 };
 
-export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdminContext = false }: Props) {
-  const dealerMode = viewerRole === "dealer_admin" || isGroupAdminContext;
+export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGroupId = null, isGroupAdminContext = false, isGhostMode = false }: Props) {
+  const dealerMode = viewerRole === "dealer_admin" || isGroupAdminContext || isGhostMode;
+  const groupMode  = viewerRole === "group_admin" && !isGroupAdminContext && !!viewerGroupId;
   const availableRoles = dealerMode ? DEALER_ROLES : ALL_ROLES;
 
   const [superAdminTab, setSuperAdminTab] = useState<SuperAdminTab>("all");
@@ -823,8 +826,8 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
         subtitle={
           activeTab === "staff"
             ? `${staff.length} staff member${staff.length !== 1 ? "s" : ""}`
-            : dealerMode
-              ? "Your team"
+            : dealerMode || groupMode
+              ? `${total.toLocaleString()} user${total !== 1 ? "s" : ""}`
               : `${total.toLocaleString()} user${total !== 1 ? "s" : ""}`
         }
         action={
@@ -839,8 +842,8 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
         }
       />
 
-      {/* Tabs — super_admin only */}
-      {viewerRole === "super_admin" && (
+      {/* Tabs — super_admin only (not in ghost mode or scoped contexts) */}
+      {viewerRole === "super_admin" && !isGhostMode && !dealerMode && !groupMode && (
         <div style={{ display: "flex", gap: 0, marginBottom: 16, borderBottom: "2px solid #e0e0e0", flexWrap: "wrap" }}>
           {SUPER_ADMIN_TABS.map(tab => (
             <button
@@ -938,7 +941,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, isGroupAdm
               Clear
             </button>
           )}
-          {viewerRole !== "super_admin" && (
+          {(viewerRole !== "super_admin" || isGhostMode || groupMode) && (
             <select
               value={roleFilter}
               onChange={e => { setRoleFilter(e.target.value); setPage(1); }}
