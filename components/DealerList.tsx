@@ -81,10 +81,10 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
   const [loading, setLoading] = useState(true);
   const [showNewForm, setShowNewForm] = useState(false);
   const [impersonating, setImpersonating] = useState<string | null>(null);
-  const [impersonateError, setImpersonateError] = useState<{ dealerId: string; message: string } | null>(null);
+  const [noUserModal, setNoUserModal] = useState<{ dealer_id: string; dealer_uuid: string; dealer_name: string } | null>(null);
+  const [createUserForm, setCreateUserForm] = useState({ email: "", full_name: "", role: "dealer_admin" as "dealer_admin" | "dealer_user", saving: false, error: null as string | null });
   const [syncing, setSyncing] = useState(false);
   const [syncToast, setSyncToast] = useState<{ msg: string; ok: boolean } | null>(null);
-  const [lastSync, setLastSync] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchDealers = useCallback(async () => {
@@ -127,35 +127,6 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
 
   useEffect(() => { void fetchDealers(); }, [fetchDealers]);
 
-  useEffect(() => {
-    if (role !== "super_admin") return;
-    fetch("/api/admin/settings?key=last_dealer_sync")
-      .then(r => r.json() as Promise<{ value: string | null }>)
-      .then(j => setLastSync(j.value ?? null))
-      .catch(() => null);
-  }, [role]);
-
-  async function handleSync() {
-    setSyncing(true);
-    setSyncToast(null);
-    try {
-      const res = await fetch("/api/admin/sync-legacy", { method: "POST" });
-      const json = await res.json() as { dealers_imported?: number; groups_imported?: number; synced_at?: string; error?: string };
-      if (!res.ok) {
-        setSyncToast({ msg: `Sync failed — ${json.error ?? "check server logs"}`, ok: false });
-      } else {
-        setSyncToast({ msg: `Sync complete — ${json.dealers_imported} active dealers and ${json.groups_imported} groups updated`, ok: true });
-        setLastSync(json.synced_at ?? new Date().toISOString());
-        void fetchDealers();
-      }
-    } catch {
-      setSyncToast({ msg: "Sync failed — check server logs", ok: false });
-    } finally {
-      setSyncing(false);
-      setTimeout(() => setSyncToast(null), 6000);
-    }
-  }
-
   async function handleFileImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -181,7 +152,6 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
         setSyncToast({ msg: `Import failed — ${json.error ?? "check server logs"}`, ok: false });
       } else {
         setSyncToast({ msg: `Import complete — ${json.dealers_imported} dealers and ${json.groups_imported} groups loaded`, ok: true });
-        setLastSync(json.synced_at ?? new Date().toISOString());
         void fetchDealers();
       }
     } catch (err) {
@@ -219,9 +189,55 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
   const from = (page - 1) * PER_PAGE + 1;
   const to = Math.min(page * PER_PAGE, total);
 
+  async function handleCreateAndImpersonate() {
+    if (!noUserModal) return;
+    const { email, full_name, role } = createUserForm;
+    if (!email.trim() || !full_name.trim()) {
+      setCreateUserForm(f => ({ ...f, error: "Email and full name are required." }));
+      return;
+    }
+    setCreateUserForm(f => ({ ...f, saving: true, error: null }));
+
+    const supabase = createClient();
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+    const res = await fetch("/api/admin/create-dealer-user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dealer_id: noUserModal.dealer_id, email: email.trim(), full_name: full_name.trim(), role }),
+    });
+    const json = (await res.json()) as { ok?: boolean; impersonation?: boolean; access_token?: string; refresh_token?: string; dealer_name?: string; dealer_id?: string; error?: string };
+
+    if (!res.ok || !json.ok) {
+      setCreateUserForm(f => ({ ...f, saving: false, error: json.error ?? "Failed to create user" }));
+      return;
+    }
+
+    if (json.impersonation && json.access_token && json.refresh_token) {
+      localStorage.setItem("da_impersonate", JSON.stringify({
+        dealer_name: json.dealer_name ?? noUserModal.dealer_name,
+        dealer_id: json.dealer_id ?? noUserModal.dealer_id,
+        original_access_token: currentSession?.access_token ?? "",
+        original_refresh_token: currentSession?.refresh_token ?? "",
+      }));
+      const { error: setError } = await supabase.auth.setSession({
+        access_token: json.access_token,
+        refresh_token: json.refresh_token,
+      });
+      if (!setError) {
+        document.cookie = "da_impersonating=1; path=/; max-age=86400; SameSite=Lax";
+        window.location.href = "/dashboard";
+        return;
+      }
+    }
+
+    // User created but impersonation tokens unavailable — go to profile instead
+    setNoUserModal(null);
+    router.push(`/dealers/${noUserModal.dealer_uuid}`);
+  }
+
   async function handleImpersonate(d: DealerListRow) {
     setImpersonating(d.dealer_id);
-    setImpersonateError(null);
     const supabase = createClient();
     const { data: { session: currentSession } } = await supabase.auth.getSession();
 
@@ -233,8 +249,11 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
     const json = (await res.json()) as { access_token?: string; refresh_token?: string; dealer_name?: string; dealer_id?: string; error?: string };
 
     if (!res.ok || !json.access_token || !json.refresh_token) {
-      setImpersonateError({ dealerId: d.dealer_id, message: json.error ?? "Failed to impersonate" });
       setImpersonating(null);
+      // No user accounts — show the no-user action modal instead of an inline error
+      if (res.status === 404 && json.error?.includes("No dealer user account")) {
+        setNoUserModal({ dealer_id: d.dealer_id, dealer_uuid: d.id, dealer_name: decodeHtml(d.name) || d.dealer_id });
+      }
       return;
     }
 
@@ -252,7 +271,6 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
 
     if (setError) {
       localStorage.removeItem("da_impersonate");
-      setImpersonateError({ dealerId: d.dealer_id, message: setError.message });
       setImpersonating(null);
       return;
     }
@@ -316,27 +334,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                       </>
                     ) : <>📥 Import from File</>}
                   </button>
-                  <button
-                    type="button"
-                    disabled={syncing}
-                    onClick={() => void handleSync()}
-                    title="Direct sync from Aurora (requires EC2 → Aurora connectivity)"
-                    style={{
-                      height: 36, padding: "0 14px", fontSize: 13, fontWeight: 600,
-                      borderRadius: 4, cursor: syncing ? "not-allowed" : "pointer",
-                      background: "transparent", color: "rgba(255,255,255,0.55)",
-                      border: "1.5px solid rgba(255,255,255,0.25)", opacity: syncing ? 0.7 : 1,
-                      display: "flex", alignItems: "center", gap: 6,
-                    }}
-                  >
-                    ↻ Sync from Legacy
-                  </button>
                 </div>
-                {lastSync && (
-                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>
-                    Last synced: {new Date(lastSync).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                  </span>
-                )}
               </div>
             )}
             <button
@@ -511,9 +509,6 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                           📋
                         </Link>
                       </div>
-                      {impersonateError?.dealerId === d.dealer_id && (
-                        <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{impersonateError.message}</p>
-                      )}
                     </td>
                     <td className="px-4 py-3 text-sm">
                       {d.group_name && d.group_id
@@ -552,6 +547,95 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
           </table>
         )}
       </div>
+
+      {/* No-user modal */}
+      {noUserModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setNoUserModal(null); setCreateUserForm({ email: "", full_name: "", role: "dealer_admin", saving: false, error: null }); } }}
+        >
+          <div style={{ background: "#fff", borderRadius: 6, width: "100%", maxWidth: 480, padding: 28, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", margin: "0 0 6px" }}>
+              No User Account
+            </h2>
+            <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: "0 0 20px" }}>
+              <strong>{noUserModal.dealer_name}</strong> has no user accounts yet. What would you like to do?
+            </p>
+
+            <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+              <button
+                type="button"
+                onClick={() => { setNoUserModal(null); router.push(`/dealers/${noUserModal.dealer_uuid}`); }}
+                style={{ flex: 1, height: 36, borderRadius: 4, border: "1.5px solid var(--border)", background: "#fff", color: "var(--text-primary)", fontSize: 13, fontWeight: 500, cursor: "pointer" }}
+              >
+                View Dealer Profile
+              </button>
+            </div>
+
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: 18 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", margin: "0 0 12px" }}>
+                Create User &amp; Impersonate
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>Full Name</label>
+                  <input
+                    className="input"
+                    placeholder="Jane Smith"
+                    value={createUserForm.full_name}
+                    onChange={e => setCreateUserForm(f => ({ ...f, full_name: e.target.value }))}
+                    disabled={createUserForm.saving}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>Email</label>
+                  <input
+                    className="input"
+                    type="email"
+                    placeholder="jane@dealer.com"
+                    value={createUserForm.email}
+                    onChange={e => setCreateUserForm(f => ({ ...f, email: e.target.value }))}
+                    disabled={createUserForm.saving}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>Role</label>
+                  <select
+                    className="input"
+                    value={createUserForm.role}
+                    onChange={e => setCreateUserForm(f => ({ ...f, role: e.target.value as "dealer_admin" | "dealer_user" }))}
+                    disabled={createUserForm.saving}
+                  >
+                    <option value="dealer_admin">Dealer Admin</option>
+                    <option value="dealer_user">Dealer User</option>
+                  </select>
+                </div>
+                {createUserForm.error && (
+                  <p style={{ fontSize: 12, color: "var(--error)", margin: 0 }}>{createUserForm.error}</p>
+                )}
+                <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                  <button
+                    type="button"
+                    disabled={createUserForm.saving}
+                    onClick={() => void handleCreateAndImpersonate()}
+                    style={{ flex: 1, height: 36, borderRadius: 4, border: "none", background: "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: createUserForm.saving ? "not-allowed" : "pointer", opacity: createUserForm.saving ? 0.7 : 1 }}
+                  >
+                    {createUserForm.saving ? "Creating…" : "Create & Impersonate"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={createUserForm.saving}
+                    onClick={() => { setNoUserModal(null); setCreateUserForm({ email: "", full_name: "", role: "dealer_admin", saving: false, error: null }); }}
+                    style={{ height: 36, padding: "0 16px", borderRadius: 4, border: "1.5px solid var(--border)", background: "#fff", color: "var(--text-secondary)", fontSize: 13, cursor: "pointer" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Pagination */}
       {total > PER_PAGE && (
