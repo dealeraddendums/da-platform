@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createServerSupabaseClient, createAdminSupabaseClient } from "./db";
 import type { UserRole } from "./db";
+import { verifyGhostToken } from "./ghost";
 
 export type JwtClaims = {
   sub: string;
@@ -11,6 +13,10 @@ export type JwtClaims = {
   impersonating_dealer_id: string | null;
   /** UUID of the dealer a group_admin has switched into; null otherwise. */
   active_dealer_id: string | null;
+  /** True when super_admin is in ghost mode (no real dealer user session). */
+  is_ghost: boolean;
+  /** UUID of the dealer being ghosted; null otherwise. */
+  ghost_dealer_uuid: string | null;
 };
 
 export type ServerProfile = {
@@ -106,6 +112,26 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
     if (activeDlr) dealerId = activeDlr.dealer_id;
   }
 
+  // Ghost mode: super_admin operates in dealer context without a real session swap
+  let isGhost = false;
+  let ghostDealerUuid: string | null = null;
+  if (role === "super_admin") {
+    try {
+      const cookieStore = cookies();
+      const ghostToken = cookieStore.get("da_ghost_token")?.value;
+      if (ghostToken) {
+        const ghostCtx = verifyGhostToken(ghostToken);
+        if (ghostCtx) {
+          dealerId = ghostCtx.dealer_text_id;
+          isGhost = true;
+          ghostDealerUuid = ghostCtx.dealer_id;
+        }
+      }
+    } catch {
+      // cookies() may throw outside a request context — ignore
+    }
+  }
+
   return {
     sub: session.user.id,
     email: session.user.email ?? "",
@@ -114,6 +140,8 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
     group_id: profile?.group_id ?? null,
     impersonating_dealer_id: impersonatingDealerId,
     active_dealer_id: activeDealerUuid,
+    is_ghost: isGhost,
+    ghost_dealer_uuid: ghostDealerUuid,
   };
 }
 

@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
+import { verifyGhostToken } from "@/lib/ghost";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
@@ -36,7 +38,23 @@ export default async function DashboardLayout({
 
   const isDealerRole = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";
   const isGroupAdmin = role === "group_admin";
+  const isSuperAdmin = role === "super_admin";
   const activeDealerUuid = isGroupAdmin ? (profile?.active_dealer_id ?? null) : null;
+
+  // ── Ghost mode (super_admin only) ──────────────────────────────────────────
+  let ghostDealerName: string | null = null;
+  let isGhostMode = false;
+  if (isSuperAdmin) {
+    const cookieStore = cookies();
+    const ghostToken = cookieStore.get("da_ghost_token")?.value;
+    if (ghostToken) {
+      const ghostCtx = verifyGhostToken(ghostToken);
+      if (ghostCtx) {
+        isGhostMode = true;
+        ghostDealerName = ghostCtx.dealer_name;
+      }
+    }
+  }
 
   // ── Dealer name (dealer roles) ─────────────────────────────────────────────
   let dealerName: string | null = null;
@@ -77,14 +95,17 @@ export default async function DashboardLayout({
   }
 
   // ── Sidebar role ───────────────────────────────────────────────────────────
-  // When a group_admin has selected a dealer, show them dealer nav items.
-  const sidebarRole: UserRole = (isGroupAdmin && activeDealerUuid) ? "dealer_admin" : role;
+  // When a group_admin has selected a dealer, or super_admin is in ghost mode,
+  // show dealer nav items.
+  const sidebarRole: UserRole = (isGroupAdmin && activeDealerUuid) ? "dealer_admin"
+    : (isSuperAdmin && isGhostMode) ? "dealer_admin"
+    : role;
 
   const userDisplay = {
     email: session.user.email ?? "",
     fullName: profile?.full_name ?? null,
     role,
-    dealerName,
+    dealerName: isGhostMode ? ghostDealerName : dealerName,
     groupName,
     activeDealerName,
     activeDealerId: activeDealerUuid,

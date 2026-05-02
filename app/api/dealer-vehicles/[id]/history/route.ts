@@ -22,7 +22,7 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  const isAdmin = (claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id;
+  const isAdmin = (claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id && !claims.is_ghost;
   if (isAdmin) return NextResponse.json({ error: "Not available for admin roles" }, { status: 403 });
 
   const dealerId = claims.impersonating_dealer_id ?? claims.dealer_id;

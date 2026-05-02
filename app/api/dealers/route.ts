@@ -138,10 +138,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const dealerIds = (allDealers ?? []).map((d: Record<string, unknown>) => d.dealer_id as string);
     const inventoryIds = (allDealers ?? []).map((d: Record<string, unknown>) => d.inventory_dealer_id as string | null);
-    const [{ lifetime, recent }, hubspotMap] = await Promise.all([
+    const [{ lifetime, recent }, hubspotMap, atRiskProfileRows] = await Promise.all([
       getPrintCounts(admin, dealerIds),
       getHubspotCompanyIds(inventoryIds),
+      admin
+        .from("profiles")
+        .select("dealer_id")
+        .in("dealer_id", dealerIds)
+        .in("role", ["dealer_admin", "dealer_user", "dealer_restricted"])
+        .then(({ data: rows }) => rows ?? []),
     ]);
+    const atRiskDealersWithUsers = new Set((atRiskProfileRows as { dealer_id: string }[]).map((p) => p.dealer_id));
 
     const atRiskList = (allDealers ?? [])
       .map((d: Record<string, unknown>) => ({
@@ -151,6 +158,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         lifetime_prints: lifetime[d.dealer_id as string] ?? 0,
         last_30_prints: recent[d.dealer_id as string] ?? 0,
         hubspot_company_id: hubspotMap[d.inventory_dealer_id as string] ?? null,
+        has_users: atRiskDealersWithUsers.has(d.dealer_id as string),
       }))
       .filter((d) => d.lifetime_prints >= 50 && d.last_30_prints === 0)
       .sort((a, b) => b.lifetime_prints - a.lifetime_prints);
@@ -176,10 +184,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const dealerIds = (data ?? []).map((d: Record<string, unknown>) => d.dealer_id as string);
   const inventoryIds = (data ?? []).map((d: Record<string, unknown>) => d.inventory_dealer_id as string | null);
-  const [{ lifetime, recent }, hubspotMap] = await Promise.all([
+  const [{ lifetime, recent }, hubspotMap, profileRows] = await Promise.all([
     getPrintCounts(admin, dealerIds),
     getHubspotCompanyIds(inventoryIds),
+    admin
+      .from("profiles")
+      .select("dealer_id")
+      .in("dealer_id", dealerIds)
+      .in("role", ["dealer_admin", "dealer_user", "dealer_restricted"])
+      .then(({ data: rows }) => rows ?? []),
   ]);
+  const dealersWithUsers = new Set((profileRows as { dealer_id: string }[]).map((p) => p.dealer_id));
 
   let enriched = (data ?? []).map((d: Record<string, unknown>) => ({
     ...d,
@@ -188,6 +203,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     lifetime_prints: lifetime[d.dealer_id as string] ?? 0,
     last_30_prints: recent[d.dealer_id as string] ?? 0,
     hubspot_company_id: hubspotMap[d.inventory_dealer_id as string] ?? null,
+    has_users: dealersWithUsers.has(d.dealer_id as string),
   }));
 
   // In-memory sort for computed/joined columns

@@ -15,8 +15,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  // Block non-impersonating admins; allow super_admin while impersonating a dealer
-  if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id) {
+  // Block non-impersonating/non-ghost admins; allow super_admin while impersonating or in ghost mode
+  if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id && !claims.is_ghost) {
     return NextResponse.json({ error: "Not available for admin roles" }, { status: 403 });
   }
 
@@ -126,7 +126,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id) {
+  if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id && !claims.is_ghost) {
     return NextResponse.json({ error: "Not available for admin roles" }, { status: 403 });
   }
 
