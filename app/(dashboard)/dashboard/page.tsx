@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
@@ -14,15 +13,6 @@ function isManualDealer(accountType: string | null): boolean {
 }
 
 export const metadata = { title: "Dashboard — DA Platform" };
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-function churnRisk(lifetime: number, last30: number): "critical" | "low" | "none" {
-  if (lifetime < 10) return "none";
-  if (lifetime >= 50 && last30 === 0) return "critical";
-  if (lifetime >= 50 && last30 <= 5) return "low";
-  return "none";
-}
 
 const STAT_LABEL = {
   fontSize: 11,
@@ -88,105 +78,40 @@ function SuperAdminView({
 
 // ── group_admin view ──────────────────────────────────────────────────────────
 
-type GroupDealerRow = {
-  id: string;
-  dealer_id: string;
-  name: string;
-  active: boolean;
-  lifetime_prints: number;
-  last_30_prints: number;
-};
-
 function GroupAdminView({
-  totalDealers,
-  unprintedTotal,
-  printed30Total,
+  paidCount,
+  trialCount,
+  dealerCount,
+  addendumMonth,
   dealers,
+  groupId,
 }: {
-  totalDealers: number;
-  unprintedTotal: number;
-  printed30Total: number;
-  dealers: GroupDealerRow[];
+  paidCount: number;
+  trialCount: number;
+  dealerCount: number;
+  addendumMonth: number;
+  dealers: DealerMapPoint[];
+  groupId: string;
 }) {
-  const stats = [
-    { label: "Dealers in Group", value: totalDealers },
-    { label: "Unprinted", value: unprintedTotal },
-    { label: "Printed Last 30 Days", value: printed30Total },
+  const cards = [
+    { label: "Paid Dealers",        value: paidCount.toLocaleString(),     note: "Active subscriptions" },
+    { label: "Trial Dealers",        value: trialCount.toLocaleString(),    note: "Free / trial accounts" },
+    { label: "Dealers",              value: dealerCount.toLocaleString(),   note: "In your group" },
+    { label: "Addendums This Month", value: addendumMonth.toLocaleString(), note: "Printed this month" },
   ];
   return (
     <div>
       <PageHeader title="Dashboard" />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        {stats.map((s) => (
-          <div key={s.label} className="card p-4">
-            <p style={STAT_LABEL}>{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>
-              {s.value.toLocaleString()}
-            </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {cards.map((c) => (
+          <div key={c.label} className="card p-4">
+            <p style={STAT_LABEL}>{c.label}</p>
+            <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{c.value}</p>
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{c.note}</p>
           </div>
         ))}
       </div>
-
-      <div className="card overflow-hidden">
-        <div className="px-4 py-3" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-          <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Dealers</p>
-        </div>
-        {dealers.length === 0 ? (
-          <p className="p-6 text-sm" style={{ color: "var(--text-muted)" }}>No dealers in this group yet.</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
-                {["Dealer", "Status", "Lifetime Prints", "Last 30 Days"].map((h) => (
-                  <th key={h} className="text-left px-4 py-2.5 font-semibold"
-                    style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {dealers.map((d, i) => {
-                const risk = churnRisk(d.lifetime_prints, d.last_30_prints);
-                return (
-                  <tr key={d.id} style={{ borderBottom: i < dealers.length - 1 ? "1px solid var(--border)" : "none" }}>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        {risk === "critical" && (
-                          <span title="No prints in 30 days — churn risk" style={{ color: "#ffa500", fontSize: 13, cursor: "help" }}>⚠</span>
-                        )}
-                        {risk === "low" && (
-                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ffd54f", display: "inline-block" }} />
-                        )}
-                        <Link href={`/dealers/${d.id}`} className="font-medium" style={{ color: "var(--text-primary)" }}>
-                          {d.name}
-                        </Link>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                        style={{
-                          background: d.active ? "#e8f5e9" : "#ffebee",
-                          color: d.active ? "#2e7d32" : "#c62828",
-                          border: `1px solid ${d.active ? "#c8e6c9" : "#ffcdd2"}`,
-                        }}>
-                        {d.active ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-medium" style={{ color: "var(--text-primary)" }}>
-                      {d.lifetime_prints.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 font-medium"
-                      style={{ color: d.last_30_prints === 0 && d.lifetime_prints >= 50 ? "#ffa500" : "var(--text-primary)" }}>
-                      {d.last_30_prints.toLocaleString()}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <ActivitySection dealers={dealers} groupId={groupId} />
     </div>
   );
 }
@@ -272,79 +197,66 @@ export default async function DashboardPage() {
       );
     }
 
-    const { data: groupDealers } = await admin
-      .from("dealers")
-      .select("id, dealer_id, name, active")
-      .eq("group_id", groupId);
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
 
-    const dealerIds = (groupDealers ?? []).map((d) => d.dealer_id as string);
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const PAID_TYPES = [
+      "Monthly Subscription Manual", "Monthly Subscription Automatic Web", "Monthly Subscription Automatic DMS",
+      "Manual", "Automatic Web", "Automatic DMS", "Standard", "Automatic Web $135",
+    ];
+    const paidFilter = `(${PAID_TYPES.map(t => `"${t}"`).join(",")})`;
 
-    let totalGroupVehicles = 0;
-    let groupPrinted30 = 0;
-    let lifetimeCounts: Record<string, number> = {};
-    let recentCounts: Record<string, number> = {};
-    let printedVehicleIds: Set<string> = new Set();
+    // Phase 1: parallel counts + dealer rows for map
+    const [
+      { count: paidCount },
+      { count: trialCount },
+      { data: groupDealerRows },
+    ] = await Promise.all([
+      admin.from("dealers").select("*", { count: "exact", head: true })
+        .eq("group_id", groupId).eq("active", true).in("account_type", PAID_TYPES),
+      admin.from("dealers").select("*", { count: "exact", head: true })
+        .eq("group_id", groupId).eq("active", true).not("account_type", "in", paidFilter),
+      admin.from("dealers")
+        .select("id, dealer_id, name, account_type, lat, lng, address, city, state, zip")
+        .eq("group_id", groupId),
+    ]);
 
-    if (dealerIds.length > 0) {
-      const { count: dvCount } = await admin
-        .from("dealer_vehicles")
+    const textDealerIds = (groupDealerRows ?? []).map(d => d.dealer_id as string);
+    const dealerCount = textDealerIds.length;
+
+    // Phase 2: addendums this month (needs textDealerIds)
+    let addendumMonth = 0;
+    if (textDealerIds.length > 0) {
+      const { count } = await admin
+        .from("print_history")
         .select("*", { count: "exact", head: true })
-        .in("dealer_id", dealerIds)
-        .eq("status", "active");
-      totalGroupVehicles = dvCount ?? 0;
-
-      const [lifetimeRes, recentRes] = await Promise.all([
-        admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).limit(100000),
-        admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).gte("created_at", thirtyDaysAgo).limit(20000),
-      ]);
-
-      // Deduplicate per dealer: each vehicle counts once regardless of how many times printed
-      const lifetimeSets: Record<string, Set<string>> = {};
-      for (const r of lifetimeRes.data ?? []) {
-        const did = r.dealer_id as string;
-        if (!lifetimeSets[did]) lifetimeSets[did] = new Set();
-        lifetimeSets[did].add(r.vehicle_id as string);
-      }
-      for (const [did, s] of Object.entries(lifetimeSets)) {
-        lifetimeCounts[did] = s.size;
-      }
-
-      const recentSets: Record<string, Set<string>> = {};
-      for (const r of recentRes.data ?? []) {
-        const did = r.dealer_id as string;
-        if (!recentSets[did]) recentSets[did] = new Set();
-        recentSets[did].add(r.vehicle_id as string);
-        printedVehicleIds.add(r.vehicle_id as string);
-      }
-      for (const [did, s] of Object.entries(recentSets)) {
-        recentCounts[did] = s.size;
-      }
-      groupPrinted30 = printedVehicleIds.size;
+        .in("dealer_id", textDealerIds)
+        .gte("created_at", startOfMonth.toISOString());
+      addendumMonth = count ?? 0;
     }
 
-    const { data: lifetimeAllRes } = await (dealerIds.length > 0
-      ? admin.from("print_history").select("vehicle_id").in("dealer_id", dealerIds).limit(100000)
-      : Promise.resolve({ data: [] as Array<{ vehicle_id: string }> }));
-
-    const allPrintedSet = new Set((lifetimeAllRes ?? []).map((r) => r.vehicle_id as string));
-    const unprintedTotal = Math.max(0, totalGroupVehicles - allPrintedSet.size);
-
-    const enrichedDealers: GroupDealerRow[] = (groupDealers ?? []).map((d) => ({
+    const mapDealers: DealerMapPoint[] = (groupDealerRows ?? []).map(d => ({
       id: d.id as string,
       dealer_id: d.dealer_id as string,
       name: d.name as string,
-      active: d.active as boolean,
-      lifetime_prints: lifetimeCounts[d.dealer_id as string] ?? 0,
-      last_30_prints: recentCounts[d.dealer_id as string] ?? 0,
-    })).sort((a, b) => b.last_30_prints - a.last_30_prints);
+      account_type: (d.account_type as string | null) ?? null,
+      lat: (d.lat as string | null) ?? null,
+      lng: (d.lng as string | null) ?? null,
+      address: (d.address as string | null) ?? null,
+      city: (d.city as string | null) ?? null,
+      state: (d.state as string | null) ?? null,
+      zip: (d.zip as string | null) ?? null,
+    }));
 
     return (
       <GroupAdminView
-        totalDealers={dealerIds.length}
-        unprintedTotal={unprintedTotal}
-        printed30Total={groupPrinted30}
-        dealers={enrichedDealers}
+        paidCount={paidCount ?? 0}
+        trialCount={trialCount ?? 0}
+        dealerCount={dealerCount}
+        addendumMonth={addendumMonth}
+        dealers={mapDealers}
+        groupId={groupId}
       />
     );
   }
@@ -370,65 +282,56 @@ export default async function DashboardPage() {
   const manual = isManualDealer(accountType);
 
   // ── Stats — always Supabase ───────────────────────────────────────────────
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const todayUTC = new Date(); todayUTC.setUTCHours(0, 0, 0, 0);
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
 
-  const [{ count: totalVehiclesCount }, todayRes, last30Res] = await Promise.all([
+  const [{ count: totalVehiclesCount }, monthRes, lifetimeRes] = await Promise.all([
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active"),
     admin.from("print_history").select("vehicle_id")
-      .eq("dealer_id", dealerId).gte("created_at", todayUTC.toISOString()),
+      .eq("dealer_id", dealerId).gte("created_at", startOfMonth.toISOString()),
     admin.from("print_history").select("vehicle_id")
-      .eq("dealer_id", dealerId).gte("created_at", thirtyDaysAgo),
+      .eq("dealer_id", dealerId).limit(100000),
   ]);
 
   const totalVehicles = totalVehiclesCount ?? 0;
-  const printedToday = new Set((todayRes.data ?? []).map(r => r.vehicle_id)).size;
-  const printed30 = new Set((last30Res.data ?? []).map(r => r.vehicle_id)).size;
-  const unprintedCount = Math.max(0, totalVehicles - printed30);
+  const printedThisMonth = new Set((monthRes.data ?? []).map(r => r.vehicle_id)).size;
+  const lifetimePrinted = new Set((lifetimeRes.data ?? []).map(r => r.vehicle_id)).size;
+  const unprintedNever = Math.max(0, totalVehicles - lifetimePrinted);
+
+  const dealerStats = [
+    { label: "Total Vehicles",     value: totalVehicles },
+    { label: "Printed This Month", value: printedThisMonth },
+    { label: "Unprinted",          value: unprintedNever },
+  ];
+
+  const statCard = (s: { label: string; value: number }) => (
+    <div key={s.label} className="card p-4">
+      <p style={STAT_LABEL}>{s.label}</p>
+      <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{s.value.toLocaleString()}</p>
+    </div>
+  );
 
   // ── Manual dealer ─────────────────────────────────────────────────────────
   if (manual) {
-    const manualStats = [
-      { label: "Total Vehicles", value: totalVehicles },
-      { label: "Unprinted", value: unprintedCount },
-      { label: "Printed Today", value: printedToday },
-      { label: "Printed Last 30 Days", value: printed30 },
-    ];
     return (
       <div>
         <PageHeader title="Dashboard" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-          {manualStats.map((s) => (
-            <div key={s.label} className="card p-3">
-              <p style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "var(--text-muted)", marginBottom: 6 }}>{s.label}</p>
-              <p className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>{s.value.toLocaleString()}</p>
-            </div>
-          ))}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          {dealerStats.map(statCard)}
         </div>
         <ManualVehicleInventory dealerId={dealerId} />
       </div>
     );
   }
 
-  // ── Aurora dealer: full inventory view ───────────────────────────────────────
-  const auroraStats = [
-    { label: "Total Vehicles", value: totalVehicles },
-    { label: "Unprinted", value: unprintedCount },
-    { label: "Printed Today", value: printedToday },
-    { label: "Printed Last 30 Days", value: printed30 },
-  ];
-
+  // ── Aurora dealer: full inventory view ────────────────────────────────────
   return (
     <div>
       <PageHeader title="Dashboard" />
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {auroraStats.map((s) => (
-          <div key={s.label} className="card p-3">
-            <p style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "var(--text-muted)", marginBottom: 6 }}>{s.label}</p>
-            <p className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>{s.value.toLocaleString()}</p>
-          </div>
-        ))}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        {dealerStats.map(statCard)}
       </div>
       <VehicleInventory fixedDealerId={dealerId} role={role} groupId={profile?.group_id ?? null} />
     </div>

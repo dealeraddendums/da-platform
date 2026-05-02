@@ -23,7 +23,7 @@ type Tab = "all" | "paid" | "trial";
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 
-export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[] }) {
+export default function ActivitySection({ dealers, groupId }: { dealers: DealerMapPoint[]; groupId?: string }) {
   const [prints, setPrints] = useState<PrintEvent[]>([]);
   const [flashingId, setFlashingId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ name: string } | null>(null);
@@ -52,7 +52,10 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
 
   // Load initial print history
   useEffect(() => {
-    fetch("/api/dashboard/recent-prints")
+    const url = groupId
+      ? `/api/dashboard/recent-prints?group_id=${encodeURIComponent(groupId)}`
+      : "/api/dashboard/recent-prints";
+    fetch(url)
       .then(r => r.json())
       .then((d: { prints?: PrintEvent[] }) => {
         if (!d.prints) return;
@@ -63,7 +66,7 @@ export default function ActivitySection({ dealers }: { dealers: DealerMapPoint[]
         if (recent) setFlashingId(recent.dealerUuid);
       })
       .catch(() => {});
-  }, []);
+  }, [groupId]);
 
   // Supabase Realtime — subscribe to addendum_data INSERTs
   useEffect(() => {
