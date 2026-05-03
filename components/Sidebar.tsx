@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { UserRole } from "@/lib/db";
+import pkg from "../package.json";
 
 type NavItem = {
   label: string;
@@ -392,7 +393,7 @@ export default function Sidebar({ role = "dealer_user" }: { role?: UserRole | "g
           borderTop: "1px solid rgba(255,255,255,0.08)",
         }}
       >
-        Phase 6 — Document Builder
+        v{pkg.version}
       </div>
     </aside>
   );
