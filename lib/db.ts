@@ -536,6 +536,7 @@ type PrintHistoryInsert = {
 export type AddendumLibraryRow = {
   id: string;
   dealer_id: string;
+  legacy_default_id?: number | null;
   option_name: string;
   item_price: string;
   description: string;
