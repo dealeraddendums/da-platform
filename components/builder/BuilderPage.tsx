@@ -78,6 +78,23 @@ function applyLogoToWidgets(ws: Record<string, Widget>, logoUrl: string | null):
   return changed ? result : ws;
 }
 
+// Apply dealer address to dealer widgets when no vehicle is available (blank builder).
+function applyDealerInfoToWidgets(
+  ws: Record<string, Widget>,
+  info: DealerInfo,
+): Record<string, Widget> {
+  const cityStateZip = [info.city, info.state, info.zip].filter(Boolean).join(' ') || null;
+  const lines = [info.name, info.address, cityStateZip, info.phone].filter(Boolean) as string[];
+  if (!lines.length) return ws;
+  const result: Record<string, Widget> = {};
+  for (const [id, w] of Object.entries(ws)) {
+    result[id] = w.type === 'dealer'
+      ? { ...w, d: { ...w.d, text: lines.join('\n') } }
+      : w;
+  }
+  return result;
+}
+
 // Populate widget d-data from real vehicle/dealer data — mirrors pdf-html.ts enrichment
 function applyVehicleDataToWidgets(
   ws: Record<string, Widget>,
@@ -119,6 +136,15 @@ function applyVehicleDataToWidgets(
   return result;
 }
 
+type DealerInfo = {
+  name?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  phone?: string | null;
+};
+
 interface Props {
   vehicle?: VehiclePreload;
   templateId?: string;
@@ -126,10 +152,11 @@ interface Props {
   customSizes?: CustomSize[];
   dealerId?: string;
   dealerLogoUrl?: string | null;
+  dealerInfo?: DealerInfo;
   groupId?: string;
 }
 
-export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, groupId }: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId }: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
@@ -173,6 +200,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // Canonical dealer logo — pre-resolved S3 URL from the page server component.
   // Stays constant for the lifetime of this builder session.
   const canonicalLogoRef = useRef<string | null>(vehicle?.logo_url ?? dealerLogoUrl ?? null);
+
+  // Dealer info for blank builder (no vehicle) — used to populate the dealer address widget.
+  const dealerInfoRef = useRef<DealerInfo | undefined>(dealerInfo);
 
   // Refs for drag
   const paperRef = useRef<HTMLDivElement>(null);
@@ -434,6 +464,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       });
       // Populate all widgets with real vehicle/dealer data
       ws = applyVehicleDataToWidgets(ws, vehicle);
+    } else if (dealerInfoRef.current) {
+      // Blank builder: populate dealer address widget from server-fetched dealer data
+      ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
     }
     // Always apply canonical dealer logo to logo widgets (works with or without a vehicle)
     ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
@@ -465,6 +498,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           [ws, n] = ensureAskbar(ws, n, ps);
           ws = clampWidgets(ws, pw, ph);
           if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
+          else if (dealerInfoRef.current) ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
           ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
           setWidgets(ws);
           widgetsRef.current = ws;
@@ -499,6 +533,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (type === 'vehicle') { ws[id].d = { ...ws[id].d, headerFontSize: 1.2 }; }
       });
       if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
+      else if (dealerInfoRef.current) ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
       const wsWithLogo = applyLogoToWidgets(ws, canonicalLogoRef.current);
       widgetsRef.current = wsWithLogo;
       setWidgets(wsWithLogo);
@@ -530,6 +565,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       });
       ws = clampWidgets(ws, pw, ph);
       if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
+      else if (dealerInfoRef.current) ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
       ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
       widgetsRef.current = ws;
       setWidgets(ws);
@@ -776,6 +812,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       let n = json.nid ?? 1;
       [ws, n] = ensureAskbar(ws, n, ps);
       ws = clampWidgets(ws, pw, ph);
+      if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
+      else if (dealerInfoRef.current) ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
       ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
       setWidgets(ws); widgetsRef.current = ws;
       setNid(n);

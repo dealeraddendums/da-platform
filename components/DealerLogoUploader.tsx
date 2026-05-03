@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ImageUploadPicker from "@/components/ImageUploadPicker";
 
 type Props = {
@@ -12,6 +12,9 @@ type Props = {
 export default function DealerLogoUploader({ dealerId, currentLogoUrl, onUpdated }: Props) {
   const [logoUrl, setLogoUrl] = useState(currentLogoUrl);
   const [showPicker, setShowPicker] = useState(false);
+
+  // Sync prop → state when parent loads logo asynchronously after initial render
+  useEffect(() => { setLogoUrl(currentLogoUrl); }, [currentLogoUrl]);
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
