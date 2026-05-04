@@ -42,8 +42,15 @@ export default async function UsersPage() {
 
   // Resolve effective dealer_id for scoped views
   let effectiveDealerId: string | null = profile?.dealer_id ?? null;
+  let ghostDealerName: string | null = null;
   if (isGhostMode) {
     effectiveDealerId = ghostDealerId;
+    const { data: ghostDlr } = await admin
+      .from("dealers")
+      .select("name")
+      .eq("dealer_id", ghostDealerId!)
+      .maybeSingle<{ name: string }>();
+    ghostDealerName = ghostDlr?.name ?? null;
   } else if (isGroupAdminInDealerContext && profile?.active_dealer_id) {
     const { data: activeDlr } = await admin
       .from("dealers")
@@ -60,6 +67,7 @@ export default async function UsersPage() {
       viewerGroupId={isGroupAdminInGroupContext ? (profile?.group_id ?? null) : null}
       isGroupAdminContext={isGroupAdminInDealerContext}
       isGhostMode={isGhostMode}
+      ghostDealerName={ghostDealerName}
     />
   );
 }

@@ -682,9 +682,10 @@ type Props = {
   viewerGroupId?: string | null;
   isGroupAdminContext?: boolean;
   isGhostMode?: boolean;
+  ghostDealerName?: string | null;
 };
 
-export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGroupId = null, isGroupAdminContext = false, isGhostMode = false }: Props) {
+export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGroupId = null, isGroupAdminContext = false, isGhostMode = false, ghostDealerName = null }: Props) {
   const dealerMode = viewerRole === "dealer_admin" || isGroupAdminContext || isGhostMode;
   const groupMode  = viewerRole === "group_admin" && !isGroupAdminContext && !!viewerGroupId;
   const availableRoles = dealerMode ? DEALER_ROLES : ALL_ROLES;
@@ -704,6 +705,9 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
 
   const [showAdd, setShowAdd]         = useState(false);
   const [showInvite, setShowInvite]   = useState(false);
+  const [showInviteAll, setShowInviteAll] = useState(false);
+  const [inviteAllSending, setInviteAllSending] = useState(false);
+  const [inviteAllResult, setInviteAllResult] = useState<{ invited: number; already_existed: number; failed: number } | null>(null);
   const [editUser, setEditUser]       = useState<UserRow | null>(null);
   const [deleteUser, setDeleteUser]   = useState<UserRow | null>(null);
   const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
@@ -760,6 +764,27 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
     setDeleteUser(null);
     showToast(msg);
     void fetchUsers();
+  }
+
+  async function handleInviteAll() {
+    if (!viewerDealerId) return;
+    setInviteAllSending(true);
+    setInviteAllResult(null);
+    try {
+      const res = await fetch("/api/migration/invite-dealer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inventory_dealer_id: viewerDealerId }),
+      });
+      const json = await res.json() as { invited?: number; already_existed?: number; failed?: number; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Invite failed");
+      setInviteAllResult({ invited: json.invited ?? 0, already_existed: json.already_existed ?? 0, failed: json.failed ?? 0 });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Invite failed", false);
+      setShowInviteAll(false);
+    } finally {
+      setInviteAllSending(false);
+    }
   }
 
   function handleSearch(e: React.FormEvent) {
@@ -833,6 +858,14 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
         action={
           activeTab === "users" ? (
             <div className="flex gap-2">
+              {viewerRole === "super_admin" && isGhostMode && viewerDealerId && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => { setShowInviteAll(true); setInviteAllResult(null); }}
+                >
+                  Invite All Users
+                </button>
+              )}
               {dealerMode && (
                 <button className="btn btn-secondary" onClick={() => setShowInvite(true)}>+ Invite User</button>
               )}
@@ -1064,6 +1097,57 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
       )}
 
       {/* Modals */}
+      {showInviteAll && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+        }}>
+          <div style={{ background: "#fff", borderRadius: 8, width: "100%", maxWidth: 480, padding: 28 }}>
+            {inviteAllResult ? (
+              <>
+                <h2 style={{ fontSize: 18, fontWeight: 600, color: "#333", margin: "0 0 16px" }}>Invitations sent</h2>
+                <div style={{ background: "#f5f6f7", borderRadius: 6, padding: "16px 20px", marginBottom: 20 }}>
+                  <div style={{ fontSize: 14, color: "#333", marginBottom: 8 }}>
+                    <strong>{inviteAllResult.invited}</strong> invitation{inviteAllResult.invited !== 1 ? "s" : ""} sent
+                  </div>
+                  {inviteAllResult.already_existed > 0 && (
+                    <div style={{ fontSize: 13, color: "#78828c", marginBottom: 4 }}>
+                      {inviteAllResult.already_existed} user{inviteAllResult.already_existed !== 1 ? "s" : ""} already had accounts — skipped
+                    </div>
+                  )}
+                  {inviteAllResult.failed > 0 && (
+                    <div style={{ fontSize: 13, color: "#d32f2f" }}>
+                      {inviteAllResult.failed} failed — check admin logs
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button className="btn btn-primary" onClick={() => setShowInviteAll(false)}>Done</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 style={{ fontSize: 18, fontWeight: 600, color: "#333", margin: "0 0 12px" }}>Send DA Platform 5.0 Invitations</h2>
+                <p style={{ fontSize: 14, color: "#55595c", lineHeight: 1.6, margin: "0 0 20px" }}>
+                  Send DA Platform 5.0 invitations to all {total > 0 ? <strong>{total} users</strong> : "users"}{" "}
+                  at <strong>{ghostDealerName ?? viewerDealerId}</strong>?
+                  Each user will receive a magic link to set up their account.
+                </p>
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button className="btn btn-secondary" onClick={() => setShowInviteAll(false)} disabled={inviteAllSending}>Cancel</button>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleInviteAll}
+                    disabled={inviteAllSending}
+                  >
+                    {inviteAllSending ? "Sending…" : "Send Invitations"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {showInvite && (
         <InviteUserModal
           onClose={() => setShowInvite(false)}
