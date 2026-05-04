@@ -66,5 +66,5 @@ export default async function BuilderRoute() {
     phone: dealerData.phone ?? null,
   } : undefined;
 
-  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} />;
+  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} canAddCustomSize={role === 'super_admin'} />;
 }

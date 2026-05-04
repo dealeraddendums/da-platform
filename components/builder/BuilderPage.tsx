@@ -154,9 +154,10 @@ interface Props {
   dealerLogoUrl?: string | null;
   dealerInfo?: DealerInfo;
   groupId?: string;
+  canAddCustomSize?: boolean;
 }
 
-export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId }: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, canAddCustomSize = false }: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
@@ -982,21 +983,22 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                   }
                 }}
                 style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>
-                <option value="narrow">3.125&quot; × 11&quot; Narrow</option>
-                <option value="standard">4.25&quot; × 11&quot; Standard</option>
-                <option value="infosheet">8.5&quot; × 11&quot; Infosheet</option>
-                {effectiveDealerId && <option disabled>────────────────</option>}
+                <option value="standard">4&#xBC;&#x2033; Addendum</option>
+                <option value="narrow">3&#x215B;&#x2033; Addendum</option>
+                <option value="wide">8&#xBD;&#x2033; Addendum</option>
+                <option value="infosheet">8&#xBD;&#x2033; Infosheet</option>
+                {localCustomSizes.length > 0 && <option disabled>────────────────</option>}
                 {localCustomSizes.map(cs => (
                   <option key={cs.id} value={cs.id}>{cs.name} ({cs.width_in}&quot; × {cs.height_in}&quot;)</option>
                 ))}
-                {effectiveDealerId && localCustomSizes.length > 0 && (
+                {canAddCustomSize && effectiveDealerId && (
                   <option disabled>────────────────</option>
                 )}
-                {effectiveDealerId && (
+                {canAddCustomSize && effectiveDealerId && (
                   <option value="__add_new__">+ Add Custom Size</option>
                 )}
               </select>
-              {effectiveDealerId && (
+              {canAddCustomSize && effectiveDealerId && (
                 <button onClick={() => setShowCustomSizesModal(true)} title="Manage custom sizes"
                   style={{ width: 26, height: 26, borderRadius: 4, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.85)', fontSize: 13, flexShrink: 0 }}>
                   ⚙

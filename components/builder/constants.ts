@@ -9,9 +9,10 @@ export const IS_BG_DEFAULT = 'https://new-infosheet-backgrounds.s3.us-east-1.ama
 export const IB_DEFAULT = 'https://new-infobox-images.s3.us-east-1.amazonaws.com/EPA_Infobox_Default.png';
 
 export const PAPERS: Record<PaperSize, { w: number; h: number }> = {
-  standard:  { w: 408, h: 1056 },
-  narrow:    { w: 300, h: 1056 },
-  infosheet: { w: 816, h: 1056 },
+  standard:  { w: 408,  h: 1056 },
+  narrow:    { w: 300,  h: 1056 },
+  wide:      { w: 816,  h: 1056 },
+  infosheet: { w: 816,  h: 1056 },
 };
 
 export const LAYOUT: Record<string, { x: number; y: number; w: number; h: number }> = {

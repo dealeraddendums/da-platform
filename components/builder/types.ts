@@ -1,4 +1,4 @@
-export type PaperSize = 'standard' | 'narrow' | 'infosheet';
+export type PaperSize = 'standard' | 'narrow' | 'infosheet' | 'wide';
 
 export interface CustomSize {
   id: string;
