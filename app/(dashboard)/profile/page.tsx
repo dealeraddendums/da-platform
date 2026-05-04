@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
+import { verifyGhostToken } from "@/lib/ghost";
 import ProfileClient from "./ProfileClient";
 
 export const metadata = { title: "My Profile — DA Platform" };
@@ -23,8 +25,47 @@ export default async function ProfilePage() {
   const userName = profile?.full_name ?? userEmail;
   const memberSince = profile?.created_at ?? session.user.created_at;
 
-  // super_admin / group_admin — no dealer; Security tab only
-  if (role === "super_admin" || role === "group_admin") {
+  // Ghost mode: super_admin viewing a dealer's context — show that dealer's profile
+  if (role === "super_admin") {
+    const cookieStore = cookies();
+    const ghostCtx = verifyGhostToken(cookieStore.get("da_ghost_token")?.value ?? "");
+    const ghostDealerId = ghostCtx?.dealer_text_id ?? null;
+
+    if (ghostDealerId) {
+      const { data: rawDealer } = await admin
+        .from("dealers")
+        .select("*")
+        .eq("dealer_id", ghostDealerId)
+        .single();
+
+      const dealer = rawDealer as DealerRow | null;
+      return (
+        <ProfileClient
+          dealer={dealer}
+          canEdit={false}
+          userEmail={userEmail}
+          userName={userName}
+          userRole={role}
+          memberSince={memberSince}
+        />
+      );
+    }
+
+    // super_admin not in ghost mode — Security tab only (no dealer context)
+    return (
+      <ProfileClient
+        dealer={null}
+        canEdit={false}
+        userEmail={userEmail}
+        userName={userName}
+        userRole={role}
+        memberSince={memberSince}
+      />
+    );
+  }
+
+  // group_admin — Security tab only
+  if (role === "group_admin") {
     return (
       <ProfileClient
         dealer={null}
