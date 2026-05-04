@@ -83,7 +83,7 @@ export const DEFS: Record<string, Record<string, unknown>> = {
   askbar: {
     label: 'Dealer Asking Price:',
     value: '$28,596.00',
-    subtitle: "(Not the Manufacturer's Suggested Retail Price)",
+    subtitle: "",
     labelColor: '#ffffff',
     valueColor: '#000000',
     labelFontSize: 1.0,
