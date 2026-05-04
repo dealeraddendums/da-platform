@@ -43,6 +43,8 @@ export default async function DashboardLayout({
 
   // ── Ghost mode (super_admin only) ──────────────────────────────────────────
   let ghostDealerName: string | null = null;
+  let ghostGroupId: string | null = null;
+  let ghostGroupName: string | null = null;
   let isGhostMode = false;
   if (isSuperAdmin) {
     const cookieStore = cookies();
@@ -51,7 +53,12 @@ export default async function DashboardLayout({
       const ghostCtx = verifyGhostToken(ghostToken);
       if (ghostCtx) {
         isGhostMode = true;
-        ghostDealerName = ghostCtx.dealer_name;
+        if (ghostCtx.group_id) {
+          ghostGroupId = ghostCtx.group_id;
+          ghostGroupName = ghostCtx.group_name ?? null;
+        } else {
+          ghostDealerName = ghostCtx.dealer_name ?? null;
+        }
       }
     }
   }
@@ -95,18 +102,19 @@ export default async function DashboardLayout({
   }
 
   // ── Sidebar role ───────────────────────────────────────────────────────────
-  // When a group_admin has selected a dealer, or super_admin is in ghost mode,
-  // show dealer nav items.
+  // When a group_admin has selected a dealer, or super_admin is in dealer ghost mode,
+  // show dealer nav items. When super_admin is in group ghost mode, show group_admin nav.
   const sidebarRole: UserRole = (isGroupAdmin && activeDealerUuid) ? "dealer_admin"
-    : (isSuperAdmin && isGhostMode) ? "dealer_admin"
+    : (isSuperAdmin && isGhostMode && !ghostGroupId) ? "dealer_admin"
+    : (isSuperAdmin && ghostGroupId) ? "group_admin"
     : role;
 
   const userDisplay = {
     email: session.user.email ?? "",
     fullName: profile?.full_name ?? null,
     role,
-    dealerName: isGhostMode ? ghostDealerName : dealerName,
-    groupName,
+    dealerName: (isGhostMode && !ghostGroupId) ? ghostDealerName : dealerName,
+    groupName: ghostGroupId ? ghostGroupName : groupName,
     activeDealerName,
     activeDealerId: activeDealerUuid,
     groupId: profile?.group_id ?? null,

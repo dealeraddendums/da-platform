@@ -38,16 +38,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { data, error: dbError, count } = await query;
   if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
 
-  // Count dealers per group
+  // Count dealers per group + check which groups have a group_admin
   const groupIds = (data ?? []).map((g: Record<string, unknown>) => g.id as string);
   const dealerCounts: Record<string, number> = {};
+  const groupsWithAdmin = new Set<string>();
+
   if (groupIds.length > 0) {
-    const { data: dealerRows } = await admin
-      .from("dealers")
-      .select("group_id")
-      .in("group_id", groupIds);
+    const [{ data: dealerRows }, { data: adminProfiles }] = await Promise.all([
+      admin.from("dealers").select("group_id").in("group_id", groupIds),
+      admin.from("profiles").select("group_id").in("group_id", groupIds).eq("role", "group_admin"),
+    ]);
     for (const r of dealerRows ?? []) {
       if (r.group_id) dealerCounts[r.group_id] = (dealerCounts[r.group_id] ?? 0) + 1;
+    }
+    for (const p of adminProfiles ?? []) {
+      if (p.group_id) groupsWithAdmin.add(p.group_id as string);
     }
   }
 
@@ -56,6 +61,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ...g,
     dealer_count: dealerCounts[g.id as string] ?? 0,
     hubspot_company_id: g.hubspot_company_id ?? null,
+    has_group_admin: groupsWithAdmin.has(g.id as string),
   }));
 
   if (sortCol === "dealer_count") {

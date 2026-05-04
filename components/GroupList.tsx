@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { createClient } from "@/lib/supabase/client";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
 
-type GroupListRow = GroupRow & { dealer_count: number; hubspot_company_id: number | null };
+type GroupListRow = GroupRow & { dealer_count: number; hubspot_company_id: number | null; has_group_admin: boolean };
 type GroupsResponse = {
   data: GroupListRow[];
   total: number;
@@ -31,13 +31,18 @@ export default function GroupList() {
   const [loading, setLoading] = useState(true);
   const [showNewForm, setShowNewForm] = useState(false);
 
-  // Dealer count hover popover + impersonation
+  // Dealer count hover popover + dealer impersonation
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
   const [loadingGroupId, setLoadingGroupId] = useState<string | null>(null);
   const [groupDealers, setGroupDealers] = useState<Record<string, { id: string; dealer_id: string; name: string }[]>>({});
   const [impersonating, setImpersonating] = useState<string | null>(null);
   const [impersonateError, setImpersonateError] = useState<string | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Group-level ghost mode / group_admin impersonation
+  const [ghosting, setGhosting] = useState<string | null>(null);
+  const [impersonatingGroup, setImpersonatingGroup] = useState<string | null>(null);
+  const [groupActionError, setGroupActionError] = useState<string | null>(null);
 
   const fetchGroups = useCallback(async () => {
     setLoading(true);
@@ -110,6 +115,73 @@ export default function GroupList() {
       clearTimeout(hoverTimerRef.current);
       hoverTimerRef.current = null;
     }
+  }
+
+  async function handleGroupClick(g: GroupListRow) {
+    setGroupActionError(null);
+    if (g.has_group_admin) {
+      await handleGroupImpersonate(g.id, g.name);
+    } else {
+      await handleGroupGhost(g.id, g.name);
+    }
+  }
+
+  async function handleGroupGhost(groupId: string, groupName: string) {
+    setGhosting(groupId);
+    const res = await fetch("/api/admin/ghost", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ group_id: groupId }),
+    });
+    const json = (await res.json()) as { ok?: boolean; group_id?: string; group_name?: string; error?: string };
+    if (!res.ok) {
+      setGroupActionError(json.error ?? "Failed to enter ghost mode");
+      setGhosting(null);
+      return;
+    }
+    localStorage.setItem("da_ghost", JSON.stringify({ group_id: json.group_id, group_name: json.group_name }));
+    window.location.href = `/groups/${groupId}`;
+  }
+
+  async function handleGroupImpersonate(groupId: string, groupName: string) {
+    setImpersonatingGroup(groupId);
+    const supabase = createClient();
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+    const res = await fetch("/api/admin/impersonate-group", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ group_id: groupId }),
+    });
+    const json = (await res.json()) as { access_token?: string; refresh_token?: string; group_name?: string; group_id?: string; error?: string };
+
+    if (!res.ok || !json.access_token || !json.refresh_token) {
+      setGroupActionError(json.error ?? "Failed to impersonate group");
+      setImpersonatingGroup(null);
+      return;
+    }
+
+    localStorage.setItem("da_impersonate", JSON.stringify({
+      dealer_name: `${groupName} (Group)`,
+      dealer_id: groupId,
+      original_access_token: currentSession?.access_token ?? "",
+      original_refresh_token: currentSession?.refresh_token ?? "",
+    }));
+
+    const { error: setError } = await supabase.auth.setSession({
+      access_token: json.access_token,
+      refresh_token: json.refresh_token,
+    });
+
+    if (setError) {
+      localStorage.removeItem("da_impersonate");
+      setGroupActionError(setError.message);
+      setImpersonatingGroup(null);
+      return;
+    }
+
+    document.cookie = "da_impersonating=1; path=/; max-age=86400; SameSite=Lax";
+    window.location.href = "/groups";
   }
 
   async function handleImpersonate(dealerId: string) {
@@ -218,6 +290,13 @@ export default function GroupList() {
         </form>
       </div>
 
+      {groupActionError && (
+        <div className="mb-3 px-4 py-2 rounded text-sm" style={{ background: "#fdecea", color: "#c62828", border: "1px solid #f5c6cb" }}>
+          {groupActionError}{" "}
+          <button onClick={() => setGroupActionError(null)} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#c62828", fontWeight: 600 }}>✕</button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="card overflow-hidden">
         {loading ? (
@@ -263,15 +342,33 @@ export default function GroupList() {
                   key={g.id}
                   style={{ borderBottom: i < groups.length - 1 ? "1px solid var(--border)" : "none" }}
                 >
-                  {/* Name */}
+                  {/* Name — click to enter group context; 📋 links to profile; 👻 = no group_admin */}
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/groups/${g.id}`}
-                      style={{ fontWeight: 500, color: "var(--text-primary)" }}
-                      className="hover:underline"
-                    >
-                      {g.name}
-                    </Link>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <button
+                        onClick={() => void handleGroupClick(g)}
+                        disabled={ghosting === g.id || impersonatingGroup === g.id}
+                        style={{
+                          fontWeight: 500, color: "var(--text-primary)", background: "none",
+                          border: "none", padding: 0, textAlign: "left",
+                          cursor: (ghosting === g.id || impersonatingGroup === g.id) ? "wait" : "pointer",
+                          opacity: (ghosting === g.id || impersonatingGroup === g.id) ? 0.6 : 1,
+                          textDecoration: "underline",
+                        }}
+                      >
+                        {(ghosting === g.id || impersonatingGroup === g.id) ? "Entering…" : g.name}
+                      </button>
+                      {!g.has_group_admin && (
+                        <span title="No group admin — will use ghost mode" style={{ fontSize: 13, lineHeight: 1 }}>👻</span>
+                      )}
+                      <Link
+                        href={`/groups/${g.id}`}
+                        title="View group profile"
+                        style={{ color: "var(--text-muted)", lineHeight: 1, textDecoration: "none", fontSize: 14 }}
+                      >
+                        📋
+                      </Link>
+                    </div>
                   </td>
 
                   {/* Status */}

@@ -4,12 +4,17 @@ const GHOST_SECRET =
   process.env.GHOST_SECRET ?? "da-ghost-dev-secret-change-in-prod";
 
 export type GhostContext = {
-  dealer_id: string; // UUID (dealers.id)
-  dealer_text_id: string; // text (dealers.dealer_id)
-  dealer_name: string;
+  // Dealer ghost (set when ghosting a specific dealer)
+  dealer_id?: string;       // UUID (dealers.id)
+  dealer_text_id?: string;  // text (dealers.dealer_id)
+  dealer_name?: string;
+  // Group ghost (set when ghosting a group — mutually exclusive with dealer fields)
+  group_id?: string;        // UUID (groups.id)
+  group_name?: string;
+  // Always present
   super_admin_id: string;
   issued_at: number;
-  expires_at: number; // issued_at + 7200000 (2 hours)
+  expires_at: number;       // issued_at + 7200000 (2 hours)
 };
 
 export function signGhostToken(ctx: GhostContext): string {

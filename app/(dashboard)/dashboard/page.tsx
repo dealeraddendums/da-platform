@@ -137,7 +137,7 @@ export default async function DashboardPage() {
     const cookieStore = cookies();
     const ghostToken = cookieStore.get("da_ghost_token")?.value;
     const ghostCtx = ghostToken ? verifyGhostToken(ghostToken) : null;
-    if (ghostCtx) {
+    if (ghostCtx?.dealer_text_id) {
       // Treat as dealer — fall through to dealer view below using ghost dealer_id
       const ghostDealerId = ghostCtx.dealer_text_id;
       const startOfMonthGhost = new Date();

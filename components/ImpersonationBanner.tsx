@@ -11,9 +11,13 @@ type ImpersonateState = {
 };
 
 type GhostState = {
-  dealer_name: string;
-  dealer_text_id: string;
-  dealer_uuid: string;
+  // Dealer ghost
+  dealer_name?: string;
+  dealer_text_id?: string;
+  dealer_uuid?: string;
+  // Group ghost
+  group_id?: string;
+  group_name?: string;
 };
 
 export default function ImpersonationBanner() {
@@ -55,6 +59,7 @@ export default function ImpersonationBanner() {
   async function handleExitGhost() {
     if (!ghostState || exiting) return;
     setExiting(true);
+    const isGroupGhost = !!ghostState.group_id;
     try {
       await fetch("/api/admin/ghost/exit", { method: "POST" });
     } catch {
@@ -62,7 +67,7 @@ export default function ImpersonationBanner() {
     }
     localStorage.removeItem("da_ghost");
     document.cookie = "da_ghost_token=; path=/; max-age=0; SameSite=Lax";
-    window.location.href = "/dealers";
+    window.location.href = isGroupGhost ? "/groups" : "/dealers";
   }
 
   // Impersonation banner (regular mode — has a real session swap)
@@ -124,7 +129,12 @@ export default function ImpersonationBanner() {
           zIndex: 9999,
         }}
       >
-        <span>👻 Ghost Mode — <strong>{ghostState.dealer_name}</strong> — Operating without a user account</span>
+        <span>
+          {ghostState.group_id
+            ? <>👻 Ghost Mode — <strong>{ghostState.group_name}</strong> — Operating as Group Admin</>
+            : <>👻 Ghost Mode — <strong>{ghostState.dealer_name}</strong> — Operating without a user account</>
+          }
+        </span>
         <button
           onClick={() => void handleExitGhost()}
           disabled={exiting}

@@ -121,10 +121,10 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
       const ghostToken = cookieStore.get("da_ghost_token")?.value;
       if (ghostToken) {
         const ghostCtx = verifyGhostToken(ghostToken);
-        if (ghostCtx) {
+        if (ghostCtx?.dealer_text_id) {
           dealerId = ghostCtx.dealer_text_id;
           isGhost = true;
-          ghostDealerUuid = ghostCtx.dealer_id;
+          ghostDealerUuid = ghostCtx.dealer_id ?? null;
         }
       }
     } catch {
