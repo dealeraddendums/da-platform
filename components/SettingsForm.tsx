@@ -11,6 +11,7 @@ type Props = {
   role: UserRole;
   groupId: string | null;
   initialSettings: DealerSettingsRow | null;
+  initialLogoUrl?: string | null;
 };
 
 type DealerOption = { id: string; dealer_id: string; name: string };
@@ -60,7 +61,7 @@ const NON_DEALER = [
 
 type DocTab = "addendum" | "infosheet" | "buyers_guide";
 
-export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, groupId, initialSettings }: Props) {
+export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, groupId, initialSettings, initialLogoUrl }: Props) {
   const isReadOnly = role === "dealer_user" || role === "dealer_restricted";
   const isAdminPicker = role === "super_admin" || role === "group_admin";
   const canEdit = role === "dealer_admin" || isAdminPicker;
@@ -106,7 +107,7 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(initialLogoUrl ?? null);
   const [bgCards, setBgCards] = useState<Record<BgKey, BgCardState>>(
     () => Object.fromEntries(BG_KEYS.map(k => [k, { loading: false, hasCustom: false, url: null, uploading: false, error: null }])) as Record<BgKey, BgCardState>
   );

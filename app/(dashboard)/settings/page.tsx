@@ -36,13 +36,16 @@ export default async function SettingsPage() {
 
   let initialSettings: DealerSettingsRow | null = null;
   let fixedDealerUuid: string | null = null;
+  let initialLogoUrl: string | null = null;
   if (dealerId) {
     const [{ data: s }, { data: dRow }] = await Promise.all([
       admin.from("dealer_settings").select("*").eq("dealer_id", dealerId).single(),
-      admin.from("dealers").select("id").eq("dealer_id", dealerId).maybeSingle(),
+      admin.from("dealers").select("id, logo_url").eq("dealer_id", dealerId).maybeSingle(),
     ]);
     initialSettings = (s as DealerSettingsRow | null) ?? null;
-    fixedDealerUuid = (dRow as { id: string } | null)?.id ?? null;
+    const dealerRow = dRow as { id: string; logo_url: string | null } | null;
+    fixedDealerUuid = dealerRow?.id ?? null;
+    initialLogoUrl = dealerRow?.logo_url ?? null;
   }
 
   return (
@@ -57,6 +60,7 @@ export default async function SettingsPage() {
         role={role}
         groupId={profile?.group_id ?? null}
         initialSettings={initialSettings}
+        initialLogoUrl={initialLogoUrl}
       />
     </div>
   );
