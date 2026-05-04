@@ -125,7 +125,7 @@ const EMPTY_FORM: FormState = {
   stock_number: "", vin: "", year: "", make: "", model: "", trim: "",
   body_style: "", exterior_color: "", interior_color: "", engine: "",
   transmission: "", drivetrain: "", description: "", options: "",
-  mileage: "0", msrp: "", condition: "New",
+  mileage: "0", msrp: "", condition: "Used",
 };
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -138,6 +138,7 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
   // VIN tab state
   const [vinInput, setVinInput] = useState("");
   const [decoding, setDecoding] = useState(false);
+  const [decodeAttempted, setDecodeAttempted] = useState(false);
   const [decodeResult, setDecodeResult] = useState<DecodeResult | null>(null);
   const [decodeError, setDecodeError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -164,6 +165,7 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
     setOpen(false);
     setTab(initialTab);
     setVinInput("");
+    setDecodeAttempted(false);
     setDecodeResult(null);
     setDecodeError(null);
     setForm(EMPTY_FORM);
@@ -198,11 +200,14 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
     setDecoding(false);
 
     if (!res.ok) {
-      setDecodeError(json.error ?? "Decode failed");
+      setDecodeError("VIN not found — please enter vehicle details manually");
+      setDecodeAttempted(true);
       return;
     }
 
+    const currentYear = new Date().getFullYear();
     setDecodeResult(json);
+    setDecodeAttempted(true);
     setForm((f) => ({
       ...f,
       vin,
@@ -214,6 +219,7 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
       engine: json.engine ?? f.engine,
       transmission: json.transmission ?? f.transmission,
       drivetrain: json.drivetrain ?? f.drivetrain,
+      condition: json.year === currentYear ? "New" : "Used",
     }));
 
     // Auto-populate AI content if enabled
@@ -497,6 +503,7 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
               vinInput={vinInput}
               setVinInput={setVinInput}
               decoding={decoding}
+              decodeAttempted={decodeAttempted}
               decodeResult={decodeResult}
               decodeError={decodeError}
               onDecode={handleDecode}
@@ -538,7 +545,7 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
 
 function VinTab({
   dealerId: _dealerId, aiEnabled, aiGenerating, aiGenerated,
-  vinInput, setVinInput, decoding, decodeResult, decodeError, onDecode,
+  vinInput, setVinInput, decoding, decodeAttempted, decodeResult, decodeError, onDecode,
   form, setForm, saving, saveError, onSave, onClose,
 }: {
   dealerId: string;
@@ -546,7 +553,7 @@ function VinTab({
   aiGenerating: boolean;
   aiGenerated: boolean;
   vinInput: string; setVinInput: (v: string) => void;
-  decoding: boolean; decodeResult: DecodeResult | null; decodeError: string | null;
+  decoding: boolean; decodeAttempted: boolean; decodeResult: DecodeResult | null; decodeError: string | null;
   onDecode: () => void;
   form: FormState; setForm: React.Dispatch<React.SetStateAction<FormState>>;
   saving: boolean; saveError: string | null;
@@ -564,7 +571,7 @@ function VinTab({
 
   return (
     <div>
-      {/* VIN decode row */}
+      {/* VIN decode row — always visible */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <input
           type="text"
@@ -582,32 +589,32 @@ function VinTab({
             height: 36, padding: "0 16px", background: "#1976d2", color: "#fff",
             border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600,
             cursor: decoding ? "not-allowed" : "pointer", whiteSpace: "nowrap",
+            opacity: decoding ? 0.7 : 1,
           }}
         >
-          {decoding ? "Decoding..." : "Decode"}
+          {decoding ? "Decoding…" : "Decode"}
         </button>
       </div>
 
+      {/* Decode messages */}
       {decodeError && (
         <div style={{ padding: "8px 12px", background: "#ffebee", border: "1px solid #ffcdd2", borderRadius: 4, color: "#c62828", fontSize: 13, marginBottom: 12 }}>
           {decodeError}
         </div>
       )}
-
       {decodeResult?.decode_flagged && decodeResult.source !== "partial" && (
         <div style={{ padding: "8px 12px", background: "#fffde7", border: "1px solid #fff176", borderRadius: 4, color: "#f57f17", fontSize: 13, marginBottom: 12 }}>
           Decoded from <strong>{decodeResult.source}</strong> — please verify vehicle details before saving.
         </div>
       )}
-
       {decodeResult?.source === "partial" && (
         <div style={{ padding: "8px 12px", background: "#fff3e0", border: "1px solid #ffcc02", borderRadius: 4, color: "#e65100", fontSize: 13, marginBottom: 12 }}>
           VIN not found in database — please enter vehicle details manually.
         </div>
       )}
 
-      {/* Form fields */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
+      {/* Always-visible fields: Stock Number + MSRP */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", marginBottom: decodeAttempted ? 20 : 0 }}>
         <div style={{ gridColumn: "1 / -1" }}>
           <label style={LABEL_STYLE}>Stock Number *</label>
           <input
@@ -618,139 +625,175 @@ function VinTab({
             placeholder="Required"
           />
         </div>
-
         <div>
-          <label style={LABEL_STYLE}>VIN</label>
+          <label style={LABEL_STYLE}>MSRP *</label>
           <input
-            type="text"
-            value={form.vin}
-            onChange={(e) => setForm((f) => ({ ...f, vin: e.target.value.toUpperCase() }))}
-            style={{ ...INPUT_STYLE, fontFamily: "monospace" }}
-            maxLength={17}
+            type="number"
+            value={form.msrp}
+            onChange={(e) => setForm((f) => ({ ...f, msrp: e.target.value }))}
+            style={INPUT_STYLE}
+            min="0"
+            step="100"
+            placeholder="Required"
           />
         </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Year</label>
-          <input type="number" value={form.year} onChange={(e) => setForm((f) => ({ ...f, year: e.target.value }))} style={INPUT_STYLE} min="1900" max="2099" />
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Make</label>
-          {field("make")}
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Model</label>
-          {field("model")}
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Trim</label>
-          {field("trim")}
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Body Style</label>
-          {field("body_style")}
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Exterior Color</label>
-          {field("exterior_color")}
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Interior Color</label>
-          {field("interior_color")}
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Engine</label>
-          {field("engine")}
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Transmission</label>
-          {field("transmission")}
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Drivetrain</label>
-          {field("drivetrain")}
-        </div>
-
-        {/* Description */}
-        <div style={{ gridColumn: "1 / -1" }}>
-          <label style={LABEL_STYLE}>
-            Description
-            {aiEnabled && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px", background: "#e3f2fd", color: "#1565c0", borderRadius: 3, verticalAlign: "middle" }}>✦ AI</span>}
-          </label>
-          {aiGenerating ? (
-            <div style={{ ...TEXTAREA_STYLE, minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
-              Generating AI content…
-            </div>
-          ) : (
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              style={{ ...TEXTAREA_STYLE, minHeight: 80 }}
-              rows={4}
-              placeholder="Vehicle description — auto-filled by AI if enabled"
-            />
-          )}
-          {aiGenerated && !aiGenerating && form.description && (
-            <p style={{ fontSize: 11, color: "#1565c0", margin: "3px 0 0" }}>✦ Generated by AI — edit as needed</p>
-          )}
-        </div>
-
-        {/* Options / Features */}
-        <div style={{ gridColumn: "1 / -1" }}>
-          <label style={LABEL_STYLE}>
-            Options / Features
-            {aiEnabled && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px", background: "#e3f2fd", color: "#1565c0", borderRadius: 3, verticalAlign: "middle" }}>✦ AI</span>}
-          </label>
-          {aiGenerating ? (
-            <div style={{ ...TEXTAREA_STYLE, minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
-              Generating AI content…
-            </div>
-          ) : (
-            <textarea
-              value={form.options}
-              onChange={(e) => setForm((f) => ({ ...f, options: e.target.value }))}
-              style={{ ...TEXTAREA_STYLE, minHeight: 80 }}
-              rows={4}
-              placeholder="Factory options and features — auto-filled by AI if enabled"
-            />
-          )}
-          {aiGenerated && !aiGenerating && form.options && (
-            <p style={{ fontSize: 11, color: "#1565c0", margin: "3px 0 0" }}>✦ Generated by AI — edit as needed</p>
-          )}
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Mileage</label>
-          <input type="number" value={form.mileage} onChange={(e) => setForm((f) => ({ ...f, mileage: e.target.value }))} style={INPUT_STYLE} min="0" />
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>MSRP</label>
-          <input type="number" value={form.msrp} onChange={(e) => setForm((f) => ({ ...f, msrp: e.target.value }))} style={INPUT_STYLE} min="0" step="100" />
-        </div>
-
-        <div>
-          <label style={LABEL_STYLE}>Condition</label>
-          <select
-            value={form.condition}
-            onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value }))}
-            style={{ ...INPUT_STYLE }}
-          >
-            {CONDITION_OPTIONS.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-        </div>
       </div>
+
+      {/* Vehicle Details — revealed after decode attempt */}
+      {decodeAttempted && (
+        <>
+          {/* Section divider */}
+          <div style={{
+            fontSize: 11, fontWeight: 600, textTransform: "uppercase",
+            letterSpacing: "0.06em", color: "var(--text-muted)",
+            borderBottom: "1px solid var(--border)", paddingBottom: 8, marginBottom: 16,
+          }}>
+            Vehicle Details
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
+            <div>
+              <label style={LABEL_STYLE}>VIN</label>
+              <input
+                type="text"
+                value={form.vin}
+                onChange={(e) => setForm((f) => ({ ...f, vin: e.target.value.toUpperCase() }))}
+                style={{ ...INPUT_STYLE, fontFamily: "monospace" }}
+                maxLength={17}
+              />
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Year</label>
+              <input
+                type="number"
+                value={form.year}
+                onChange={(e) => setForm((f) => ({ ...f, year: e.target.value }))}
+                style={INPUT_STYLE}
+                min="1900"
+                max="2099"
+              />
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Make</label>
+              {field("make")}
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Model</label>
+              {field("model")}
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Trim</label>
+              {field("trim")}
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Body Style</label>
+              {field("body_style")}
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Exterior Color</label>
+              {field("exterior_color")}
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Interior Color</label>
+              {field("interior_color")}
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Engine</label>
+              {field("engine")}
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Transmission</label>
+              {field("transmission")}
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Drivetrain</label>
+              {field("drivetrain")}
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Mileage</label>
+              <input
+                type="number"
+                value={form.mileage}
+                onChange={(e) => setForm((f) => ({ ...f, mileage: e.target.value }))}
+                style={INPUT_STYLE}
+                min="0"
+              />
+            </div>
+
+            {/* Description */}
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={LABEL_STYLE}>
+                Description
+                {aiEnabled && <AiBadge />}
+              </label>
+              {aiGenerating ? (
+                <div style={{ ...TEXTAREA_STYLE, minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
+                  Generating AI content…
+                </div>
+              ) : (
+                <textarea
+                  value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  style={{ ...TEXTAREA_STYLE, minHeight: 80 }}
+                  rows={4}
+                  placeholder="Vehicle description"
+                />
+              )}
+              {aiGenerated && !aiGenerating && form.description && (
+                <p style={{ fontSize: 11, color: "#1565c0", margin: "3px 0 0" }}>✦ Generated by AI — edit as needed</p>
+              )}
+            </div>
+
+            {/* Options / Features */}
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={LABEL_STYLE}>
+                Options / Features
+                {aiEnabled && <AiBadge />}
+              </label>
+              {aiGenerating ? (
+                <div style={{ ...TEXTAREA_STYLE, minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
+                  Generating AI content…
+                </div>
+              ) : (
+                <textarea
+                  value={form.options}
+                  onChange={(e) => setForm((f) => ({ ...f, options: e.target.value }))}
+                  style={{ ...TEXTAREA_STYLE, minHeight: 80 }}
+                  rows={4}
+                  placeholder="Factory options and features"
+                />
+              )}
+              {aiGenerated && !aiGenerating && form.options && (
+                <p style={{ fontSize: 11, color: "#1565c0", margin: "3px 0 0" }}>✦ Generated by AI — edit as needed</p>
+              )}
+            </div>
+
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={LABEL_STYLE}>Condition</label>
+              <select
+                value={form.condition}
+                onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value }))}
+                style={{ ...INPUT_STYLE, width: "50%" }}
+              >
+                {CONDITION_OPTIONS.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </>
+      )}
 
       {saveError && (
         <div style={{ padding: "8px 12px", background: "#ffebee", border: "1px solid #ffcdd2", borderRadius: 4, color: "#c62828", fontSize: 13, marginTop: 12 }}>
@@ -759,23 +802,30 @@ function VinTab({
       )}
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
-        <button onClick={onClose} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
+        <button
+          onClick={onClose}
+          style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}
+        >
           Cancel
         </button>
-        <button
-          onClick={() => onSave(false)}
-          disabled={saving}
-          style={{ height: 36, padding: "0 16px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer" }}
-        >
-          {saving ? "Saving..." : "Save Vehicle"}
-        </button>
-        <button
-          onClick={() => onSave(true)}
-          disabled={saving}
-          style={{ height: 36, padding: "0 16px", background: "#4caf50", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer" }}
-        >
-          Save & Open Addendum
-        </button>
+        {decodeAttempted && (
+          <>
+            <button
+              onClick={() => onSave(false)}
+              disabled={saving}
+              style={{ height: 36, padding: "0 16px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer" }}
+            >
+              {saving ? "Saving…" : "Save Vehicle"}
+            </button>
+            <button
+              onClick={() => onSave(true)}
+              disabled={saving}
+              style={{ height: 36, padding: "0 16px", background: "#4caf50", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer" }}
+            >
+              Save & Open Addendum
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
