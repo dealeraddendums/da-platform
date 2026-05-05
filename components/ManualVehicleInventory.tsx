@@ -207,12 +207,15 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
     }
 
     setBulkPrinting(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
     try {
       const paperSize = docType === "infosheet" ? "infosheet" : "standard";
       const res = await fetch("/api/pdf/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ vehicleIds: ids, docType, paperSize }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -221,14 +224,17 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
         return;
       }
 
-      const json = await res.json() as { url?: string };
-      if (json.url) {
-        setBulkModal({ url: json.url, docType, count: ids.length });
-        setCheckedIds(new Set());
-      }
-    } catch {
-      alert("Bulk PDF generation failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setBulkModal({ url, docType, count: ids.length });
+      setCheckedIds(new Set());
+    } catch (err) {
+      const msg = err instanceof Error && err.name === "AbortError"
+        ? "Bulk PDF generation timed out. Try fewer vehicles."
+        : "Bulk PDF generation failed";
+      alert(msg);
     } finally {
+      clearTimeout(timeout);
       setBulkPrinting(false);
     }
   }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { AddendumLibraryRow } from "@/lib/db";
+import type { AddendumLibraryRow, VehicleOptionRow } from "@/lib/db";
 
 /**
  * GET /api/addendum-library?dealer_id=XXX&page=1&per_page=25
@@ -40,6 +40,57 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (dbError) {
     return NextResponse.json({ error: dbError.message }, { status: 500 });
+  }
+
+  // If this dealer has no addendum_library entries, fall back to legacy sentinel rows
+  // in vehicle_options (vehicle_id='0') which the old ETL wrote before migration 048.
+  if ((count ?? 0) === 0) {
+    const { data: legacyRows, error: legacyErr } = await admin
+      .from("vehicle_options")
+      .select("*")
+      .eq("vehicle_id", "0")
+      .eq("dealer_id", dealerId)
+      .order("sort_order", { ascending: true });
+
+    if (!legacyErr && legacyRows && legacyRows.length > 0) {
+      const mapped: AddendumLibraryRow[] = (legacyRows as VehicleOptionRow[]).map((r) => ({
+        id: r.id,
+        dealer_id: r.dealer_id,
+        legacy_default_id: null,
+        option_name: r.option_name,
+        item_price: r.option_price ?? "",
+        description: r.description ?? "",
+        ad_type: "Both",
+        ad_types: ["New", "Used"],
+        makes: "",
+        makes_not: false,
+        models: "",
+        models_not: false,
+        trims: "",
+        trims_not: false,
+        body_styles: "",
+        year_condition: 0,
+        year_value: null,
+        miles_condition: 0,
+        miles_value: null,
+        msrp_condition: 0,
+        msrp1: null,
+        msrp2: null,
+        applies_to: "all",
+        sort_order: r.sort_order,
+        active: r.active,
+        show_models_only: false,
+        separator_above: false,
+        separator_below: false,
+        spaces: 2,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      }));
+
+      const total = mapped.length;
+      const paged = mapped.slice(from, from + perPage);
+      return NextResponse.json({ data: paged, total, page, per_page: perPage });
+    }
   }
 
   return NextResponse.json({

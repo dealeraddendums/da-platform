@@ -114,20 +114,26 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
     if (checkedIds.size === 0) return;
     const ids = Array.from(checkedIds);
 
-    // Single vehicle: go to addendum options screen (unchanged)
+    // Single vehicle: addendum goes to builder; infosheet/buyer_guide go to the addendum page
     if (ids.length === 1) {
-      window.open(`/builder/${ids[0]}?doc_type=${docType}`, "_blank");
+      const singleUrl = docType === "addendum"
+        ? `/builder/${ids[0]}`
+        : `/dealer-vehicles/${ids[0]}/addendum?type=${docType}`;
+      window.open(singleUrl, "_blank");
       setCheckedIds(new Set());
       return;
     }
 
     setBulkPrinting(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
     try {
       const paperSize = docType === "infosheet" ? "infosheet" : "standard";
       const res = await fetch("/api/pdf/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ vehicleIds: ids, docType, paperSize }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -140,9 +146,13 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
       const url = URL.createObjectURL(blob);
       setBulkModal({ url, docType, count: ids.length });
       setCheckedIds(new Set());
-    } catch {
-      alert("Bulk PDF generation failed");
+    } catch (err) {
+      const msg = err instanceof Error && err.name === "AbortError"
+        ? "Bulk PDF generation timed out. Try fewer vehicles."
+        : "Bulk PDF generation failed";
+      alert(msg);
     } finally {
+      clearTimeout(timeout);
       setBulkPrinting(false);
     }
   }
