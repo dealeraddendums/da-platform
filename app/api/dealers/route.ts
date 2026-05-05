@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerUpdate } from "@/lib/db";
+import { sendMandrillEmail } from "@/lib/mandrill";
 
 // Strip HTML tags from dealer names
 function sanitizeName(name: string | null | undefined): string {
@@ -298,6 +299,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       dealer_id,
     });
   }
+
+  const dealer = data as Record<string, unknown>;
+
+  // Get creator name and group name in parallel (fire off DB lookups)
+  const groupId = (rest.group_id as string | null) ?? null;
+  const [creatorResult, groupResult] = await Promise.all([
+    admin.from("profiles").select("full_name").eq("id", claims.sub).maybeSingle<{ full_name: string | null }>(),
+    groupId
+      ? admin.from("groups").select("name").eq("id", groupId).maybeSingle<{ name: string }>()
+      : Promise.resolve({ data: null }),
+  ]);
+  const creatorName = (creatorResult.data as { full_name: string | null } | null)?.full_name ?? claims.email;
+  const groupName = (groupResult.data as { name: string } | null)?.name ?? null;
+  const now = new Date().toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" });
+
+  // Internal notification — always sent on every new dealer creation
+  void sendMandrillEmail({
+    subject: `New Dealer Created — ${name.trim()}`,
+    from_email: "noreply@dealeraddendums.com",
+    from_name: "DealerAddendums",
+    to: [{ email: "support@dealeraddendums.com", name: "DA Support" }],
+    html: `<p><strong>Dealer Name:</strong> ${name.trim()}<br>
+<strong>Dealer ID:</strong> ${dealer_id}<br>
+<strong>Contact:</strong> ${(rest.primary_contact as string | null) ?? "—"} / ${(rest.primary_contact_email as string | null) ?? "—"}<br>
+<strong>Subscription:</strong> ${(dealer.account_type as string | null) ?? "—"}<br>
+<strong>Group:</strong> ${groupName ?? "None"}<br>
+<strong>Created by:</strong> ${creatorName}<br>
+<strong>Created at:</strong> ${now} ET</p>`,
+  }).catch((err) => console.error("[dealers/notify] internal email failed:", err instanceof Error ? err.message : err));
 
   return NextResponse.json({ data, emailSent: sendNotify ? true : false }, { status: 201 });
 }

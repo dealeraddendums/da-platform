@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow, GroupUpdate } from "@/lib/db";
+import { sendMandrillEmail } from "@/lib/mandrill";
 
 type SortableCol = "name" | "active" | "account_type" | "dealer_count" | "created_at" | "billing_contact";
 const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "billing_contact", "created_at"]);
@@ -80,7 +81,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
  * Optional: sendNotify=true for placeholder welcome email.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const { error } = await requireSuperAdmin();
+  const { claims, error } = await requireSuperAdmin();
   if (error) return error;
 
   let body: {
@@ -147,8 +148,49 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
+  // Get creator's display name for internal notification
+  const { data: creatorProfile } = await admin
+    .from("profiles")
+    .select("full_name")
+    .eq("id", claims.sub)
+    .maybeSingle<{ full_name: string | null }>();
+  const creatorName = creatorProfile?.full_name ?? claims.email;
+
+  const contactName = (rest.primary_contact as string | null) ?? null;
+  const contactEmail = (rest.primary_contact_email as string | null) ?? null;
+  const now = new Date().toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" });
+
+  // Welcome email to group contact (sendNotify button only)
+  if (sendNotify && contactEmail) {
+    void sendMandrillEmail({
+      subject: `Welcome to DealerAddendums — ${group.name}`,
+      from_email: "noreply@dealeraddendums.com",
+      from_name: "DealerAddendums",
+      to: [{ email: contactEmail, name: contactName ?? undefined }],
+      html: `<p>Hi ${contactName ?? "there"},</p>
+<p>Your DealerAddendums group account <strong>${group.name}</strong> has been created.</p>
+<p><strong>Your login details:</strong><br>
+Username: ${username?.trim() ? (username.trim().includes("@") ? username.trim() : `${username.trim()}@dealeraddendums.com`) : "(not set)"}</p>
+<p>You can access your account at: <a href="https://app.dealeraddendums.com">https://app.dealeraddendums.com</a></p>
+<p>If you have any questions, contact <a href="mailto:support@dealeraddendums.com">support@dealeraddendums.com</a></p>`,
+    }).catch((err) => console.error("[groups/notify] welcome email failed:", err instanceof Error ? err.message : err));
+  }
+
+  // Internal notification — always sent on every new group creation
+  void sendMandrillEmail({
+    subject: `New Group Created — ${group.name}`,
+    from_email: "noreply@dealeraddendums.com",
+    from_name: "DealerAddendums",
+    to: [{ email: "support@dealeraddendums.com", name: "DA Support" }],
+    html: `<p><strong>Group Name:</strong> ${group.name}<br>
+<strong>Group ID:</strong> ${group.internal_id}<br>
+<strong>Contact:</strong> ${contactName ?? "—"} / ${contactEmail ?? "—"}<br>
+<strong>Created by:</strong> ${creatorName}<br>
+<strong>Created at:</strong> ${now} ET</p>`,
+  }).catch((err) => console.error("[groups/notify] internal email failed:", err instanceof Error ? err.message : err));
+
   return NextResponse.json(
-    { data: group, emailSent: sendNotify ? true : false },
+    { data: group, emailSent: sendNotify && !!contactEmail },
     { status: 201 }
   );
 }

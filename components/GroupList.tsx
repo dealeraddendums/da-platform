@@ -537,7 +537,6 @@ function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
   const [fields, setFields] = useState({
     name: "",
     internal_id: String(Date.now()),
-    account_type: "Monthly Subscription Manual",
     primary_contact: "",
     primary_contact_email: "",
     username: "",
@@ -574,7 +573,6 @@ function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
     const body = {
       name: fields.name.trim(),
       internal_id: fields.internal_id.trim() || String(Date.now()),
-      account_type: fields.account_type,
       primary_contact: fields.primary_contact.trim() || null,
       primary_contact_email: fields.primary_contact_email.trim() || null,
       phone: fields.phone.trim() || null,
@@ -628,8 +626,8 @@ function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
       )}
 
       <div className="space-y-4">
-        {/* Row 1: Group Name, Group ID, Account Type */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Row 1: Group Name, Group ID */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="label">Group Name *</label>
             <input className="input" required value={fields.name} onChange={set("name")} placeholder="ABC Auto Group" />
@@ -638,12 +636,6 @@ function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
             <label className="label">Group ID *</label>
             <input className="input" required value={fields.internal_id} onChange={set("internal_id")} placeholder="Billing identifier" />
             <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Used for billing; never changes</p>
-          </div>
-          <div>
-            <label className="label">Account Type</label>
-            <select className="input" value={fields.account_type} onChange={set("account_type")}>
-              {GROUP_ACCOUNT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
           </div>
         </div>
 
