@@ -225,8 +225,8 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
 
     if (!res.ok || !json.access_token || !json.refresh_token) {
       setImpersonating(null);
-      // No user accounts — enter ghost mode automatically
-      if (res.status === 404 && json.error?.includes("No dealer user account")) {
+      // No dealer_admin account — enter ghost mode automatically
+      if (res.status === 404 && json.error?.includes("No dealer_admin account")) {
         void handleEnterGhost(d);
       }
       return;

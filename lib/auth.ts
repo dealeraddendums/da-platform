@@ -90,11 +90,32 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
   // Use profiles table as source of truth for role/dealer_id/group_id
   // so changes take effect immediately without requiring re-login.
   const admin = createAdminSupabaseClient();
-  const { data: profile } = await admin
+  const { data: profileById } = await admin
     .from("profiles")
     .select("role, dealer_id, group_id, active_dealer_id")
     .eq("id", session.user.id)
-    .single();
+    .maybeSingle();
+
+  // Fallback: ETL-synced profiles may have a legacy UUID as their id that doesn't
+  // match the Supabase auth UUID returned after magic-link impersonation. Look up
+  // by email so impersonated sessions get the correct role and dealer_id.
+  let profile = profileById;
+  if (!profile && session.user.email) {
+    const { data: profileByEmail } = await admin
+      .from("profiles")
+      .select("role, dealer_id, group_id, active_dealer_id")
+      .eq("email", session.user.email)
+      .maybeSingle();
+    profile = profileByEmail;
+    if (profile) {
+      console.log("[auth] profile resolved by email fallback — UUID mismatch", {
+        authId: session.user.id,
+        email: session.user.email,
+        role: profile.role,
+        dealer_id: profile.dealer_id,
+      });
+    }
+  }
 
   const role = ((profile?.role as UserRole) ?? "dealer_user");
   let dealerId = profile?.dealer_id ?? null;
