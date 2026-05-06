@@ -65,6 +65,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
+  console.log("[templates/POST] claims:", JSON.stringify({
+    sub: claims.sub, role: claims.role, dealer_id: claims.dealer_id,
+    is_ghost: claims.is_ghost, email: claims.email,
+  }));
+
   if (claims.role === "dealer_user") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
