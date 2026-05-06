@@ -42,14 +42,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .in("role", ["dealer_admin", "dealer_user", "dealer_restricted"]);
 
   const profiles = profileRows ?? [];
-  const targetProfile =
-    profiles.find((p) => p.role === "dealer_admin") ??
-    profiles[0] ??
-    null;
+  const targetProfile = profiles.find((p) => p.role === "dealer_admin") ?? null;
 
   if (!targetProfile) {
     return NextResponse.json(
-      { error: "No dealer user account exists for this dealer. Use the New Dealer form to create one." },
+      { error: "No dealer_admin account exists for this dealer. Create a dealer_admin user first, or use Ghost Mode to browse as super_admin." },
       { status: 404 }
     );
   }
