@@ -870,48 +870,88 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     <div style={{ fontFamily: "'Roboto', -apple-system, sans-serif", display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', fontSize: 13, background: '#3a6897', color: '#333' }}>
 
       {/* TOPBAR */}
-      <div style={{ height: 50, background: '#2a2b3c', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', flexShrink: 0, gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <input
-            value={templateName}
-            onChange={e => setTemplateName(e.target.value)}
-            style={{ border: 'none', background: 'transparent', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.87)', outline: 'none', width: 210, padding: '4px 6px', borderRadius: 5 }}
-            onFocus={e => (e.target.style.background = 'rgba(255,255,255,0.12)')}
-            onBlur={e => (e.target.style.background = 'transparent')}
-          />
-          {/* Vehicle type badges */}
-          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, padding: 2, gap: 2 }}>
-            {['New','Used','CPO'].map(t => (
-              <button key={t} style={{ padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, border: 'none', background: 'transparent', cursor: 'pointer', color: 'rgba(255,255,255,0.7)', fontFamily: 'inherit' }}
-                onClick={() => showToast('Vehicle type saved with template')}>
-                {t}
-              </button>
-            ))}
-          </div>
+      <div style={{ height: 50, background: '#2a2b3c', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', flexShrink: 0, gap: 8 }}>
+        {/* Left: canvas status */}
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '.06em', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#4caf50' }} />Canvas
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {previewMode && (
-            <span style={{ fontSize: 11, color: '#4caf50', display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: 'rgba(76,175,80,0.15)', borderRadius: 20 }}>
-              ● Preview mode
-            </span>
+
+        {/* Right: controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {/* Undo / Redo */}
+          <Tb onClick={undo} title="Undo (⌘Z)">↩</Tb>
+          <Tb onClick={redo} title="Redo (⌘⇧Z)">↪</Tb>
+          <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.2)', margin: '0 2px' }} />
+
+          {/* Zoom */}
+          <Tb onClick={() => doZoom(-0.05)}>−</Tb>
+          <div
+            style={{ fontSize: 11, fontFamily: 'monospace', color: '#333', padding: '3px 7px', background: 'rgba(255,255,255,0.9)', borderRadius: 4, border: '1px solid rgba(255,255,255,0.25)', minWidth: 40, textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => { setZ(0.75); ZRef.current = 0.75; }}
+            title="Reset zoom to 75%"
+          >
+            {Math.round(Z * 100)}%
+          </div>
+          <Tb onClick={() => doZoom(0.05)}>+</Tb>
+          <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.2)', margin: '0 2px' }} />
+
+          {/* Paper size */}
+          <select
+            value={paperSize}
+            onChange={e => {
+              if (e.target.value === '__add_new__') {
+                if (effectiveDealerId) setShowAddSizeModal(true);
+              } else {
+                switchPaperSize(e.target.value);
+              }
+            }}
+            style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>
+            <option value="standard">4&#xBC;&#x2033; Addendum</option>
+            <option value="narrow">3&#x215B;&#x2033; Addendum</option>
+            <option value="wide">8&#xBD;&#x2033; Addendum</option>
+            <option value="infosheet">8&#xBD;&#x2033; Infosheet</option>
+            {localCustomSizes.length > 0 && <option disabled>────────────────</option>}
+            {localCustomSizes.map(cs => (
+              <option key={cs.id} value={cs.id}>{cs.name} ({cs.width_in}&quot; × {cs.height_in}&quot;)</option>
+            ))}
+            {canAddCustomSize && effectiveDealerId && (
+              <option disabled>────────────────</option>
+            )}
+            {canAddCustomSize && effectiveDealerId && (
+              <option value="__add_new__">+ Add Custom Size</option>
+            )}
+          </select>
+          {canAddCustomSize && effectiveDealerId && (
+            <button onClick={() => setShowCustomSizesModal(true)} title="Manage custom sizes"
+              style={{ width: 26, height: 26, borderRadius: 4, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.85)', fontSize: 13, flexShrink: 0 }}>
+              ⚙
+            </button>
           )}
-          <button onClick={() => setPreviewMode(p => !p)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 13px', borderRadius: 4, fontSize: 12, fontWeight: 500, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.25)', background: previewMode ? '#1976d2' : 'rgba(255,255,255,0.1)', color: '#fff', fontFamily: 'inherit' }}>
-            {previewMode ? '✎ Edit' : '👁 Preview'}
-          </button>
+
+          {/* Font size */}
+          <select value={fontScale} onChange={e => setFontScale(+e.target.value)}
+            style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>
+            <option value="0.8">Font: Small</option>
+            <option value="1.0">Font: Medium</option>
+            <option value="1.2">Font: Large</option>
+            <option value="1.4">Font: X-Large</option>
+          </select>
+          <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.2)', margin: '0 2px' }} />
+
+          {/* AI Regenerate (conditional) */}
           {vehicle && (usedTypes.has('description') || usedTypes.has('features')) && (
             <button
               onClick={() => fetchAiContent(true)}
               disabled={aiLoading}
               style={{ ...tbBtn, background: aiLoading ? 'rgba(255,255,255,0.08)' : 'rgba(25,118,210,0.85)', borderColor: '#1976d2', opacity: aiLoading ? 0.6 : 1 }}
             >
-              {aiLoading ? '⟳ Generating…' : '✦ Regenerate AI'}
+              {aiLoading ? '⟳ Generating…' : '✦ AI'}
             </button>
           )}
           <button onClick={openTemplates} style={tbBtn}>All templates</button>
           <button onClick={async () => {
             setSaveTname(templateName);
             setSaveDocType(paperSize === 'infosheet' ? 'infosheet' : 'addendum');
-            // Fetch current templates so saveTemplate can detect name collisions
             try { const r = await fetch('/api/templates'); if (r.ok) { const j = await r.json(); setSavedTemplates(j.data ?? []); } } catch {}
             setShowSave(true);
           }} style={{ ...tbBtn, background: '#1976d2', borderColor: '#1976d2' }}>Save template</button>
@@ -974,68 +1014,6 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
 
         {/* CANVAS AREA */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {/* Canvas bar */}
-          {!previewMode && (
-            <div style={{ height: 40, background: '#2a2b3c', display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8, flexShrink: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.85)', textTransform: 'uppercase', letterSpacing: '.06em', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#4caf50' }} />Canvas
-              </div>
-              <Tb onClick={() => doZoom(-0.05)}>−</Tb>
-              <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#333', padding: '3px 7px', background: 'rgba(255,255,255,0.9)', borderRadius: 4, border: '1px solid rgba(255,255,255,0.25)', minWidth: 40, textAlign: 'center' }}>
-                {Math.round(Z * 100)}%
-              </div>
-              <Tb onClick={() => doZoom(0.05)}>+</Tb>
-              <Tb onClick={() => { setZ(0.75); ZRef.current = 0.75; }}>⊙</Tb>
-              <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.2)' }} />
-              <Tb onClick={undo} title="Undo">↩</Tb>
-              <Tb onClick={redo} title="Redo">↪</Tb>
-              <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.2)' }} />
-              <Tb onClick={() => align('left')} title="Align left">⇤</Tb>
-              <Tb onClick={() => align('center')} title="Center">↔</Tb>
-              <Tb onClick={() => align('right')} title="Align right">⇥</Tb>
-              <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.2)' }} />
-              <select
-                value={paperSize}
-                onChange={e => {
-                  if (e.target.value === '__add_new__') {
-                    if (effectiveDealerId) setShowAddSizeModal(true);
-                  } else {
-                    switchPaperSize(e.target.value);
-                  }
-                }}
-                style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>
-                <option value="standard">4&#xBC;&#x2033; Addendum</option>
-                <option value="narrow">3&#x215B;&#x2033; Addendum</option>
-                <option value="wide">8&#xBD;&#x2033; Addendum</option>
-                <option value="infosheet">8&#xBD;&#x2033; Infosheet</option>
-                {localCustomSizes.length > 0 && <option disabled>────────────────</option>}
-                {localCustomSizes.map(cs => (
-                  <option key={cs.id} value={cs.id}>{cs.name} ({cs.width_in}&quot; × {cs.height_in}&quot;)</option>
-                ))}
-                {canAddCustomSize && effectiveDealerId && (
-                  <option disabled>────────────────</option>
-                )}
-                {canAddCustomSize && effectiveDealerId && (
-                  <option value="__add_new__">+ Add Custom Size</option>
-                )}
-              </select>
-              {canAddCustomSize && effectiveDealerId && (
-                <button onClick={() => setShowCustomSizesModal(true)} title="Manage custom sizes"
-                  style={{ width: 26, height: 26, borderRadius: 4, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.85)', fontSize: 13, flexShrink: 0 }}>
-                  ⚙
-                </button>
-              )}
-              <select value={fontScale} onChange={e => setFontScale(+e.target.value)}
-                style={{ padding: '4px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', background: 'rgba(255,255,255,0.9)', color: '#333', cursor: 'pointer', outline: 'none' }}>
-                <option value="0.8">Font: Small</option>
-                <option value="1.0">Font: Medium</option>
-                <option value="1.2">Font: Large</option>
-                <option value="1.4">Font: X-Large</option>
-              </select>
-              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginLeft: 'auto', paddingRight: 4 }}>Drag to reposition · Handles to resize</span>
-            </div>
-          )}
-
           {/* Canvas scroll */}
           <div
             style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '32px 24px', background: '#3a6897', cursor: previewMode ? 'default' : undefined }}
