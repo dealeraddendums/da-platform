@@ -13,10 +13,42 @@ interface ImageEntry {
 
 type TabBucket = "new-infobox-images" | "new-addendum-backgrounds" | "new-infosheet-backgrounds";
 
-const TABS: { label: string; bucket: TabBucket; accept: string; maxMB: number }[] = [
-  { label: "Infobox Images",        bucket: "new-infobox-images",        accept: "image/png", maxMB: 5  },
-  { label: "Addendum Backgrounds",  bucket: "new-addendum-backgrounds",  accept: "image/png", maxMB: 5  },
-  { label: "Infosheet Backgrounds", bucket: "new-infosheet-backgrounds", accept: "image/png", maxMB: 10 },
+const TABS: {
+  label: string;
+  bucket: TabBucket;
+  accept: string;
+  maxMB: number;
+  cols: number;
+  aspectRatio: string;
+  spec: string;
+}[] = [
+  {
+    label: "Infobox Images",
+    bucket: "new-infobox-images",
+    accept: "image/png",
+    maxMB: 5,
+    cols: 4,
+    aspectRatio: "553/339",
+    spec: "Recommended size: 553 × 339 px · 150 DPI · PNG only · Max 5 MB",
+  },
+  {
+    label: "Addendum Backgrounds",
+    bucket: "new-addendum-backgrounds",
+    accept: "image/png",
+    maxMB: 5,
+    cols: 5,
+    aspectRatio: "638/1650",
+    spec: "Standard: 638 × 1,650 px · Narrow: 469 × 1,650 px · 150 DPI · PNG only · Max 5 MB",
+  },
+  {
+    label: "Infosheet Backgrounds",
+    bucket: "new-infosheet-backgrounds",
+    accept: "image/png",
+    maxMB: 10,
+    cols: 4,
+    aspectRatio: "2657/3438",
+    spec: "Recommended size: 2,657 × 3,438 px · 150 DPI · PNG only · Max 10 MB",
+  },
 ];
 
 export default function ImageLibraryPage() {
@@ -25,6 +57,7 @@ export default function ImageLibraryPage() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -49,6 +82,7 @@ export default function ImageLibraryPage() {
 
   useEffect(() => {
     setImages([]);
+    setHoveredKey(null);
     loadImages(tab.bucket);
   }, [activeTab, tab.bucket, loadImages]);
 
@@ -100,7 +134,7 @@ export default function ImageLibraryPage() {
 
   return (
     <div>
-      {/* Page heading — white text on blue app background */}
+      {/* Page heading */}
       <div className="mb-5">
         <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>
           Image Library
@@ -110,7 +144,6 @@ export default function ImageLibraryPage() {
         </p>
       </div>
 
-      {/* White card container */}
       <div className="card overflow-hidden">
         {/* Tabs */}
         <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
@@ -133,6 +166,21 @@ export default function ImageLibraryPage() {
               {t.label}
             </button>
           ))}
+        </div>
+
+        {/* Specs banner */}
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 20px",
+          background: "#e3f2fd",
+          borderBottom: "1px solid #bbdefb",
+          fontSize: 12,
+          color: "#1565c0",
+        }}>
+          <span style={{ flexShrink: 0 }}>ℹ</span>
+          {tab.spec}
         </div>
 
         {/* Upload bar */}
@@ -162,9 +210,6 @@ export default function ImageLibraryPage() {
           >
             {uploading ? "Uploading…" : "Upload Image"}
           </button>
-          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            PNG only · max {tab.maxMB} MB
-          </span>
           {uploadError && (
             <span style={{ fontSize: 12, color: "#d32f2f" }}>{uploadError}</span>
           )}
@@ -188,13 +233,20 @@ export default function ImageLibraryPage() {
               No images yet. Upload one to get started.
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(${tab.cols}, 1fr)`,
+              gap: 16,
+            }}>
               {images.map((img) => {
                 const name = img.key.split("/").pop() ?? img.key;
                 const isDel = deletingKey === img.key;
+                const isHovered = hoveredKey === img.key;
                 return (
                   <div
                     key={img.key}
+                    onMouseEnter={() => setHoveredKey(img.key)}
+                    onMouseLeave={() => setHoveredKey(null)}
                     style={{
                       border: "1px solid var(--border)",
                       borderRadius: 6,
@@ -202,15 +254,64 @@ export default function ImageLibraryPage() {
                       background: "#fff",
                       display: "flex",
                       flexDirection: "column",
+                      position: "relative",
                     }}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={img.url}
-                      alt={name}
-                      style={{ width: "100%", height: 130, objectFit: "cover", display: "block", background: "var(--bg-subtle)" }}
-                    />
-                    <div style={{ padding: "8px 10px", flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                    {/* Hover trash icon */}
+                    <button
+                      onClick={() => handleDelete(img.key)}
+                      disabled={isDel}
+                      title="Delete image"
+                      style={{
+                        position: "absolute",
+                        top: 6,
+                        right: 6,
+                        zIndex: 2,
+                        width: 28,
+                        height: 28,
+                        borderRadius: 4,
+                        border: "none",
+                        background: isDel ? "rgba(0,0,0,0.4)" : "rgba(211,47,47,0.85)",
+                        color: "#fff",
+                        fontSize: 14,
+                        cursor: isDel ? "not-allowed" : "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        opacity: isHovered || isDel ? 1 : 0,
+                        transition: "opacity 0.15s",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {isDel ? "…" : "🗑"}
+                    </button>
+
+                    {/* Image area with correct aspect ratio */}
+                    <div style={{
+                      aspectRatio: tab.aspectRatio,
+                      background: "#f8f9fa",
+                      border: "none",
+                      borderBottom: "1px solid #e0e0e0",
+                      overflow: "hidden",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.url}
+                        alt={name}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "contain",
+                          display: "block",
+                        }}
+                      />
+                    </div>
+
+                    {/* Caption */}
+                    <div style={{ padding: "6px 8px" }}>
                       <div
                         style={{
                           fontSize: 11,
@@ -224,26 +325,9 @@ export default function ImageLibraryPage() {
                       >
                         {name}
                       </div>
-                      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
                         {(img.size / 1024).toFixed(0)} KB
                       </div>
-                      <button
-                        onClick={() => handleDelete(img.key)}
-                        disabled={isDel}
-                        style={{
-                          marginTop: "auto",
-                          padding: "4px 0",
-                          background: isDel ? "var(--bg-subtle)" : "#ffebee",
-                          color: "#d32f2f",
-                          border: "1px solid #ffcdd2",
-                          borderRadius: 3,
-                          fontSize: 11,
-                          cursor: isDel ? "not-allowed" : "pointer",
-                          fontFamily: "inherit",
-                        }}
-                      >
-                        {isDel ? "Deleting…" : "Delete"}
-                      </button>
                     </div>
                   </div>
                 );
