@@ -740,8 +740,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       } else {
         const r = await fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!r.ok) { showToast('Save failed — try again'); return; }
-        const { data: savedArr } = await r.json() as { data?: { id: string }[] };
-        savedId = savedArr?.[0]?.id ?? null;
+        const { data: savedData } = await r.json() as { data?: { id: string } };
+        savedId = savedData?.id ?? null;
       }
 
       setTemplateName(name);
@@ -756,7 +756,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (isAll || saveVtypes.has('used')) settingsPatch[`default_${dtKey}_used`] = savedId;
         if (isAll || saveVtypes.has('cpo'))  settingsPatch[`default_${dtKey}_cpo`]  = savedId;
         if (Object.keys(settingsPatch).length > 0) {
-          const settingsRes = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settingsPatch) });
+          const eid = dealerId ?? vehicle?.dealer_id ?? null;
+          const sqs = eid ? `?dealer_id=${encodeURIComponent(eid)}` : '';
+          const settingsRes = await fetch(`/api/settings${sqs}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settingsPatch) });
           if (!settingsRes.ok) {
             showToast('Template saved, but could not set as default. Please assign it manually in Settings.');
             return;
@@ -770,12 +772,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {
       showToast('Save failed — try again');
     }
-  }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, showToast, loadedTemplateId, savedTemplates]);
+  }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, showToast, loadedTemplateId, savedTemplates, dealerId, vehicle?.dealer_id]);
 
   // ── Load templates list ────────────────────────────────────────────
   const openTemplates = useCallback(async () => {
     try {
-      const [tRes, sRes] = await Promise.all([fetch('/api/templates'), fetch('/api/settings')]);
+      const eid = dealerId ?? vehicle?.dealer_id ?? null;
+      const qs = eid ? `?dealer_id=${encodeURIComponent(eid)}` : '';
+      const [tRes, sRes] = await Promise.all([fetch(`/api/templates${qs}`), fetch(`/api/settings${qs}`)]);
       if (tRes.ok) { const j = await tRes.json(); setSavedTemplates(j.data ?? []); }
       if (sRes.ok) {
         const sj = await sRes.json() as { data?: Record<string, string | null> };
@@ -790,7 +794,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {}
     setDeleteConfirmId(null);
     setShowOpenModal(true);
-  }, []);
+  }, [dealerId, vehicle?.dealer_id]);
 
   const loadTemplate = useCallback(async (id: string) => {
     try {

@@ -35,6 +35,10 @@ async function resolveDealerId(
     }
     return { dealerId: claims.dealer_id };
   }
+  // Ghost mode: super_admin browsing in a dealer context via ghost cookie
+  if (claims.role === "super_admin" && claims.dealer_id) {
+    return { dealerId: claims.dealer_id };
+  }
   const paramId = req.nextUrl.searchParams.get("dealer_id");
   if (!paramId) {
     return { dealerError: NextResponse.json({ error: "dealer_id param required" }, { status: 400 }) };
