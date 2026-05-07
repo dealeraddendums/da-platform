@@ -1618,10 +1618,17 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
 
       {w.type === 'suggested_price' && (
         <EpSection>
-          <Eps>Suggested Price Line</Eps>
+          <Eps>Suggested Price Bar</Eps>
           <Fd label="Label"><input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} /></Fd>
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Displays MSRP + all options (required + suggested). Updates automatically at print time.</div>
-          <FontStepper label="Font size" fkey="fontSize" base={12} d={d} fontScale={fontScale} af={af} />
+          <Fd label="Label color">
+            <ColorPair value={(d.labelColor as string) || '#ffffff'} onChange={v => u('labelColor', v)} />
+          </Fd>
+          <Fd label="Price color">
+            <ColorPair value={(d.valueColor as string) || '#000000'} onChange={v => u('valueColor', v)} />
+          </Fd>
+          <FontStepper label="Label font size" fkey="labelFontSize" base={12} d={d} fontScale={fontScale} af={af} />
+          <FontStepper label="Price font size" fkey="valueFontSize" base={13} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
 

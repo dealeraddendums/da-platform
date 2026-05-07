@@ -119,7 +119,7 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     fontSize: 1.0,
     items: [],
   },
-  suggested_price: { label: 'Suggested Asking Price:', value: '$29,000.00', fontSize: 1.0 },
+  suggested_price: { label: 'Suggested Asking Price:', value: '$29,000.00', labelColor: '#ffffff', valueColor: '#000000', labelFontSize: 1.0, valueFontSize: 1.0 },
 };
 
 export const DEFAULT_CUSTOM_WIDGETS: CustomWidgetDef[] = [

@@ -58,8 +58,11 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   if (type === 'suggested_price') {
-    const sz = Math.round(12 * fs * ((d.fontSize as number) || 1));
-    return `<div style="padding:3px 0;display:flex;justify-content:flex-end;gap:12px"><span style="font-size:${sz}px;font-weight:700;color:#1a1916">${d.label}</span><span style="font-size:${sz}px;font-weight:700;color:#1a1916;font-family:monospace">${d.value}</span></div>`;
+    const lfs = Math.round(12 * fs * ((d.labelFontSize as number) || 1));
+    const vfs = Math.round(13 * fs * ((d.valueFontSize as number) || 1));
+    const lc = (d.labelColor as string) || '#ffffff';
+    const vc = (d.valueColor as string) || '#000000';
+    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px"><div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div></div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}</div></div>`;
   }
 
   if (type === 'subtotal') {
