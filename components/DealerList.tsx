@@ -689,10 +689,10 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
     if (res.ok && json.data) {
       if (json.warning) setError(json.warning);
       if (sendNotify) {
-        setToast("Email sent to new dealer.");
+        setToast("Dealer created. Internal notification sent to support.");
         setTimeout(() => {
           onCreated(json.data!.id);
-        }, 1200);
+        }, 1500);
       } else {
         onCreated(json.data.id);
       }

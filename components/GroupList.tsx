@@ -490,13 +490,6 @@ export default function GroupList() {
   );
 }
 
-const GROUP_ACCOUNT_TYPES: { label: string; value: string }[] = [
-  { label: "Trial",    value: "Trial" },
-  { label: "Manual",   value: "Monthly Subscription Manual" },
-  { label: "Auto Web", value: "Monthly Subscription Automatic Web" },
-  { label: "Auto DMS", value: "Monthly Subscription Automatic DMS" },
-];
-
 type NewGroupFormProps = {
   onCreated: (id: string) => void;
   onCancel: () => void;
@@ -562,6 +555,10 @@ function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
       setError("Group Name is required.");
       return;
     }
+    if (sendNotify && !fields.primary_contact_email.trim()) {
+      setError("Contact Email is required to send a notification.");
+      return;
+    }
     if (fields.username.trim() && fields.password !== fields.confirm_password) {
       setError("Passwords do not match.");
       return;
@@ -599,10 +596,12 @@ function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
     if (res.ok && json.data) {
       if (json.warning) setError(json.warning);
       if (sendNotify) {
-        setToast("Email sent to new group admin.");
+        setToast(json.emailSent
+          ? "Group created. Welcome email sent to group contact."
+          : "Group created. (No contact email — notification not sent.)");
         setTimeout(() => {
           onCreated(json.data!.id);
-        }, 1200);
+        }, 1500);
       } else {
         onCreated(json.data.id);
       }
