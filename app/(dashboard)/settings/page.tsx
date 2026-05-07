@@ -7,7 +7,7 @@ import { verifyGhostToken } from "@/lib/ghost";
 import SettingsForm from "@/components/SettingsForm";
 import { PageHeader } from "@/components/PageHeader";
 
-export const metadata = { title: "Settings — DA Platform" };
+export const metadata = { title: "Print Settings — DA Platform" };
 
 export default async function SettingsPage() {
   const supabase = createClient();
@@ -51,7 +51,7 @@ export default async function SettingsPage() {
   return (
     <div>
       <PageHeader
-        title="Settings"
+        title="Print Settings"
         subtitle="AI content defaults, template assignments, and printer margins"
       />
       <SettingsForm

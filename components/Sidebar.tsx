@@ -156,7 +156,7 @@ const nav: NavEntry[] = [
     ),
   },
   {
-    label: "Settings",
+    label: "Print Settings",
     href: "/settings",
     roles: ["dealer_admin"],
     icon: (

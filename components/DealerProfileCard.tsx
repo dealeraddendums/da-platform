@@ -49,7 +49,6 @@ function isExternalGroup(val: string | null | undefined): val is string {
 
 type FormData = {
   name: string;
-  inventory_dealer_id: string;
   primary_contact: string;
   primary_contact_email: string;
   phone: string;
@@ -64,7 +63,6 @@ type FormData = {
 function dealerToForm(d: DealerRow): FormData {
   return {
     name: d.name,
-    inventory_dealer_id: d.inventory_dealer_id ?? "",
     primary_contact: d.primary_contact ?? "",
     primary_contact_email: d.primary_contact_email ?? "",
     phone: d.phone ?? "",
@@ -85,6 +83,14 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Inventory Dealer ID inline edit state
+  const [invIdEditing, setInvIdEditing] = useState(false);
+  const [invIdValue, setInvIdValue] = useState(initialDealer.inventory_dealer_id ?? "");
+  const [invIdSaving, setInvIdSaving] = useState(false);
+  const [invIdError, setInvIdError] = useState<string | null>(null);
+  const [invIdWarning, setInvIdWarning] = useState<{ vehicleCount: number; newId: string } | null>(null);
+  const [invIdSuccess, setInvIdSuccess] = useState<string | null>(null);
 
   function startEdit() {
     setForm(dealerToForm(dealer));
@@ -108,10 +114,6 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
 
     const patch: DealerUpdate = {
       name: form.name.trim(),
-      // inventory_dealer_id only included in PATCH when super_admin edits it
-      ...(isSuperAdmin && form.inventory_dealer_id.trim()
-        ? { inventory_dealer_id: form.inventory_dealer_id.trim() }
-        : {}),
       primary_contact: form.primary_contact.trim() || null,
       primary_contact_email: form.primary_contact_email.trim() || null,
       phone: form.phone.trim() || null,
@@ -155,6 +157,57 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
       setDealer(json.data);
     }
     setToggling(false);
+  }
+
+  async function handleInvIdSave() {
+    const newId = invIdValue.trim();
+    if (!newId) { setInvIdError("Inventory Dealer ID cannot be empty"); return; }
+    if (newId === dealer.inventory_dealer_id) { setInvIdEditing(false); return; }
+    setInvIdSaving(true);
+    setInvIdError(null);
+    try {
+      const res = await fetch(`/api/dealers/${dealer.id}/inventory-dealer-id`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_id: newId, confirm: false }),
+      });
+      if (!res.ok) {
+        const j = (await res.json()) as { error?: string };
+        setInvIdError(j.error ?? "Failed to check");
+        return;
+      }
+      const { vehicle_count } = (await res.json()) as { vehicle_count: number };
+      setInvIdWarning({ vehicleCount: vehicle_count, newId });
+    } finally {
+      setInvIdSaving(false);
+    }
+  }
+
+  async function handleInvIdConfirm() {
+    if (!invIdWarning) return;
+    setInvIdSaving(true);
+    try {
+      const res = await fetch(`/api/dealers/${dealer.id}/inventory-dealer-id`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_id: invIdWarning.newId, confirm: true }),
+      });
+      if (!res.ok) {
+        const j = (await res.json()) as { error?: string };
+        setInvIdError(j.error ?? "Failed to update");
+        setInvIdWarning(null);
+        return;
+      }
+      const { data, vehicle_count } = (await res.json()) as { data: DealerRow; vehicle_count: number };
+      setDealer(data);
+      setInvIdEditing(false);
+      setInvIdWarning(null);
+      setInvIdError(null);
+      setInvIdSuccess(`Inventory Dealer ID updated. ${vehicle_count} vehicle${vehicle_count !== 1 ? "s" : ""} set to inactive. New inventory will appear after the next ETL sync.`);
+      setTimeout(() => setInvIdSuccess(null), 8000);
+    } finally {
+      setInvIdSaving(false);
+    }
   }
 
   return (
@@ -215,6 +268,70 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
         </div>
       )}
 
+      {invIdSuccess && (
+        <div
+          className="mb-4 px-4 py-3 rounded text-sm"
+          style={{ background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" }}
+        >
+          {invIdSuccess}
+        </div>
+      )}
+
+      {/* Inventory Dealer ID confirmation modal */}
+      {invIdWarning && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+            zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <div className="card p-6" style={{ maxWidth: 480, width: "100%", margin: "0 16px" }}>
+            <h3 className="text-base font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
+              Confirm Inventory Dealer ID Change
+            </h3>
+            <div
+              className="mb-4 px-4 py-3 rounded text-sm"
+              style={{ background: "#fff3e0", color: "#e65100", border: "1px solid #ffcc80", lineHeight: 1.6 }}
+            >
+              Changing the Inventory Dealer ID will affect vehicle inventory sync and ETL data matching.
+              All current vehicles for this dealer will be set to inactive to prevent duplicates when
+              the new feed syncs. Make sure the new ID matches the feed exactly.
+            </div>
+            <p className="text-sm mb-2" style={{ color: "var(--text-secondary)" }}>
+              New ID:{" "}
+              <span className="font-mono font-semibold" style={{ color: "var(--text-primary)" }}>
+                {invIdWarning.newId}
+              </span>
+            </p>
+            <p className="text-sm mb-5" style={{ color: "var(--text-secondary)" }}>
+              <strong>{invIdWarning.vehicleCount}</strong> vehicle
+              {invIdWarning.vehicleCount !== 1 ? "s" : ""} will be set to inactive.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setInvIdWarning(null)}
+                disabled={invIdSaving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleInvIdConfirm()}
+                disabled={invIdSaving}
+                style={{
+                  background: "#d32f2f", color: "white", border: "none",
+                  borderRadius: 4, padding: "8px 16px", fontSize: 14,
+                  cursor: invIdSaving ? "not-allowed" : "pointer", fontWeight: 500,
+                  opacity: invIdSaving ? 0.7 : 1,
+                }}
+              >
+                {invIdSaving ? "Updating…" : "Confirm Change"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main content */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         {/* Dealer info */}
@@ -246,8 +363,8 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
               </span>
             </div>
 
-            {/* Inventory Dealer ID — editable by super_admin */}
-            {editing && isSuperAdmin ? (
+            {/* Inventory Dealer ID — inline edit for super_admin only */}
+            {invIdEditing ? (
               <div>
                 <label className="label">
                   Inventory Dealer ID
@@ -260,13 +377,33 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                 </label>
                 <input
                   className="input"
-                  value={form.inventory_dealer_id}
-                  onChange={set("inventory_dealer_id")}
+                  value={invIdValue}
+                  onChange={(e) => setInvIdValue(e.target.value)}
                   placeholder="e.g. 1234567"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === "Enter") void handleInvIdSave(); if (e.key === "Escape") { setInvIdEditing(false); setInvIdError(null); } }}
                 />
-                <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                  Update this when the inventory feed goes live and the supplier assigns a new ID.
-                </p>
+                {invIdError && (
+                  <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{invIdError}</p>
+                )}
+                <div className="flex gap-2 mt-2">
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: 13 }}
+                    onClick={() => void handleInvIdSave()}
+                    disabled={invIdSaving}
+                  >
+                    {invIdSaving ? "Checking…" : "Save"}
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: 13 }}
+                    onClick={() => { setInvIdEditing(false); setInvIdError(null); setInvIdValue(dealer.inventory_dealer_id ?? ""); }}
+                    disabled={invIdSaving}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="flex items-start justify-between gap-4">
@@ -279,13 +416,26 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                     Inventory
                   </span>
                 </div>
-                <span
-                  className="text-sm font-mono font-medium text-right"
-                  style={{ color: "var(--text-primary)" }}
-                  title="Supplier-assigned inventory dealer ID."
-                >
-                  {dealer.inventory_dealer_id ?? <span style={{ color: "var(--text-muted)" }}>—</span>}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="text-sm font-mono font-medium text-right"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    {dealer.inventory_dealer_id ?? <span style={{ color: "var(--text-muted)" }}>—</span>}
+                  </span>
+                  {isSuperAdmin && !editing && (
+                    <button
+                      onClick={() => { setInvIdValue(dealer.inventory_dealer_id ?? ""); setInvIdEditing(true); setInvIdError(null); }}
+                      title="Edit Inventory Dealer ID"
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "var(--text-muted)", display: "flex", alignItems: "center" }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
