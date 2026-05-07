@@ -28,6 +28,7 @@ export interface Widget {
   y: number;
   w: number;
   h: number;
+  z?: number;
   d: Record<string, unknown>;
 }
 

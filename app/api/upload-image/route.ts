@@ -7,6 +7,7 @@ const ALLOWED_BUCKETS = new Set([
   "new-infosheet-backgrounds",
   "new-dealer-logos",
   "addendum-product-images",
+  "new-infobox-images",
 ]);
 
 const REGION = process.env.AWS_REGION || "us-east-1";

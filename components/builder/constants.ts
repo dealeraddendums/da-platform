@@ -51,7 +51,7 @@ export const WIDGET_LABELS: Record<string, string> = {
 
 export const UNIQUE_WIDGETS = [
   'logo','vehicle','msrp','options','subtotal','askbar','dealer',
-  'infobox','description','features','barcode','qrcode',
+  'infobox','description','features','barcode',
   'suggested_options','suggested_price',
 ];
 

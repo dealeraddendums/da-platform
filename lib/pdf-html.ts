@@ -217,11 +217,12 @@ export async function buildPdfHtml({
     return { ...w, d };
   });
 
-  const widgetHtml = enriched
+  const widgetHtml = [...enriched]
+    .sort((a, b) => (a.z ?? 10) - (b.z ?? 10))
     .map(w => {
       const inner = renderW(w.type, w.d, fontScale);
       // overflow:visible matches the canvas — widget content is never clipped
-      return `<div style="position:absolute;left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px;overflow:visible;z-index:10;background:transparent;">${inner}</div>`;
+      return `<div style="position:absolute;left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px;overflow:visible;z-index:${w.z ?? 10};background:transparent;">${inner}</div>`;
     })
     .join('\n');
 

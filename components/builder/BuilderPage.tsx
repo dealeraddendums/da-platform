@@ -13,6 +13,7 @@ import { useBuilderBreadcrumb } from '@/contexts/BuilderBreadcrumb';
 import CustomSizesModal from '@/components/CustomSizesModal';
 import AddCustomSizeModal from './AddCustomSizeModal';
 import ImageUploadPicker from '@/components/ImageUploadPicker';
+import ImagePickerModal from '@/components/ImagePickerModal';
 
 // ── Palette widget tiles ──────────────────────────────────────────────
 const PALETTE_TILES = [
@@ -199,6 +200,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [showAddSizeModal, setShowAddSizeModal] = useState(false);
   const [showBgPicker, setShowBgPicker] = useState(false);
   const [showLogoPicker, setShowLogoPicker] = useState(false);
+  const [showInfoboxLibPicker, setShowInfoboxLibPicker] = useState(false);
+  const [showBgLibPicker, setShowBgLibPicker] = useState(false);
 
   // Canonical dealer logo — pre-resolved S3 URL from the page server component.
   // Stays constant for the lifetime of this builder session.
@@ -335,6 +338,25 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       return next;
     });
   }, []);
+
+  const handleLayerChange = useCallback((id: string, action: 'front'|'back'|'forward'|'backward') => {
+    setWidgets(prev => {
+      const w = prev[id]; if (!w) return prev;
+      const allZ = Object.values(prev).map(wg => wg.z ?? 10);
+      const maxZ = Math.max(...allZ, 10);
+      const minZ = Math.min(...allZ, 10);
+      const curZ = w.z ?? 10;
+      let newZ = curZ;
+      if (action === 'front') newZ = maxZ + 1;
+      else if (action === 'back') newZ = minZ - 1;
+      else if (action === 'forward') newZ = curZ + 1;
+      else if (action === 'backward') newZ = curZ - 1;
+      const next = { ...prev, [id]: { ...w, z: newZ } };
+      widgetsRef.current = next;
+      pushHistory(next, nid);
+      return next;
+    });
+  }, [nid, pushHistory]);
 
   // ── Drag/resize ────────────────────────────────────────────────────
   const startMove = useCallback((e: React.MouseEvent, id: string) => {
@@ -1057,7 +1079,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                   <div
                     key={w.id}
                     ref={el => { if (el) widgetEls.current.set(w.id, el); else widgetEls.current.delete(w.id); }}
-                    style={{ position: 'absolute', left: w.x, top: w.y, width: w.w, height: w.h, zIndex: 10, cursor: previewMode ? 'default' : 'move', userSelect: 'none' }}
+                    style={{ position: 'absolute', left: w.x, top: w.y, width: w.w, height: w.h, zIndex: w.z ?? 10, cursor: previewMode ? 'default' : 'move', userSelect: 'none' }}
                     onMouseDown={e => startMove(e, w.id)}
                     onClick={e => { e.stopPropagation(); if (!previewMode) setSelId(w.id); }}
                   >
@@ -1155,6 +1177,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                     <button onClick={() => setShowBgPicker(true)} style={{ width: '100%', padding: '6px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer', marginBottom: 6 }}>
                       Upload / Choose from Library
                     </button>
+                    <button onClick={() => setShowBgLibPicker(true)} style={{ width: '100%', padding: '6px', background: '#fff', color: '#1976d2', border: '1px solid #1976d2', borderRadius: 4, fontSize: 12, cursor: 'pointer', marginBottom: 6 }}>
+                      Platform Backgrounds
+                    </button>
                     <div style={{ marginBottom: 4, fontSize: 11, color: '#55595c' }}>Or load from URL</div>
                     <input
                       value={bgInputVal}
@@ -1178,6 +1203,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                   onDelete={deleteWidget}
                   onUpdatePos={updateWidgetPos}
                   onPickLogoImage={() => setShowLogoPicker(true)}
+                  onLayerChange={handleLayerChange}
+                  onPickInfolibImage={() => setShowInfoboxLibPicker(true)}
                 />
               ) : (
                 <EpSection>
@@ -1441,6 +1468,36 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           onClose={() => setShowLogoPicker(false)}
         />
       )}
+
+      {/* INFOBOX LIBRARY PICKER */}
+      {showInfoboxLibPicker && (
+        <ImagePickerModal
+          bucket="new-infobox-images"
+          title="Choose Infobox Image"
+          onSelect={url => {
+            if (selId) {
+              updateWidget(selId, 'ibType', 'upload');
+              updateWidget(selId, 'imgUrl', url);
+            }
+            setShowInfoboxLibPicker(false);
+          }}
+          onClose={() => setShowInfoboxLibPicker(false)}
+        />
+      )}
+
+      {/* BACKGROUND LIBRARY PICKER */}
+      {showBgLibPicker && (
+        <ImagePickerModal
+          bucket={isInfosheet ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds'}
+          title="Platform Backgrounds"
+          onSelect={url => {
+            setBgUrl(url);
+            setBgInputVal(url);
+            setShowBgLibPicker(false);
+          }}
+          onClose={() => setShowBgLibPicker(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1484,7 +1541,7 @@ function ModalRow({ icon, label, children }: { icon: React.ReactNode; label: Rea
 }
 
 // ── Widget Edit Panel ──────────────────────────────────────────────────
-function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, onDelete, onUpdatePos, onPickLogoImage }: {
+function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, onDelete, onUpdatePos, onPickLogoImage, onLayerChange, onPickInfolibImage }: {
   widget: Widget;
   fontScale: number;
   dealerId: string | null;
@@ -1493,6 +1550,8 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
   onDelete: (id: string) => void;
   onUpdatePos: (id: string, key: 'x'|'y'|'w'|'h', value: number) => void;
   onPickLogoImage?: () => void;
+  onLayerChange?: (id: string, action: 'front'|'back'|'forward'|'backward') => void;
+  onPickInfolibImage?: () => void;
 }) {
   const d = w.d;
   const u = (key: string, val: unknown) => onUpdate(w.id, key, val);
@@ -1791,6 +1850,14 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
               <span style={{ fontSize: 11, fontWeight: (d.ibType as string) === v ? 600 : 500, color: (d.ibType as string) === v ? '#1976d2' : '#333' } as React.CSSProperties}>{l}</span>
             </div>
           ))}
+          {onPickInfolibImage && (
+            <button
+              onClick={onPickInfolibImage}
+              style={{ width: '100%', padding: '6px', background: '#fff', color: '#1976d2', border: '1px solid #1976d2', borderRadius: 4, fontSize: 11, cursor: 'pointer', marginTop: 8, marginBottom: 4, fontFamily: 'inherit' }}
+            >
+              Choose from Image Library
+            </button>
+          )}
           {(d.ibType as string) === 'qr' && (
             <>
               <Fd label="Custom URL template (optional)" style={{ marginTop: 8 }}>
@@ -1868,6 +1935,27 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Fd label="URL"><input value={(d.url as string) || ''} onChange={e => u('url', e.target.value)} style={{ ...fiStyle, fontSize: 11 }} placeholder="https://…" /></Fd>
           <Fd label="Label"><input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} /></Fd>
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>QR code links to vehicle detail page. URL auto-populated at print time.</div>
+        </EpSection>
+      )}
+
+      {/* Layer order */}
+      {onLayerChange && (
+        <EpSection>
+          <Eps>Layer Order</Eps>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+            {([
+              ['front', 'Bring to Front'],
+              ['back', 'Send to Back'],
+              ['forward', 'Bring Forward'],
+              ['backward', 'Send Backward'],
+            ] as const).map(([action, label]) => (
+              <button key={action} onClick={() => onLayerChange(w.id, action)}
+                style={{ padding: '5px 4px', borderRadius: 4, border: '1px solid #e0e0e0', background: '#f5f6f7', color: '#333', fontSize: 10, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'center' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 10, color: '#78828c', marginTop: 5 }}>z-index: {w.z ?? 10}</div>
         </EpSection>
       )}
 
