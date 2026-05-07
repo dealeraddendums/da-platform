@@ -101,7 +101,8 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     changed_by_email: claims.email,
     changes,
   };
-  void admin.from("vehicle_audit_log").insert(logEntry);
+  const { error: logErr } = await admin.from("vehicle_audit_log").insert(logEntry);
+  if (logErr) console.error("[vehicle_audit_log] insert failed:", logErr.message);
 
   return NextResponse.json(updated);
 }

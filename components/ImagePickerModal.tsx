@@ -6,6 +6,7 @@ interface ImageEntry {
   key: string;
   url: string;
   size: number;
+  display_name?: string;
 }
 
 interface ImagePickerModalProps {
@@ -34,9 +35,10 @@ export default function ImagePickerModal({
       .finally(() => setLoading(false));
   }, [bucket]);
 
-  const filtered = images.filter((img) =>
-    img.key.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = images.filter((img) => {
+    const name = img.display_name ?? img.key.split("/").pop() ?? img.key;
+    return name.toLowerCase().includes(search.toLowerCase());
+  });
 
   return (
     <div
@@ -140,46 +142,49 @@ export default function ImagePickerModal({
                 gap: 12,
               }}
             >
-              {filtered.map((img) => (
-                <div
-                  key={img.key}
-                  onClick={() => onSelect(img.url)}
-                  title={img.key}
-                  style={{
-                    cursor: "pointer",
-                    border: "2px solid #e0e0e0",
-                    borderRadius: 6,
-                    overflow: "hidden",
-                    background: "#f5f6f7",
-                    transition: "border-color .15s",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.borderColor = "#1976d2";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.borderColor = "#e0e0e0";
-                  }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={img.url}
-                    alt={img.key}
-                    style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }}
-                  />
+              {filtered.map((img) => {
+                const label = img.display_name ?? img.key.split("/").pop() ?? img.key;
+                return (
                   <div
+                    key={img.key}
+                    onClick={() => onSelect(img.url)}
+                    title={label}
                     style={{
-                      padding: "5px 8px",
-                      fontSize: 10,
-                      color: "#55595c",
-                      whiteSpace: "nowrap",
+                      cursor: "pointer",
+                      border: "2px solid #e0e0e0",
+                      borderRadius: 6,
                       overflow: "hidden",
-                      textOverflow: "ellipsis",
+                      background: "#f5f6f7",
+                      transition: "border-color .15s",
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.borderColor = "#1976d2";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.borderColor = "#e0e0e0";
                     }}
                   >
-                    {img.key.split("/").pop()}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={img.url}
+                      alt={label}
+                      style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }}
+                    />
+                    <div
+                      style={{
+                        padding: "5px 8px",
+                        fontSize: 10,
+                        color: "#55595c",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {label}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

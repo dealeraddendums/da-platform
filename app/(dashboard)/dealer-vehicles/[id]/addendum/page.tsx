@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
 import { verifyGhostToken } from "@/lib/ghost";
 import AddendumEditor from "@/components/AddendumEditor";
+import VehicleHistoryButton from "@/components/VehicleHistoryButton";
 import type { VehicleRow } from "@/lib/vehicles";
 
 export const metadata = { title: "Addendum — DA Platform" };
@@ -100,15 +101,20 @@ export default async function DealerVehicleAddendumPage({
           <span className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>›</span>
           <span className="text-sm" style={{ color: "var(--text-inverse)" }}>Addendum</span>
         </div>
-        <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>
-          {[dv.year, dv.make, dv.model, dv.trim].filter(Boolean).join(" ") || dv.stock_number}
-        </h1>
-        {dv.vin && (
-          <p className="text-sm mt-0.5 font-mono" style={{ color: "rgba(255,255,255,0.6)" }}>{dv.vin}</p>
-        )}
-        <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
-          Manual vehicle entry — stock #{dv.stock_number}
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>
+              {[dv.year, dv.make, dv.model, dv.trim].filter(Boolean).join(" ") || dv.stock_number}
+            </h1>
+            {dv.vin && (
+              <p className="text-sm mt-0.5 font-mono" style={{ color: "rgba(255,255,255,0.6)" }}>{dv.vin}</p>
+            )}
+            <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
+              Manual vehicle entry — stock #{dv.stock_number}
+            </p>
+          </div>
+          <VehicleHistoryButton vehicleId={dv.id} stockNumber={dv.stock_number} />
+        </div>
       </div>
 
       <AddendumEditor vehicle={vehicle} dealerVehicleId={dv.id} initialDocType={initialDocType} />

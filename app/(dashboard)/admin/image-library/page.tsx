@@ -5,9 +5,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 export const dynamic = "force-dynamic";
 
 interface ImageEntry {
+  id: string | null;
   key: string;
   url: string;
   size: number;
+  display_name: string;
   lastModified: string | null;
 }
 
@@ -50,6 +52,93 @@ const TABS: {
     spec: "Recommended size: 2,657 × 3,438 px · 150 DPI · PNG only · Max 10 MB",
   },
 ];
+
+function NameLabel({ img, onSaved }: { img: ImageEntry; onSaved: (id: string, name: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(img.display_name);
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  async function save() {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === img.display_name) {
+      setValue(img.display_name);
+      setEditing(false);
+      return;
+    }
+    if (!img.id) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/admin/image-library/meta/${img.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: trimmed }),
+      });
+      if (res.ok) {
+        onSaved(img.id, trimmed);
+      } else {
+        setValue(img.display_name);
+      }
+    } catch {
+      setValue(img.display_name);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); void save(); }
+          if (e.key === "Escape") { setValue(img.display_name); setEditing(false); }
+        }}
+        disabled={saving}
+        style={{
+          width: "100%",
+          fontSize: 11,
+          fontWeight: 500,
+          border: "1px solid #1976d2",
+          borderRadius: 3,
+          padding: "1px 4px",
+          outline: "none",
+          fontFamily: "inherit",
+          color: "var(--text-primary)",
+          background: "#fff",
+          boxSizing: "border-box",
+        }}
+      />
+    );
+  }
+
+  return (
+    <div
+      onClick={() => setEditing(true)}
+      title="Click to rename"
+      style={{
+        fontSize: 11,
+        color: "var(--text-primary)",
+        fontWeight: 500,
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        cursor: "text",
+        padding: "1px 0",
+      }}
+    >
+      {img.display_name}
+    </div>
+  );
+}
 
 export default function ImageLibraryPage() {
   const [activeTab, setActiveTab] = useState(0);
@@ -130,6 +219,10 @@ export default function ImageLibraryPage() {
     } finally {
       setDeletingKey(null);
     }
+  }
+
+  function handleNameSaved(id: string, newName: string) {
+    setImages((prev) => prev.map((img) => img.id === id ? { ...img, display_name: newName } : img));
   }
 
   return (
@@ -239,7 +332,6 @@ export default function ImageLibraryPage() {
               gap: 16,
             }}>
               {images.map((img) => {
-                const name = img.key.split("/").pop() ?? img.key;
                 const isDel = deletingKey === img.key;
                 const isHovered = hoveredKey === img.key;
                 return (
@@ -300,7 +392,7 @@ export default function ImageLibraryPage() {
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={img.url}
-                        alt={name}
+                        alt={img.display_name}
                         style={{
                           width: "100%",
                           height: "100%",
@@ -310,21 +402,9 @@ export default function ImageLibraryPage() {
                       />
                     </div>
 
-                    {/* Caption */}
+                    {/* Caption with editable name */}
                     <div style={{ padding: "6px 8px" }}>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-primary)",
-                          fontWeight: 500,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                        title={name}
-                      >
-                        {name}
-                      </div>
+                      <NameLabel img={img} onSaved={handleNameSaved} />
                       <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
                         {(img.size / 1024).toFixed(0)} KB
                       </div>

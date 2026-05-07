@@ -1054,6 +1054,19 @@ export type NhtsaSyncLogRow = {
   notes: string | null;
 };
 
+export type ImageLibraryRow = {
+  id: string;
+  bucket: string;
+  s3_key: string;
+  url: string;
+  display_name: string;
+  file_size: number | null;
+  uploaded_at: string;
+  uploaded_by: string | null;
+};
+export type ImageLibraryInsert = Omit<ImageLibraryRow, "id" | "uploaded_at" | "uploaded_by"> & { uploaded_by?: string | null };
+export type ImageLibraryUpdate = Partial<ImageLibraryInsert>;
+
 export type StaffProfileRow = {
   id: string;
   user_id: string;
@@ -1472,6 +1485,12 @@ export type Database = {
         Row: PasskeyChallengeRow;
         Insert: PasskeyChallengeInsert;
         Update: Record<string, never>;
+        Relationships: [];
+      };
+      image_library: {
+        Row: ImageLibraryRow;
+        Insert: ImageLibraryInsert;
+        Update: ImageLibraryUpdate;
         Relationships: [];
       };
       staff_profiles: {

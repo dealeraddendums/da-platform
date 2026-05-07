@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { createAdminSupabaseClient } from "@/lib/db";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 const ALLOWED_BUCKETS: Record<string, { maxMB: number }> = {
@@ -10,6 +11,11 @@ const ALLOWED_BUCKETS: Record<string, { maxMB: number }> = {
 
 const REGION = process.env.AWS_REGION || "us-east-1";
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"];
+
+function cleanDisplayName(filename: string): string {
+  const base = filename.replace(/\.[^.]+$/, "");
+  return base.replace(/^\d{10,}_/, "");
+}
 
 /** POST /api/admin/image-library/upload — super_admin only */
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -68,5 +74,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   );
 
   const url = `https://${bucket}.s3.${REGION}.amazonaws.com/${key}`;
-  return NextResponse.json({ url, key }, { status: 201 });
+
+  // Track in image_library with cleaned display name
+  const admin = createAdminSupabaseClient();
+  const displayName = cleanDisplayName(cleanName);
+  const { data: libRow } = await admin
+    .from("image_library")
+    .upsert({
+      bucket,
+      s3_key: key,
+      url,
+      display_name: displayName,
+      file_size: file.size,
+      uploaded_by: claims.sub,
+    }, { onConflict: "bucket,s3_key" })
+    .select("id, display_name")
+    .single();
+
+  return NextResponse.json({ url, key, id: libRow?.id ?? null, display_name: libRow?.display_name ?? displayName }, { status: 201 });
 }

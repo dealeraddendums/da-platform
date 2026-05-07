@@ -16,12 +16,31 @@ function formatDate(iso: string) {
   });
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  stock_number: "Stock #", vin: "VIN", year: "Year", make: "Make", model: "Model",
+  trim: "Trim", body_style: "Body Style", exterior_color: "Color", interior_color: "Int. Color",
+  engine: "Engine", transmission: "Transmission", drivetrain: "Drivetrain",
+  mileage: "Mileage", msrp: "MSRP", condition: "Condition", status: "Status",
+  description: "Description", options: "Options",
+};
+const LONG_FIELDS = new Set(["description", "options"]);
+
 function actionLabel(entry: HistoryEntry): string {
   switch (entry.action) {
     case "import":
       return "Vehicle added";
-    case "edit":
-      return "Vehicle edited";
+    case "edit": {
+      if (!entry.changes || Object.keys(entry.changes).length === 0) return "Vehicle updated";
+      const parts = Object.entries(entry.changes).map(([field, { old: o, new: n }]) => {
+        const label = FIELD_LABELS[field] ?? field;
+        if (LONG_FIELDS.has(field)) return `${label} updated`;
+        return `${label}: ${String(o ?? "—")} → ${String(n ?? "—")}`;
+      });
+      const shown = parts.slice(0, 3);
+      const extra = parts.length - 3;
+      const summary = extra > 0 ? [...shown, `+${extra} more`].join(", ") : shown.join(", ");
+      return `Vehicle updated · ${summary}`;
+    }
     case "delete":
       return "Vehicle deleted";
     case "restored_from_archive":

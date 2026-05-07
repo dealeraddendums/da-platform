@@ -36,12 +36,6 @@ const PALETTE_TILES = [
   { type: 'suggested_price',   emoji: '💰', label: 'Suggested Price',   hint: 'MSRP + all options',    group: 'suggested', addendum: true },
 ];
 
-const BG_COLORS = [
-  ['#111','01 Black'], ['#1e3a5f','02 Blue'], ['#7f1d1d','03 Red'],
-  ['#14532d','04 Green'], ['#4c1d95','05 Purple'], ['#0f172a','06 Navy'],
-  ['#78350f','07 Gold'], ['#6b7280','08 Silver'], ['#374151','09 Charcoal'],
-  ['#134e4a','10 Teal'], ['#4a1942','11 Maroon'], ['#1e3a8a','12 Cobalt'],
-];
 
 // Nudge any widget whose top-left corner is outside canvas back to the nearest in-bounds position
 function clampWidgets(ws: Record<string, Widget>, pw: number, ph: number): Record<string, Widget> {
@@ -198,7 +192,6 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [localCustomSizes, setLocalCustomSizes] = useState<CustomSize[]>(customSizes);
   const [showCustomSizesModal, setShowCustomSizesModal] = useState(false);
   const [showAddSizeModal, setShowAddSizeModal] = useState(false);
-  const [showBgPicker, setShowBgPicker] = useState(false);
   const [showLogoPicker, setShowLogoPicker] = useState(false);
   const [showInfoboxLibPicker, setShowInfoboxLibPicker] = useState(false);
   const [showBgLibPicker, setShowBgLibPicker] = useState(false);
@@ -1154,9 +1147,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 </div>
                 {bgOpen && (
                   <div style={{ marginTop: 8 }}>
-                    <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e0e0e0', borderRadius: 6, marginBottom: 8 }}>
+                    <div style={{ border: '1px solid #e0e0e0', borderRadius: 6, marginBottom: 8 }}>
                       <div
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', background: bgUrl === BG_DEFAULT || bgUrl === IS_BG_DEFAULT ? '#e3f2fd' : '#fff', borderBottom: '1px solid #e0e0e0' }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', background: bgUrl === BG_DEFAULT || bgUrl === IS_BG_DEFAULT ? '#e3f2fd' : '#fff', borderRadius: 6 }}
                         onClick={() => { const u = isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT; setBgUrl(u); setBgInputVal(u); }}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1164,21 +1157,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                         <span style={{ fontSize: 11, flex: 1, color: bgUrl === BG_DEFAULT || bgUrl === IS_BG_DEFAULT ? '#1976d2' : '#333', fontWeight: bgUrl === BG_DEFAULT || bgUrl === IS_BG_DEFAULT ? 600 : 400 }}>Default</span>
                         {(bgUrl === BG_DEFAULT || bgUrl === IS_BG_DEFAULT) && <span style={{ color: '#1976d2', fontSize: 11, fontWeight: 700 }}>✓</span>}
                       </div>
-                      {BG_COLORS.map(([color, name]) => (
-                        <div key={color}
-                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', background: bgUrl === color ? '#e3f2fd' : '#fff', borderBottom: '1px solid #e0e0e0' }}
-                          onClick={() => { setBgUrl(color); showToast(`Background '${name}' — loads from S3 in production`); }}>
-                          <div style={{ width: 18, height: 30, borderRadius: 2, background: color, flexShrink: 0, border: '1px solid rgba(0,0,0,.15)' }} />
-                          <span style={{ fontSize: 11, flex: 1, color: '#333' }}>{name}</span>
-                          {bgUrl === color && <span style={{ color: '#1976d2', fontSize: 11 }}>✓</span>}
-                        </div>
-                      ))}
                     </div>
-                    <button onClick={() => setShowBgPicker(true)} style={{ width: '100%', padding: '6px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer', marginBottom: 6 }}>
-                      Upload / Choose from Library
-                    </button>
-                    <button onClick={() => setShowBgLibPicker(true)} style={{ width: '100%', padding: '6px', background: '#fff', color: '#1976d2', border: '1px solid #1976d2', borderRadius: 4, fontSize: 12, cursor: 'pointer', marginBottom: 6 }}>
-                      Platform Backgrounds
+                    <button onClick={() => setShowBgLibPicker(true)} style={{ width: '100%', padding: '6px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer', marginBottom: 6 }}>
+                      Choose Background
                     </button>
                     <div style={{ marginBottom: 4, fontSize: 11, color: '#55595c' }}>Or load from URL</div>
                     <input
@@ -1433,21 +1414,6 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
             switchPaperSize(newSize.id);
           }}
           onClose={() => setShowAddSizeModal(false)}
-        />
-      )}
-
-      {/* BACKGROUND IMAGE PICKER */}
-      {showBgPicker && (
-        <ImageUploadPicker
-          title="Choose Background Image"
-          tab1Label="My Backgrounds"
-          listEndpoint={`/api/upload-image?bucket=${isInfosheet ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds'}${effectiveDealerId ? `&prefix=${encodeURIComponent(effectiveDealerId)}` : ''}`}
-          uploadBucket={isInfosheet ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds'}
-          uploadKeyPrefix={effectiveDealerId ?? ''}
-          acceptedTypes="image/png"
-          maxSizeMB={5}
-          onSelect={url => { setBgUrl(url); setBgInputVal(url); setShowBgPicker(false); }}
-          onClose={() => setShowBgPicker(false)}
         />
       )}
 
