@@ -30,6 +30,7 @@ type FormData = {
   separator_above: boolean;
   separator_below: boolean;
   spaces: number;
+  required: boolean;
 };
 
 const BLANK: FormData = {
@@ -40,6 +41,7 @@ const BLANK: FormData = {
   miles_condition: 0, miles_value: "",
   msrp_condition: 0, msrp1: "", msrp2: "",
   show_models_only: false, separator_above: false, separator_below: false, spaces: 2,
+  required: true,
 };
 
 function rowToForm(r: AddendumLibraryRow): FormData {
@@ -60,6 +62,7 @@ function rowToForm(r: AddendumLibraryRow): FormData {
     msrp2: r.msrp2 != null ? String(r.msrp2) : "",
     show_models_only: r.show_models_only, separator_above: r.separator_above,
     separator_below: r.separator_below, spaces: r.spaces,
+    required: r.required !== false,
   };
 }
 
@@ -284,6 +287,35 @@ function OptionForm({
             + Add to item name
           </button>
         </div>
+      </div>
+
+      {/* Required vs Suggested */}
+      <div style={{ marginBottom: 14 }}>
+        <label style={lbl}>Option Type</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          {([
+            { val: true,  label: "Required",  active: "#e8f5e9", activeText: "#2e7d32", activeBorder: "#4caf50" },
+            { val: false, label: "Suggested", active: "#fff3e0", activeText: "#e65100", activeBorder: "#ffa500" },
+          ] as const).map(({ val, label, active, activeText, activeBorder }) => {
+            const on = form.required === val;
+            return (
+              <button type="button" key={label} onClick={() => f("required", val)}
+                style={{
+                  flex: 1, padding: "7px 0", borderRadius: 4, fontWeight: 600, fontSize: 12, cursor: "pointer",
+                  border: `2px solid ${on ? activeBorder : "#e0e0e0"}`,
+                  background: on ? active : "#fff",
+                  color: on ? activeText : "#55595c",
+                }}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <p style={{ fontSize: 11, color: "#78828c", marginTop: 6, marginBottom: 0 }}>
+          {form.required
+            ? "Required — dealer-installed item printed on the addendum (Required Options widget)."
+            : "Suggested — optional upgrade offered to the buyer (Suggested Options widget)."}
+        </p>
       </div>
 
       {/* Applies To toggle — shown before Type since it controls visibility */}
@@ -575,6 +607,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
         miles_value: form.miles_value ? parseInt(form.miles_value) : null,
         msrp1: form.msrp1 ? parseInt(form.msrp1) : null,
         msrp2: form.msrp2 ? parseInt(form.msrp2) : null,
+        required: form.required,
       };
       const clearRules = { models: "", models_not: false, trims: "", trims_not: false, makes: "", makes_not: false, body_styles: "", year_condition: 0, year_value: null, miles_condition: 0, miles_value: null, msrp_condition: 0, msrp1: null, msrp2: null, show_models_only: false };
       const payload = appliesTo === "rules"
@@ -722,6 +755,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                   {reorderMode && <th style={{ width: 40, padding: "10px 8px" }} />}
                   <th style={th}>Option Name</th>
                   <th style={th}>Description</th>
+                  <th style={th}>Type</th>
                   <th style={th}>New/Used</th>
                   <th style={th}>Model</th>
                   <th style={th}>Trim</th>
@@ -767,6 +801,12 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                         <span style={{ color: "#78828c", fontSize: 12 }}>
                           {item.description ? (item.description.length > 50 ? item.description.slice(0, 50) + "…" : item.description) : <span style={{ color: "#ccc" }}>—</span>}
                         </span>
+                      </td>
+                      <td style={td}>
+                        {item.required !== false
+                          ? <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#e8f5e9", color: "#2e7d32" }}>Required</span>
+                          : <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#fff3e0", color: "#e65100" }}>Suggested</span>
+                        }
                       </td>
                       <td style={td}>{adTypeBadge(item)}</td>
                       <td style={td}>{listPreview(item.models, item.models_not)}</td>

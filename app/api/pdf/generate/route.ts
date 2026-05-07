@@ -6,7 +6,7 @@ import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf } from "@/lib/s3-upload";
 
-type BgOption = { option_name: string; option_price?: string; description?: string | null };
+type BgOption = { option_name: string; option_price?: string; description?: string | null; required?: boolean };
 
 async function logGeneratePdf(
   pdfBuffer: Buffer,
@@ -65,6 +65,7 @@ async function logGeneratePdf(
       printed_at: printedAt,
       document_type: docType,
       s3_key: uploadedKey,
+      required: o.required !== false,
     }));
     const { error: adErr } = await admin.from("addendum_data").insert(adRows);
     if (adErr) console.error("[pdf/generate] addendum_data insert failed:", adErr.message);
@@ -221,10 +222,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         option_price: g.option_price,
         description: null as string | null,
         active: true as const,
+        required: true as const,
       })),
       ...(optionRows ?? []).map(r => ({
         ...r,
         description: r.description ?? libDescMap[r.option_name as string] ?? null,
+        required: (r.required as boolean | undefined) !== false,
       })),
     ];
 

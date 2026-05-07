@@ -31,6 +31,7 @@ type LibraryRow = {
   sort_order: number;
   active: boolean;
   ad_types: string[] | null;
+  required: boolean;
 };
 
 export type MatchedOption = {
@@ -39,6 +40,7 @@ export type MatchedOption = {
   option_price: string;
   sort_order: number;
   source: "default";
+  required: boolean;
 };
 
 
@@ -133,7 +135,7 @@ export async function matchOptionsToVehicle(
   const admin = createAdminSupabaseClient();
   const { data: rows } = await admin
     .from("addendum_library")
-    .select("id, dealer_id, option_name, item_price, description, applies_to, makes, makes_not, models, models_not, trims, trims_not, body_styles, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2, sort_order, active, ad_types")
+    .select("id, dealer_id, option_name, item_price, description, applies_to, makes, makes_not, models, models_not, trims, trims_not, body_styles, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2, sort_order, active, ad_types, required")
     .eq("dealer_id", dealerId)
     .eq("active", true)
     .neq("applies_to", "none")
@@ -148,6 +150,7 @@ export async function matchOptionsToVehicle(
         option_price: row.item_price ?? "NC",
         sort_order: row.sort_order,
         source: "default",
+        required: row.required ?? true,
       });
     }
   }
@@ -165,7 +168,7 @@ export async function getDealerOptionLibrary(
   const admin = createAdminSupabaseClient();
   const { data: rows } = await admin
     .from("addendum_library")
-    .select("id, option_name, item_price, sort_order")
+    .select("id, option_name, item_price, sort_order, required")
     .eq("dealer_id", dealerId)
     .eq("active", true)
     .order("sort_order", { ascending: true });
@@ -176,6 +179,7 @@ export async function getDealerOptionLibrary(
     option_price: (r.item_price ?? "NC") as string,
     sort_order: r.sort_order as number,
     source: "default" as const,
+    required: (r.required ?? true) as boolean,
   }));
 }
 

@@ -34,7 +34,7 @@ const PAPER_DIMS: Record<string, { w: number; h: number }> = {
   infosheet: { w: 816, h: 1056 },
 };
 
-type AnyOption = { option_name: string; option_price: string; active?: boolean; description?: string | null };
+type AnyOption = { option_name: string; option_price: string; active?: boolean; description?: string | null; required?: boolean };
 
 export interface BuildPdfHtmlInput {
   widgets: Widget[];
@@ -75,6 +75,11 @@ export async function buildPdfHtml({
     ? { w: Math.round(customDims.widthIn * 96), h: Math.round(customDims.heightIn * 96) }
     : (PAPER_DIMS[paperSize] ?? PAPER_DIMS.standard);
 
+  // Split options into required vs suggested (default: all required for backward compat)
+  const allOptions = (options ?? []).filter(o => o.active !== false);
+  const requiredOptions = allOptions.filter(o => o.required !== false);
+  const suggestedOptions = allOptions.filter(o => o.required === false);
+
   const enriched = widgets.map(w => {
     const d = { ...w.d };
 
@@ -109,14 +114,23 @@ export async function buildPdfHtml({
           console.log('[pdf-html] infosheet askbar msrp:', msrp, '→', d.value);
         }
       } else {
-        const optTotal = (options ?? []).reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
-        const total = (msrp ?? 0) + optTotal;
+        // Asking price = MSRP + required options only
+        const reqTotal = requiredOptions.reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
+        const total = (msrp ?? 0) + reqTotal;
         if (total > 0) d.value = total.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
       }
     }
     if (w.type === 'subtotal') {
-      const optTotal = (options ?? []).reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
-      if (optTotal > 0) d.value = `$${optTotal.toLocaleString()}`;
+      // Subtotal = required options only
+      const reqTotal = requiredOptions.reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
+      if (reqTotal > 0) d.value = `$${reqTotal.toLocaleString()}`;
+    }
+    if (w.type === 'suggested_price' && vehicle) {
+      const msrp = vehicle.MSRP != null ? parseFloat(vehicle.MSRP) : null;
+      // Suggested asking price = MSRP + all options (required + suggested)
+      const allTotal = allOptions.reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
+      const total = (msrp ?? 0) + allTotal;
+      if (total > 0) d.value = total.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
     }
 
     if (vehicle) {
@@ -140,7 +154,14 @@ export async function buildPdfHtml({
     }
 
     if (options !== undefined && w.type === 'options') {
-      d.items = options.filter(o => o.active !== false).map(o => ({
+      d.items = requiredOptions.map(o => ({
+        name: o.option_name,
+        desc: o.description ?? '',
+        price: formatOptionPrice(o.option_price),
+      }));
+    }
+    if (options !== undefined && w.type === 'suggested_options') {
+      d.items = suggestedOptions.map(o => ({
         name: o.option_name,
         desc: o.description ?? '',
         price: formatOptionPrice(o.option_price),

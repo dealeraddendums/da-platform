@@ -45,6 +45,23 @@ export function renderW(type: string, d: D, fontScale: number): string {
     ).join('')}</div>`;
   }
 
+  if (type === 'suggested_options') {
+    const sz = Math.round(10 * fs * ((d.fontSize as number) || 1));
+    const szm = Math.round(9 * fs * ((d.fontSize as number) || 1));
+    const items = (d.items as Array<{name:string;desc:string;price:string}>) || [];
+    if (items.length === 0) {
+      return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div><div style="font-size:${szm}px;color:#bbb;font-style:italic">Suggested options will appear here at print time.</div></div>`;
+    }
+    return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div>${items.map(it =>
+      `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0"><div><div style="font-size:${sz}px;font-weight:700;color:#333">${it.name}</div>${it.desc ? `<div style="font-size:${szm}px;color:#666;padding-left:8px;margin-top:1px;line-height:1.3">${it.desc}</div>` : ''}</div><div style="font-size:${sz}px;font-weight:700;color:#333;font-family:monospace;white-space:nowrap;padding-left:6px;flex-shrink:0">${it.price}</div></div>`
+    ).join('')}</div>`;
+  }
+
+  if (type === 'suggested_price') {
+    const sz = Math.round(12 * fs * ((d.fontSize as number) || 1));
+    return `<div style="padding:3px 0;display:flex;justify-content:flex-end;gap:12px"><span style="font-size:${sz}px;font-weight:700;color:#1a1916">${d.label}</span><span style="font-size:${sz}px;font-weight:700;color:#1a1916;font-family:monospace">${d.value}</span></div>`;
+  }
+
   if (type === 'subtotal') {
     const sz = Math.round(12 * fs * ((d.fontSize as number) || 1));
     return `<div style="padding:3px 0;display:flex;justify-content:flex-end;gap:12px"><span style="font-size:${sz}px;font-weight:700;color:#1a1916">${d.label}</span><span style="font-size:${sz}px;font-weight:700;color:#1a1916;font-family:monospace">${d.value}</span></div>`;

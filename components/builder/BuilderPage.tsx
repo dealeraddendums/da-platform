@@ -16,21 +16,23 @@ import ImageUploadPicker from '@/components/ImageUploadPicker';
 
 // ── Palette widget tiles ──────────────────────────────────────────────
 const PALETTE_TILES = [
-  { type: 'logo',       emoji: '🏷️', label: 'Logo',           hint: 'Dealer brand',     group: 'content' },
-  { type: 'vehicle',    emoji: '🚗', label: 'Vehicle data',   hint: 'Stock, VIN, Year…', group: 'content' },
-  { type: 'msrp',       emoji: '💲', label: 'MSRP line',      hint: 'Label + price',     group: 'content', addendum: true },
-  { type: 'options',    emoji: '📋', label: 'Options table',  hint: 'Dealer adds',       group: 'content', addendum: true },
-  { type: 'subtotal',   emoji: 'Σ',  label: 'Subtotal',       hint: 'Options total',     group: 'content', addendum: true },
-  { type: 'askbar',     emoji: '$',  label: 'Asking price',   hint: 'Total asking price',group: 'content' },
-  { type: 'dealer',     emoji: '🏠', label: 'Dealer address', hint: 'Contact info',      group: 'content' },
-  { type: 'description',emoji: '📝', label: 'Description',    hint: 'Populated at print time', group: 'infosheet' },
-  { type: 'features',   emoji: '✦',  label: 'Features list',  hint: 'Populated at print time', group: 'infosheet' },
-  { type: 'barcode',    emoji: '▐▌', label: 'Barcode',        hint: 'VIN Code-128',      group: 'infosheet' },
-  { type: 'qrcode',     emoji: '⊞',  label: 'QR Code',        hint: 'Vehicle page link', group: 'infosheet' },
-  { type: 'headerbar',  emoji: '⬛', label: 'Header bar',     hint: 'Full-width text',   group: 'structural' },
-  { type: 'customtext', emoji: 'T',  label: 'Custom text',    hint: 'Free content',      group: 'structural' },
-  { type: 'sigline',    emoji: '✎',  label: 'Signature line', hint: 'Buyer + date',      group: 'structural' },
-  { type: 'infobox',    emoji: '📦', label: 'Infobox',        hint: 'EPA, QR, photo…',   group: 'infobox', addendum: true },
+  { type: 'logo',              emoji: '🏷️', label: 'Logo',              hint: 'Dealer brand',          group: 'content' },
+  { type: 'vehicle',           emoji: '🚗', label: 'Vehicle data',      hint: 'Stock, VIN, Year…',     group: 'content' },
+  { type: 'msrp',              emoji: '💲', label: 'MSRP line',         hint: 'Label + price',         group: 'content', addendum: true },
+  { type: 'options',           emoji: '📋', label: 'Required Options',  hint: 'Dealer-installed items', group: 'content', addendum: true },
+  { type: 'subtotal',          emoji: 'Σ',  label: 'Subtotal',          hint: 'Required options total', group: 'content', addendum: true },
+  { type: 'askbar',            emoji: '$',  label: 'Asking price',      hint: 'MSRP + required',       group: 'content' },
+  { type: 'dealer',            emoji: '🏠', label: 'Dealer address',    hint: 'Contact info',          group: 'content' },
+  { type: 'description',       emoji: '📝', label: 'Description',       hint: 'Populated at print time', group: 'infosheet' },
+  { type: 'features',          emoji: '✦',  label: 'Features list',     hint: 'Populated at print time', group: 'infosheet' },
+  { type: 'barcode',           emoji: '▐▌', label: 'Barcode',           hint: 'VIN Code-128',          group: 'infosheet' },
+  { type: 'qrcode',            emoji: '⊞',  label: 'QR Code',           hint: 'Vehicle page link',     group: 'infosheet' },
+  { type: 'headerbar',         emoji: '⬛', label: 'Header bar',        hint: 'Full-width text',       group: 'structural' },
+  { type: 'customtext',        emoji: 'T',  label: 'Custom text',       hint: 'Free content',          group: 'structural' },
+  { type: 'sigline',           emoji: '✎',  label: 'Signature line',    hint: 'Buyer + date',          group: 'structural' },
+  { type: 'infobox',           emoji: '📦', label: 'Infobox',           hint: 'EPA, QR, photo…',       group: 'infobox', addendum: true },
+  { type: 'suggested_options', emoji: '💭', label: 'Suggested Options', hint: 'Optional buyer add-ons', group: 'suggested', addendum: true },
+  { type: 'suggested_price',   emoji: '💰', label: 'Suggested Price',   hint: 'MSRP + all options',    group: 'suggested', addendum: true },
 ];
 
 const BG_COLORS = [
@@ -910,13 +912,13 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
               <div style={{ fontSize: 10, fontWeight: 600, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.06em' }}>Widgets — drag to canvas</div>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px 20px' }}>
-              {(['content','infosheet','structural','infobox'] as const).map(group => {
+              {(['content','suggested','infosheet','structural','infobox'] as const).map(group => {
                 const tiles = PALETTE_TILES.filter(t => t.group === group);
                 if (!tiles.length) return null;
                 return (
                   <div key={group}>
                     <div style={{ fontSize: 10, fontWeight: 600, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.05em', margin: '10px 0 5px' }}>
-                      {group === 'infosheet' ? 'Infosheet' : group === 'infobox' ? 'Infobox' : group === 'content' ? 'Content' : 'Structural'}
+                      {group === 'infosheet' ? 'Infosheet' : group === 'infobox' ? 'Infobox' : group === 'content' ? 'Content' : group === 'suggested' ? 'Suggested Options' : 'Structural'}
                     </div>
                     {tiles.map(tile => {
                       const hidden = isInfosheet
@@ -1595,10 +1597,28 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
 
       {w.type === 'options' && (
         <EpSection>
-          <Eps>Options Table</Eps>
+          <Eps>Required Options Table</Eps>
           <Fd label="Section label"><input value={(d.sectionLabel as string) || ''} onChange={e => u('sectionLabel', e.target.value)} style={fiStyle} /></Fd>
-          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Option names and prices are set per vehicle in the addendum editor — not in the template.</div>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Shows dealer-installed Required options only. Option names and prices are set per vehicle in the addendum editor.</div>
           <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+
+      {w.type === 'suggested_options' && (
+        <EpSection>
+          <Eps>Suggested Options Table</Eps>
+          <Fd label="Section label"><input value={(d.sectionLabel as string) || ''} onChange={e => u('sectionLabel', e.target.value)} style={fiStyle} /></Fd>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Shows Suggested options only. Requires a Combo background template to separate sections visually.</div>
+          <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+
+      {w.type === 'suggested_price' && (
+        <EpSection>
+          <Eps>Suggested Price Line</Eps>
+          <Fd label="Label"><input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} /></Fd>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Displays MSRP + all options (required + suggested). Updates automatically at print time.</div>
+          <FontStepper label="Font size" fkey="fontSize" base={12} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
 

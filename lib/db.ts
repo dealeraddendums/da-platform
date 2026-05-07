@@ -490,6 +490,7 @@ export type VehicleOptionRow = {
   sort_order: number;
   active: boolean;
   source: "default" | "manual";
+  required: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -503,6 +504,7 @@ type VehicleOptionInsert = {
   sort_order?: number;
   active?: boolean;
   source?: "default" | "manual";
+  required?: boolean;
 };
 
 type VehicleOptionUpdate = {
@@ -559,6 +561,7 @@ export type AddendumLibraryRow = {
   applies_to: "all" | "rules" | "none";
   sort_order: number;
   active: boolean;
+  required: boolean;
   show_models_only: boolean;
   separator_above: boolean;
   separator_below: boolean;
@@ -590,6 +593,7 @@ export type AddendumDataRow = {
   printed_at: string | null;
   document_type: string | null;
   s3_key: string | null;
+  required: boolean;
   created_at: string;
   updated_at: string | null;
 };
@@ -613,6 +617,7 @@ export type AddendumDataInsert = {
   printed_at?: string | null;
   document_type?: string | null;
   s3_key?: string | null;
+  required?: boolean;
   created_at?: string;
   updated_at?: string | null;
 };

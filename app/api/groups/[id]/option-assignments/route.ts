@@ -125,6 +125,7 @@ export async function POST(
       applies_to: "all" as const,
       sort_order: 9999,
       active: true,
+      required: true,
       show_models_only: false,
       separator_above: false,
       separator_below: false,

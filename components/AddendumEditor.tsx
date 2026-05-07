@@ -17,6 +17,7 @@ type MatchedOption = {
   description?: string | null;
   sort_order: number;
   source?: string;
+  required?: boolean;
 };
 
 type GroupOption = {
@@ -204,6 +205,17 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
     setDirty(true);
   }
 
+  function toggleRequired(idx: number) {
+    setOptions((prev) =>
+      prev.map((o, i) => {
+        if (i !== idx) return o;
+        const cur = (o as MatchedOption).required !== false;
+        return { ...o, required: !cur };
+      })
+    );
+    setDirty(true);
+  }
+
   // ── Save ─────────────────────────────────────────────────────────────────────
 
   async function saveOptions() {
@@ -220,6 +232,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
             description: (o as MatchedOption).description ?? (o as VehicleOptionRow).description ?? null,
             sort_order: i,
             source: o.source ?? "manual",
+            required: (o as MatchedOption).required !== false && (o as VehicleOptionRow).required !== false,
           })),
         }),
       });
@@ -244,9 +257,14 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
 
   // ── Totals ───────────────────────────────────────────────────────────────────
 
-  const total = [...groupOptions, ...options].reduce((sum, o) => sum + parseOptionPriceValue(o.option_price), 0);
+  const reqOptions = options.filter(o => (o as MatchedOption).required !== false && (o as VehicleOptionRow).required !== false);
+  const sugOptions = options.filter(o => (o as MatchedOption).required === false || (o as VehicleOptionRow).required === false);
+  const reqTotal = [...groupOptions, ...reqOptions].reduce((sum, o) => sum + parseOptionPriceValue(o.option_price), 0);
+  const sugTotal = sugOptions.reduce((sum, o) => sum + parseOptionPriceValue(o.option_price), 0);
+  const total = reqTotal + sugTotal;
   const msrp = vehicle.MSRP ? parseFloat(vehicle.MSRP) : null;
-  const askingPrice = msrp != null ? msrp + total : null;
+  const askingPrice = msrp != null ? msrp + reqTotal : null;
+  const suggestedAskingPrice = sugTotal > 0 && msrp != null ? msrp + reqTotal + sugTotal : null;
 
   const cond = vehicleCondition(vehicle);
   const photos = parsePhotos(vehicle.PHOTOS ?? null);
@@ -347,6 +365,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                   <th className="px-3 py-2 text-left" style={{ width: 28, color: "var(--text-muted)", fontSize: 11 }}></th>
                   <th className="px-3 py-2 text-left font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>Option</th>
                   <th className="px-3 py-2 text-right font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", width: 110 }}>Price</th>
+                  <th className="px-3 py-2 text-center font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", width: 100 }}>Type</th>
                   <th className="px-3 py-2" style={{ width: 40 }}></th>
                 </tr>
               </thead>
@@ -373,6 +392,9 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                       <span className="font-medium" style={{ color: "var(--text-secondary)" }}>
                         {formatOptionPrice(opt.option_price)}
                       </span>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#e8f5e9", color: "#2e7d32" }}>Required</span>
                     </td>
                     <td className="px-3 py-2"></td>
                   </tr>
@@ -453,6 +475,28 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                         )}
                       </td>
 
+                      {/* Required/Suggested toggle */}
+                      <td className="px-3 py-2 text-center">
+                        {(() => {
+                          const isReq = (opt as MatchedOption).required !== false && (opt as VehicleOptionRow).required !== false;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => toggleRequired(idx)}
+                              title={isReq ? "Click to mark as Suggested" : "Click to mark as Required"}
+                              style={{
+                                fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10,
+                                border: "none", cursor: "pointer",
+                                background: isReq ? "#e8f5e9" : "#fff3e0",
+                                color: isReq ? "#2e7d32" : "#e65100",
+                              }}
+                            >
+                              {isReq ? "Required" : "Suggested"}
+                            </button>
+                          );
+                        })()}
+                      </td>
+
                       {/* Delete */}
                       <td className="px-3 py-2 text-center">
                         <button
@@ -513,11 +557,19 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
               className="px-4 py-3"
               style={{ borderTop: "2px solid var(--border)", background: "var(--bg-subtle)" }}
             >
-              {total > 0 && (
+              {reqTotal > 0 && (
                 <div className="flex justify-between text-sm mb-1">
-                  <span style={{ color: "var(--text-secondary)" }}>Options Total</span>
+                  <span style={{ color: "var(--text-secondary)" }}>Required Options</span>
                   <span className="font-medium" style={{ color: "var(--text-primary)" }}>
-                    ${total.toLocaleString()}
+                    ${reqTotal.toLocaleString()}
+                  </span>
+                </div>
+              )}
+              {sugTotal > 0 && (
+                <div className="flex justify-between text-sm mb-1">
+                  <span style={{ color: "#e65100" }}>Suggested Options</span>
+                  <span className="font-medium" style={{ color: "#e65100" }}>
+                    ${sugTotal.toLocaleString()}
                   </span>
                 </div>
               )}
@@ -529,11 +581,19 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                   </span>
                 </div>
               )}
-              {askingPrice != null && total > 0 && (
+              {askingPrice != null && reqTotal > 0 && (
                 <div className="flex justify-between text-sm font-semibold" style={{ borderTop: "1px solid var(--border)", paddingTop: 8, marginTop: 4 }}>
                   <span style={{ color: "var(--text-primary)" }}>Asking Price</span>
                   <span style={{ color: "var(--blue)" }}>
                     ${askingPrice.toLocaleString()}
+                  </span>
+                </div>
+              )}
+              {suggestedAskingPrice != null && (
+                <div className="flex justify-between text-sm" style={{ marginTop: 4 }}>
+                  <span style={{ color: "#e65100", fontSize: 12 }}>+ w/ Suggestions</span>
+                  <span style={{ color: "#e65100", fontSize: 12, fontWeight: 600 }}>
+                    ${suggestedAskingPrice.toLocaleString()}
                   </span>
                 </div>
               )}

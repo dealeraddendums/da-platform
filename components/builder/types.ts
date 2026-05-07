@@ -12,7 +12,8 @@ export interface CustomSize {
 export type WidgetType =
   | 'logo' | 'vehicle' | 'msrp' | 'options' | 'subtotal'
   | 'askbar' | 'dealer' | 'infobox' | 'headerbar' | 'customtext'
-  | 'sigline' | 'description' | 'features' | 'barcode' | 'qrcode' | 'custom';
+  | 'sigline' | 'description' | 'features' | 'barcode' | 'qrcode' | 'custom'
+  | 'suggested_options' | 'suggested_price';
 
 export interface OptionItem {
   name: string;

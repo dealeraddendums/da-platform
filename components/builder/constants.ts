@@ -16,14 +16,16 @@ export const PAPERS: Record<PaperSize, { w: number; h: number }> = {
 };
 
 export const LAYOUT: Record<string, { x: number; y: number; w: number; h: number }> = {
-  logo:     { x: 32,  y: 48,  w: 348, h: 118 },
-  vehicle:  { x: 40,  y: 168, w: 336, h: 72  },
-  msrp:     { x: 40,  y: 248, w: 332, h: 32  },
-  options:  { x: 40,  y: 280, w: 332, h: 175 },
-  subtotal: { x: 40,  y: 608, w: 332, h: 28  },
-  askbar:   { x: 40,  y: 624, w: 344, h: 45  },
-  dealer:   { x: 40,  y: 676, w: 336, h: 80  },
-  infobox:  { x: 28,  y: 760, w: 352, h: 240 },
+  logo:              { x: 32,  y: 48,  w: 348, h: 118 },
+  vehicle:           { x: 40,  y: 168, w: 336, h: 72  },
+  msrp:              { x: 40,  y: 248, w: 332, h: 32  },
+  options:           { x: 40,  y: 280, w: 332, h: 175 },
+  suggested_options: { x: 40,  y: 460, w: 332, h: 120 },
+  suggested_price:   { x: 40,  y: 584, w: 332, h: 28  },
+  subtotal:          { x: 40,  y: 608, w: 332, h: 28  },
+  askbar:            { x: 40,  y: 624, w: 344, h: 45  },
+  dealer:            { x: 40,  y: 676, w: 336, h: 80  },
+  infobox:           { x: 28,  y: 760, w: 352, h: 240 },
 };
 
 export const LAYOUT_INFOSHEET: Record<string, { x: number; y: number; w: number; h: number }> = {
@@ -39,22 +41,24 @@ export const LAYOUT_INFOSHEET: Record<string, { x: number; y: number; w: number;
 };
 
 export const WIDGET_LABELS: Record<string, string> = {
-  logo: 'Logo', vehicle: 'Vehicle data', msrp: 'MSRP', options: 'Options',
+  logo: 'Logo', vehicle: 'Vehicle data', msrp: 'MSRP', options: 'Required Options',
   subtotal: 'Subtotal', askbar: 'Asking price', dealer: 'Dealer address',
   headerbar: 'Header bar', customtext: 'Custom text', sigline: 'Signature',
   infobox: 'Infobox', description: 'Description', features: 'Features',
   barcode: 'Barcode', qrcode: 'QR Code', custom: 'Custom',
+  suggested_options: 'Suggested Options', suggested_price: 'Suggested Price',
 };
 
 export const UNIQUE_WIDGETS = [
   'logo','vehicle','msrp','options','subtotal','askbar','dealer',
   'infobox','description','features','barcode','qrcode',
+  'suggested_options','suggested_price',
 ];
 
-export const ADDENDUM_WIDGETS = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox','headerbar','customtext','sigline'];
+export const ADDENDUM_WIDGETS = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox','headerbar','customtext','sigline','suggested_options','suggested_price'];
 export const INFOSHEET_WIDGETS = ['logo','vehicle','description','features','askbar','qrcode','barcode','dealer','customtext'];
 export const PALETTE_HIDDEN_IN_ADDENDUM = ['description','features','barcode','qrcode'];
-export const PALETTE_HIDDEN_IN_INFOSHEET = ['msrp','options','subtotal','infobox'];
+export const PALETTE_HIDDEN_IN_INFOSHEET = ['msrp','options','subtotal','infobox','suggested_options','suggested_price'];
 
 export const DEFS: Record<string, Record<string, unknown>> = {
   logo: {
@@ -110,6 +114,12 @@ export const DEFS: Record<string, Record<string, unknown>> = {
   features: { items: [['Feature 1', 'Feature 2'], ['Feature 3', 'Feature 4']], aiMode: 'db', fontSize: 1.0 },
   barcode: { vin: '', stock: '' },
   qrcode: { url: 'https://dealeraddendums.com', label: 'Scan for more info', size: 120 },
+  suggested_options: {
+    sectionLabel: 'Suggested Options:',
+    fontSize: 1.0,
+    items: [],
+  },
+  suggested_price: { label: 'Suggested Asking Price:', value: '$29,000.00', fontSize: 1.0 },
 };
 
 export const DEFAULT_CUSTOM_WIDGETS: CustomWidgetDef[] = [

@@ -78,6 +78,7 @@ export async function GET(
         description: r.description ?? null,
         sort_order: r.sort_order ?? i,
         source: "default" as const,
+        required: (r.required ?? true) as boolean,
       }));
 
       return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false });
@@ -119,6 +120,7 @@ export async function GET(
       description: r.description ?? null,
       sort_order: r.sort_order ?? i,
       source: "default" as const,
+      required: (r.required ?? true) as boolean,
     }));
 
     return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false });
@@ -143,7 +145,7 @@ export async function POST(
     if (error) return error;
 
     const vid = params.vehicleId;
-    type OptionInput = Pick<VehicleOptionRow, "option_name" | "option_price" | "sort_order" | "source"> & { description?: string | null };
+    type OptionInput = Pick<VehicleOptionRow, "option_name" | "option_price" | "sort_order" | "source"> & { description?: string | null; required?: boolean };
     const body = await req.json() as { options?: OptionInput[]; dealer_id?: string };
     if (!body.options || !Array.isArray(body.options)) {
       return NextResponse.json({ error: "options array required" }, { status: 400 });
@@ -170,6 +172,7 @@ export async function POST(
         description: o.description ?? null,
         sort_order: o.sort_order ?? i,
         source: o.source ?? "manual",
+        required: o.required !== false,
       }));
       const { data, error: insertErr } = await admin.from("vehicle_options").insert(inserts).select("*");
       if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 });
@@ -191,6 +194,7 @@ export async function POST(
       description: o.description ?? null,
       sort_order: o.sort_order ?? i,
       source: o.source ?? "manual",
+      required: o.required !== false,
     }));
 
     const { data, error: insertErr } = await admin
