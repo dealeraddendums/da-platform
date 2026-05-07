@@ -359,13 +359,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
 
         // ── Options — UUID saved → legacy '0' sentinel → library matching ───
-        let effectiveOptions: { option_name: string; option_price: string; description: string | null }[] = [];
+        type EffectiveOption = { option_name: string; option_price: string; description: string | null; required?: boolean };
+        let effectiveOptions: EffectiveOption[] = [];
         let optionsSource = "library";
 
         // 1. Saved options keyed to this vehicle's UUID
         const { data: savedOpts, error: savedOptsErr } = await admin
           .from("vehicle_options")
-          .select("option_name, option_price, description")
+          .select("option_name, option_price, description, required")
           .eq("vehicle_id", vehicleId)
           .eq("dealer_id", dv.dealer_id)
           .eq("active", true)
@@ -379,12 +380,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             option_name: o.option_name,
             option_price: o.option_price ?? "NC",
             description: o.description ?? null,
+            required: (o.required as boolean | undefined) !== false,
           }));
         } else {
           // 2. Legacy '0' sentinel (options saved before per-vehicle UUID migration)
           const { data: legacyOpts, error: legacyOptsErr } = await admin
             .from("vehicle_options")
-            .select("option_name, option_price, description")
+            .select("option_name, option_price, description, required")
             .eq("vehicle_id", "0")
             .eq("dealer_id", dv.dealer_id)
             .eq("active", true)
@@ -398,6 +400,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               option_name: o.option_name,
               option_price: o.option_price ?? "NC",
               description: o.description ?? null,
+              required: (o.required as boolean | undefined) !== false,
             }));
           } else {
             // 3. Library matching rules per vehicle
@@ -411,6 +414,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                   "year_condition", "year_value",
                   "miles_condition", "miles_value",
                   "msrp_condition", "msrp1", "msrp2",
+                  "required",
                 ].join(", "))
                 .eq("dealer_id", dv.dealer_id)
                 .eq("active", true)
@@ -434,7 +438,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 option_name: r.option_name as string,
                 option_price: (r.item_price as string) ?? "NC",
                 description: (r.description as string) || null,
+                required: (r.required as boolean | undefined) !== false,
               }));
+          }
+        }
+
+        // For saved options that may have stale required=true, cross-reference library by option name
+        if (optionsSource === "uuid" || optionsSource === "legacy_sentinel") {
+          const dealerLib = libCache.get(dv.dealer_id);
+          if (!dealerLib) {
+            // Fetch library required flags if not already cached
+            const { data: lib } = await admin
+              .from("addendum_library")
+              .select("option_name, required")
+              .eq("dealer_id", dv.dealer_id)
+              .eq("active", true);
+            const libMap: Record<string, boolean> = {};
+            for (const r of lib ?? []) {
+              if ((r as { required?: boolean }).required === false) libMap[r.option_name as string] = false;
+            }
+            effectiveOptions = effectiveOptions.map(o =>
+              libMap[o.option_name] === false ? { ...o, required: false } : o
+            );
+          } else {
+            const libMap: Record<string, boolean> = {};
+            for (const r of dealerLib) {
+              if ((r.required as boolean | undefined) === false) libMap[r.option_name as string] = false;
+            }
+            effectiveOptions = effectiveOptions.map(o =>
+              libMap[o.option_name] === false ? { ...o, required: false } : o
+            );
           }
         }
 
@@ -443,6 +476,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           ...groupOpts.map(g => ({
             option_name: g.option_name, option_price: g.option_price,
             description: null as string | null, active: true as const,
+            required: true as const,
           })),
           ...effectiveOptions,
         ];

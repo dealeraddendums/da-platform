@@ -35,7 +35,8 @@ function SuperAdminView({
   hour,
   payingCount,
   trialCount,
-  groupCount,
+  vehicleTotal,
+  vehiclePrinted,
   addendumMonth,
   dealers,
 }: {
@@ -43,30 +44,40 @@ function SuperAdminView({
   hour: number;
   payingCount: number;
   trialCount: number;
-  groupCount: number;
+  vehicleTotal: number;
+  vehiclePrinted: number;
   addendumMonth: number;
   dealers: DealerMapPoint[];
 }) {
   const firstName = name ? name.split(" ")[0] : null;
   const _greeting = greeting(hour, firstName); // available for future use
   void _greeting;
-  const cards = [
-    { label: "Paying Dealers",      value: payingCount.toLocaleString(),    note: "Paid subscriptions" },
-    { label: "Trial Dealers",       value: trialCount.toLocaleString(),      note: "Free / trial accounts" },
-    { label: "Groups",              value: groupCount.toLocaleString(),      note: "Dealer groups" },
-    { label: "Addendums This Month",value: addendumMonth.toLocaleString(),   note: "Printed this month" },
-  ];
+  const printedPct = vehicleTotal > 0 ? Math.round((vehiclePrinted / vehicleTotal) * 100) : 0;
+  const pctColor = printedPct >= 75 ? "#4caf50" : printedPct >= 50 ? "var(--text-muted)" : "#ffa500";
   return (
     <div>
       <PageHeader title="Dashboard" />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {cards.map((c) => (
-          <div key={c.label} className="card p-4">
-            <p style={STAT_LABEL}>{c.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{c.value}</p>
-            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{c.note}</p>
-          </div>
-        ))}
+        <div className="card p-4">
+          <p style={STAT_LABEL}>Paying Dealers</p>
+          <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{payingCount.toLocaleString()}</p>
+          <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Paid subscriptions</p>
+        </div>
+        <div className="card p-4">
+          <p style={STAT_LABEL}>Trial Dealers</p>
+          <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{trialCount.toLocaleString()}</p>
+          <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Free / trial accounts</p>
+        </div>
+        <div className="card p-4">
+          <p style={STAT_LABEL}>Vehicles in System</p>
+          <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{vehicleTotal.toLocaleString()}</p>
+          <p className="text-xs mt-1" style={{ color: pctColor }}>{printedPct}% printed</p>
+        </div>
+        <div className="card p-4">
+          <p style={STAT_LABEL}>Addendums This Month</p>
+          <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{addendumMonth.toLocaleString()}</p>
+          <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Printed this month</p>
+        </div>
       </div>
       <ActivitySection dealers={dealers} />
     </div>
@@ -194,7 +205,8 @@ export default async function DashboardPage() {
     const [
       { count: payingCount },
       { count: trialCount },
-      { count: groupCount },
+      { count: vehicleTotal },
+      { count: vehiclePrinted },
       { count: addendumMonth },
       { data: dealerRows },
     ] = await Promise.all([
@@ -202,7 +214,10 @@ export default async function DashboardPage() {
         .eq("active", true).in("account_type", PAID_TYPES),
       admin.from("dealers").select("*", { count: "exact", head: true })
         .eq("active", true).not("account_type", "in", `(${PAID_TYPES.map(t => `"${t}"`).join(",")})`),
-      admin.from("groups").select("*", { count: "exact", head: true }),
+      admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+        .neq("status", "inactive"),
+      admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+        .neq("status", "inactive").eq("print_status", 1),
       admin.from("print_history").select("*", { count: "exact", head: true })
         .gte("created_at", startOfMonth.toISOString()),
       admin.from("dealers").select("id, dealer_id, name, account_type, lat, lng, address, city, state, zip").limit(5000),
@@ -227,7 +242,8 @@ export default async function DashboardPage() {
         hour={new Date().getHours()}
         payingCount={payingCount ?? 0}
         trialCount={trialCount ?? 0}
-        groupCount={groupCount ?? 0}
+        vehicleTotal={vehicleTotal ?? 0}
+        vehiclePrinted={vehiclePrinted ?? 0}
         addendumMonth={addendumMonth ?? 0}
         dealers={dealers}
       />

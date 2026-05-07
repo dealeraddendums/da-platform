@@ -9,6 +9,36 @@ type Params = { params: { vehicleId: string } };
 function isUUID(v: string) { return v.includes("-"); }
 function isManual(v: string) { return isUUID(v) || v === "0"; }
 
+// Build a map of option_name → false for any addendum_library entries marked required=false.
+// Used to override stale vehicle_options.required=true values when the library flag changed.
+async function buildLibRequiredMap(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  dealerId: string,
+  optionNames: string[]
+): Promise<Record<string, boolean>> {
+  if (optionNames.length === 0) return {};
+  const { data } = await admin
+    .from("addendum_library")
+    .select("option_name, required")
+    .eq("dealer_id", dealerId)
+    .in("option_name", optionNames);
+  const map: Record<string, boolean> = {};
+  for (const r of data ?? []) {
+    if (r.required === false) map[r.option_name as string] = false;
+  }
+  return map;
+}
+
+function applyLibRequired<T extends { option_name: string; required?: boolean | null }>(
+  rows: T[],
+  libMap: Record<string, boolean>
+): T[] {
+  return rows.map(r => {
+    if (libMap[r.option_name] === false) return { ...r, required: false };
+    return r;
+  });
+}
+
 /**
  * GET /api/options/[vehicleId]
  * vehicleId can be:
@@ -45,7 +75,8 @@ export async function GET(
         .order("sort_order", { ascending: true });
 
       if (saved && saved.length > 0) {
-        return NextResponse.json({ data: saved, groupOptions, source: "saved" });
+        const libMap = await buildLibRequiredMap(admin, effectiveDealerId, saved.map(r => r.option_name as string));
+        return NextResponse.json({ data: applyLibRequired(saved, libMap), groupOptions, source: "saved" });
       }
 
       // If UUID and nothing found, also check legacy '0' sentinel as fallback
@@ -58,7 +89,8 @@ export async function GET(
           .order("sort_order", { ascending: true });
 
         if (legacySaved && legacySaved.length > 0) {
-          return NextResponse.json({ data: legacySaved, groupOptions, source: "saved" });
+          const libMap = await buildLibRequiredMap(admin, effectiveDealerId, legacySaved.map(r => r.option_name as string));
+          return NextResponse.json({ data: applyLibRequired(legacySaved, libMap), groupOptions, source: "saved" });
         }
       }
 
@@ -101,7 +133,8 @@ export async function GET(
       .order("sort_order", { ascending: true });
 
     if (saved && saved.length > 0) {
-      return NextResponse.json({ data: saved, groupOptions, source: "saved" });
+      const libMap = await buildLibRequiredMap(admin, effectiveDealerId, saved.map(r => r.option_name as string));
+      return NextResponse.json({ data: applyLibRequired(saved, libMap), groupOptions, source: "saved" });
     }
 
     // No saved options — seed from dealer's addendum_library

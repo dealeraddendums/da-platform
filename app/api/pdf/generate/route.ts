@@ -198,19 +198,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       optionRows = legacyRows;
     }
 
-    // For options missing a description, fall back to addendum_library by name
+    // For options missing a description, fall back to addendum_library by name.
+    // Also load required flag from library to override stale vehicle_options.required=true values.
+    const allOptNames = (optionRows ?? []).map(r => r.option_name as string);
     const nullDescNames = (optionRows ?? [])
       .filter(r => !r.description)
       .map(r => r.option_name as string);
     const libDescMap: Record<string, string | null> = {};
-    if (nullDescNames.length > 0) {
+    const libRequiredMap: Record<string, boolean> = {};
+    if (allOptNames.length > 0) {
       const { data: libRows } = await admin
         .from("addendum_library")
-        .select("option_name, description")
-        .in("option_name", nullDescNames)
-        .not("description", "is", null);
+        .select("option_name, description, required")
+        .eq("dealer_id", dv.dealer_id)
+        .in("option_name", allOptNames);
       for (const lr of libRows ?? []) {
-        if (lr.description) libDescMap[lr.option_name as string] = lr.description as string;
+        const name = lr.option_name as string;
+        if (nullDescNames.includes(name) && lr.description) libDescMap[name] = lr.description as string;
+        if (lr.required === false) libRequiredMap[name] = false;
       }
     }
 
@@ -227,7 +232,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ...(optionRows ?? []).map(r => ({
         ...r,
         description: r.description ?? libDescMap[r.option_name as string] ?? null,
-        required: (r.required as boolean | undefined) !== false,
+        // Library required=false takes precedence over stale vehicle_options value
+        required: libRequiredMap[r.option_name as string] === false
+          ? false
+          : (r.required as boolean | undefined) !== false,
       })),
     ];
 
