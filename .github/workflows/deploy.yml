@@ -27,7 +27,11 @@ jobs:
             git reset --hard origin/main
             sudo rm -rf node_modules .next
             /usr/bin/npm install
-            /usr/bin/npm run build
+            if ! /usr/bin/npm run build; then
+              echo "Build failed — cleaning .next and retrying once"
+              sudo rm -rf .next
+              /usr/bin/npm run build
+            fi
             pm2 restart da-platform || pm2 start ecosystem.config.js
             echo "Deploy complete"
           '
