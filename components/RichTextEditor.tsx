@@ -72,14 +72,15 @@ export default function RichTextEditor({
   placeholder,
   disabled,
   minHeight = 64,
+  toolbarOpen = false,
 }: {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
   disabled?: boolean;
   minHeight?: number;
+  toolbarOpen?: boolean;
 }) {
-  const [toolbarOpen, setToolbarOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
 
   const editor = useEditor({
@@ -123,24 +124,7 @@ export default function RichTextEditor({
   const currentSize = editor.getAttributes("textStyle").fontSize as string | undefined;
 
   return (
-    <div style={{ position: "relative" }}>
-      {/* Format toggle (top-right) */}
-      <button
-        type="button"
-        onClick={() => setToolbarOpen(o => !o)}
-        title={toolbarOpen ? "Hide formatting" : "Show formatting"}
-        style={{
-          position: "absolute", top: -28, right: 0, zIndex: 1,
-          height: 22, padding: "0 8px", fontSize: 12, fontWeight: 700,
-          border: "1px solid #e0e0e0", borderRadius: 6,
-          background: toolbarOpen ? "#1976d2" : "#fff",
-          color: toolbarOpen ? "#fff" : "#78828c",
-          cursor: "pointer", lineHeight: 1,
-        }}
-      >
-        A
-      </button>
-
+    <div>
       {toolbarOpen && (
         <div
           style={{

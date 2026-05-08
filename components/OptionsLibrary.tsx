@@ -210,6 +210,7 @@ function OptionForm({
   const [aiError, setAiError] = useState<string | null>(null);
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [insertTarget, setInsertTarget] = useState<"description" | "item_name">("description");
+  const [descToolbarOpen, setDescToolbarOpen] = useState(false);
 
   function f(field: keyof FormData, value: unknown) {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -226,11 +227,21 @@ function OptionForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ itemName: name, price: form.item_price }),
       });
-      const json = await res.json() as { description?: string; error?: string };
-      if (!res.ok) { setAiError(json.error ?? "Generation failed"); return; }
-      f("description", json.description ?? "");
+      const text = await res.text();
+      let json: { description?: string; error?: string } = {};
+      try { json = JSON.parse(text) as typeof json; } catch { /* non-JSON response */ }
+      if (!res.ok) {
+        setAiError(json.error ?? `Generation failed (HTTP ${res.status})`);
+        return;
+      }
+      const desc = json.description ?? "";
+      // Wrap plain text in <p> so Tiptap doesn't lose paragraph structure on insert.
+      const html = /<[a-z][^>]*>/i.test(desc) ? desc : (desc ? `<p>${desc.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>` : "");
+      f("description", html);
       setAiGenerated(true);
-    } catch { setAiError("Network error"); }
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "Network error");
+    }
     finally { setAiGenerating(false); }
   }
 
@@ -258,12 +269,28 @@ function OptionForm({
       ))}
 
       <div style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5, gap: 8 }}>
           <label style={lbl}>Description</label>
-          <button type="button" onClick={() => void handleAiGenerate()} disabled={aiGenerating}
-            style={{ background: "none", border: "none", cursor: aiGenerating ? "default" : "pointer", color: "#1565c0", fontSize: 12, fontWeight: 700, padding: "2px 6px", display: "flex", alignItems: "center", gap: 3 }}>
-            {aiGenerating ? "Generating…" : "✦ Generate"}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button type="button" onClick={() => void handleAiGenerate()} disabled={aiGenerating}
+              style={{ background: "none", border: "none", cursor: aiGenerating ? "default" : "pointer", color: "#1565c0", fontSize: 12, fontWeight: 700, padding: "2px 6px", display: "flex", alignItems: "center", gap: 3 }}>
+              {aiGenerating ? "Generating…" : "✦ Generate"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDescToolbarOpen(o => !o)}
+              title={descToolbarOpen ? "Hide formatting" : "Show formatting"}
+              style={{
+                height: 22, padding: "0 8px", fontSize: 12, fontWeight: 700,
+                border: "1px solid #e0e0e0", borderRadius: 6,
+                background: descToolbarOpen ? "#1976d2" : "#fff",
+                color: descToolbarOpen ? "#fff" : "#78828c",
+                cursor: "pointer", lineHeight: 1,
+              }}
+            >
+              A
+            </button>
+          </div>
         </div>
         <RichTextEditor
           value={form.description}
@@ -271,6 +298,7 @@ function OptionForm({
           placeholder={aiGenerating ? "Generating description…" : "Optional description shown under the product name"}
           disabled={aiGenerating}
           minHeight={64}
+          toolbarOpen={descToolbarOpen}
         />
         {aiGenerated && !aiGenerating && (
           <p style={{ fontSize: 11, color: "#1565c0", marginTop: 4, marginBottom: 0 }}>✦ AI generated — edit as needed</p>
