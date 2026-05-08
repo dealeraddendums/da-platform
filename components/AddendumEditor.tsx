@@ -34,6 +34,7 @@ type LibraryOption = {
   option_price: string;
   description?: string | null;
   sort_order: number;
+  required?: boolean;
 };
 
 type Props = {
@@ -114,13 +115,14 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
       if (typeof vehicleId === "string" && vehicleId.includes("-")) {
         // Manual vehicle (UUID): read from Supabase addendum_library (auth-scoped, no dealer_id param)
         const res = await fetch("/api/addendum-library?per_page=100");
-        const json = await res.json() as { data?: Array<{ option_name: string; item_price: string; sort_order: number }> };
+        const json = await res.json() as { data?: Array<{ option_name: string; item_price: string; sort_order: number; description?: string | null; required?: boolean }> };
         items = (json.data ?? []).map((r, i) => ({
           default_id: i,
           option_name: r.option_name,
           option_price: r.item_price,
-          description: (r as { description?: string | null }).description ?? null,
+          description: r.description ?? null,
           sort_order: r.sort_order,
+          required: r.required,
         }));
       } else {
         const res = await fetch(`/api/options/library?dealer_id=${encodeURIComponent(dealerId)}`);
@@ -141,6 +143,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
       description: opt.description ?? null,
       sort_order: options.length,
       source: "default",
+      required: opt.required,
     };
     setOptions((prev) => [...prev, next]);
     setDirty(true);
