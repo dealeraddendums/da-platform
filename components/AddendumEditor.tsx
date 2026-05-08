@@ -325,7 +325,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
             style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}
           >
             <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-              Options
+              Addendum Details
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -366,7 +366,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
               <thead>
                 <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
                   <th className="px-3 py-2 text-left" style={{ width: 28, color: "var(--text-muted)", fontSize: 11 }}></th>
-                  <th className="px-3 py-2 text-left font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>Option</th>
+                  <th className="px-3 py-2 text-left font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>Products</th>
                   <th className="px-3 py-2 text-right font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", width: 110 }}>Price</th>
                   <th className="px-3 py-2 text-center font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", width: 100 }}>Type</th>
                   <th className="px-3 py-2" style={{ width: 40 }}></th>
