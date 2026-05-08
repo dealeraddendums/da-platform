@@ -5,8 +5,13 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
-import { Mark } from "@tiptap/core";
+import { Mark, Extension } from "@tiptap/core";
 import { useEffect, useState } from "react";
+
+const LINE_HEIGHT_TYPES = ["paragraph", "heading", "listItem"] as const;
+const LINE_HEIGHT_MIN = 0.8;
+const LINE_HEIGHT_MAX = 3.0;
+const LINE_HEIGHT_DEFAULT = 1.2;
 
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20];
 const COLORS: { hex: string; label: string }[] = [
@@ -18,6 +23,33 @@ const COLORS: { hex: string; label: string }[] = [
   { hex: "#2e7d32", label: "Green" },
   { hex: "#78828c", label: "Gray" },
 ];
+
+const LineHeight = Extension.create({
+  name: "lineHeight",
+  addGlobalAttributes() {
+    return [{
+      types: [...LINE_HEIGHT_TYPES],
+      attributes: {
+        lineHeight: {
+          default: null,
+          parseHTML: (el: HTMLElement) => el.style.lineHeight || null,
+          renderHTML: (attrs: Record<string, unknown>) => {
+            const lh = attrs.lineHeight as string | null | undefined;
+            if (!lh) return {};
+            return { style: `line-height: ${lh}` };
+          },
+        },
+      },
+    }];
+  },
+  addCommands() {
+    return {
+      setLineHeight: (lh: string | null) => ({ commands }: { commands: { updateAttributes: (t: string, a: Record<string, unknown>) => boolean } }) => {
+        return LINE_HEIGHT_TYPES.every(t => commands.updateAttributes(t, { lineHeight: lh }));
+      },
+    } as unknown as Record<string, () => () => boolean>;
+  },
+});
 
 const FontSize = Mark.create({
   name: "fontSize",
@@ -90,6 +122,7 @@ export default function RichTextEditor({
       TextStyle,
       Color.configure({ types: ["textStyle"] }),
       FontSize,
+      LineHeight,
     ],
     content: toEditorContent(value),
     editable: !disabled,
@@ -122,6 +155,24 @@ export default function RichTextEditor({
   }
 
   const currentSize = editor.getAttributes("textStyle").fontSize as string | undefined;
+
+  function readCurrentLineHeight(): number {
+    for (const t of LINE_HEIGHT_TYPES) {
+      const v = editor!.getAttributes(t).lineHeight as string | undefined;
+      if (v) {
+        const n = parseFloat(v);
+        if (!Number.isNaN(n)) return n;
+      }
+    }
+    return LINE_HEIGHT_DEFAULT;
+  }
+  const currentLh = readCurrentLineHeight();
+  const adjustLh = (delta: number) => {
+    const next = Math.round(Math.max(LINE_HEIGHT_MIN, Math.min(LINE_HEIGHT_MAX, currentLh + delta)) * 10) / 10;
+    if (next === currentLh) return;
+    const cmd = editor!.chain().focus() as unknown as { setLineHeight: (s: string | null) => { run: () => boolean } };
+    cmd.setLineHeight(String(next)).run();
+  };
 
   return (
     <div>
@@ -167,6 +218,15 @@ export default function RichTextEditor({
             <option value="">Size</option>
             {FONT_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
+
+          <span style={{ width: 1, height: 18, background: "#e0e0e0", margin: "0 2px" }} />
+
+          {/* Line spacing stepper */}
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 2 }} title="Line spacing">
+            <button type="button" onClick={() => adjustLh(-0.1)} style={tbBtn(false)} aria-label="Decrease line spacing">−</button>
+            <span style={{ minWidth: 28, textAlign: "center", fontSize: 11, fontFamily: "monospace", color: "#1976d2" }}>{currentLh.toFixed(1)}</span>
+            <button type="button" onClick={() => adjustLh(0.1)} style={tbBtn(false)} aria-label="Increase line spacing">+</button>
+          </div>
 
           <span style={{ width: 1, height: 18, background: "#e0e0e0", margin: "0 2px" }} />
 
