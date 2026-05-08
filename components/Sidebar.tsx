@@ -108,7 +108,7 @@ const nav: NavEntry[] = [
   },
   // ── Dealer-facing items ───────────────────────────────────────────────────────
   {
-    label: "Options",
+    label: "Products",
     href: "/options",
     roles: ["dealer_admin", "dealer_user"],
     icon: (

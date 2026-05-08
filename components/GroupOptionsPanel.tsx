@@ -365,7 +365,7 @@ function OptionsTab({ groupId }: { groupId: string }) {
       <OptionSection
         groupId={groupId}
         isSuggested={true}
-        title="Suggested Options"
+        title="Suggested Products"
         description="Make these options available to dealers. Use &ldquo;Assign to Dealers&rdquo; to push them to specific dealers."
         emptyText="No suggested options yet. Add options here to make them available for dealer assignment."
         addLabel="+ Add Suggested Option"

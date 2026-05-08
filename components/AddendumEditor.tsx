@@ -356,7 +356,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
             <div className="p-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading options…</div>
           ) : groupOptions.length === 0 && options.length === 0 ? (
             <div className="p-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
-              No options yet. Add from the library or create a custom option.
+              No products yet. Add from the library or create a custom product.
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -559,7 +559,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
             >
               {reqTotal > 0 && (
                 <div className="flex justify-between text-sm mb-1">
-                  <span style={{ color: "var(--text-secondary)" }}>Required Options</span>
+                  <span style={{ color: "var(--text-secondary)" }}>Required Products</span>
                   <span className="font-medium" style={{ color: "var(--text-primary)" }}>
                     ${reqTotal.toLocaleString()}
                   </span>
@@ -567,7 +567,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
               )}
               {sugTotal > 0 && (
                 <div className="flex justify-between text-sm mb-1">
-                  <span style={{ color: "#e65100" }}>Suggested Options</span>
+                  <span style={{ color: "#e65100" }}>Suggested Products</span>
                   <span className="font-medium" style={{ color: "#e65100" }}>
                     ${sugTotal.toLocaleString()}
                   </span>
@@ -667,7 +667,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
             {libraryLoading ? (
               <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading…</div>
             ) : filteredLibrary.length === 0 ? (
-              <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>No options found.</div>
+              <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>No products found.</div>
             ) : (
               <table className="w-full text-sm">
                 <tbody>

@@ -268,7 +268,7 @@ function OptionForm({
           value={form.description}
           onChange={e => { f("description", e.target.value); setAiGenerated(false); }}
           style={{ ...inp, height: 64, resize: "vertical", opacity: aiGenerating ? 0.5 : 1 }}
-          placeholder={aiGenerating ? "Generating description…" : "Optional description shown under the option name"}
+          placeholder={aiGenerating ? "Generating description…" : "Optional description shown under the product name"}
           disabled={aiGenerating}
         />
         {aiGenerated && !aiGenerating && (
@@ -291,7 +291,7 @@ function OptionForm({
 
       {/* Required vs Suggested */}
       <div style={{ marginBottom: 14 }}>
-        <label style={lbl}>Option Type</label>
+        <label style={lbl}>Product Type</label>
         <div style={{ display: "flex", gap: 8 }}>
           {([
             { val: true,  label: "Required",  active: "#e8f5e9", activeText: "#2e7d32", activeBorder: "#4caf50" },
@@ -313,8 +313,8 @@ function OptionForm({
         </div>
         <p style={{ fontSize: 11, color: "#78828c", marginTop: 6, marginBottom: 0 }}>
           {form.required
-            ? "Required — dealer-installed item printed on the addendum (Required Options widget)."
-            : "Suggested — optional upgrade offered to the buyer (Suggested Options widget)."}
+            ? "Required — dealer-installed item printed on the addendum (Required Products widget)."
+            : "Suggested — optional upgrade offered to the buyer (Suggested Products widget)."}
         </p>
       </div>
 
@@ -703,9 +703,9 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.2, color: "#fff", margin: 0 }}>Addendum Options</h1>
+          <h1 style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.2, color: "#fff", margin: 0 }}>Addendum Products</h1>
           <p style={{ fontSize: 14, color: "rgba(255,255,255,0.7)", marginTop: 4, marginBottom: 0 }}>
-            {total > 0 ? `${total} option${total !== 1 ? "s" : ""}` : "Define options that auto-apply to vehicle addendums"}
+            {total > 0 ? `${total} product${total !== 1 ? "s" : ""}` : "Define products that auto-apply to vehicle addendums"}
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -717,7 +717,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
               </button>
               <button onClick={openAdd}
                 style={{ ...btnPrimary, background: "#4caf50", border: "none", display: "flex", alignItems: "center", gap: 5 }}>
-                + Add Option
+                + Add Product
               </button>
             </>
           ) : (
@@ -743,8 +743,8 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
         ) : !displayItems.length ? (
           <div style={{ padding: 48, textAlign: "center" }}>
             <div style={{ fontSize: 32, color: "#e0e0e0", marginBottom: 10 }}>☰</div>
-            <div style={{ fontSize: 14, color: "#78828c", marginBottom: 16 }}>No options yet. Add your first option to get started.</div>
-            <button onClick={openAdd} style={{ ...btnPrimary, background: "#4caf50" }}>+ Add Option</button>
+            <div style={{ fontSize: 14, color: "#78828c", marginBottom: 16 }}>No products yet. Add your first product to get started.</div>
+            <button onClick={openAdd} style={{ ...btnPrimary, background: "#4caf50" }}>+ Add Product</button>
           </div>
         ) : (
           <>
@@ -753,7 +753,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
               <thead>
                 <tr style={{ background: "#f5f6f7", borderBottom: "1px solid #e0e0e0" }}>
                   {reorderMode && <th style={{ width: 40, padding: "10px 8px" }} />}
-                  <th style={th}>Option Name</th>
+                  <th style={th}>Product Name</th>
                   <th style={th}>Description</th>
                   <th style={th}>Type</th>
                   <th style={th}>New/Used</th>
@@ -872,14 +872,14 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
       {/* Add/Edit modal */}
       {showModal && (
         <Modal
-          title={editItem ? "Edit Option" : "Add Addendum Default"}
+          title={editItem ? "Edit Product" : "Configure Product"}
           onClose={() => setShowModal(false)}
           footer={
             <>
               {formError && <span style={{ fontSize: 12, color: "#ff5252", flex: 1 }}>{formError}</span>}
               <button onClick={() => setShowModal(false)} style={btnGhost}>Cancel</button>
               <button onClick={() => void handleSave()} disabled={saving} style={btnPrimary}>
-                {saving ? "Saving…" : editItem ? "Save Changes" : "Add Option"}
+                {saving ? "Saving…" : editItem ? "Save Changes" : "Add Product"}
               </button>
             </>
           }

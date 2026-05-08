@@ -5,7 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import OptionsLibrary from "@/components/OptionsLibrary";
 
-export const metadata = { title: "Addendum Options — DA Platform" };
+export const metadata = { title: "Addendum Products — DA Platform" };
 
 export default async function OptionsPage() {
   const supabase = createClient();

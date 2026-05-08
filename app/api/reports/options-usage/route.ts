@@ -48,7 +48,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .map(([name, count]) => ({ option_name: name, count }));
 
   if (format === "csv") {
-    const lines = ["Option Name,Count", ...rows.map(r => `"${r.option_name.replace(/"/g, '""')}",${r.count}`)];
+    const lines = ["Product Name,Count", ...rows.map(r => `"${r.option_name.replace(/"/g, '""')}",${r.count}`)];
     return new NextResponse(lines.join("\n"), {
       headers: {
         "Content-Type": "text/csv",

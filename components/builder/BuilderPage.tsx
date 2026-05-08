@@ -20,7 +20,7 @@ const PALETTE_TILES = [
   { type: 'logo',              emoji: '🏷️', label: 'Logo',              hint: 'Dealer brand',          group: 'content' },
   { type: 'vehicle',           emoji: '🚗', label: 'Vehicle data',      hint: 'Stock, VIN, Year…',     group: 'content' },
   { type: 'msrp',              emoji: '💲', label: 'MSRP line',         hint: 'Label + price',         group: 'content', addendum: true },
-  { type: 'options',           emoji: '📋', label: 'Required Options',  hint: 'Dealer-installed items', group: 'content', addendum: true },
+  { type: 'options',           emoji: '📋', label: 'Required Products',  hint: 'Dealer-installed items', group: 'content', addendum: true },
   { type: 'subtotal',          emoji: 'Σ',  label: 'Subtotal',          hint: 'Required options total', group: 'content', addendum: true },
   { type: 'askbar',            emoji: '$',  label: 'Asking price',      hint: 'MSRP + required',       group: 'content' },
   { type: 'dealer',            emoji: '🏠', label: 'Dealer address',    hint: 'Contact info',          group: 'content' },
@@ -32,7 +32,7 @@ const PALETTE_TILES = [
   { type: 'customtext',        emoji: 'T',  label: 'Custom text',       hint: 'Free content',          group: 'structural' },
   { type: 'sigline',           emoji: '✎',  label: 'Signature line',    hint: 'Buyer + date',          group: 'structural' },
   { type: 'infobox',           emoji: '📦', label: 'Infobox',           hint: 'EPA, QR, photo…',       group: 'infobox', addendum: true },
-  { type: 'suggested_options', emoji: '💭', label: 'Suggested Options', hint: 'Optional buyer add-ons', group: 'suggested', addendum: true },
+  { type: 'suggested_options', emoji: '💭', label: 'Suggested Products', hint: 'Optional buyer add-ons', group: 'suggested', addendum: true },
   { type: 'suggested_price',   emoji: '💰', label: 'Suggested Price',   hint: 'MSRP + all options',    group: 'suggested', addendum: true },
 ];
 
@@ -973,7 +973,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 return (
                   <div key={group}>
                     <div style={{ fontSize: 10, fontWeight: 600, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.05em', margin: '10px 0 5px' }}>
-                      {group === 'infosheet' ? 'Infosheet' : group === 'infobox' ? 'Infobox' : group === 'content' ? 'Content' : group === 'suggested' ? 'Suggested Options' : 'Structural'}
+                      {group === 'infosheet' ? 'Infosheet' : group === 'infobox' ? 'Infobox' : group === 'content' ? 'Content' : group === 'suggested' ? 'Suggested Products' : 'Structural'}
                     </div>
                     {tiles.map(tile => {
                       const hidden = isInfosheet
@@ -1600,7 +1600,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
 
       {w.type === 'options' && (
         <EpSection>
-          <Eps>Required Options Table</Eps>
+          <Eps>Required Products Table</Eps>
           <Fd label="Section label"><input value={(d.sectionLabel as string) || ''} onChange={e => u('sectionLabel', e.target.value)} style={fiStyle} /></Fd>
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Shows dealer-installed Required options only. Option names and prices are set per vehicle in the addendum editor.</div>
           <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
@@ -1609,7 +1609,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
 
       {w.type === 'suggested_options' && (
         <EpSection>
-          <Eps>Suggested Options Table</Eps>
+          <Eps>Suggested Products Table</Eps>
           <Fd label="Section label"><input value={(d.sectionLabel as string) || ''} onChange={e => u('sectionLabel', e.target.value)} style={fiStyle} /></Fd>
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Shows Suggested options only. Requires a Combo background template to separate sections visually.</div>
           <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />

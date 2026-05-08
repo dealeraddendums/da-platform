@@ -142,7 +142,7 @@ function OptionsUsageReport() {
             <thead>
               <tr>
                 <th style={{ ...th, width: 48 }}>#</th>
-                <th style={th}>Option Name</th>
+                <th style={th}>Product Name</th>
                 <th style={{ ...th, textAlign: "right" }}>Applications</th>
                 <th style={{ ...th, textAlign: "right" }}>% of Total</th>
               </tr>

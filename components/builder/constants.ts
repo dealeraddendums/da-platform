@@ -41,12 +41,12 @@ export const LAYOUT_INFOSHEET: Record<string, { x: number; y: number; w: number;
 };
 
 export const WIDGET_LABELS: Record<string, string> = {
-  logo: 'Logo', vehicle: 'Vehicle data', msrp: 'MSRP', options: 'Required Options',
+  logo: 'Logo', vehicle: 'Vehicle data', msrp: 'MSRP', options: 'Required Products',
   subtotal: 'Subtotal', askbar: 'Asking price', dealer: 'Dealer address',
   headerbar: 'Header bar', customtext: 'Custom text', sigline: 'Signature',
   infobox: 'Infobox', description: 'Description', features: 'Features',
   barcode: 'Barcode', qrcode: 'QR Code', custom: 'Custom',
-  suggested_options: 'Suggested Options', suggested_price: 'Suggested Price',
+  suggested_options: 'Suggested Products', suggested_price: 'Suggested Price',
 };
 
 export const UNIQUE_WIDGETS = [
@@ -75,7 +75,7 @@ export const DEFS: Record<string, Record<string, unknown>> = {
   },
   msrp: { label: 'Manufacturer Retail Price:', value: '$27,100.00', divider: true, fontSize: 1.0 },
   options: {
-    sectionLabel: 'Dealer Installed Options:',
+    sectionLabel: 'Dealer Installed Products:',
     fontSize: 1.0,
     items: [
       { name: 'Lifetime Warranty CERAMIC TINT', desc: '', price: '$799.00' },
@@ -115,7 +115,7 @@ export const DEFS: Record<string, Record<string, unknown>> = {
   barcode: { vin: '', stock: '' },
   qrcode: { url: 'https://dealeraddendums.com', label: 'Scan for more info', size: 120 },
   suggested_options: {
-    sectionLabel: 'Suggested Options:',
+    sectionLabel: 'Suggested Products:',
     fontSize: 1.0,
     items: [],
   },
