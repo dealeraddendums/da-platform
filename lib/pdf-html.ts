@@ -240,6 +240,11 @@ body { width: ${paper.w}px; height: ${paper.h}px; overflow: hidden; background: 
 .paper { position: relative; width: ${paper.w}px; height: ${paper.h}px; background: #fff; overflow: hidden; }
 .frame { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .frame img { width: 100%; height: 100%; display: block; mix-blend-mode: multiply; }
+.description-html p { margin: 0; }
+.description-html ul { margin: 0; padding-left: 1.2em; list-style-type: disc; }
+.description-html ul ul { list-style-type: circle; padding-left: 1.2em; }
+.description-html ol { margin: 0; padding-left: 1.2em; }
+.description-html li { margin: 0; padding: 0; }
 </style>
 </head>
 <body>

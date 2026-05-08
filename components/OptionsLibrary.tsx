@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { formatOptionPrice } from "@/lib/option-price";
 import type { AddendumLibraryRow } from "@/lib/db";
 import ImageUploadPicker from "@/components/ImageUploadPicker";
+import RichTextEditor from "@/components/RichTextEditor";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -264,12 +265,12 @@ function OptionForm({
             {aiGenerating ? "Generating…" : "✦ Generate"}
           </button>
         </div>
-        <textarea
+        <RichTextEditor
           value={form.description}
-          onChange={e => { f("description", e.target.value); setAiGenerated(false); }}
-          style={{ ...inp, height: 64, resize: "vertical", opacity: aiGenerating ? 0.5 : 1 }}
+          onChange={(html) => { f("description", html); setAiGenerated(false); }}
           placeholder={aiGenerating ? "Generating description…" : "Optional description shown under the product name"}
           disabled={aiGenerating}
+          minHeight={64}
         />
         {aiGenerated && !aiGenerating && (
           <p style={{ fontSize: 11, color: "#1565c0", marginTop: 4, marginBottom: 0 }}>✦ AI generated — edit as needed</p>

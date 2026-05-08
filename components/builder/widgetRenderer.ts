@@ -2,6 +2,21 @@ import { IB_DEFAULT } from './constants';
 
 type D = Record<string, unknown>;
 
+function looksLikeHtml(s: string): boolean {
+  return /<[a-z][^>]*>/i.test(s);
+}
+
+function renderDescription(desc: string, fontPx: number): string {
+  if (!desc) return '';
+  const baseStyle = `font-size:${fontPx}px;color:#666;padding-left:8px;margin-top:1px`;
+  if (looksLikeHtml(desc)) {
+    return `<div class="description-html" style="${baseStyle}">${desc}</div>`;
+  }
+  // Escape plain text to keep parity with previous behavior.
+  const escaped = desc.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<div style="${baseStyle}">${escaped}</div>`;
+}
+
 export function renderW(type: string, d: D, fontScale: number): string {
   const fs = fontScale;
 
@@ -42,7 +57,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const ls = (d.lineSpacing as number) || 1.2;
     const items = (d.items as Array<{name:string;desc:string;price:string}>) || [];
     return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div>${items.map(it =>
-      `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0;line-height:${ls}"><div><div style="font-size:${sz}px;font-weight:700;color:#333">${it.name}</div>${it.desc ? `<div style="font-size:${szm}px;color:#666;padding-left:8px;margin-top:1px">${it.desc}</div>` : ''}</div><div style="font-size:${sz}px;font-weight:700;color:#333;font-family:monospace;white-space:nowrap;padding-left:6px;flex-shrink:0">${it.price}</div></div>`
+      `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0;line-height:${ls}"><div><div style="font-size:${sz}px;font-weight:700;color:#333">${it.name}</div>${renderDescription(it.desc, szm)}</div><div style="font-size:${sz}px;font-weight:700;color:#333;font-family:monospace;white-space:nowrap;padding-left:6px;flex-shrink:0">${it.price}</div></div>`
     ).join('')}</div>`;
   }
 
@@ -55,7 +70,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
       return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div><div style="font-size:${szm}px;color:#bbb;font-style:italic">Suggested products will appear here at print time.</div></div>`;
     }
     return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div>${items.map(it =>
-      `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0;line-height:${ls}"><div><div style="font-size:${sz}px;font-weight:700;color:#333">${it.name}</div>${it.desc ? `<div style="font-size:${szm}px;color:#666;padding-left:8px;margin-top:1px">${it.desc}</div>` : ''}</div><div style="font-size:${sz}px;font-weight:700;color:#333;font-family:monospace;white-space:nowrap;padding-left:6px;flex-shrink:0">${it.price}</div></div>`
+      `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0;line-height:${ls}"><div><div style="font-size:${sz}px;font-weight:700;color:#333">${it.name}</div>${renderDescription(it.desc, szm)}</div><div style="font-size:${sz}px;font-weight:700;color:#333;font-family:monospace;white-space:nowrap;padding-left:6px;flex-shrink:0">${it.price}</div></div>`
     ).join('')}</div>`;
   }
 

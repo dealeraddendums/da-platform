@@ -869,6 +869,15 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   return (
     <div style={{ fontFamily: "'Roboto', -apple-system, sans-serif", display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', fontSize: 13, background: '#3a6897', color: '#333' }}>
 
+      {/* Canvas-side CSS for HTML product descriptions — keep in sync with lib/pdf-html.ts */}
+      <style jsx global>{`
+        .description-html p { margin: 0; }
+        .description-html ul { margin: 0; padding-left: 1.2em; list-style-type: disc; }
+        .description-html ul ul { list-style-type: circle; padding-left: 1.2em; }
+        .description-html ol { margin: 0; padding-left: 1.2em; }
+        .description-html li { margin: 0; padding: 0; }
+      `}</style>
+
       {/* TOPBAR */}
       <div style={{ height: 50, background: '#2a2b3c', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', flexShrink: 0, gap: 8 }}>
         {/* Left: canvas status */}
