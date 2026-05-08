@@ -5,6 +5,7 @@ import AddVehicleModal from "./AddVehicleModal";
 import EditVehicleModal from "./EditVehicleModal";
 import PrintPreviewModal from "./PrintPreviewModal";
 import PdfBuildingOverlay from "./PdfBuildingOverlay";
+import VehicleHistoryPanel from "./VehicleHistoryPanel";
 import type { DealerVehicleRow, DealerVehicleArchiveRow } from "@/lib/db";
 
 type Props = { dealerId: string; isSuperAdmin?: boolean };
@@ -117,6 +118,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
   const [bulkPrinting, setBulkPrinting] = useState(false);
   const [bulkModal, setBulkModal] = useState<{ url: string; docType: "addendum" | "infosheet" | "buyer_guide"; count: number } | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<DealerVehicleRow | null>(null);
+  const [historyVehicle, setHistoryVehicle] = useState<{ id: string; stockNumber: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -421,7 +423,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
                   <SortTh label="Condition" col="condition" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <SortTh label="MSRP" col="msrp" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <SortTh label="Added" col="date_added" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-                  {["Edit", "Print Now"].map((h) => (
+                  {["Edit", "History", "Print Now"].map((h) => (
                     <th key={h} className="text-left px-3 py-2.5" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -455,6 +457,14 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
                           style={{ height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, background: "#fff", color: "#333", border: "1px solid #c0c0c0", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
                         >
                           Edit
+                        </button>
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          onClick={() => setHistoryVehicle({ id: v.id, stockNumber: v.stock_number })}
+                          style={{ height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, background: "#fff", color: "#78828c", border: "1px solid #c0c0c0", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
+                        >
+                          History
                         </button>
                       </td>
                       <td className="px-3 py-2">
@@ -511,6 +521,15 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
             setEditingVehicle(null);
           }}
           onClose={() => setEditingVehicle(null)}
+        />
+      )}
+
+      {/* History panel */}
+      {historyVehicle && (
+        <VehicleHistoryPanel
+          vehicleId={historyVehicle.id}
+          stockNumber={historyVehicle.stockNumber}
+          onClose={() => setHistoryVehicle(null)}
         />
       )}
 
