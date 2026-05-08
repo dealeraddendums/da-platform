@@ -6,7 +6,7 @@ type Params = { params: { id: string } };
 
 export type HistoryEntry = {
   id: string;
-  action: "import" | "edit" | "print" | "delete" | "restored_from_archive";
+  action: "import" | "edit" | "print" | "delete" | "restored_from_archive" | "added";
   method: string | null;
   document_type: string | null;
   changed_by: string | null;
@@ -14,7 +14,7 @@ export type HistoryEntry = {
   user_full_name: string | null;
   changes: Record<string, { old: unknown; new: unknown }> | null;
   created_at: string;
-  source: "audit_log" | "print_history";
+  source: "audit_log" | "print_history" | "synthesized";
 };
 
 /** GET /api/dealer-vehicles/[id]/history — full audit trail */
@@ -30,7 +30,7 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
 
   const admin = createAdminSupabaseClient();
 
-  const [auditRes, printRes] = await Promise.all([
+  const [auditRes, printRes, vehicleRes] = await Promise.all([
     admin
       .from("vehicle_audit_log")
       .select("*")
@@ -45,6 +45,12 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
       .eq("dealer_id", dealerId)
       .order("created_at", { ascending: false })
       .limit(200),
+    admin
+      .from("dealer_vehicles")
+      .select("date_added, created_by")
+      .eq("id", params.id)
+      .eq("dealer_id", dealerId)
+      .maybeSingle<{ date_added: string; created_by: string | null }>(),
   ]);
 
   if (auditRes.error) return NextResponse.json({ error: auditRes.error.message }, { status: 500 });
@@ -106,6 +112,26 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
 
   const combined = [...auditEntries, ...supplementPrints]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  // Fallback: if no audit log "import" event exists (e.g. ETL-created vehicles or
+  // pre-audit-log rows), synthesize an "added" entry from dealer_vehicles. This is
+  // read-only — never written back to the database.
+  const hasImportEvent = combined.some(e => e.action === "import" || e.action === "added");
+  const dv = vehicleRes.data;
+  if (!hasImportEvent && dv?.date_added) {
+    combined.push({
+      id: `synthesized-added-${params.id}`,
+      action: "added",
+      method: "auto",
+      document_type: null,
+      changed_by: null,
+      changed_by_email: null,
+      user_full_name: dv.created_by ?? null,
+      changes: null,
+      created_at: dv.date_added,
+      source: "synthesized",
+    });
+  }
 
   return NextResponse.json({ data: combined });
 }

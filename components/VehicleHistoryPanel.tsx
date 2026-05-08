@@ -27,6 +27,8 @@ const LONG_FIELDS = new Set(["description", "options"]);
 
 function actionLabel(entry: HistoryEntry): string {
   switch (entry.action) {
+    case "added":
+      return "Added to system";
     case "import":
       return "Vehicle added";
     case "edit": {
@@ -60,6 +62,10 @@ function byWhom(entry: HistoryEntry): string {
   const m = entry.method ?? "";
   const name = entry.user_full_name ?? null;
 
+  // Synthesized "added" entries surface dealer_vehicles.created_by verbatim
+  // (e.g. "automatic80" for ETL jobs, or whatever the manual creator wrote).
+  if (entry.source === "synthesized") return name ?? "System";
+
   if (m === "etl" || m.startsWith("automatic")) return "ETL Import";
   if (m === "cron") return "System";
   if (m === "vin_decoder") return name ? `VIN Decoder (${name})` : "VIN Decoder";
@@ -75,6 +81,7 @@ function byWhom(entry: HistoryEntry): string {
 }
 
 const DOT_COLORS: Record<string, string> = {
+  added:                   "#4caf50",
   import:                  "#4caf50",
   edit:                    "#78828c",
   print:                   "#1976d2",
