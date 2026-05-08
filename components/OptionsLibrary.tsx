@@ -45,6 +45,11 @@ const BLANK: FormData = {
   required: true,
 };
 
+function stripHtml(html: string): string {
+  if (!html) return "";
+  return html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
+}
+
 function rowToForm(r: AddendumLibraryRow): FormData {
   return {
     option_name: r.option_name, item_price: r.item_price, description: r.description,
@@ -828,7 +833,11 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                       </td>
                       <td style={td}>
                         <span style={{ color: "#78828c", fontSize: 12 }}>
-                          {item.description ? (item.description.length > 50 ? item.description.slice(0, 50) + "…" : item.description) : <span style={{ color: "#ccc" }}>—</span>}
+                          {(() => {
+                            const plain = stripHtml(item.description ?? "");
+                            if (!plain) return <span style={{ color: "#ccc" }}>—</span>;
+                            return plain.length > 50 ? plain.slice(0, 50) + "…" : plain;
+                          })()}
                         </span>
                       </td>
                       <td style={td}>
