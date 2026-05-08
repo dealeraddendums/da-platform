@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { BuyersGuideDefaults } from "@/lib/db";
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
-import { uploadPdf } from "@/lib/s3-upload";
+import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import JSZip from "jszip";
 
 /**
@@ -109,7 +109,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── Generate ──────────────────────────────────────────────────────────────
   if (both) {
     const [enBuffer, esBuffer] = await Promise.all([generateOneLang('en'), generateOneLang('es')]);
-    const enKey = `${dealer?.internal_id ?? dvDealerId}/${vehicleId}/buyers_guide_en_${Date.now()}.pdf`;
+    // Save the English buyer's guide to the canonical {VIN}_buyers_guide.pdf slot.
+    // Spanish is delivered in the zip but we keep one canonical buyer's guide per vehicle.
+    const enKey = buildPdfKey({
+      internalId: dealer?.internal_id ?? null,
+      dealerIdFallback: dvDealerId,
+      vehicleUuid: vehicleId,
+      vin: dv.vin,
+      docType: 'buyer_guide',
+    });
     void logPrint(enBuffer, enKey).catch(err =>
       console.error("[buyers-guide] background logging error:", err instanceof Error ? err.message : err)
     );
@@ -131,7 +139,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const buffer = await generateOneLang(language);
-  const s3Key = `${dealer?.internal_id ?? dvDealerId}/${vehicleId}/buyers_guide_${language}_${Date.now()}.pdf`;
+  const s3Key = buildPdfKey({
+    internalId: dealer?.internal_id ?? null,
+    dealerIdFallback: dvDealerId,
+    vehicleUuid: vehicleId,
+    vin: dv.vin,
+    docType: 'buyer_guide',
+  });
   void logPrint(buffer, s3Key).catch(err =>
     console.error("[buyers-guide] background logging error:", err instanceof Error ? err.message : err)
   );

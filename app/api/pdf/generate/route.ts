@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { VehicleAuditLogInsert, AddendumHistoryInsert, AddendumDataInsert, DealerSettingsRow } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
-import { uploadPdf } from "@/lib/s3-upload";
+import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 
 type BgOption = { option_name: string; option_price?: string; description?: string | null; required?: boolean };
 
@@ -545,7 +545,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: err instanceof Error ? err.message : "PDF render failed" }, { status: 500 });
     }
 
-    const s3Key = `${dealer?.internal_id ?? dv.dealer_id}/${dealerVehicleId}/${docType}_${Date.now()}.pdf`;
+    const s3Key = buildPdfKey({
+      internalId: dealer?.internal_id ?? null,
+      dealerIdFallback: dv.dealer_id,
+      vehicleUuid: dealerVehicleId,
+      vin: dv.vin,
+      docType,
+    });
 
     // S3 upload + all DB logging happen in the background — PDF bytes returned immediately
     void logGeneratePdf(pdfBuffer, s3Key, dealerVehicleId, dv, dealer, claims, docType, options, admin)

@@ -5,7 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerSettingsRow, AddendumDataInsert, BuyersGuideDefaults } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
-import { uploadPdf } from "@/lib/s3-upload";
+import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimer } from "@/lib/options-engine";
@@ -238,7 +238,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             warranty,
           });
 
-          const s3Key = `${dealer?.internal_id ?? dv.dealer_id}/${vehicleId}/buyers_guide_en_${Date.now()}.pdf`;
+          const s3Key = buildPdfKey({
+            internalId: dealer?.internal_id ?? null,
+            dealerIdFallback: dv.dealer_id,
+            vehicleUuid: vehicleId,
+            vin: dv.vin,
+            docType: "buyer_guide",
+          });
           bgJobs.push({ vehicleId, pdfBuffer, s3Key, dvDealerId: dv.dealer_id, dvVin: dv.vin ?? null, dealerUuid: dealer?.id ?? null, docType: "buyer_guide", options: [] });
           pdfBuffers.push(pdfBuffer);
           console.log(`[BULK]   buyers_guide rendered vehicleId=${vehicleId}`);
@@ -652,7 +658,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const pdfBuffer = await renderPdf(html, effectivePaperSizeStr, { customDims: customPaperDims, browser: sharedBrowser });
         console.log(`[BULK]   pdf_rendered vehicleId=${vehicleId} bytes=${pdfBuffer.length}`);
 
-        const s3Key = `${dealer?.internal_id ?? dv.dealer_id}/${vehicleId}/${docType}_${Date.now()}.pdf`;
+        const s3Key = buildPdfKey({
+          internalId: dealer?.internal_id ?? null,
+          dealerIdFallback: dv.dealer_id,
+          vehicleUuid: vehicleId,
+          vin: dv.vin,
+          docType,
+        });
         bgJobs.push({ vehicleId, pdfBuffer, s3Key, dvDealerId: dv.dealer_id, dvVin: dv.vin ?? null, dealerUuid: dealer?.id ?? null, docType, options });
         pdfBuffers.push(pdfBuffer);
         console.log(`[BULK]   rendered vehicleId=${vehicleId}`);

@@ -6,6 +6,32 @@ const BUCKET = 'dealer-addendums';
 const LOGO_BUCKET = 'new-dealer-logos';
 const LOGO_BASE_URL = 'https://new-dealer-logos.s3.us-east-1.amazonaws.com';
 
+export type PdfDocType = 'addendum' | 'infosheet' | 'buyer_guide';
+
+/**
+ * Canonical per-vehicle PDF key. Dealer website integrations rely on this
+ * format being stable: addendum is the bare {VIN}.pdf slot, infosheet and
+ * buyer's guide get suffixed siblings. Falls back to vehicle UUID for the
+ * filename when VIN is missing so we never produce an empty path segment.
+ */
+export function buildPdfKey(opts: {
+  internalId: string | number | null | undefined;
+  dealerIdFallback: string;
+  vehicleUuid: string;
+  vin: string | null | undefined;
+  docType: PdfDocType;
+}): string {
+  const dealerSegment = opts.internalId != null && String(opts.internalId).trim()
+    ? String(opts.internalId).trim()
+    : opts.dealerIdFallback;
+  const vinTrimmed = opts.vin?.trim();
+  const filename = vinTrimmed && vinTrimmed.length > 0 ? vinTrimmed : opts.vehicleUuid;
+  const suffix = opts.docType === 'infosheet' ? '_infosheet'
+    : opts.docType === 'buyer_guide' ? '_buyers_guide'
+    : '';
+  return `${dealerSegment}/${opts.vehicleUuid}/${filename}${suffix}.pdf`;
+}
+
 function getClient(): S3Client {
   return new S3Client({
     region: 'us-east-1',
