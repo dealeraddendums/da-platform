@@ -77,6 +77,7 @@ export const DEFS: Record<string, Record<string, unknown>> = {
   options: {
     sectionLabel: 'Dealer Installed Products:',
     fontSize: 1.0,
+    lineSpacing: 1.2,
     items: [
       { name: 'Lifetime Warranty CERAMIC TINT', desc: '', price: '$799.00' },
       { name: 'Door Edge & Cup Guards', desc: '', price: '$199.00' },
@@ -117,6 +118,7 @@ export const DEFS: Record<string, Record<string, unknown>> = {
   suggested_options: {
     sectionLabel: 'Suggested Products:',
     fontSize: 1.0,
+    lineSpacing: 1.2,
     items: [],
   },
   suggested_price: { label: 'Suggested Asking Price:', value: '$29,000.00', labelColor: '#ffffff', valueColor: '#000000', labelFontSize: 1.0, valueFontSize: 1.0 },

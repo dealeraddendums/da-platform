@@ -1604,6 +1604,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Fd label="Section label"><input value={(d.sectionLabel as string) || ''} onChange={e => u('sectionLabel', e.target.value)} style={fiStyle} /></Fd>
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Shows dealer-installed Required options only. Option names and prices are set per vehicle in the addendum editor.</div>
           <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
+          <LineSpacingStepper d={d} u={u} />
         </EpSection>
       )}
 
@@ -1613,6 +1614,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Fd label="Section label"><input value={(d.sectionLabel as string) || ''} onChange={e => u('sectionLabel', e.target.value)} style={fiStyle} /></Fd>
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Shows Suggested options only. Requires a Combo background template to separate sections visually.</div>
           <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
+          <LineSpacingStepper d={d} u={u} />
         </EpSection>
       )}
 
@@ -1941,6 +1943,27 @@ function TogSwitch({ checked, onChange }: { checked: boolean; onChange: (v: bool
     <div style={{ position: 'relative', width: 30, height: 17, flexShrink: 0, cursor: 'pointer' }} onClick={() => onChange(!checked)}>
       <div style={{ position: 'absolute', inset: 0, background: checked ? '#1976d2' : '#c0c0c0', borderRadius: 20, transition: 'background .15s' }} />
       <div style={{ position: 'absolute', top: 2, left: checked ? 15 : 2, width: 13, height: 13, background: '#fff', borderRadius: '50%', transition: 'left .15s' }} />
+    </div>
+  );
+}
+
+function LineSpacingStepper({ d, u }: {
+  d: Record<string, unknown>;
+  u: (key: string, val: unknown) => void;
+}) {
+  const cur = (d.lineSpacing as number) || 1.2;
+  const set = (delta: number) => {
+    const next = Math.round(Math.max(0.8, Math.min(3.0, cur + delta)) * 10) / 10;
+    if (next !== cur) u('lineSpacing', next);
+  };
+  return (
+    <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e0e0e0' }}>
+      <div style={{ fontSize: 11, color: '#55595c', marginBottom: 4 }}>Line Spacing</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button onClick={() => set(-0.1)} style={stepBtn}>−</button>
+        <div style={{ flex: 1, textAlign: 'center', fontSize: 11, fontFamily: 'monospace', color: '#1976d2' }}>{cur.toFixed(1)}</div>
+        <button onClick={() => set(0.1)} style={stepBtn}>+</button>
+      </div>
     </div>
   );
 }
