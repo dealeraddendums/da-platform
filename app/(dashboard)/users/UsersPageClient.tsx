@@ -961,7 +961,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
         <form onSubmit={handleSearch} className="flex items-center gap-2 flex-wrap">
           <input
             type="text"
-            placeholder="Search name or email…"
+            placeholder="Search name, email, or dealership…"
             value={searchInput}
             onChange={e => setSearchInput(e.target.value)}
             className="input"

@@ -5,6 +5,35 @@ import type { UserRole } from "@/lib/db";
 
 const DEALER_ROLES: UserRole[] = ["dealer_admin", "dealer_user", "dealer_restricted"];
 
+// Lookup helpers used by the search box: find dealer text_ids and group UUIDs
+// whose name matches the search term so we can OR them into the profiles
+// query alongside name/email matches. Capped at 500 to keep the OR clause from
+// blowing past Postgrest URL limits — a typed-out search will narrow long
+// before that cap matters in practice.
+async function dealerIdsMatchingName(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  term: string,
+): Promise<string[]> {
+  const { data } = await admin
+    .from("dealers")
+    .select("dealer_id")
+    .ilike("name", `%${term}%`)
+    .limit(500);
+  return (data ?? []).map(d => d.dealer_id as string).filter(Boolean);
+}
+
+async function groupIdsMatchingName(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  term: string,
+): Promise<string[]> {
+  const { data } = await admin
+    .from("groups")
+    .select("id")
+    .ilike("name", `%${term}%`)
+    .limit(500);
+  return (data ?? []).map(g => g.id as string).filter(Boolean);
+}
+
 /**
  * GET /api/users
  * super_admin: all users, paginated, with HubSpot enrichment.
@@ -99,7 +128,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       q = q.eq("group_id", groupId);
     }
 
-    if (search)     q = q.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+    if (search) {
+      const matchingDealerIds = await dealerIdsMatchingName(admin, search);
+      const dealerClause = matchingDealerIds.length > 0
+        ? `,dealer_id.in.(${matchingDealerIds.join(",")})`
+        : "";
+      q = q.or(`full_name.ilike.%${search}%,email.ilike.%${search}%${dealerClause}`);
+    }
     if (roleFilter) q = q.eq("role", roleFilter as UserRole);
 
     const { data: profiles, count, error: dbErr } = await q;
@@ -133,7 +168,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .order("full_name", { ascending: true, nullsFirst: false })
     .range(from, to);
 
-  if (search)     q = q.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+  if (search) {
+    const [matchingDealerIds, matchingGroupIds] = await Promise.all([
+      dealerIdsMatchingName(admin, search),
+      groupIdsMatchingName(admin, search),
+    ]);
+    const clauses = [`full_name.ilike.%${search}%`, `email.ilike.%${search}%`];
+    if (matchingDealerIds.length > 0) clauses.push(`dealer_id.in.(${matchingDealerIds.join(",")})`);
+    if (matchingGroupIds.length > 0) clauses.push(`group_id.in.(${matchingGroupIds.join(",")})`);
+    q = q.or(clauses.join(","));
+  }
   if (roleFilter) q = q.eq("role", roleFilter as UserRole);
 
   const { data: profiles, count, error: dbErr } = await q;
