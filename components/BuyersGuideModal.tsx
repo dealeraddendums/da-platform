@@ -7,6 +7,7 @@ type Props = {
   dealerVehicleId: string;
   vehicleName: string;
   onClose: () => void;
+  onPrinted?: () => void;
 };
 
 const WARRANTY_LABELS: Record<string, string> = {
@@ -22,7 +23,7 @@ const NON_DEALER = [
   { key: "other_used", label: "Other used vehicle warranty applies" },
 ];
 
-export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose }: Props) {
+export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose, onPrinted }: Props) {
   const [loading, setLoading] = useState(true);
   const [warranty, setWarranty] = useState<BuyersGuideDefaults>({ warranty_type: "as_is" });
   const [language, setLanguage] = useState<"en" | "es">("en");
@@ -85,6 +86,7 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
         a.download = `${vehicleName.replace(/[^a-zA-Z0-9]+/g, "_")}_buyers_guide_en_es.zip`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 2000);
+        onPrinted?.();
         setGenerating(false);
         return;
       }
@@ -95,6 +97,7 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
       }
       const blob = await res.blob();
       setPdfUrl(URL.createObjectURL(blob));
+      onPrinted?.();
     } catch (e) {
       setGenError(e instanceof Error ? e.message : "Generation failed");
     } finally {

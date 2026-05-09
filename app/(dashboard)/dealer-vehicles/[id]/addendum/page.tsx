@@ -117,7 +117,17 @@ export default async function DealerVehicleAddendumPage({
         </div>
       </div>
 
-      <AddendumEditor vehicle={vehicle} dealerVehicleId={dv.id} initialDocType={initialDocType} />
+      <AddendumEditor
+        vehicle={vehicle}
+        dealerVehicleId={dv.id}
+        initialDocType={initialDocType}
+        initialPrintState={{
+          addendum: dv.print_status === 1,
+          infosheet: dv.print_info === 1,
+          buyer_guide: dv.print_guide === 1,
+          lastDate: dv.print_date ?? null,
+        }}
+      />
     </div>
   );
 }

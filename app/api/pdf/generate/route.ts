@@ -37,14 +37,22 @@ async function logGeneratePdf(
   });
   if (phErr) console.error("[pdf/generate] print_history insert failed:", phErr.message, phErr.code);
 
-  // Mark the canonical print fields on dealer_vehicles so dashboard counts and
-  // legacy-aware filters see this vehicle as printed without depending on
-  // print_history. print_user stores legacy Aurora ID for legacy rows; we use
-  // the Supabase user UUID for new prints.
+  // Mark the canonical print fields on dealer_vehicles so dashboard counts,
+  // legacy-aware filters, and the per-document button states see this vehicle
+  // as printed without depending on print_history. The doc type controls
+  // which column flips: addendum → print_status, infosheet → print_info,
+  // buyer_guide → print_guide.
   const todayDate = new Date().toISOString().split("T")[0];
+  const dvUpdate: Partial<{ print_status: number; print_info: number; print_guide: number; print_date: string; print_user: string }> = {
+    print_date: todayDate,
+    print_user: claims.sub,
+  };
+  if (docType === "addendum") dvUpdate.print_status = 1;
+  else if (docType === "infosheet") dvUpdate.print_info = 1;
+  else if (docType === "buyer_guide") dvUpdate.print_guide = 1;
   const { error: dvUpdateErr } = await admin
     .from("dealer_vehicles")
-    .update({ print_status: 1, print_date: todayDate, print_user: claims.sub })
+    .update(dvUpdate)
     .eq("id", dealerVehicleId);
   if (dvUpdateErr) console.error("[pdf/generate] dealer_vehicles print update failed:", dvUpdateErr.message);
 

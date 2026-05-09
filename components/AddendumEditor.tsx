@@ -37,15 +37,23 @@ type LibraryOption = {
   required?: boolean;
 };
 
+type PrintState = {
+  addendum: boolean;
+  infosheet: boolean;
+  buyer_guide: boolean;
+  lastDate: string | null;
+};
+
 type Props = {
   vehicle: VehicleRow;
   dealerVehicleId: string;
   initialDocType?: "infosheet" | "buyer_guide";
+  initialPrintState?: PrintState;
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocType }: Props) {
+export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocType, initialPrintState }: Props) {
   // Use UUID for manual vehicles (vehicle.id===0) so options are saved per-vehicle, not shared
   const vehicleId: string | number = vehicle.id === 0 ? dealerVehicleId : vehicle.id;
   const dealerId = vehicle.DEALER_ID;
@@ -76,6 +84,19 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
   const [printDoc, setPrintDoc] = useState<"addendum" | "infosheet" | "buyer_guide" | null>(
     initialDocType ?? null
   );
+
+  // Per-document print state, seeded from server props. Updated optimistically
+  // when a print runs so the button color reflects "this dealer just printed
+  // it" without a page reload.
+  const [printState, setPrintState] = useState<PrintState>(initialPrintState ?? {
+    addendum: false, infosheet: false, buyer_guide: false, lastDate: null,
+  });
+
+  function todayIso(): string { return new Date().toISOString().split("T")[0]; }
+  function formatPrintDate(d: string | null): string {
+    if (!d) return "";
+    return new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  }
 
   // Drag-and-drop
   const dragIdx = useRef<number | null>(null);
@@ -613,33 +634,35 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
             Create Document
           </p>
           <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              className="btn btn-primary w-full text-sm"
-              style={{ justifyContent: "flex-start", textAlign: "left" }}
-              disabled={saving}
-              onClick={() => void handlePrint("addendum")}
-            >
-              {saving ? "Saving…" : "Addendum"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary w-full text-sm"
-              style={{ justifyContent: "flex-start", textAlign: "left" }}
-              disabled={saving}
-              onClick={() => void handlePrint("infosheet")}
-            >
-              {saving ? "Saving…" : "Info Sheet"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary w-full text-sm"
-              style={{ justifyContent: "flex-start", textAlign: "left" }}
-              disabled={saving}
-              onClick={() => void handlePrint("buyer_guide")}
-            >
-              {saving ? "Saving…" : "Buyer Guide"}
-            </button>
+            {(["addendum", "infosheet", "buyer_guide"] as const).map((dt) => {
+              const label = dt === "addendum" ? "Addendum" : dt === "infosheet" ? "Info Sheet" : "Buyer Guide";
+              const printed = printState[dt];
+              const tooltip = printed && printState.lastDate
+                ? `Last printed ${formatPrintDate(printState.lastDate)}`
+                : undefined;
+              const baseStyle: React.CSSProperties = {
+                height: 36, padding: "0 14px",
+                fontSize: 13, fontWeight: 600,
+                borderRadius: 6, justifyContent: "flex-start", textAlign: "left",
+                width: "100%", cursor: saving ? "default" : "pointer",
+                display: "inline-flex", alignItems: "center",
+              };
+              const style: React.CSSProperties = printed
+                ? { ...baseStyle, background: "#1976d2", color: "#fff", border: "1px solid #1565c0" }
+                : { ...baseStyle, background: "#fff", color: "#333", border: "1px solid #c0c0c0" };
+              return (
+                <button
+                  key={dt}
+                  type="button"
+                  title={tooltip}
+                  style={style}
+                  disabled={saving}
+                  onClick={() => void handlePrint(dt)}
+                >
+                  {saving ? "Saving…" : label}
+                </button>
+              );
+            })}
           </div>
           <div className="mt-4 pt-4" style={{ borderTop: "1px solid var(--border)" }}>
             <a
@@ -700,6 +723,15 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
           docType={printDoc}
           vehicleName={[vehicle.YEAR, vehicle.MAKE, vehicle.MODEL].filter(Boolean).join(" ") || "Vehicle"}
           onClose={() => setPrintDoc(null)}
+          onPrinted={() => {
+            const dt = printDoc;
+            setPrintState(prev => ({
+              ...prev,
+              addendum: dt === 'addendum' ? true : prev.addendum,
+              infosheet: dt === 'infosheet' ? true : prev.infosheet,
+              lastDate: todayIso(),
+            }));
+          }}
         />
       )}
       {printDoc === 'buyer_guide' && (
@@ -707,6 +739,9 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
           dealerVehicleId={dealerVehicleId}
           vehicleName={[vehicle.YEAR, vehicle.MAKE, vehicle.MODEL].filter(Boolean).join(" ") || "Vehicle"}
           onClose={() => setPrintDoc(null)}
+          onPrinted={() => {
+            setPrintState(prev => ({ ...prev, buyer_guide: true, lastDate: todayIso() }));
+          }}
         />
       )}
     </div>

@@ -44,21 +44,26 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
 }
 
-function PrintNowBtn({ vehicleId, everPrinted }: {
+function PrintNowBtn({ vehicleId, printed, printDate }: {
   vehicleId: string;
-  everPrinted: boolean;
+  printed: boolean;
+  printDate: string | null;
 }) {
+  const tooltip = printed && printDate
+    ? `Last printed ${new Date(`${printDate}T12:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`
+    : undefined;
   return (
     <a
       href={`/vehicles/${vehicleId}/addendum`}
+      title={tooltip}
       style={{
         display: "inline-block",
         height: 28, padding: "0 11px", fontSize: 11, fontWeight: 600,
         borderRadius: 4, whiteSpace: "nowrap", textDecoration: "none",
         lineHeight: "28px",
-        background: everPrinted ? "#1976d2" : "#fff",
-        color: everPrinted ? "#fff" : "#333",
-        border: everPrinted ? "1px solid #1565c0" : "1px solid #c0c0c0",
+        background: printed ? "#4caf50" : "#fff",
+        color: printed ? "#fff" : "#333",
+        border: printed ? "1px solid #43a047" : "1px solid #c0c0c0",
       }}
     >
       Print Now
@@ -468,7 +473,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
                         </button>
                       </td>
                       <td className="px-3 py-2">
-                        <PrintNowBtn vehicleId={v.id} everPrinted={printed.length > 0} />
+                        <PrintNowBtn vehicleId={v.id} printed={v.print_status === 1} printDate={v.print_date ?? null} />
                       </td>
                     </tr>
                   );

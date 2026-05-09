@@ -52,11 +52,12 @@ export async function POST(
 
   if (phErr) return NextResponse.json({ error: phErr.message }, { status: 500 });
 
-  // Reset canonical print fields on dealer_vehicles too — dashboard counts and
-  // the print-status filter read from these now.
+  // Reset canonical print fields on dealer_vehicles too — dashboard counts,
+  // the print-status filter, and the Create Document button states read from
+  // these. Reset all three doc-type flags.
   const { error: dvResetErr } = await admin
     .from("dealer_vehicles")
-    .update({ print_status: 0, print_date: null, print_user: null })
+    .update({ print_status: 0, print_info: 0, print_guide: 0, print_date: null, print_user: null })
     .eq("dealer_id", dealerId)
     .in("id", activeIds);
   if (dvResetErr) console.error("[clear-print-history] dealer_vehicles reset failed:", dvResetErr.message);

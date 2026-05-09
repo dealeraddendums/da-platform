@@ -51,12 +51,20 @@ async function uploadAndLogBulkJob(
   });
   if (phErr) console.error(`[BULK] print_history insert failed vehicleId=${job.vehicleId}:`, phErr.message);
 
-  // Mirror to dealer_vehicles canonical print fields so dashboard counts and
-  // print-status filters see legacy and platform prints uniformly.
+  // Mirror to dealer_vehicles canonical print fields. doc type controls which
+  // column flips: addendum → print_status, infosheet → print_info,
+  // buyer_guide → print_guide.
   const todayDate = new Date().toISOString().split("T")[0];
+  const dvUpdate: Partial<{ print_status: number; print_info: number; print_guide: number; print_date: string; print_user: string }> = {
+    print_date: todayDate,
+    print_user: claimsSub,
+  };
+  if (job.docType === "addendum") dvUpdate.print_status = 1;
+  else if (job.docType === "infosheet") dvUpdate.print_info = 1;
+  else if (job.docType === "buyer_guide") dvUpdate.print_guide = 1;
   const { error: dvUpdateErr } = await admin
     .from("dealer_vehicles")
-    .update({ print_status: 1, print_date: todayDate, print_user: claimsSub })
+    .update(dvUpdate)
     .eq("id", job.vehicleId);
   if (dvUpdateErr) console.error(`[BULK] dealer_vehicles print update failed vehicleId=${job.vehicleId}:`, dvUpdateErr.message);
 
