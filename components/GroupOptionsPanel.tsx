@@ -16,7 +16,7 @@ export default function GroupOptionsPanel({ groupId, isSuperAdmin = false }: Pro
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "users", label: "Users" },
-    { id: "options", label: "Corporate Options" },
+    { id: "options", label: "Corporate Products" },
     { id: "disclaimers", label: "Disclaimers" },
     { id: "templates", label: "Templates" },
   ];
@@ -349,55 +349,33 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
   );
 }
 
-// ── Corporate Options Tab ─────────────────────────────────────────────────────
+// ── Corporate Products Tab ────────────────────────────────────────────────────
 
 function OptionsTab({ groupId }: { groupId: string }) {
   return (
     <div className="space-y-6">
-      <OptionSection
-        groupId={groupId}
-        isSuggested={false}
-        title="Corporate Options (Locked)"
-        description="Automatically prepended to every dealer addendum in this group. Dealers cannot remove or edit these."
-        emptyText="No corporate options yet. These appear locked on all dealer addendums."
-        addLabel="+ Add Corporate Option"
-      />
-      <OptionSection
-        groupId={groupId}
-        isSuggested={true}
-        title="Suggested Products"
-        description="Make these options available to dealers. Use &ldquo;Assign to Dealers&rdquo; to push them to specific dealers."
-        emptyText="No suggested options yet. Add options here to make them available for dealer assignment."
-        addLabel="+ Add Suggested Option"
-      />
+      <OptionSection groupId={groupId} />
     </div>
   );
 }
 
-type OptionSectionProps = {
-  groupId: string;
-  isSuggested: boolean;
-  title: string;
-  description: string;
-  emptyText: string;
-  addLabel: string;
-};
-
 type DealerBasic = { id: string; name: string };
 
-function OptionSection({ groupId, isSuggested, title, description, emptyText, addLabel }: OptionSectionProps) {
+function OptionSection({ groupId }: { groupId: string }) {
   const [options, setOptions] = useState<GroupOptionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPrice, setNewPrice] = useState("NC");
+  const [newSuggested, setNewSuggested] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState("");
+  const [editSuggested, setEditSuggested] = useState(false);
 
-  // Assign modal state (suggested only)
+  // Assign modal state
   const [assigningOpt, setAssigningOpt] = useState<GroupOptionRow | null>(null);
   const [dealers, setDealers] = useState<DealerBasic[]>([]);
   const [selectedDealers, setSelectedDealers] = useState<Set<string>>(new Set());
@@ -410,12 +388,12 @@ function OptionSection({ groupId, isSuggested, title, description, emptyText, ad
     const res = await fetch(`/api/group-options/${groupId}`);
     if (res.ok) {
       const json = await res.json() as { data: GroupOptionRow[] };
-      setOptions(json.data.filter((o) => (o.is_suggested ?? false) === isSuggested));
+      setOptions(json.data);
     } else {
       setError("Failed to load options");
     }
     setLoading(false);
-  }, [groupId, isSuggested]);
+  }, [groupId]);
 
   useEffect(() => { void fetchOptions(); }, [fetchOptions]);
 
@@ -431,7 +409,7 @@ function OptionSection({ groupId, isSuggested, title, description, emptyText, ad
         option_name: newName.trim(),
         option_price: newPrice.trim() || "NC",
         sort_order: options.length,
-        is_suggested: isSuggested,
+        is_suggested: newSuggested,
       }),
     });
     if (res.ok) {
@@ -439,6 +417,7 @@ function OptionSection({ groupId, isSuggested, title, description, emptyText, ad
       setOptions((prev) => [...prev, json.data]);
       setNewName("");
       setNewPrice("NC");
+      setNewSuggested(false);
       setShowAddForm(false);
     } else {
       const json = await res.json() as { error?: string };
@@ -451,13 +430,18 @@ function OptionSection({ groupId, isSuggested, title, description, emptyText, ad
     setEditingId(opt.id);
     setEditName(opt.option_name);
     setEditPrice(opt.option_price);
+    setEditSuggested(opt.is_suggested ?? false);
   }
 
   async function saveEdit(opt: GroupOptionRow) {
     const res = await fetch(`/api/group-options/${groupId}/${opt.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ option_name: editName.trim(), option_price: editPrice.trim() || "NC" }),
+      body: JSON.stringify({
+        option_name: editName.trim(),
+        option_price: editPrice.trim() || "NC",
+        is_suggested: editSuggested,
+      }),
     });
     if (res.ok) {
       const json = await res.json() as { data: GroupOptionRow };
@@ -467,8 +451,7 @@ function OptionSection({ groupId, isSuggested, title, description, emptyText, ad
   }
 
   async function deleteOption(id: string) {
-    const label = isSuggested ? "suggested option" : "corporate option";
-    if (!confirm(`Remove this ${label}?`)) return;
+    if (!confirm("Remove this corporate product?")) return;
     const res = await fetch(`/api/group-options/${groupId}/${id}`, { method: "DELETE" });
     if (res.ok) setOptions((prev) => prev.filter((o) => o.id !== id));
   }
@@ -526,39 +509,84 @@ function OptionSection({ groupId, isSuggested, title, description, emptyText, ad
     setAssigning(false);
   }
 
+  const typePill = (suggested: boolean) => (
+    <span
+      className="text-xs font-semibold px-2 py-0.5 rounded-full"
+      style={{
+        background: suggested ? "#fff3e0" : "#e8f5e9",
+        color: suggested ? "#e65100" : "#2e7d32",
+        border: `1px solid ${suggested ? "#ffb74d" : "#c8e6c9"}`,
+      }}
+    >
+      {suggested ? "Suggested" : "Required"}
+    </span>
+  );
+
+  const typeToggle = (value: boolean, onChange: (v: boolean) => void) => (
+    <div style={{ display: "inline-flex", gap: 4 }}>
+      {[
+        { v: false, label: "Required", bg: "#e8f5e9", fg: "#2e7d32", bd: "#4caf50" },
+        { v: true,  label: "Suggested", bg: "#fff3e0", fg: "#e65100", bd: "#ffa500" },
+      ].map(opt => {
+        const on = value === opt.v;
+        return (
+          <button
+            key={opt.label}
+            type="button"
+            onClick={() => onChange(opt.v)}
+            style={{
+              height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, borderRadius: 4,
+              cursor: "pointer", whiteSpace: "nowrap",
+              border: `1px solid ${on ? opt.bd : "#e0e0e0"}`,
+              background: on ? opt.bg : "#fff",
+              color: on ? opt.fg : "#55595c",
+            }}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
     <>
       <div className="card overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{title}</p>
-            <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }} dangerouslySetInnerHTML={{ __html: description }} />
+            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Corporate Products</p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+              Required products are auto-prepended to every dealer addendum in this group. Suggested products are made available to dealers — use Assign to Dealers to push them.
+            </p>
           </div>
           <button className="btn btn-primary" style={{ fontSize: 12, height: 30, padding: "0 12px" }} onClick={() => setShowAddForm(true)}>
-            {addLabel}
+            + Add Corporate Product
           </button>
         </div>
 
         {error && <div className="px-5 py-2 text-xs" style={{ background: "#ffebee", color: "var(--error)" }}>{error}</div>}
 
         {showAddForm && (
-          <form onSubmit={(e) => void addOption(e)} className="px-5 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}>
-            <input autoFocus className="input text-sm flex-1" style={{ height: 32 }} placeholder="Option name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+          <form onSubmit={(e) => void addOption(e)} className="px-5 py-3 flex items-center gap-2 flex-wrap" style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}>
+            <input autoFocus className="input text-sm flex-1" style={{ height: 32, minWidth: 200 }} placeholder="Product name" value={newName} onChange={(e) => setNewName(e.target.value)} />
             <input className="input text-sm" style={{ height: 32, width: 90 }} placeholder="NC" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} />
+            {typeToggle(newSuggested, setNewSuggested)}
             <button type="submit" className="btn btn-primary text-xs" style={{ height: 32 }} disabled={saving}>{saving ? "Adding…" : "Add"}</button>
-            <button type="button" className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={() => setShowAddForm(false)}>Cancel</button>
+            <button type="button" className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={() => { setShowAddForm(false); setNewSuggested(false); }}>Cancel</button>
           </form>
         )}
 
         {loading ? (
           <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading…</div>
         ) : options.length === 0 ? (
-          <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>{emptyText}</div>
+          <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+            No corporate products yet. Required products appear locked on every dealer addendum; Suggested products can be pushed to specific dealers.
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
-                {["Option", "Price", "Active", ""].map((h) => (
+                {["Product", "Price", "Type", "Active", ""].map((h) => (
                   <th key={h} className="px-4 py-2 text-left font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>{h}</th>
                 ))}
               </tr>
@@ -566,6 +594,7 @@ function OptionSection({ groupId, isSuggested, title, description, emptyText, ad
             <tbody>
               {options.map((opt, i) => {
                 const isEditing = editingId === opt.id;
+                const suggested = opt.is_suggested ?? false;
                 return (
                   <tr key={opt.id} style={{ borderBottom: i < options.length - 1 ? "1px solid var(--border)" : "none", opacity: opt.active ? 1 : 0.5 }}>
                     <td className="px-4 py-2.5">
@@ -581,6 +610,9 @@ function OptionSection({ groupId, isSuggested, title, description, emptyText, ad
                       ) : (
                         <span style={{ color: "var(--text-secondary)" }}>{opt.option_price}</span>
                       )}
+                    </td>
+                    <td className="px-4 py-2.5" style={{ width: 200 }}>
+                      {isEditing ? typeToggle(editSuggested, setEditSuggested) : typePill(suggested)}
                     </td>
                     <td className="px-4 py-2.5">
                       <button
@@ -600,7 +632,7 @@ function OptionSection({ groupId, isSuggested, title, description, emptyText, ad
                       ) : (
                         <div className="flex items-center justify-end gap-3">
                           <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => startEdit(opt)}>Edit</button>
-                          {isSuggested && (
+                          {suggested && (
                             <button className="text-xs" style={{ color: "#7b1fa2" }} onClick={() => void openAssignModal(opt)}>Assign to Dealers</button>
                           )}
                           <button className="text-xs" style={{ color: "var(--error)" }} onClick={() => void deleteOption(opt.id)}>Delete</button>
