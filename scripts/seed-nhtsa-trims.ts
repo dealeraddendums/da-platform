@@ -1,22 +1,31 @@
 /**
- * seed-nhtsa-trims.ts — Best-effort seed of nhtsa_trims using NHTSA's
- * Canadian Vehicle Specifications endpoint, the only publicly-documented
- * bulk-by-model trim source. Coverage is partial: NHTSA does not publish
- * a bulk per-model trim list via vPIC, so models with no Canadian listing
- * (or US-only trim names) won't be returned. The Add Product modal already
- * falls through to an "Enter Trim" free-text input for any model not in
- * nhtsa_trims, so partial coverage is acceptable.
+ * seed-nhtsa-trims.ts — INVESTIGATION ONLY. Does not currently produce any
+ * rows. Kept as documentation of what was attempted.
  *
- * Run on EC2: cd /var/www/da-platform && npx tsx scripts/seed-nhtsa-trims.ts
+ * NHTSA's vPIC API does not publish a per-model trim list via any bulk
+ * endpoint. The Canadian Vehicle Specifications endpoint does NOT carry a
+ * "Trim Name" field — its Specs[] is dimension and crash-test data only
+ * (OL, OW, OH, WB, CW, etc.). Body-style variations are encoded inside the
+ * Model field itself (e.g. "F-150 HYBRID P/U SUPERCREW 6.5-FT BOX 4X4")
+ * rather than as separate trim rows.
  *
- * Strategy:
- *   1. Load all (model_id, model_name, make_id, make_name) joined rows.
- *   2. For each (make, model) and year in YEARS, call:
- *      https://vpic.nhtsa.dot.gov/api/vehicles/GetCanadianVehicleSpecifications/?Year={y}&Make={m}&Model={mod}&format=json
- *   3. Parse Results[].Specs[] for {Name: "Trim Name"} entries.
- *   4. Upsert (model_id, name) with a deterministic int hash as id so re-runs
- *      are idempotent without a schema change.
- *   5. Throttle to ~120ms between requests to be polite to NHTSA.
+ * Verified 2026-05-09 against:
+ *   GET vpic.nhtsa.dot.gov/api/vehicles/GetCanadianVehicleSpecifications/
+ *       ?Year=2025&Make=Ford&Model=F-150&format=json
+ *   → 16 results, zero with a Trim/Series field.
+ *
+ * Real options for trim coverage going forward:
+ *   - A paid catalog provider (Edmunds, vAuto, Chrome Data, Black Book).
+ *   - VIN-driven enrichment: as dealer inventory flows in, decode each VIN
+ *     via DecodeVinValuesExtended and harvest the returned Trim/Series
+ *     into nhtsa_trims keyed by (make_id, model_id). Coverage grows with
+ *     real VINs the dealers actually sell.
+ *
+ * Until then, the Add Product modal's free-text "Enter Trim" fallback is the
+ * authoritative path. The Make/Model dropdowns work; Trim is always the
+ * Enter Trim input.
+ *
+ * Run on EC2 (no-op today): cd /var/www/da-platform && npx tsx scripts/seed-nhtsa-trims.ts
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -102,8 +111,10 @@ async function fetchTrims(makeName: string, modelName: string, year: number): Pr
 async function main() {
   console.log("=== NHTSA Trim Seeder (best-effort, Canadian Specs) ===");
 
-  const { data: makes } = await sb.from("nhtsa_makes").select("id, name").returns<MakeRow[]>();
-  const { data: models } = await sb.from("nhtsa_models").select("id, name, make_id").returns<ModelRow[]>();
+  // Default supabase select tops out at 1000 — paginate so the loop sees
+  // every model, not just the first page.
+  const { data: makes } = await sb.from("nhtsa_makes").select("id, name").range(0, 99999).returns<MakeRow[]>();
+  const { data: models } = await sb.from("nhtsa_models").select("id, name, make_id").range(0, 99999).returns<ModelRow[]>();
   if (!makes?.length || !models?.length) {
     console.error("Refusing to run: nhtsa_makes or nhtsa_models is empty. Run sync-nhtsa.ts first.");
     process.exit(1);
