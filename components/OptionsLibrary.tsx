@@ -5,6 +5,7 @@ import { formatOptionPrice } from "@/lib/option-price";
 import type { AddendumLibraryRow } from "@/lib/db";
 import ImageUploadPicker from "@/components/ImageUploadPicker";
 import RichTextEditor from "@/components/RichTextEditor";
+import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -408,33 +409,25 @@ function OptionForm({
       {/* Rules section — only shown when "Assign with Rules" */}
       {appliesTo === "rules" && (
         <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: "14px 16px", marginBottom: 14, background: "#fafafa" }}>
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <label style={{ ...lbl, margin: 0 }}>Model</label>
-              <InNotIn value={form.models_not} onChange={v => f("models_not", v)} />
-            </div>
-            <TagInput value={form.models} onChange={v => f("models", v)} placeholder="All models" />
-          </div>
+          <MakeModelTrimSelect
+            make={form.makes}
+            model={form.models}
+            trim={form.trims}
+            onChange={({ make, model, trim }) => {
+              f("makes", make);
+              f("models", model);
+              f("trims", trim);
+            }}
+            makeRight={<InNotIn value={form.makes_not} onChange={v => f("makes_not", v)} />}
+            modelRight={<InNotIn value={form.models_not} onChange={v => f("models_not", v)} />}
+            trimRight={<InNotIn value={form.trims_not} onChange={v => f("trims_not", v)} />}
+          />
 
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <label style={{ ...lbl, margin: 0 }}>Trim</label>
-              <InNotIn value={form.trims_not} onChange={v => f("trims_not", v)} />
-            </div>
-            <TagInput value={form.trims} onChange={v => f("trims", v)} placeholder="All trims" />
+          <div style={{ marginTop: 14 }}>
+            {row("Bodystyle", (
+              <TagInput value={form.body_styles} onChange={v => f("body_styles", v)} placeholder="All bodystyles" />
+            ))}
           </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <label style={{ ...lbl, margin: 0 }}>Make</label>
-              <InNotIn value={form.makes_not} onChange={v => f("makes_not", v)} />
-            </div>
-            <TagInput value={form.makes} onChange={v => f("makes", v)} placeholder="All makes" />
-          </div>
-
-          {row("Style", (
-            <TagInput value={form.body_styles} onChange={v => f("body_styles", v)} placeholder="All styles" />
-          ))}
 
           {row("Year", (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

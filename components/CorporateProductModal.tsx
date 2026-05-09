@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import RichTextEditor from "@/components/RichTextEditor";
+import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
 import type { GroupOptionRow } from "@/lib/db";
 
 type DealerBasic = { id: string; name: string };
@@ -311,29 +312,19 @@ export default function CorporateProductModal({
           </div>
 
           {form.applies_to === "rules" && (
-            <>
-              <div style={{ marginBottom: 14 }}>
-                <label style={lbl}>Models</label>
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <input value={form.models} onChange={e => f("models", e.target.value)} style={inp} placeholder="Comma-separated, blank = all" />
-                  <NotPill on={form.models_not} onClick={() => f("models_not", !form.models_not)} />
-                </div>
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <label style={lbl}>Trims</label>
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <input value={form.trims} onChange={e => f("trims", e.target.value)} style={inp} placeholder="Comma-separated, blank = all" />
-                  <NotPill on={form.trims_not} onClick={() => f("trims_not", !form.trims_not)} />
-                </div>
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <label style={lbl}>Makes</label>
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <input value={form.makes} onChange={e => f("makes", e.target.value)} style={inp} placeholder="Comma-separated, blank = all" />
-                  <NotPill on={form.makes_not} onClick={() => f("makes_not", !form.makes_not)} />
-                </div>
-              </div>
-            </>
+            <div style={{ marginBottom: 14 }}>
+              <MakeModelTrimSelect
+                make={form.makes}
+                model={form.models}
+                trim={form.trims}
+                onChange={({ make, model, trim }) => {
+                  setForm(prev => ({ ...prev, makes: make, models: model, trims: trim }));
+                }}
+                makeRight={<NotPill on={form.makes_not} onClick={() => f("makes_not", !form.makes_not)} />}
+                modelRight={<NotPill on={form.models_not} onClick={() => f("models_not", !form.models_not)} />}
+                trimRight={<NotPill on={form.trims_not} onClick={() => f("trims_not", !form.trims_not)} />}
+              />
+            </div>
           )}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
