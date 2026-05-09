@@ -498,8 +498,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const options = [
           ...groupOpts.map(g => ({
             option_name: g.option_name, option_price: g.option_price,
-            description: null as string | null, active: true as const,
-            required: true as const,
+            description: g.description, active: true as const,
+            required: g.required,
           })),
           ...effectiveOptions,
         ];

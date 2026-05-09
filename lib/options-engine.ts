@@ -189,25 +189,35 @@ export type LockedOption = {
   id: string;
   option_name: string;
   option_price: string;
+  description: string | null;
   sort_order: number;
+  required: boolean;
   is_locked: true;
 };
 
 /**
- * Returns active group options for the dealer identified by their dealer_id.
- * Looks up the Supabase group_id via dealers.dealer_id or inventory_dealer_id.
+ * Returns active group options for the dealer identified by their dealer_id,
+ * scoped to what should appear on this specific dealer's addendum:
+ *   - Required (Corporate) products: always returned for any dealer in the group.
+ *   - Suggested products: only returned when an explicit assignment exists in
+ *     dealer_option_assignments with dealer_editable=false (locked). Editable
+ *     assignments are already copied to the dealer's own addendum_library by
+ *     the assignments endpoint, so they appear via the dealer's product flow,
+ *     not via this locked-group-option flow.
+ *
+ * Looks up the Supabase group_id and dealer UUID via dealers.dealer_id or
+ * inventory_dealer_id.
  */
 export async function getGroupOptionsForDealer(
   dealerTextId: string
 ): Promise<LockedOption[]> {
   const admin = createAdminSupabaseClient();
 
-  // Find Supabase dealer row to get group_id
   const { data: dealer } = await admin
     .from("dealers")
-    .select("group_id")
+    .select("id, group_id")
     .or(`dealer_id.eq.${dealerTextId},inventory_dealer_id.eq.${dealerTextId}`)
-    .maybeSingle<{ group_id: string | null }>();
+    .maybeSingle<{ id: string; group_id: string | null }>();
 
   if (!dealer?.group_id) return [];
 
@@ -218,13 +228,46 @@ export async function getGroupOptionsForDealer(
     .eq("active", true)
     .order("sort_order");
 
-  return (rows ?? []).map((r: GroupOptionRow) => ({
-    id: r.id,
-    option_name: r.option_name,
-    option_price: r.option_price,
-    sort_order: r.sort_order,
-    is_locked: true as const,
-  }));
+  if (!rows || rows.length === 0) return [];
+
+  // Resolve which suggested options are locked-assigned to this dealer.
+  const suggestedIds = (rows as GroupOptionRow[])
+    .filter(r => r.is_suggested === true)
+    .map(r => r.id);
+
+  let lockedSuggestedIds = new Set<string>();
+  if (suggestedIds.length > 0) {
+    const { data: assigns } = await admin
+      .from("dealer_option_assignments")
+      .select("option_id")
+      .eq("dealer_id", dealer.id)
+      .eq("group_id", dealer.group_id)
+      .eq("dealer_editable", false)
+      .in("option_id", suggestedIds);
+    lockedSuggestedIds = new Set((assigns ?? []).map(a => a.option_id as string));
+  }
+
+  return (rows as GroupOptionRow[])
+    .filter(r => {
+      // Required corporate product → always show on every dealer in the group.
+      // Suggested → only show when locked-assigned to this dealer.
+      if (r.is_suggested !== true) return true;
+      return lockedSuggestedIds.has(r.id);
+    })
+    .map(r => {
+      // Prefer the explicit `required` column added in migration 053; fall back
+      // to the inverted is_suggested mapping for rows that pre-date the backfill.
+      const required = typeof r.required === "boolean" ? r.required : !r.is_suggested;
+      return {
+        id: r.id,
+        option_name: r.option_name,
+        option_price: r.option_price,
+        description: r.description ?? null,
+        sort_order: r.sort_order,
+        required,
+        is_locked: true as const,
+      };
+    });
 }
 
 /**

@@ -244,9 +244,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ...groupOpts.map(g => ({
         option_name: g.option_name,
         option_price: g.option_price,
-        description: null as string | null,
+        description: g.description,
         active: true as const,
-        required: true as const,
+        // Honor the corporate product's Required/Suggested flag — locked-assigned
+        // Suggested products are still rendered in the Suggested section.
+        required: g.required,
       })),
       ...(optionRows ?? []).map(r => ({
         ...r,
