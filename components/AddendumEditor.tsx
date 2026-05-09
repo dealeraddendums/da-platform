@@ -24,7 +24,9 @@ type GroupOption = {
   id: string;
   option_name: string;
   option_price: string;
+  description?: string | null;
   sort_order: number;
+  required?: boolean;
   is_locked: true;
 };
 
@@ -283,8 +285,12 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
 
   const reqOptions = options.filter(o => (o as MatchedOption).required !== false && (o as VehicleOptionRow).required !== false);
   const sugOptions = options.filter(o => (o as MatchedOption).required === false || (o as VehicleOptionRow).required === false);
-  const reqTotal = [...groupOptions, ...reqOptions].reduce((sum, o) => sum + parseOptionPriceValue(o.option_price), 0);
-  const sugTotal = sugOptions.reduce((sum, o) => sum + parseOptionPriceValue(o.option_price), 0);
+  // Group options carry their own required flag; only Required ones go into the
+  // Asking Price math, Suggested locked-assignments fall into the Suggested total.
+  const reqGroup = groupOptions.filter(g => g.required !== false);
+  const sugGroup = groupOptions.filter(g => g.required === false);
+  const reqTotal = [...reqGroup, ...reqOptions].reduce((sum, o) => sum + parseOptionPriceValue(o.option_price), 0);
+  const sugTotal = [...sugGroup, ...sugOptions].reduce((sum, o) => sum + parseOptionPriceValue(o.option_price), 0);
   const total = reqTotal + sugTotal;
   const msrp = vehicle.MSRP ? parseFloat(vehicle.MSRP) : null;
   const askingPrice = msrp != null ? msrp + reqTotal : null;
@@ -395,34 +401,41 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
               </thead>
               <tbody>
                 {/* Locked group options at top */}
-                {groupOptions.map((opt) => (
-                  <tr
-                    key={`group-${opt.id}`}
-                    style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}
-                  >
-                    <td className="px-3 py-2 text-center" style={{ color: "#1565c0", fontSize: 13 }}>
-                      🔒
-                    </td>
-                    <td className="px-3 py-2">
-                      <span style={{ color: "var(--text-secondary)" }}>{opt.option_name}</span>
-                      <span
-                        className="ml-2 text-xs px-1.5 py-0.5 rounded"
-                        style={{ background: "#e3f2fd", color: "#1565c0", fontSize: 10, fontWeight: 600 }}
-                      >
-                        Group
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <span className="font-medium" style={{ color: "var(--text-secondary)" }}>
-                        {formatOptionPrice(opt.option_price)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#e8f5e9", color: "#2e7d32" }}>Required</span>
-                    </td>
-                    <td className="px-3 py-2"></td>
-                  </tr>
-                ))}
+                {groupOptions.map((opt) => {
+                  const required = opt.required !== false;
+                  return (
+                    <tr
+                      key={`group-${opt.id}`}
+                      style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}
+                    >
+                      <td className="px-3 py-2 text-center" style={{ color: "#1565c0", fontSize: 13 }}>
+                        🔒
+                      </td>
+                      <td className="px-3 py-2">
+                        <span style={{ color: "var(--text-secondary)" }}>{opt.option_name}</span>
+                        <span
+                          className="ml-2 text-xs px-1.5 py-0.5 rounded"
+                          style={{ background: "#e3f2fd", color: "#1565c0", fontSize: 10, fontWeight: 600 }}
+                        >
+                          Group
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <span className="font-medium" style={{ color: "var(--text-secondary)" }}>
+                          {formatOptionPrice(opt.option_price)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {required ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#e8f5e9", color: "#2e7d32" }}>Required</span>
+                        ) : (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#fff3e0", color: "#e65100" }}>Suggested</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2"></td>
+                    </tr>
+                  );
+                })}
 
                 {/* Dealer editable options */}
                 {options.map((opt, idx) => {
