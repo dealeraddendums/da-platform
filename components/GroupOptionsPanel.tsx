@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { GroupOptionRow, GroupDisclaimerRow, GroupTemplateRow } from "@/lib/db";
+import CorporateProductModal from "@/components/CorporateProductModal";
 
 type Props = {
   groupId: string;
@@ -365,23 +366,8 @@ function OptionSection({ groupId }: { groupId: string }) {
   const [options, setOptions] = useState<GroupOptionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newPrice, setNewPrice] = useState("NC");
-  const [newSuggested, setNewSuggested] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editPrice, setEditPrice] = useState("");
-  const [editSuggested, setEditSuggested] = useState(false);
-
-  // Assign modal state
-  const [assigningOpt, setAssigningOpt] = useState<GroupOptionRow | null>(null);
-  const [dealers, setDealers] = useState<DealerBasic[]>([]);
-  const [selectedDealers, setSelectedDealers] = useState<Set<string>>(new Set());
-  const [dealerEditable, setDealerEditable] = useState(true);
-  const [assigning, setAssigning] = useState(false);
-  const [assignSuccess, setAssignSuccess] = useState(false);
+  const [modalProduct, setModalProduct] = useState<GroupOptionRow | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
 
   const fetchOptions = useCallback(async () => {
     setLoading(true);
@@ -397,57 +383,14 @@ function OptionSection({ groupId }: { groupId: string }) {
 
   useEffect(() => { void fetchOptions(); }, [fetchOptions]);
 
-  async function addOption(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    setSaving(true);
-    setError(null);
-    const res = await fetch(`/api/group-options/${groupId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        option_name: newName.trim(),
-        option_price: newPrice.trim() || "NC",
-        sort_order: options.length,
-        is_suggested: newSuggested,
-      }),
+  function handleSaved(saved: GroupOptionRow) {
+    setOptions(prev => {
+      const existing = prev.find(o => o.id === saved.id);
+      if (existing) return prev.map(o => o.id === saved.id ? saved : o);
+      return [...prev, saved];
     });
-    if (res.ok) {
-      const json = await res.json() as { data: GroupOptionRow };
-      setOptions((prev) => [...prev, json.data]);
-      setNewName("");
-      setNewPrice("NC");
-      setNewSuggested(false);
-      setShowAddForm(false);
-    } else {
-      const json = await res.json() as { error?: string };
-      setError(json.error ?? "Failed to add");
-    }
-    setSaving(false);
-  }
-
-  function startEdit(opt: GroupOptionRow) {
-    setEditingId(opt.id);
-    setEditName(opt.option_name);
-    setEditPrice(opt.option_price);
-    setEditSuggested(opt.is_suggested ?? false);
-  }
-
-  async function saveEdit(opt: GroupOptionRow) {
-    const res = await fetch(`/api/group-options/${groupId}/${opt.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        option_name: editName.trim(),
-        option_price: editPrice.trim() || "NC",
-        is_suggested: editSuggested,
-      }),
-    });
-    if (res.ok) {
-      const json = await res.json() as { data: GroupOptionRow };
-      setOptions((prev) => prev.map((o) => (o.id === opt.id ? json.data : o)));
-      setEditingId(null);
-    }
+    setShowAddModal(false);
+    setModalProduct(null);
   }
 
   async function deleteOption(id: string) {
@@ -468,47 +411,6 @@ function OptionSection({ groupId }: { groupId: string }) {
     }
   }
 
-  async function openAssignModal(opt: GroupOptionRow) {
-    setAssigningOpt(opt);
-    setSelectedDealers(new Set());
-    setDealerEditable(true);
-    setAssignSuccess(false);
-    if (dealers.length === 0) {
-      const res = await fetch(`/api/groups/${groupId}/dealers`);
-      if (res.ok) {
-        const json = await res.json() as { data: DealerBasic[] };
-        setDealers(json.data ?? []);
-      }
-    }
-  }
-
-  function toggleDealer(id: string) {
-    setSelectedDealers((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
-
-  async function submitAssign() {
-    if (!assigningOpt || selectedDealers.size === 0) return;
-    setAssigning(true);
-    const res = await fetch(`/api/groups/${groupId}/option-assignments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        option_id: assigningOpt.id,
-        dealer_ids: Array.from(selectedDealers),
-        dealer_editable: dealerEditable,
-      }),
-    });
-    if (res.ok) {
-      setAssignSuccess(true);
-      setTimeout(() => { setAssigningOpt(null); setAssignSuccess(false); }, 1500);
-    }
-    setAssigning(false);
-  }
-
   const typePill = (suggested: boolean) => (
     <span
       className="text-xs font-semibold px-2 py-0.5 rounded-full"
@@ -522,33 +424,6 @@ function OptionSection({ groupId }: { groupId: string }) {
     </span>
   );
 
-  const typeToggle = (value: boolean, onChange: (v: boolean) => void) => (
-    <div style={{ display: "inline-flex", gap: 4 }}>
-      {[
-        { v: false, label: "Required", bg: "#e8f5e9", fg: "#2e7d32", bd: "#4caf50" },
-        { v: true,  label: "Suggested", bg: "#fff3e0", fg: "#e65100", bd: "#ffa500" },
-      ].map(opt => {
-        const on = value === opt.v;
-        return (
-          <button
-            key={opt.label}
-            type="button"
-            onClick={() => onChange(opt.v)}
-            style={{
-              height: 28, padding: "0 10px", fontSize: 11, fontWeight: 600, borderRadius: 4,
-              cursor: "pointer", whiteSpace: "nowrap",
-              border: `1px solid ${on ? opt.bd : "#e0e0e0"}`,
-              background: on ? opt.bg : "#fff",
-              color: on ? opt.fg : "#55595c",
-            }}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-
   return (
     <>
       <div className="card overflow-hidden">
@@ -556,25 +431,15 @@ function OptionSection({ groupId }: { groupId: string }) {
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Corporate Products</p>
             <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-              Required products are auto-prepended to every dealer addendum in this group. Suggested products are made available to dealers — use Assign to Dealers to push them.
+              Required products are auto-prepended to every dealer addendum in this group. Suggested products are offered to selected dealers via the Assign to Dealers section.
             </p>
           </div>
-          <button className="btn btn-primary" style={{ fontSize: 12, height: 30, padding: "0 12px" }} onClick={() => setShowAddForm(true)}>
+          <button className="btn btn-primary" style={{ fontSize: 12, height: 30, padding: "0 12px" }} onClick={() => setShowAddModal(true)}>
             + Add Corporate Product
           </button>
         </div>
 
         {error && <div className="px-5 py-2 text-xs" style={{ background: "#ffebee", color: "var(--error)" }}>{error}</div>}
-
-        {showAddForm && (
-          <form onSubmit={(e) => void addOption(e)} className="px-5 py-3 flex items-center gap-2 flex-wrap" style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}>
-            <input autoFocus className="input text-sm flex-1" style={{ height: 32, minWidth: 200 }} placeholder="Product name" value={newName} onChange={(e) => setNewName(e.target.value)} />
-            <input className="input text-sm" style={{ height: 32, width: 90 }} placeholder="NC" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} />
-            {typeToggle(newSuggested, setNewSuggested)}
-            <button type="submit" className="btn btn-primary text-xs" style={{ height: 32 }} disabled={saving}>{saving ? "Adding…" : "Add"}</button>
-            <button type="button" className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={() => { setShowAddForm(false); setNewSuggested(false); }}>Cancel</button>
-          </form>
-        )}
 
         {loading ? (
           <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading…</div>
@@ -593,26 +458,17 @@ function OptionSection({ groupId }: { groupId: string }) {
             </thead>
             <tbody>
               {options.map((opt, i) => {
-                const isEditing = editingId === opt.id;
                 const suggested = opt.is_suggested ?? false;
                 return (
                   <tr key={opt.id} style={{ borderBottom: i < options.length - 1 ? "1px solid var(--border)" : "none", opacity: opt.active ? 1 : 0.5 }}>
                     <td className="px-4 py-2.5">
-                      {isEditing ? (
-                        <input autoFocus className="input text-sm" style={{ height: 28, width: "100%" }} value={editName} onChange={(e) => setEditName(e.target.value)} />
-                      ) : (
-                        <span style={{ color: "var(--text-primary)" }}>{opt.option_name}</span>
-                      )}
+                      <span style={{ color: "var(--text-primary)" }}>{opt.option_name}</span>
                     </td>
                     <td className="px-4 py-2.5" style={{ width: 120 }}>
-                      {isEditing ? (
-                        <input className="input text-sm" style={{ height: 28, width: 90 }} value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
-                      ) : (
-                        <span style={{ color: "var(--text-secondary)" }}>{opt.option_price}</span>
-                      )}
+                      <span style={{ color: "var(--text-secondary)" }}>{opt.option_price}</span>
                     </td>
-                    <td className="px-4 py-2.5" style={{ width: 200 }}>
-                      {isEditing ? typeToggle(editSuggested, setEditSuggested) : typePill(suggested)}
+                    <td className="px-4 py-2.5" style={{ width: 140 }}>
+                      {typePill(suggested)}
                     </td>
                     <td className="px-4 py-2.5">
                       <button
@@ -624,20 +480,10 @@ function OptionSection({ groupId }: { groupId: string }) {
                       </button>
                     </td>
                     <td className="px-4 py-2.5 text-right" style={{ whiteSpace: "nowrap" }}>
-                      {isEditing ? (
-                        <>
-                          <button className="text-xs mr-2" style={{ color: "var(--blue)" }} onClick={() => void saveEdit(opt)}>Save</button>
-                          <button className="text-xs" style={{ color: "var(--text-muted)" }} onClick={() => setEditingId(null)}>Cancel</button>
-                        </>
-                      ) : (
-                        <div className="flex items-center justify-end gap-3">
-                          <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => startEdit(opt)}>Edit</button>
-                          {suggested && (
-                            <button className="text-xs" style={{ color: "#7b1fa2" }} onClick={() => void openAssignModal(opt)}>Assign to Dealers</button>
-                          )}
-                          <button className="text-xs" style={{ color: "var(--error)" }} onClick={() => void deleteOption(opt.id)}>Delete</button>
-                        </div>
-                      )}
+                      <div className="flex items-center justify-end gap-3">
+                        <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => setModalProduct(opt)}>Edit</button>
+                        <button className="text-xs" style={{ color: "var(--error)" }} onClick={() => void deleteOption(opt.id)}>Delete</button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -647,61 +493,13 @@ function OptionSection({ groupId }: { groupId: string }) {
         )}
       </div>
 
-      {/* Assign Modal */}
-      {assigningOpt && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div className="card" style={{ width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
-            <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
-              <h3 className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
-                Assign &ldquo;{assigningOpt.option_name}&rdquo; to Dealers
-              </h3>
-            </div>
-            <div className="px-5 py-3 overflow-y-auto flex-1">
-              {assignSuccess ? (
-                <div className="text-sm text-center py-4" style={{ color: "#2e7d32" }}>Assigned successfully!</div>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>SELECT DEALERS</span>
-                    <div className="flex gap-2">
-                      <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => setSelectedDealers(new Set(dealers.map((d) => d.id)))}>All</button>
-                      <button className="text-xs" style={{ color: "var(--text-muted)" }} onClick={() => setSelectedDealers(new Set())}>None</button>
-                    </div>
-                  </div>
-                  <div className="space-y-1 mb-4">
-                    {dealers.length === 0 ? (
-                      <p className="text-xs" style={{ color: "var(--text-muted)" }}>No dealers in this group.</p>
-                    ) : dealers.map((d) => (
-                      <label key={d.id} className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer" style={{ background: selectedDealers.has(d.id) ? "#e3f2fd" : "transparent" }}>
-                        <input type="checkbox" checked={selectedDealers.has(d.id)} onChange={() => toggleDealer(d.id)} />
-                        <span className="text-sm" style={{ color: "var(--text-primary)" }}>{d.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
-                    <p className="text-xs font-semibold mb-2" style={{ color: "var(--text-muted)" }}>DEALER ACCESS</p>
-                    <label className="flex items-center gap-2 cursor-pointer mb-1">
-                      <input type="radio" checked={!dealerEditable} onChange={() => setDealerEditable(false)} />
-                      <span className="text-sm">Locked — dealer cannot edit or remove</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="radio" checked={dealerEditable} onChange={() => setDealerEditable(true)} />
-                      <span className="text-sm">Editable — copied to dealer&apos;s library (they can modify)</span>
-                    </label>
-                  </div>
-                </>
-              )}
-            </div>
-            {!assignSuccess && (
-              <div className="px-5 py-3 flex gap-2 justify-end" style={{ borderTop: "1px solid var(--border)" }}>
-                <button className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={() => setAssigningOpt(null)}>Cancel</button>
-                <button className="btn btn-primary text-xs" style={{ height: 32 }} disabled={assigning || selectedDealers.size === 0} onClick={() => void submitAssign()}>
-                  {assigning ? "Assigning…" : `Assign to ${selectedDealers.size} dealer${selectedDealers.size !== 1 ? "s" : ""}`}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+      {(showAddModal || modalProduct) && (
+        <CorporateProductModal
+          groupId={groupId}
+          initial={modalProduct}
+          onClose={() => { setShowAddModal(false); setModalProduct(null); }}
+          onSaved={handleSaved}
+        />
       )}
     </>
   );
