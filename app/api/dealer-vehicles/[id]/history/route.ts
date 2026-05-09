@@ -47,10 +47,16 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
       .limit(200),
     admin
       .from("dealer_vehicles")
-      .select("date_added, created_by")
+      .select("date_added, created_by, print_status, print_date, print_user")
       .eq("id", params.id)
       .eq("dealer_id", dealerId)
-      .maybeSingle<{ date_added: string; created_by: string | null }>(),
+      .maybeSingle<{
+        date_added: string;
+        created_by: string | null;
+        print_status: number | null;
+        print_date: string | null;
+        print_user: string | null;
+      }>(),
   ]);
 
   if (auditRes.error) return NextResponse.json({ error: auditRes.error.message }, { status: 500 });
@@ -132,6 +138,44 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
       source: "synthesized",
     });
   }
+
+  // Fallback: legacy-printed vehicles (print_status=1 + print_date set on
+  // dealer_vehicles) with no print_history or audit log entry. Resolve the
+  // print_user (legacy Aurora user_id stored as varchar) to a profile name
+  // via profiles.legacy_user_id, falling back to "Legacy User (ID: …)".
+  const hasPrintEvent = combined.some(e => e.action === "print");
+  if (!hasPrintEvent && dv?.print_status === 1 && dv.print_date) {
+    let legacyName: string | null = null;
+    const legacyIdNum = dv.print_user ? parseInt(dv.print_user, 10) : NaN;
+    if (!Number.isNaN(legacyIdNum)) {
+      const { data: legacyProfile } = await admin
+        .from("profiles")
+        .select("full_name, email")
+        .eq("legacy_user_id", legacyIdNum)
+        .maybeSingle<{ full_name: string | null; email: string | null }>();
+      legacyName = legacyProfile?.full_name ?? legacyProfile?.email ?? null;
+    }
+    if (!legacyName) {
+      legacyName = dv.print_user ? `Legacy User (ID: ${dv.print_user})` : "Legacy print";
+    }
+    // print_date is a date column — anchor at noon UTC so timezone shifts don't
+    // bump it onto a different calendar day.
+    const printedAt = `${dv.print_date}T12:00:00.000Z`;
+    combined.push({
+      id: `synthesized-print-${params.id}`,
+      action: "print",
+      method: "legacy",
+      document_type: "addendum",
+      changed_by: null,
+      changed_by_email: null,
+      user_full_name: legacyName,
+      changes: null,
+      created_at: printedAt,
+      source: "synthesized",
+    });
+  }
+
+  combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   return NextResponse.json({ data: combined });
 }

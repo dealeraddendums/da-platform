@@ -155,18 +155,21 @@ export default async function DashboardPage() {
       startOfMonthGhost.setDate(1);
       startOfMonthGhost.setHours(0, 0, 0, 0);
 
-      const [{ count: ghostTotal }, ghostMonthRes, ghostLifetimeRes] = await Promise.all([
+      const startOfMonthGhostDate = startOfMonthGhost.toISOString().split("T")[0];
+      const [{ count: ghostTotal }, { count: ghostMonthCount }, { count: ghostLifetimeCount }] = await Promise.all([
         admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
           .eq("dealer_id", ghostDealerId).eq("status", "active"),
-        admin.from("print_history").select("vehicle_id")
-          .eq("dealer_id", ghostDealerId).gte("created_at", startOfMonthGhost.toISOString()),
-        admin.from("print_history").select("vehicle_id")
-          .eq("dealer_id", ghostDealerId).limit(100000),
+        admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+          .eq("dealer_id", ghostDealerId).eq("status", "active")
+          .eq("print_status", 1).gte("print_date", startOfMonthGhostDate),
+        admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+          .eq("dealer_id", ghostDealerId).eq("status", "active")
+          .eq("print_status", 1),
       ]);
 
       const ghostTotalVehicles = ghostTotal ?? 0;
-      const ghostPrintedMonth = new Set((ghostMonthRes.data ?? []).map(r => r.vehicle_id)).size;
-      const ghostLifetimePrinted = new Set((ghostLifetimeRes.data ?? []).map(r => r.vehicle_id)).size;
+      const ghostPrintedMonth = ghostMonthCount ?? 0;
+      const ghostLifetimePrinted = ghostLifetimeCount ?? 0;
       const ghostUnprinted = Math.max(0, ghostTotalVehicles - ghostLifetimePrinted);
 
       const ghostStats = [
@@ -338,22 +341,27 @@ export default async function DashboardPage() {
   }
 
   // ── Stats — always Supabase ───────────────────────────────────────────────
+  // Source of truth is dealer_vehicles.print_status / print_date so legacy
+  // ETL-printed and platform-printed vehicles are counted uniformly.
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
+  const startOfMonthDate = startOfMonth.toISOString().split("T")[0];
 
-  const [{ count: totalVehiclesCount }, monthRes, lifetimeRes] = await Promise.all([
+  const [{ count: totalVehiclesCount }, { count: printedMonthCount }, { count: printedLifetimeCount }] = await Promise.all([
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active"),
-    admin.from("print_history").select("vehicle_id")
-      .eq("dealer_id", dealerId).gte("created_at", startOfMonth.toISOString()),
-    admin.from("print_history").select("vehicle_id")
-      .eq("dealer_id", dealerId).limit(100000),
+    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId).eq("status", "active")
+      .eq("print_status", 1).gte("print_date", startOfMonthDate),
+    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId).eq("status", "active")
+      .eq("print_status", 1),
   ]);
 
   const totalVehicles = totalVehiclesCount ?? 0;
-  const printedThisMonth = new Set((monthRes.data ?? []).map(r => r.vehicle_id)).size;
-  const lifetimePrinted = new Set((lifetimeRes.data ?? []).map(r => r.vehicle_id)).size;
+  const printedThisMonth = printedMonthCount ?? 0;
+  const lifetimePrinted = printedLifetimeCount ?? 0;
   const unprintedNever = Math.max(0, totalVehicles - lifetimePrinted);
 
   const dealerStats = [

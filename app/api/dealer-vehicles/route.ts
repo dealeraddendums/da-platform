@@ -41,26 +41,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const admin = createAdminSupabaseClient();
 
-  // Resolve print-status filter: fetch printed vehicle IDs from print_history
-  // (print_history is the source of truth — it's what clear-print-history deletes from)
-  let printedIds: string[] | null = null;
-  if (printStatus !== "all") {
-    try {
-      const { data: prints } = await admin
-        .from("print_history")
-        .select("vehicle_id")
-        .eq("dealer_id", dealerId);
-      const seen = new Set<string>();
-      for (const p of prints ?? []) { if (p.vehicle_id) seen.add(p.vehicle_id); }
-      printedIds = Array.from(seen);
-    } catch { printedIds = []; }
-  }
-
-  // Short-circuit: "printed" filter with no printed vehicles → empty result
-  if (printStatus === "printed" && printedIds && printedIds.length === 0) {
-    return NextResponse.json({ data: [], total: 0, page, per_page: perPage, dealer_id: dealerId, printedTypes: {} });
-  }
-
   let query = admin
     .from("dealer_vehicles")
     .select("*", { count: "exact" })
@@ -77,10 +57,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       `stock_number.ilike.%${q}%,vin.ilike.%${q}%,make.ilike.%${q}%,model.ilike.%${q}%${yearClause}`
     );
   }
-  if (printStatus === "printed" && printedIds && printedIds.length > 0) {
-    query = query.in("id", printedIds);
-  } else if (printStatus === "unprinted" && printedIds && printedIds.length > 0) {
-    query = query.not("id", "in", `(${printedIds.join(",")})`);
+  // Print status reads dealer_vehicles.print_status — matches dashboard counts
+  // and surfaces both legacy ETL-printed and platform-printed vehicles.
+  if (printStatus === "printed") {
+    query = query.eq("print_status", 1);
+  } else if (printStatus === "unprinted") {
+    query = query.or("print_status.is.null,print_status.neq.1");
   }
 
   const { data, count, error: dbErr } = await query;

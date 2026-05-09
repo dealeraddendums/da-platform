@@ -52,6 +52,15 @@ export async function POST(
 
   if (phErr) return NextResponse.json({ error: phErr.message }, { status: 500 });
 
+  // Reset canonical print fields on dealer_vehicles too — dashboard counts and
+  // the print-status filter read from these now.
+  const { error: dvResetErr } = await admin
+    .from("dealer_vehicles")
+    .update({ print_status: 0, print_date: null, print_user: null })
+    .eq("dealer_id", dealerId)
+    .in("id", activeIds);
+  if (dvResetErr) console.error("[clear-print-history] dealer_vehicles reset failed:", dvResetErr.message);
+
   // Delete addendum_data for active vehicles — need dealer UUID for FK
   const { data: dealerRow } = await admin
     .from("dealers")

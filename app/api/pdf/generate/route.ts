@@ -37,6 +37,17 @@ async function logGeneratePdf(
   });
   if (phErr) console.error("[pdf/generate] print_history insert failed:", phErr.message, phErr.code);
 
+  // Mark the canonical print fields on dealer_vehicles so dashboard counts and
+  // legacy-aware filters see this vehicle as printed without depending on
+  // print_history. print_user stores legacy Aurora ID for legacy rows; we use
+  // the Supabase user UUID for new prints.
+  const todayDate = new Date().toISOString().split("T")[0];
+  const { error: dvUpdateErr } = await admin
+    .from("dealer_vehicles")
+    .update({ print_status: 1, print_date: todayDate, print_user: claims.sub })
+    .eq("id", dealerVehicleId);
+  if (dvUpdateErr) console.error("[pdf/generate] dealer_vehicles print update failed:", dvUpdateErr.message);
+
   await admin.from("vehicle_audit_log").insert({
     dealer_id: dv.dealer_id,
     vehicle_id: dealerVehicleId,

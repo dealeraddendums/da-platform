@@ -51,6 +51,15 @@ async function uploadAndLogBulkJob(
   });
   if (phErr) console.error(`[BULK] print_history insert failed vehicleId=${job.vehicleId}:`, phErr.message);
 
+  // Mirror to dealer_vehicles canonical print fields so dashboard counts and
+  // print-status filters see legacy and platform prints uniformly.
+  const todayDate = new Date().toISOString().split("T")[0];
+  const { error: dvUpdateErr } = await admin
+    .from("dealer_vehicles")
+    .update({ print_status: 1, print_date: todayDate, print_user: claimsSub })
+    .eq("id", job.vehicleId);
+  if (dvUpdateErr) console.error(`[BULK] dealer_vehicles print update failed vehicleId=${job.vehicleId}:`, dvUpdateErr.message);
+
   if (job.dealerUuid && job.options.length > 0) {
     const printedAt = new Date().toISOString();
     const adRows: AddendumDataInsert[] = job.options.map((o, i) => ({
