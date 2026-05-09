@@ -6,7 +6,7 @@ import BuilderPage from "@/components/builder/BuilderPage";
 
 export const metadata = { title: "Document Builder — DA Platform" };
 
-export default async function BuilderRoute() {
+export default async function BuilderRoute({ searchParams }: { searchParams?: { group?: string; template?: string } }) {
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect("/login?next=/builder");
@@ -21,6 +21,15 @@ export default async function BuilderRoute() {
 
   const role = profile?.role ?? "dealer_user";
   const isGroupAdmin = role === "group_admin";
+  const isSuperAdmin = role === "super_admin";
+
+  // ?group=ID lets super_admin and the group's own group_admin open the Builder
+  // scoped to that group. Other roles fall through to the dealer flow below.
+  const groupParam = searchParams?.group ?? null;
+  const templateParam = searchParams?.template ?? null;
+  const explicitGroupId = groupParam && (isSuperAdmin || (isGroupAdmin && profile?.group_id === groupParam))
+    ? groupParam
+    : null;
 
   // Ghost mode: super_admin can view builder scoped to a ghost dealer
   const cookieStore = cookies();
@@ -40,7 +49,8 @@ export default async function BuilderRoute() {
     if (activeDlr) dealerId = activeDlr.dealer_id;
   }
 
-  const groupId = (isGroupAdmin && profile?.group_id) ? profile.group_id : null;
+  const groupId = explicitGroupId
+    ?? ((isGroupAdmin && profile?.group_id) ? profile.group_id : null);
 
   type DealerData = { logo_url: string | null; name: string | null; address: string | null; city: string | null; state: string | null; zip: string | null; phone: string | null };
 
@@ -66,5 +76,5 @@ export default async function BuilderRoute() {
     phone: dealerData.phone ?? null,
   } : undefined;
 
-  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} canAddCustomSize={role === 'super_admin'} />;
+  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={role === 'super_admin'} />;
 }

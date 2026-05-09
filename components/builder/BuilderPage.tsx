@@ -500,15 +500,25 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load template if templateId provided
+  // Load template if templateId provided. When groupId is set we fetch from the
+  // group-templates route so super_admin / group_admin can edit shared templates;
+  // otherwise the dealer-templates route is used.
   useEffect(() => {
     if (!templateId) return;
-    fetch(`/api/templates/${templateId}`)
+    const url = groupId
+      ? `/api/group-templates/${groupId}/${templateId}`
+      : `/api/templates/${templateId}`;
+    fetch(url)
       .then(r => r.ok ? r.json() : null)
-      .then(data => {
+      .then(payload => {
+        if (!payload) return;
+        // Group route returns { data: row }; dealer route returns row directly.
+        const data = (payload && typeof payload === 'object' && 'data' in payload)
+          ? payload.data as Record<string, unknown>
+          : payload as Record<string, unknown>;
         if (!data) return;
         const json = data.template_json as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: string };
-        if (json.widgets) {
+        if (json?.widgets) {
           const ps = json.paperSize ?? 'standard';
           const { w: pw, h: ph } = getPaperDims(ps, customSizesRef.current);
           let ws = json.widgets;
@@ -522,14 +532,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           widgetsRef.current = ws;
           setNid(n);
         }
-        if (json.bgUrl) { setBgUrl(json.bgUrl); setBgInputVal(json.bgUrl); }
-        if (json.fontScale) setFontScale(json.fontScale);
-        if (json.paperSize) setPaperSize(json.paperSize);
-        setTemplateName(data.name || 'Template');
+        if (json?.bgUrl) { setBgUrl(json.bgUrl); setBgInputVal(json.bgUrl); }
+        if (json?.fontScale) setFontScale(json.fontScale);
+        if (json?.paperSize) setPaperSize(json.paperSize);
+        setTemplateName((data.name as string) || 'Template');
         setLoadedTemplateId(templateId);
       })
       .catch(() => {});
-  }, [templateId]);
+  }, [templateId, groupId]);
 
   // ── Paper size switch ──────────────────────────────────────────────
   const switchPaperSize = useCallback((size: string) => {

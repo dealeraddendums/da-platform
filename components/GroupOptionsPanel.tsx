@@ -920,13 +920,13 @@ function TemplatesTab({ groupId }: { groupId: string }) {
             Shared document templates. Locked templates override dealer templates.
           </p>
         </div>
-        <button
+        <a
           className="btn btn-primary"
-          style={{ fontSize: 12, height: 30, padding: "0 12px" }}
-          onClick={() => setShowAddForm(true)}
+          style={{ fontSize: 12, height: 30, padding: "0 12px", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+          href={`/builder?group=${groupId}`}
         >
           + New Template
-        </button>
+        </a>
       </div>
 
       {error && (
@@ -1045,6 +1045,10 @@ function TemplatesTab({ groupId }: { groupId: string }) {
                 </td>
                 <td className="px-4 py-2.5 text-right" style={{ whiteSpace: "nowrap" }}>
                   <div className="flex items-center justify-end gap-3">
+                    <a className="text-xs" style={{ color: "var(--blue)", textDecoration: "none" }}
+                      href={`/builder?group=${groupId}&template=${t.id}`}>
+                      Edit
+                    </a>
                     <button className="text-xs" style={{ color: "#7b1fa2" }} onClick={() => void openAssignModal(t)}>Assign to Dealers</button>
                     <button className="text-xs" style={{ color: "var(--error)" }} onClick={() => void deleteTemplate(t.id)}>Delete</button>
                   </div>

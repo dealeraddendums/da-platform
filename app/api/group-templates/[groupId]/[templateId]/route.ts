@@ -10,6 +10,29 @@ function canManage(claims: { role: string; group_id: string | null }, groupId: s
   return false;
 }
 
+export async function GET(_req: NextRequest, { params }: Params): Promise<NextResponse> {
+  const { claims, error } = await requireAuth();
+  if (error) return error;
+  // Anyone in the group can read; super_admin too. Dealers in the group can
+  // load locked group templates into their Builder for reference.
+  const inGroup = claims.role === "super_admin" || claims.group_id === params.groupId;
+  if (!inGroup && claims.role !== "dealer_admin" && claims.role !== "dealer_user") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data, error: dbErr } = await admin
+    .from("group_templates")
+    .select("*")
+    .eq("id", params.templateId)
+    .eq("group_id", params.groupId)
+    .maybeSingle();
+
+  if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
+  if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json({ data });
+}
+
 export async function PATCH(req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
