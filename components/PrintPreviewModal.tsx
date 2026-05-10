@@ -1,4 +1,5 @@
 "use client";
+import { printPdfFromBlobUrl } from "@/lib/print-pdf";
 
 import { useEffect, useRef, useState } from "react";
 type DocType = "addendum" | "infosheet" | "buyer_guide";
@@ -196,26 +197,8 @@ export default function PrintPreviewModal({
               <button
                 onClick={() => {
                   if (!blobUrl) return;
-                  const opened = window.open(blobUrl, "_blank");
-                  if (!opened) {
-                    onClose();
-                    window.location.href = "/dashboard";
-                    return;
-                  }
-                  const win: Window = opened;
-                  let redirected = false;
-                  function doRedirect() {
-                    if (redirected) return;
-                    redirected = true;
-                    try { win.close(); } catch { /* ignore */ }
-                    onClose();
-                    window.location.href = "/dashboard";
-                  }
-                  setTimeout(() => {
-                    win.print();
-                    win.addEventListener("afterprint", doRedirect);
-                    setTimeout(doRedirect, 2000);
-                  }, 500);
+                  printPdfFromBlobUrl(blobUrl);
+                  onClose();
                 }}
                 style={{
                   height: 36, padding: "0 16px", background: "#1976d2", color: "#fff",

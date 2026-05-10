@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { printPdfFromBlobUrl } from "@/lib/print-pdf";
 import type { BuyersGuideDefaults } from "@/lib/db";
 
 type Props = {
@@ -233,7 +234,12 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
                 <a href={blobUrl} download={filename} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, color: "var(--text-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
                   Download PDF
                 </a>
-                <button onClick={() => { const w = window.open(blobUrl!, '_blank'); if (w) { let redirected = false; const doRedirect = () => { if (redirected) return; redirected = true; try { w.close(); } catch { /* ignore */ } onClose(); window.location.href = '/dashboard'; }; setTimeout(() => { w.print(); w.addEventListener('afterprint', doRedirect); setTimeout(doRedirect, 5000); }, 500); } }}
+                <button
+                  onClick={() => {
+                    if (!blobUrl) return;
+                    printPdfFromBlobUrl(blobUrl);
+                    onClose();
+                  }}
                   style={{ height: 36, padding: "0 16px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
                   Send to Printer
                 </button>
