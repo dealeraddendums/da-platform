@@ -109,23 +109,40 @@ export async function harvestTrimsFromVins(
     elapsedMs: 0,
   };
 
-  // Load make/model catalogs into memory once.
-  const makesRes = await sb
-    .from("nhtsa_makes")
-    .select("id, name")
-    .range(0, 99999)
-    .returns<MakeRow[]>();
-  const modelsRes = await sb
-    .from("nhtsa_models")
-    .select("id, name, make_id")
-    .range(0, 99999)
-    .returns<ModelRow[]>();
+  // Load make/model catalogs into memory once. PostgREST caps single .range()
+  // calls at 1000 rows by default, so paginate explicitly — otherwise common
+  // makes like FORD or TOYOTA fall outside the first page and get silently
+  // miss-matched as "skippedNoMake".
+  const allMakes: MakeRow[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await sb
+      .from("nhtsa_makes")
+      .select("id, name")
+      .order("id", { ascending: true })
+      .range(from, from + 999)
+      .returns<MakeRow[]>();
+    const rows = data ?? [];
+    allMakes.push(...rows);
+    if (rows.length < 1000) break;
+  }
+  const allModels: ModelRow[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await sb
+      .from("nhtsa_models")
+      .select("id, name, make_id")
+      .order("id", { ascending: true })
+      .range(from, from + 999)
+      .returns<ModelRow[]>();
+    const rows = data ?? [];
+    allModels.push(...rows);
+    if (rows.length < 1000) break;
+  }
 
   const makeByName = new Map<string, MakeRow>();
-  for (const m of makesRes.data ?? []) makeByName.set(m.name.toLowerCase(), m);
+  for (const m of allMakes) makeByName.set(m.name.toLowerCase(), m);
 
   const modelByMakeAndName = new Map<string, ModelRow>();
-  for (const m of modelsRes.data ?? []) {
+  for (const m of allModels) {
     modelByMakeAndName.set(`${m.make_id}:${m.name.toLowerCase()}`, m);
   }
 
