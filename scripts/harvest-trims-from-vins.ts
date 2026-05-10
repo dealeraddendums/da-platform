@@ -30,7 +30,10 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const PAGE_SIZE = 5000;
+// Supabase / PostgREST caps query results at 1000 rows by default. Page in
+// 1000-row chunks and only break when an empty page comes back so we don't
+// silently stop after the first batch like the earlier run did.
+const PAGE_SIZE = 1000;
 
 async function loadAllVins(): Promise<string[]> {
   const all: string[] = [];
@@ -41,6 +44,7 @@ async function loadAllVins(): Promise<string[]> {
       .select("vin")
       .not("vin", "is", null)
       .neq("vin", "")
+      .order("id", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
     if (error) throw new Error(error.message);
     const rows = (data ?? []) as { vin: string | null }[];
@@ -48,9 +52,9 @@ async function loadAllVins(): Promise<string[]> {
     for (const r of rows) {
       if (r.vin && r.vin.trim().length >= 11) all.push(r.vin);
     }
+    from += rows.length;
+    if (from % 50_000 < PAGE_SIZE) console.log(`  loaded ${all.length} VINs so far (offset ${from})…`);
     if (rows.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-    if (from % 50_000 === 0) console.log(`  loaded ${all.length} VINs so far…`);
   }
   return all;
 }
