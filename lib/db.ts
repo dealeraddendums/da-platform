@@ -1439,9 +1439,9 @@ export type Database = {
         Relationships: [];
       };
       nhtsa_makes: {
-        Row: { id: number; name: string; created_at: string };
-        Insert: { id: number; name: string };
-        Update: { name?: string };
+        Row: { id: number; name: string; approved: boolean; created_at: string };
+        Insert: { id: number; name: string; approved?: boolean };
+        Update: { name?: string; approved?: boolean };
         Relationships: [];
       };
       nhtsa_models: {
