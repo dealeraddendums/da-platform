@@ -85,26 +85,54 @@ async function syncMakes(): Promise<number> {
 }
 
 // ── Step 2: Sync models for major makes ──────────────────────────────────────
-const MAJOR_MAKE_IDS: Record<number, string> = {
-  474: "ACURA", 475: "ALFA ROMEO", 476: "ASTON MARTIN", 478: "AUDI",
-  479: "BENTLEY", 482: "BMW", 484: "BUICK", 485: "CADILLAC",
-  487: "CHEVROLET", 491: "CHRYSLER", 492: "DODGE", 497: "FERRARI",
-  499: "FIAT", 500: "FORD", 503: "GENESIS", 504: "GMC",
-  507: "HONDA", 508: "HYUNDAI", 510: "INFINITI", 512: "JAGUAR",
-  513: "JEEP", 515: "KIA", 516: "LAMBORGHINI", 521: "LAND ROVER",
-  523: "LEXUS", 524: "LINCOLN", 526: "LOTUS", 530: "MASERATI",
-  531: "MAZDA", 535: "MERCEDES-BENZ", 538: "MINI", 540: "MITSUBISHI",
-  541: "NISSAN", 544: "OLDSMOBILE", 545: "PONTIAC", 548: "PORSCHE",
-  549: "RAM", 550: "RIVIAN", 551: "ROLLS-ROYCE", 553: "SUBARU",
-  555: "TESLA", 559: "TOYOTA", 562: "VOLKSWAGEN", 563: "VOLVO",
-};
+// Names only — make IDs are resolved against nhtsa_makes at runtime so we
+// don't drift when NHTSA renumbers entries. (Hardcoded IDs were wrong:
+// 500 mapped to FIAT, not FORD; 559 to a 1-model entry, not real TOYOTA;
+// etc., which gave only 1956 models across the catalog — the trim harvest
+// then skipped 18,176 unique VINs as "no model" because Ford F-150 / Toyota
+// Camry / Chevy Silverado weren't in nhtsa_models.)
+const MAJOR_MAKE_NAMES = [
+  "ACURA", "ALFA ROMEO", "ASTON MARTIN", "AUDI", "BENTLEY", "BMW",
+  "BUICK", "CADILLAC", "CHEVROLET", "CHRYSLER", "DODGE", "FERRARI",
+  "FIAT", "FORD", "GENESIS", "GMC", "HONDA", "HYUNDAI", "INFINITI",
+  "JAGUAR", "JEEP", "KIA", "LAMBORGHINI", "LAND ROVER", "LEXUS",
+  "LINCOLN", "LOTUS", "MASERATI", "MAZDA", "MERCEDES-BENZ", "MINI",
+  "MITSUBISHI", "NISSAN", "OLDSMOBILE", "PONTIAC", "PORSCHE", "RAM",
+  "RIVIAN", "ROLLS-ROYCE", "SUBARU", "TESLA", "TOYOTA", "VOLKSWAGEN",
+  "VOLVO",
+];
+
+async function pageAllMakes(): Promise<{ id: number; name: string }[]> {
+  const out: { id: number; name: string }[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await admin
+      .from("nhtsa_makes")
+      .select("id, name")
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    const rows = (data ?? []) as { id: number; name: string }[];
+    out.push(...rows);
+    if (rows.length < 1000) break;
+  }
+  return out;
+}
 
 async function syncModels(): Promise<number> {
-  console.log(`Syncing models for ${Object.keys(MAJOR_MAKE_IDS).length} major makes...`);
+  console.log(`Syncing models for ${MAJOR_MAKE_NAMES.length} major makes...`);
+
+  // Resolve names → ids from nhtsa_makes at runtime.
+  const allMakes = await pageAllMakes();
+  const idByName = new Map<string, number>();
+  for (const m of allMakes) idByName.set(m.name.toUpperCase(), m.id);
+
   const allRows: { id: number; make_id: number; name: string }[] = [];
 
-  for (const [makeIdStr, makeName] of Object.entries(MAJOR_MAKE_IDS)) {
-    const makeId = parseInt(makeIdStr, 10);
+  for (const name of MAJOR_MAKE_NAMES) {
+    const makeId = idByName.get(name);
+    if (!makeId) {
+      process.stdout.write(`  ${name}(NO_ID) `);
+      continue;
+    }
     const json = await fetchJson<{
       Results: { Model_ID: number; Model_Name: string }[];
     }>(`${NHTSA_BASE}/GetModelsForMakeId/${makeId}?format=json`);
@@ -116,7 +144,7 @@ async function syncModels(): Promise<number> {
     }
     // Rate-limit: 100ms between calls
     await new Promise((r) => setTimeout(r, 100));
-    process.stdout.write(`  ${makeName}(${json?.Results?.length ?? 0}) `);
+    process.stdout.write(`  ${name}(${json?.Results?.length ?? 0}) `);
   }
   console.log();
 
