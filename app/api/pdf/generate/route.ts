@@ -50,10 +50,24 @@ async function logGeneratePdf(
   if (docType === "addendum") dvUpdate.print_status = 1;
   else if (docType === "infosheet") dvUpdate.print_info = 1;
   else if (docType === "buyer_guide") dvUpdate.print_guide = 1;
-  const { error: dvUpdateErr } = await admin
+  let { error: dvUpdateErr } = await admin
     .from("dealer_vehicles")
     .update(dvUpdate)
     .eq("id", dealerVehicleId);
+  // Pre-migration-055 safety net: dealer_vehicles.print_user was varchar(20)
+  // and rejected 36-char UUIDs, rolling back the whole atomic UPDATE — which
+  // is why print_status / print_date never landed. Retry without print_user
+  // so the canonical print_status fields still flip even before migration 055
+  // is applied. Once the column is widened to text, the first try succeeds.
+  if (dvUpdateErr && /too long/i.test(dvUpdateErr.message)) {
+    const { print_user: _omit, ...withoutUser } = dvUpdate;
+    void _omit;
+    const retry = await admin
+      .from("dealer_vehicles")
+      .update(withoutUser)
+      .eq("id", dealerVehicleId);
+    dvUpdateErr = retry.error;
+  }
   if (dvUpdateErr) console.error("[pdf/generate] dealer_vehicles print update failed:", dvUpdateErr.message);
 
   await admin.from("vehicle_audit_log").insert({

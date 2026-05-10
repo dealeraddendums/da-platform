@@ -62,10 +62,20 @@ async function uploadAndLogBulkJob(
   if (job.docType === "addendum") dvUpdate.print_status = 1;
   else if (job.docType === "infosheet") dvUpdate.print_info = 1;
   else if (job.docType === "buyer_guide") dvUpdate.print_guide = 1;
-  const { error: dvUpdateErr } = await admin
+  let { error: dvUpdateErr } = await admin
     .from("dealer_vehicles")
     .update(dvUpdate)
     .eq("id", job.vehicleId);
+  // See pdf/generate route — same varchar(20) → UUID retry safety net.
+  if (dvUpdateErr && /too long/i.test(dvUpdateErr.message)) {
+    const { print_user: _omit, ...withoutUser } = dvUpdate;
+    void _omit;
+    const retry = await admin
+      .from("dealer_vehicles")
+      .update(withoutUser)
+      .eq("id", job.vehicleId);
+    dvUpdateErr = retry.error;
+  }
   if (dvUpdateErr) console.error(`[BULK] dealer_vehicles print update failed vehicleId=${job.vehicleId}:`, dvUpdateErr.message);
 
   if (job.dealerUuid && job.options.length > 0) {
