@@ -47,6 +47,12 @@ export default function MakeModelTrimSelect({
   const [trims, setTrims] = useState<Trim[]>([]);
   const [makeId, setMakeId] = useState<number | null>(null);
   const [modelId, setModelId] = useState<number | null>(null);
+  // Sticky "user picked Enter X" flags. Without these, selecting "Enter Make"
+  // would clear the value, leave makeMode === "empty", and the UI would stay
+  // as a dropdown instead of switching to a text input.
+  const [makeFree, setMakeFree] = useState(false);
+  const [modelFree, setModelFree] = useState(false);
+  const [trimFree, setTrimFree] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,32 +96,64 @@ export default function MakeModelTrimSelect({
   }, [modelId]);
 
   function selectMake(rawValue: string) {
-    if (rawValue === ENTER) { onChange({ make: "", model: "", trim: "" }); setMakeId(null); return; }
+    if (rawValue === ENTER) {
+      setMakeFree(true);
+      setModelFree(false);
+      setTrimFree(false);
+      onChange({ make: "", model: "", trim: "" });
+      setMakeId(null);
+      return;
+    }
+    setMakeFree(false);
     const id = rawValue ? parseInt(rawValue, 10) : NaN;
     const m = makes.find(x => x.id === id);
     setMakeId(m?.id ?? null);
     onChange({ make: m?.name ?? "", model: "", trim: "" });
   }
   function selectModel(rawValue: string) {
-    if (rawValue === ENTER) { onChange({ make, model: "", trim: "" }); setModelId(null); return; }
+    if (rawValue === ENTER) {
+      setModelFree(true);
+      setTrimFree(false);
+      onChange({ make, model: "", trim: "" });
+      setModelId(null);
+      return;
+    }
+    setModelFree(false);
     const id = rawValue ? parseInt(rawValue, 10) : NaN;
     const m = models.find(x => x.id === id);
     setModelId(m?.id ?? null);
     onChange({ make, model: m?.name ?? "", trim: "" });
   }
   function selectTrim(rawValue: string) {
-    if (rawValue === ENTER) { onChange({ make, model, trim: "" }); return; }
+    if (rawValue === ENTER) {
+      setTrimFree(true);
+      onChange({ make, model, trim: "" });
+      return;
+    }
+    setTrimFree(false);
     const id = rawValue ? parseInt(rawValue, 10) : NaN;
     const t = trims.find(x => x.id === id);
     onChange({ make, model, trim: t?.name ?? "" });
   }
 
+  // Three sources for "free-text mode":
+  //   1. User explicitly picked "— Enter X —" from the dropdown (the *Free flag).
+  //   2. Saved value doesn't match anything in the loaded NHTSA catalog
+  //      (legacy CSV-style strings like "Camry, Corolla").
+  //   3. NHTSA returned an empty list for this tier (no models for the make,
+  //      or no trims for the model) — fall to free-text so user has a way in.
   const makeMode: "select" | "free" | "empty" =
-    !make ? "empty" : (makeId != null ? "select" : "free");
+    makeFree ? "free"
+    : !make ? "empty"
+    : (makeId != null ? "select" : "free");
   const modelMode: "select" | "free" | "empty" =
-    !model ? "empty" : (modelId != null ? "select" : "free");
+    modelFree ? "free"
+    : !model ? (makeMode === "empty" ? "empty" : (models.length === 0 && makeMode === "select" ? "free" : "empty"))
+    : (modelId != null ? "select" : "free");
   const trimMode: "select" | "free" | "empty" =
-    !trim ? "empty" : (trims.find(t => t.name.toLowerCase() === trim.trim().toLowerCase()) ? "select" : "free");
+    trimFree ? "free"
+    : !trim ? (modelMode === "empty" ? "empty" : (trims.length === 0 && modelMode === "select" ? "free" : "empty"))
+    : (trims.find(t => t.name.toLowerCase() === trim.trim().toLowerCase()) ? "select" : "free");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -125,7 +163,13 @@ export default function MakeModelTrimSelect({
             value={make}
             placeholder="Enter make"
             onChange={(v) => onChange({ make: v, model: "", trim: "" })}
-            onRevert={() => { onChange({ make: "", model: "", trim: "" }); setMakeId(null); }}
+            onRevert={() => {
+              setMakeFree(false);
+              setModelFree(false);
+              setTrimFree(false);
+              onChange({ make: "", model: "", trim: "" });
+              setMakeId(null);
+            }}
           />
         ) : (
           <select
@@ -147,7 +191,12 @@ export default function MakeModelTrimSelect({
             placeholder="Enter model"
             disabled={!make}
             onChange={(v) => onChange({ make, model: v, trim: "" })}
-            onRevert={() => { onChange({ make, model: "", trim: "" }); setModelId(null); }}
+            onRevert={() => {
+              setModelFree(false);
+              setTrimFree(false);
+              onChange({ make, model: "", trim: "" });
+              setModelId(null);
+            }}
           />
         ) : (
           <select
@@ -170,7 +219,10 @@ export default function MakeModelTrimSelect({
             placeholder="Enter trim"
             disabled={!model}
             onChange={(v) => onChange({ make, model, trim: v })}
-            onRevert={() => onChange({ make, model, trim: "" })}
+            onRevert={() => {
+              setTrimFree(false);
+              onChange({ make, model, trim: "" });
+            }}
           />
         ) : (
           <select
