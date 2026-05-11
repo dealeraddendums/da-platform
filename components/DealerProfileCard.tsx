@@ -6,6 +6,7 @@ import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
 import { PageHeader } from "@/components/PageHeader";
+import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
 
 type Props = {
   dealer: DealerRow;
@@ -213,7 +214,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
   return (
     <div>
       <PageHeader
-        title={dealer.name}
+        title={decodeHtmlEntities(dealer.name)}
         subtitle={`Inventory ID: ${dealer.inventory_dealer_id ?? dealer.dealer_id}`}
         action={
           <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
@@ -469,7 +470,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
               editing={editing}
               required
               onChange={set("name")}
-              view={dealer.name}
+              view={decodeHtmlEntities(dealer.name)}
             />
             <Field
               label="Primary Contact"
@@ -614,10 +615,18 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
       </div>
 
       {/* Metadata */}
-      <div className="mt-4 text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
-        Created {new Date(dealer.created_at).toLocaleDateString()} · Last
-        updated {new Date(dealer.updated_at).toLocaleDateString()}
-      </div>
+      {(() => {
+        const created = formatCreatedDate(dealer.created_at);
+        const updated = formatCreatedDate(dealer.updated_at);
+        if (!created && !updated) return null;
+        return (
+          <div className="mt-4 text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
+            {created && <>Created {created}</>}
+            {created && updated ? " · " : ""}
+            {updated && <>Last updated {updated}</>}
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { decodeHtmlEntities } from "@/lib/format";
 
 type ImpersonateState = {
   dealer_name: string;
@@ -88,7 +89,7 @@ export default function ImpersonationBanner() {
           zIndex: 9999,
         }}
       >
-        <span>👁 Viewing as <strong>{impersonateState.dealer_name}</strong></span>
+        <span>👁 Viewing as <strong>{decodeHtmlEntities(impersonateState.dealer_name)}</strong></span>
         <button
           onClick={() => void handleExitImpersonate()}
           disabled={exiting}
@@ -131,8 +132,8 @@ export default function ImpersonationBanner() {
       >
         <span>
           {ghostState.group_id
-            ? <>👻 Ghost Mode — <strong>{ghostState.group_name}</strong> — Operating as Group Admin</>
-            : <>👻 Ghost Mode — <strong>{ghostState.dealer_name}</strong> — Operating without a user account</>
+            ? <>👻 Ghost Mode — <strong>{decodeHtmlEntities(ghostState.group_name)}</strong> — Operating as Group Admin</>
+            : <>👻 Ghost Mode — <strong>{decodeHtmlEntities(ghostState.dealer_name)}</strong> — Operating without a user account</>
           }
         </span>
         <button

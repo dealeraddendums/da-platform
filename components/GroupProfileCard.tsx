@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
+import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
 
 type Props = {
   group: GroupRow;
@@ -142,7 +143,7 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
   return (
     <div>
       <PageHeader
-        title={group.name}
+        title={decodeHtmlEntities(group.name)}
         subtitle={`Group ID: ${group.id.slice(0, 8)}…`}
         action={
           <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
@@ -201,7 +202,7 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
             Group Information
           </p>
           <div className="space-y-4">
-            <Field label="Group Name" value={form.name} editing={editing} required onChange={set("name")} view={group.name} />
+            <Field label="Group Name" value={form.name} editing={editing} required onChange={set("name")} view={decodeHtmlEntities(group.name)} />
             <Field label="Primary Contact" value={form.primary_contact} editing={editing} onChange={set("primary_contact")} view={group.primary_contact} />
             <Field label="Email" value={form.primary_contact_email} editing={editing} type="email" onChange={set("primary_contact_email")} view={group.primary_contact_email} isEmail />
             <Field label="Phone" value={form.phone} editing={editing} onChange={set("phone")} view={group.phone} />
@@ -232,10 +233,18 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
       <GroupDealers groupId={group.id} isSuperAdmin={isSuperAdmin} isGroupAdmin={isGroupAdmin} />
 
       {/* Metadata */}
-      <div className="mt-4 text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
-        Created {new Date(group.created_at).toLocaleDateString()} · Last updated{" "}
-        {new Date(group.updated_at).toLocaleDateString()}
-      </div>
+      {(() => {
+        const created = formatCreatedDate(group.created_at);
+        const updated = formatCreatedDate(group.updated_at);
+        if (!created && !updated) return null;
+        return (
+          <div className="mt-4 text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
+            {created && <>Created {created}</>}
+            {created && updated ? " · " : ""}
+            {updated && <>Last updated {updated}</>}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -394,10 +403,10 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
                         }}
                         className="hover:underline"
                       >
-                        {impersonating === d.dealer_id ? "…" : d.name}
+                        {impersonating === d.dealer_id ? "…" : decodeHtmlEntities(d.name)}
                       </button>
                     ) : (
-                      <span style={{ fontWeight: 500, color: "var(--text-primary)" }}>{d.name}</span>
+                      <span style={{ fontWeight: 500, color: "var(--text-primary)" }}>{decodeHtmlEntities(d.name)}</span>
                     )}
                     <Link
                       href={`/dealers/${d.id}`}
@@ -432,7 +441,7 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
                         style={{ color: "var(--error)" }}
                         disabled={removing === d.id}
                         onClick={() => {
-                          const confirmMsg = `Remove ${d.name} from this group?\n\nThe dealer account will remain active but will no longer be associated with your group.`;
+                          const confirmMsg = `Remove ${decodeHtmlEntities(d.name)} from this group?\n\nThe dealer account will remain active but will no longer be associated with your group.`;
                           if (confirm(confirmMsg)) void removeDealer(d.id);
                         }}
                       >

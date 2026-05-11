@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { createClient } from "@/lib/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
+import { decodeHtmlEntities } from "@/lib/format";
 
 type DealerListRow = DealerRow & {
   group_name: string | null;
@@ -27,13 +28,9 @@ function isExternalGroup(val: string | null | undefined): val is string {
   return isNaN(Number(val));
 }
 
-function decodeHtml(str: string | null | undefined): string {
-  if (!str) return "";
-  if (typeof window === "undefined") return str;
-  const el = document.createElement("textarea");
-  el.innerHTML = str;
-  return el.value;
-}
+// Re-export under the legacy name so we don't have to touch every call site.
+// Pure-string under the hood so it works during SSR too.
+const decodeHtml = decodeHtmlEntities;
 
 function churnRisk(d: DealerListRow): "critical" | "low" | "none" {
   if (d.lifetime_prints < 10) return "none";
