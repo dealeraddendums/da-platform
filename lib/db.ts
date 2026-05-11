@@ -767,6 +767,7 @@ export type GroupOptionRow = {
   separator_above: boolean;
   separator_below: boolean;
   spaces: number;
+  assign_all_dealers: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -801,6 +802,7 @@ type GroupOptionInsert = {
   separator_above?: boolean;
   separator_below?: boolean;
   spaces?: number;
+  assign_all_dealers?: boolean;
 };
 
 type GroupOptionUpdate = {
@@ -832,6 +834,7 @@ type GroupOptionUpdate = {
   separator_above?: boolean;
   separator_below?: boolean;
   spaces?: number;
+  assign_all_dealers?: boolean;
   updated_at?: string;
 };
 

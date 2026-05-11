@@ -1,11 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import RichTextEditor from "@/components/RichTextEditor";
 import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
 import type { GroupOptionRow } from "@/lib/db";
-
-type DealerBasic = { id: string; name: string };
 
 type FormState = {
   option_name: string;
@@ -108,38 +106,9 @@ export default function CorporateProductModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Dealer-assignment state — only used for Suggested products
-  const [dealers, setDealers] = useState<DealerBasic[]>([]);
-  const [assignAll, setAssignAll] = useState(true);
-  const [selectedDealers, setSelectedDealers] = useState<Set<string>>(new Set());
-  const [dealerEditable, setDealerEditable] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/groups/${groupId}/dealers`)
-      .then(r => r.json())
-      .then((j: { data?: DealerBasic[] }) => { if (!cancelled) setDealers(j.data ?? []); })
-      .catch(() => null);
-    return () => { cancelled = true; };
-  }, [groupId]);
-
-  // Load existing assignments when editing
-  useEffect(() => {
-    if (!initial?.id || initial.required !== false) return;
-    let cancelled = false;
-    fetch(`/api/groups/${groupId}/option-assignments`)
-      .then(r => r.json())
-      .then((j: { data?: { option_id: string; dealer_id: string }[] }) => {
-        if (cancelled) return;
-        const mine = (j.data ?? []).filter(a => a.option_id === initial.id);
-        if (mine.length > 0) {
-          setAssignAll(false);
-          setSelectedDealers(new Set(mine.map(a => a.dealer_id)));
-        }
-      })
-      .catch(() => null);
-    return () => { cancelled = true; };
-  }, [initial, groupId]);
+  // Dealer assignment lives in the standalone Assign button on the Corporate
+  // Products row now — see AssignProductModal. This modal handles only the
+  // product attributes.
 
   function f<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -151,14 +120,6 @@ export default function CorporateProductModal({
       return { ...prev, ad_types: Array.from(set) };
     });
   }
-  function toggleSelectedDealer(id: string) {
-    setSelectedDealers(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
-
   async function save() {
     setError(null);
     if (!form.option_name.trim()) { setError("Item name is required"); return; }
@@ -199,21 +160,6 @@ export default function CorporateProductModal({
       return;
     }
     const { data: saved } = await res.json() as { data: GroupOptionRow };
-
-    // Apply dealer assignments only for Suggested products (engine still
-    // requires is_suggested=true on the API for assignments).
-    if (!form.required && !assignAll && selectedDealers.size > 0) {
-      await fetch(`/api/groups/${groupId}/option-assignments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          option_id: saved.id,
-          dealer_ids: Array.from(selectedDealers),
-          dealer_editable: dealerEditable,
-        }),
-      });
-    }
-
     setSaving(false);
     onSaved(saved);
   }
@@ -344,67 +290,9 @@ export default function CorporateProductModal({
             </label>
           </div>
 
-          {!form.required && (
-            <div style={{ marginTop: 18, padding: 14, border: "1px solid #e0e0e0", borderRadius: 6, background: "#fafafa" }}>
-              <label style={lbl}>Assign to Dealers</label>
-              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                <button type="button" onClick={() => setAssignAll(true)}
-                  style={{
-                    flex: 1, padding: "8px 0", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: "pointer",
-                    border: `2px solid ${assignAll ? "#7b1fa2" : "#e0e0e0"}`,
-                    background: assignAll ? "#f3e5f5" : "#fff",
-                    color: assignAll ? "#4a148c" : "#55595c",
-                  }}>
-                  All Dealers in Group
-                </button>
-                <button type="button" onClick={() => setAssignAll(false)}
-                  style={{
-                    flex: 1, padding: "8px 0", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: "pointer",
-                    border: `2px solid ${!assignAll ? "#7b1fa2" : "#e0e0e0"}`,
-                    background: !assignAll ? "#f3e5f5" : "#fff",
-                    color: !assignAll ? "#4a148c" : "#55595c",
-                  }}>
-                  Select Dealers
-                </button>
-              </div>
-
-              {!assignAll && (
-                <>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: "#78828c", fontWeight: 600 }}>{selectedDealers.size} selected</span>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button type="button" style={{ background: "none", border: "none", color: "#1976d2", fontSize: 11, cursor: "pointer" }}
-                        onClick={() => setSelectedDealers(new Set(dealers.map(d => d.id)))}>Select all</button>
-                      <button type="button" style={{ background: "none", border: "none", color: "#78828c", fontSize: 11, cursor: "pointer" }}
-                        onClick={() => setSelectedDealers(new Set())}>Clear</button>
-                    </div>
-                  </div>
-                  <div style={{ maxHeight: 180, overflowY: "auto", border: "1px solid #e0e0e0", borderRadius: 4, background: "#fff" }}>
-                    {dealers.length === 0 ? (
-                      <p style={{ padding: 12, fontSize: 12, color: "#78828c", textAlign: "center" }}>No dealers in this group.</p>
-                    ) : dealers.map(d => (
-                      <label key={d.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", cursor: "pointer", borderBottom: "1px solid #f0f0f0" }}>
-                        <input type="checkbox" checked={selectedDealers.has(d.id)} onChange={() => toggleSelectedDealer(d.id)} />
-                        <span style={{ fontSize: 13, color: "#333" }}>{d.name}</span>
-                      </label>
-                    ))}
-                  </div>
-
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e0e0e0" }}>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: "#78828c", marginBottom: 6 }}>DEALER ACCESS</p>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#55595c", marginBottom: 4 }}>
-                      <input type="radio" checked={!dealerEditable} onChange={() => setDealerEditable(false)} />
-                      Locked — dealer cannot edit or remove
-                    </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#55595c" }}>
-                      <input type="radio" checked={dealerEditable} onChange={() => setDealerEditable(true)} />
-                      Editable — copied to dealer&apos;s library (they can modify)
-                    </label>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+          <p style={{ fontSize: 11, color: "#78828c", marginTop: 18 }}>
+            Dealer assignment is managed from the Assign button on this product&apos;s row in the Corporate Products table.
+          </p>
         </div>
 
         <div className="px-5 py-3" style={{ borderTop: "1px solid var(--border)", display: "flex", justifyContent: "flex-end", gap: 8, alignItems: "center" }}>

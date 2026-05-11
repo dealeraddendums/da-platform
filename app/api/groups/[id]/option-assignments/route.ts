@@ -70,17 +70,19 @@ export async function POST(
 
   const admin = createAdminSupabaseClient();
 
-  // Verify option belongs to this group and is suggested
+  // Verify option belongs to this group. Both Required and Suggested products
+  // can have specific dealer assignments now that scope is controlled by
+  // assign_all_dealers — the is_suggested gate the legacy flow used has been
+  // removed.
   const { data: opt } = await admin
     .from("group_options")
     .select("*")
     .eq("id", option_id)
     .eq("group_id", params.id)
-    .eq("is_suggested", true)
     .maybeSingle<GroupOptionRow>();
 
   if (!opt) {
-    return NextResponse.json({ error: "Suggested option not found in this group" }, { status: 404 });
+    return NextResponse.json({ error: "Option not found in this group" }, { status: 404 });
   }
 
   const rows = dealer_ids.map((dealer_id) => ({

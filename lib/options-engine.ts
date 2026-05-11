@@ -230,29 +230,33 @@ export async function getGroupOptionsForDealer(
 
   if (!rows || rows.length === 0) return [];
 
-  // Resolve which suggested options are locked-assigned to this dealer.
-  const suggestedIds = (rows as GroupOptionRow[])
-    .filter(r => r.is_suggested === true)
+  // Resolve which specific-scope products are explicitly assigned to this
+  // dealer. assign_all_dealers=true products skip the assignment check.
+  const selectScopeIds = (rows as GroupOptionRow[])
+    .filter(r => r.assign_all_dealers === false)
     .map(r => r.id);
 
-  let lockedSuggestedIds = new Set<string>();
-  if (suggestedIds.length > 0) {
+  let assignedIds = new Set<string>();
+  if (selectScopeIds.length > 0) {
     const { data: assigns } = await admin
       .from("dealer_option_assignments")
       .select("option_id")
       .eq("dealer_id", dealer.id)
       .eq("group_id", dealer.group_id)
       .eq("dealer_editable", false)
-      .in("option_id", suggestedIds);
-    lockedSuggestedIds = new Set((assigns ?? []).map(a => a.option_id as string));
+      .in("option_id", selectScopeIds);
+    assignedIds = new Set((assigns ?? []).map(a => a.option_id as string));
   }
 
   return (rows as GroupOptionRow[])
     .filter(r => {
-      // Required corporate product → always show on every dealer in the group.
-      // Suggested → only show when locked-assigned to this dealer.
-      if (r.is_suggested !== true) return true;
-      return lockedSuggestedIds.has(r.id);
+      // assign_all_dealers=true → product applies to every current and future
+      // dealer in the group. assign_all_dealers=false → only dealers explicitly
+      // listed in dealer_option_assignments (with dealer_editable=false; the
+      // editable flow already copies into addendum_library and is its own
+      // surface).
+      if (r.assign_all_dealers !== false) return true;
+      return assignedIds.has(r.id);
     })
     .map(r => {
       // Prefer the explicit `required` column added in migration 053; fall back

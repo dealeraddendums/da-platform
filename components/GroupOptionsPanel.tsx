@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { GroupOptionRow, GroupDisclaimerRow, GroupTemplateRow } from "@/lib/db";
 import CorporateProductModal from "@/components/CorporateProductModal";
+import AssignProductModal from "@/components/AssignProductModal";
 
 type Props = {
   groupId: string;
@@ -364,19 +365,30 @@ type DealerBasic = { id: string; name: string };
 
 function OptionSection({ groupId }: { groupId: string }) {
   const [options, setOptions] = useState<GroupOptionRow[]>([]);
+  const [assignmentCounts, setAssignmentCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalProduct, setModalProduct] = useState<GroupOptionRow | null>(null);
+  const [assignProduct, setAssignProduct] = useState<GroupOptionRow | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
 
   const fetchOptions = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`/api/group-options/${groupId}`);
-    if (res.ok) {
-      const json = await res.json() as { data: GroupOptionRow[] };
+    const [optsRes, assignsRes] = await Promise.all([
+      fetch(`/api/group-options/${groupId}`),
+      fetch(`/api/groups/${groupId}/option-assignments`),
+    ]);
+    if (optsRes.ok) {
+      const json = await optsRes.json() as { data: GroupOptionRow[] };
       setOptions(json.data);
     } else {
       setError("Failed to load options");
+    }
+    if (assignsRes.ok) {
+      const json = await assignsRes.json() as { data?: { option_id: string; dealer_id: string }[] };
+      const counts: Record<string, number> = {};
+      for (const a of json.data ?? []) counts[a.option_id] = (counts[a.option_id] ?? 0) + 1;
+      setAssignmentCounts(counts);
     }
     setLoading(false);
   }, [groupId]);
@@ -459,6 +471,8 @@ function OptionSection({ groupId }: { groupId: string }) {
             <tbody>
               {options.map((opt, i) => {
                 const suggested = opt.is_suggested ?? false;
+                const allDealers = opt.assign_all_dealers !== false;
+                const count = assignmentCounts[opt.id] ?? 0;
                 return (
                   <tr key={opt.id} style={{ borderBottom: i < options.length - 1 ? "1px solid var(--border)" : "none", opacity: opt.active ? 1 : 0.5 }}>
                     <td className="px-4 py-2.5">
@@ -480,9 +494,14 @@ function OptionSection({ groupId }: { groupId: string }) {
                       </button>
                     </td>
                     <td className="px-4 py-2.5 text-right" style={{ whiteSpace: "nowrap" }}>
-                      <div className="flex items-center justify-end gap-3">
-                        <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => setModalProduct(opt)}>Edit</button>
-                        <button className="text-xs" style={{ color: "var(--error)" }} onClick={() => void deleteOption(opt.id)}>Delete</button>
+                      <div className="flex items-center justify-end gap-2">
+                        {assignmentBadge(allDealers, count)}
+                        <button className="text-xs" style={assignButtonStyle} onClick={() => setAssignProduct(opt)}>
+                          Assign
+                        </button>
+                        <span style={{ color: "#e0e0e0" }}>·</span>
+                        <button className="text-xs" style={{ color: "var(--blue)", background: "none", border: "none", cursor: "pointer", padding: 0 }} onClick={() => setModalProduct(opt)}>Edit</button>
+                        <button className="text-xs" style={{ color: "var(--error)", background: "none", border: "none", cursor: "pointer", padding: 0 }} onClick={() => void deleteOption(opt.id)}>Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -501,7 +520,47 @@ function OptionSection({ groupId }: { groupId: string }) {
           onSaved={handleSaved}
         />
       )}
+
+      {assignProduct && (
+        <AssignProductModal
+          groupId={groupId}
+          product={assignProduct}
+          onClose={() => setAssignProduct(null)}
+          onSaved={({ assign_all_dealers, dealer_count }) => {
+            setOptions(prev => prev.map(o => o.id === assignProduct.id ? { ...o, assign_all_dealers } : o));
+            setAssignmentCounts(prev => ({ ...prev, [assignProduct.id]: dealer_count }));
+          }}
+        />
+      )}
     </>
+  );
+}
+
+const assignButtonStyle: React.CSSProperties = {
+  height: 26, padding: "0 10px", fontSize: 11, fontWeight: 600,
+  border: "1px solid #c0c0c0", borderRadius: 4, background: "#fff",
+  color: "#78828c", cursor: "pointer", whiteSpace: "nowrap",
+};
+
+function assignmentBadge(allDealers: boolean, count: number): React.ReactNode {
+  if (allDealers) {
+    return (
+      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", whiteSpace: "nowrap" }}>
+        All Dealers
+      </span>
+    );
+  }
+  if (count > 0) {
+    return (
+      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#e3f2fd", color: "#0d47a1", border: "1px solid #bbdefb", whiteSpace: "nowrap" }}>
+        {count} dealer{count !== 1 ? "s" : ""}
+      </span>
+    );
+  }
+  return (
+    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#fafafa", color: "#78828c", border: "1px solid #e0e0e0", whiteSpace: "nowrap" }}>
+      Unassigned
+    </span>
   );
 }
 
