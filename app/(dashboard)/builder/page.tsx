@@ -37,6 +37,11 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
     ? verifyGhostToken(cookieStore.get("da_ghost_token")?.value ?? "")
     : null;
   const ghostDealerId = ghostCtx?.dealer_text_id ?? null;
+  // Group ghost mode: super_admin viewing a group sets ghostCtx.group_id and
+  // has no dealer_text_id. Without this, the Builder previously fell through
+  // to dealer mode with no dealer scope and the "All Templates" modal queried
+  // /api/templates (dealer table) — never the group's saved templates.
+  const ghostGroupId = ghostCtx?.group_id ?? null;
 
   // Resolve effective dealer_id
   let dealerId = ghostDealerId ?? profile?.dealer_id ?? null;
@@ -50,6 +55,7 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
   }
 
   const groupId = explicitGroupId
+    ?? ghostGroupId
     ?? ((isGroupAdmin && profile?.group_id) ? profile.group_id : null);
 
   type DealerData = { logo_url: string | null; name: string | null; address: string | null; city: string | null; state: string | null; zip: string | null; phone: string | null };

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { GroupOptionRow, GroupDisclaimerRow, GroupTemplateRow } from "@/lib/db";
 import CorporateProductModal from "@/components/CorporateProductModal";
 import AssignProductModal from "@/components/AssignProductModal";
+import { decodeHtmlEntities } from "@/lib/format";
 
 type Props = {
   groupId: string;
@@ -1125,7 +1126,7 @@ function TemplatesTab({ groupId }: { groupId: string }) {
         <div className="card" style={{ width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
           <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
             <h3 className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
-              Assign &ldquo;{assigningTpl.name}&rdquo; to Dealers
+              Assign &ldquo;{decodeHtmlEntities(assigningTpl.name)}&rdquo; to Dealers
             </h3>
           </div>
           <div className="px-5 py-3 overflow-y-auto flex-1">
@@ -1146,7 +1147,7 @@ function TemplatesTab({ groupId }: { groupId: string }) {
                   ) : dealers.map((d) => (
                     <label key={d.id} className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer" style={{ background: selectedDealers.has(d.id) ? "#e3f2fd" : "transparent" }}>
                       <input type="checkbox" checked={selectedDealers.has(d.id)} onChange={() => toggleDealer(d.id)} />
-                      <span className="text-sm" style={{ color: "var(--text-primary)" }}>{d.name}</span>
+                      <span className="text-sm" style={{ color: "var(--text-primary)" }}>{decodeHtmlEntities(d.name)}</span>
                     </label>
                   ))}
                 </div>

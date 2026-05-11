@@ -806,7 +806,12 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     try {
       const eid = dealerId ?? vehicle?.dealer_id ?? null;
       const qs = eid ? `?dealer_id=${encodeURIComponent(eid)}` : '';
-      const [tRes, sRes] = await Promise.all([fetch(`/api/templates${qs}`), fetch(`/api/settings${qs}`)]);
+      // In group context (group ghost mode or group_admin / super_admin opening
+      // via ?group=) the Builder reads from the group's template library
+      // instead of the dealer one. group_templates rows have name + id, so
+      // the existing modal renders them identically.
+      const templatesUrl = groupId ? `/api/group-templates/${groupId}` : `/api/templates${qs}`;
+      const [tRes, sRes] = await Promise.all([fetch(templatesUrl), fetch(`/api/settings${qs}`)]);
       if (tRes.ok) { const j = await tRes.json(); setSavedTemplates(j.data ?? []); }
       if (sRes.ok) {
         const sj = await sRes.json() as { data?: Record<string, string | null> };
@@ -821,11 +826,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {}
     setDeleteConfirmId(null);
     setShowOpenModal(true);
-  }, [dealerId, vehicle?.dealer_id]);
+  }, [dealerId, vehicle?.dealer_id, groupId]);
 
   const loadTemplate = useCallback(async (id: string) => {
     try {
-      const r = await fetch(`/api/templates/${id}`);
+      // Match the read path used by openTemplates — group_templates when the
+      // Builder is scoped to a group, dealer templates otherwise.
+      const url = groupId ? `/api/group-templates/${groupId}/${id}` : `/api/templates/${id}`;
+      const r = await fetch(url);
       if (!r.ok) { showToast('Failed to load template'); return; }
       const resp = await r.json();
       const tmpl = resp.data as { template_json?: Record<string, unknown>; name?: string } | null;
@@ -860,7 +868,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {
       showToast('Failed to load template');
     }
-  }, [showToast]);
+  }, [showToast, groupId]);
 
   // ── Selected widget ────────────────────────────────────────────────
   const sel = selId ? widgets[selId] : null;
@@ -1346,7 +1354,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                       <span style={{ fontSize: 11, color: '#555' }}>Delete &ldquo;{t.name}&rdquo;? This cannot be undone.</span>
                       <button onClick={async () => {
-                        const r = await fetch(`/api/templates/${t.id}`, { method: 'DELETE' });
+                        const delUrl = groupId ? `/api/group-templates/${groupId}/${t.id}` : `/api/templates/${t.id}`;
+                        const r = await fetch(delUrl, { method: 'DELETE' });
                         if (r.ok || r.status === 204) {
                           setSavedTemplates(prev => prev.filter(x => x.id !== t.id));
                           setDefaultTemplateIds(prev => { const n = new Set(prev); n.delete(t.id); return n; });
