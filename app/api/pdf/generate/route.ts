@@ -463,6 +463,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         });
     }
 
+    // ── Normalize dealer-specific widget data ─────────────────────────────
+    // Saved templates (especially group templates shared across dealers) carry
+    // whatever logo URL and dealer text were on the canvas at save time. Those
+    // values are wrong as soon as a different dealer prints the same template.
+    // Override the logo and dealer-text widgets with this dealer's live values
+    // unconditionally — same overrides the default-layout path already
+    // applies inline.
+    const dealerLogoForWidget = dealer?.logo_url ?? null;
+    const dealerLines = [
+      dealer?.name,
+      dealer?.address,
+      [dealer?.city, dealer?.state, dealer?.zip].filter(Boolean).join(" ").trim() || null,
+      dealer?.phone,
+    ].filter(Boolean) as string[];
+    widgets = widgets.map(w => {
+      if (w.type === "logo") {
+        // null → blank tile (intentional "no logo"); a truthy URL renders the
+        // image. Either way we drop any prior dealer's logo.
+        return { ...w, d: { ...w.d, imgUrl: dealerLogoForWidget } };
+      }
+      if (w.type === "dealer" && dealerLines.length > 0) {
+        return { ...w, d: { ...w.d, text: dealerLines.join("\n") } };
+      }
+      return w;
+    });
+
     // ── Generate QR codes for infobox-qr and qrcode widgets ─────────────────
     const hasQrWidgets = widgets.some(
       w => (w.type === 'infobox' && (w.d.ibType as string) === 'qr') || w.type === 'qrcode'

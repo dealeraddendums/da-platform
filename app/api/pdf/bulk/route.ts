@@ -577,6 +577,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           });
         }
 
+        // ── Normalize dealer-specific widget data ─────────────────────────
+        // See pdf/generate route — same override so a saved (group) template
+        // never bakes in the wrong dealer's logo or address.
+        const dealerLogoForWidget = dealer?.logo_url ?? null;
+        const dealerLines = [
+          dealer?.name,
+          dealer?.address,
+          [dealer?.city, dealer?.state, dealer?.zip].filter(Boolean).join(" ").trim() || null,
+          dealer?.phone,
+        ].filter(Boolean) as string[];
+        widgets = widgets.map(w => {
+          if (w.type === "logo") return { ...w, d: { ...w.d, imgUrl: dealerLogoForWidget } };
+          if (w.type === "dealer" && dealerLines.length > 0) return { ...w, d: { ...w.d, text: dealerLines.join("\n") } };
+          return w;
+        });
+
         // ── QR code generation (infobox-qr and qrcode widgets) ──────────────
         const hasQrWidgets = widgets.some(
           w => (w.type === "infobox" && (w.d.ibType as string) === "qr") || w.type === "qrcode"
