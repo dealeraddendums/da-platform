@@ -581,6 +581,28 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
 
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
+  // Corporate products inherited from the dealer's parent group. Read-only on
+  // the dealer side — the group admin manages them from the Group page. Empty
+  // array when the dealer isn't in a group or no products apply to them.
+  type CorporateProduct = {
+    id: string;
+    option_name: string;
+    option_price: string;
+    description: string | null;
+    sort_order: number;
+    required: boolean;
+  };
+  const [corporate, setCorporate] = useState<CorporateProduct[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/dealers/${encodeURIComponent(dealerId)}/corporate-products`)
+      .then(r => r.ok ? r.json() : { data: [] })
+      .then((j: { data?: CorporateProduct[] }) => { if (!cancelled) setCorporate(j.data ?? []); })
+      .catch(() => null);
+    return () => { cancelled = true; };
+  }, [dealerId]);
+
   const fetchItems = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -758,6 +780,58 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
           )}
         </div>
       </div>
+
+      {/* Corporate products inherited from the parent group (read-only). */}
+      {corporate.length > 0 && (
+        <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden", marginBottom: 16 }}>
+          <div style={{ padding: "10px 16px", background: "#e8eaf6", borderBottom: "1px solid #c5cae9", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 14 }}>🔒</span>
+            <p style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "#283593", margin: 0 }}>
+              Corporate Products ({corporate.length})
+            </p>
+            <span style={{ fontSize: 11, color: "#5c6bc0" }}>
+              Locked — managed by your group admin. Auto-applied to every printed addendum.
+            </span>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "#f5f6f7", borderBottom: "1px solid #e0e0e0" }}>
+                  <th style={th}>Product Name</th>
+                  <th style={th}>Description</th>
+                  <th style={th}>Type</th>
+                  <th style={{ ...th, textAlign: "right" }}>Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {corporate.map((c, i) => (
+                  <tr key={c.id} style={{ borderBottom: i < corporate.length - 1 ? "1px solid var(--border)" : "none", background: "#f8f9ff" }}>
+                    <td style={td}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontWeight: 600, color: "#1a237e" }}>{c.option_name}</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 10, background: "#e3f2fd", color: "#0d47a1", border: "1px solid #bbdefb" }}>
+                          Group
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ ...td, color: "#78828c", fontSize: 12 }}>
+                      {c.description ? stripHtml(c.description).slice(0, 50) + (stripHtml(c.description).length > 50 ? "…" : "") : "—"}
+                    </td>
+                    <td style={td}>
+                      {c.required
+                        ? <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#e8f5e9", color: "#2e7d32" }}>Required</span>
+                        : <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#fff3e0", color: "#e65100" }}>Suggested</span>}
+                    </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#1a237e" }}>
+                      {formatOptionPrice(c.option_price)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden" }}>
