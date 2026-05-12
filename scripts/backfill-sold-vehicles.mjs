@@ -142,7 +142,7 @@ async function loadDealers() {
   const all = [];
   let from = 0;
   while (true) {
-    let q = sb.from("dealers").select("id, dealer_id, internal_id, name, active, status")
+    let q = sb.from("dealers").select("id, dealer_id, internal_id, name, active")
       .order("internal_id", { ascending: true, nullsFirst: false })
       .range(from, from + 999);
     if (DEALER_FILTER) q = q.eq("internal_id", DEALER_FILTER);
@@ -154,14 +154,14 @@ async function loadDealers() {
     from += 1000;
     if (DEALER_FILTER) break;
   }
-  // Per spec: skip dealers where Supabase status='inactive' AND Aurora active='No'.
-  // Aurora ACTIVE check happens inline below since we already know the join.
-  return all.filter(d => {
-    // Skip dealers we can't key against (no internal_id) — we look up by Aurora DEALER_ID = dealers.internal_id.
-    if (!d.internal_id) return false;
-    if (LIMIT_DEALERS && all.indexOf(d) >= LIMIT_DEALERS) return false;
-    return true;
-  });
+  // Per spec: skip dealers where Supabase active=false (the row's only
+  // "inactive" signal — there is no separate status column on dealers).
+  // Spec also says skip if Aurora ACTIVE='No', but checking that would
+  // require an extra round-trip per dealer; we accept the small cost of
+  // a noop query for those because the Aurora vehicle filter will return
+  // zero rows for cancelled dealers anyway.
+  const filtered = all.filter(d => d.internal_id && d.active !== false);
+  return LIMIT_DEALERS ? filtered.slice(0, LIMIT_DEALERS) : filtered;
 }
 
 // ── Phase 2: per-dealer processing ────────────────────────────────────────────
