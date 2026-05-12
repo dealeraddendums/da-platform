@@ -97,6 +97,20 @@ function toIntOrZero(v) {
   const n = toIntOrNull(v);
   return n ?? 0;
 }
+// Range clamps for the typed Supabase columns. Two batches blew up during the
+// first full pass with "numeric field overflow" because Aurora carries a
+// handful of corrupt values (year 99999, mileage 9_999_999_999, MSRP
+// 999_999_999.99, etc.). Clamp at write time so a single bad row never
+// fails a whole 500-row batch.
+function clampInt(v, lo, hi) {
+  if (v == null) return null;
+  if (v < lo) return lo;
+  if (v > hi) return hi;
+  return v;
+}
+function clampYear(v)    { return v == null ? null : (v < 1900 || v > 2100 ? null : v); }
+function clampMileage(v) { return v == null ? 0    : clampInt(v, 0, 2_000_000); }
+function clampMsrp(v)    { return v == null ? null : (v < 0 || v > 9_999_999.99 ? null : v); }
 function normalizeDate(d) {
   if (!d) return null;
   // mysql2 returns Date objects for DATE/DATETIME — convert to ISO.
@@ -116,15 +130,15 @@ function mapVehicleFromAurora(row, dealerTextId) {
     dealer_id: dealerTextId,
     stock_number: (row.STOCK_NUMBER ?? "").toString().trim() || null,
     vin: (row.VIN_NUMBER ?? "").toString().trim() || null,
-    year: toIntOrNull(row.YEAR),
+    year: clampYear(toIntOrNull(row.YEAR)),
     make: row.MAKE ?? null,
     model: row.MODEL ?? null,
     trim: row.TRIM ?? null,
     body_style: row.BODYSTYLE ?? null,
     exterior_color: row.EXT_COLOR ?? null,
     interior_color: row.INT_COLOR ?? null,
-    mileage: toIntOrZero(row.MILEAGE),
-    msrp: toNullableNumber(row.MSRP),
+    mileage: clampMileage(toIntOrZero(row.MILEAGE)),
+    msrp: clampMsrp(toNullableNumber(row.MSRP)),
     internet_price: row.INTERNET_PRICE != null ? String(row.INTERNET_PRICE) : null,
     condition: (row.NEW_USED ?? "Used").toString().trim() || "Used",
     status: "inactive", // STATUS='0' in Aurora → sold/inactive in Supabase
