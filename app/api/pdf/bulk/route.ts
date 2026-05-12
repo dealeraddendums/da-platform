@@ -6,6 +6,7 @@ import type { DealerSettingsRow, AddendumDataInsert, BuyersGuideDefaults } from 
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
+import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimer } from "@/lib/options-engine";
@@ -99,6 +100,18 @@ async function uploadAndLogBulkJob(
     }));
     const { error: adErr } = await admin.from("addendum_data").insert(adRows);
     if (adErr) console.error(`[BULK] addendum_data insert failed vehicleId=${job.vehicleId}:`, adErr.message);
+  }
+
+  // Mirror to vehicle_addendum_items (reporting table). Same gating as the
+  // single-print path — only addendum doc type contributes the canonical
+  // current product set.
+  if (job.docType === "addendum" && job.dealerUuid) {
+    await syncAddendumItems(admin, {
+      vehicleId: job.vehicleId,
+      dealerId: job.dealerUuid,
+      vin: job.dvVin,
+      products: job.options.map(o => ({ name: o.option_name, price: o.option_price })),
+    });
   }
 }
 

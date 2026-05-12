@@ -5,6 +5,7 @@ import type { VehicleAuditLogInsert, AddendumHistoryInsert, AddendumDataInsert, 
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
+import { syncAddendumItems } from "@/lib/sync-addendum-items";
 
 type BgOption = { option_name: string; option_price?: string; description?: string | null; required?: boolean };
 
@@ -102,6 +103,18 @@ async function logGeneratePdf(
     }));
     const { error: adErr } = await admin.from("addendum_data").insert(adRows);
     if (adErr) console.error("[pdf/generate] addendum_data insert failed:", adErr.message);
+  }
+
+  // Mirror to vehicle_addendum_items (reporting table). Only the addendum
+  // doc type contributes the dealer's "current product set" — infosheet and
+  // buyer-guide prints aren't product-set events.
+  if (docType === "addendum" && dealer?.id) {
+    await syncAddendumItems(admin, {
+      vehicleId: dealerVehicleId,
+      dealerId: dealer.id,
+      vin: dv.vin,
+      products: options.map(o => ({ name: o.option_name, price: o.option_price })),
+    });
   }
 
   const today = new Date().toISOString().split("T")[0];

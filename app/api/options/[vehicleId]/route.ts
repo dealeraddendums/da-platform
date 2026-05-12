@@ -2,12 +2,42 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { getGroupOptionsForDealer } from "@/lib/options-engine";
+import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import type { VehicleOptionRow } from "@/lib/db";
 
 type Params = { params: { vehicleId: string } };
 
 function isUUID(v: string) { return v.includes("-"); }
 function isManual(v: string) { return isUUID(v) || v === "0"; }
+
+/**
+ * Mirror the current per-vehicle option set into vehicle_addendum_items.
+ * Resolves the dealer's UUID and the vehicle's vin from Supabase first
+ * because the save path only has the text dealer_id and the vehicle UUID.
+ * Fire-and-forget at the call site so a sync failure never blocks a save.
+ */
+async function mirrorToAddendumItems(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  vehicleId: string,
+  dealerTextId: string,
+  options: Array<{ option_name: string; option_price?: string }>,
+): Promise<void> {
+  try {
+    if (!isUUID(vehicleId)) return; // legacy "0" sentinel — no real vehicle row
+    const [dealerRes, vehicleRes] = await Promise.all([
+      admin.from("dealers").select("id").eq("dealer_id", dealerTextId).maybeSingle<{ id: string }>(),
+      admin.from("dealer_vehicles").select("vin").eq("id", vehicleId).maybeSingle<{ vin: string | null }>(),
+    ]);
+    await syncAddendumItems(admin, {
+      vehicleId,
+      dealerId: dealerRes.data?.id ?? null,
+      vin: vehicleRes.data?.vin ?? null,
+      products: options.map(o => ({ name: o.option_name, price: o.option_price })),
+    });
+  } catch (err) {
+    console.error("[options POST] addendum-items sync failed:", err instanceof Error ? err.message : err);
+  }
+}
 
 // Build a map of option_name → false for any addendum_library entries marked required=false.
 // Used to override stale vehicle_options.required=true values when the library flag changed.
@@ -209,6 +239,9 @@ export async function POST(
       }));
       const { data, error: insertErr } = await admin.from("vehicle_options").insert(inserts).select("*");
       if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 });
+      // Mirror to vehicle_addendum_items (reporting table). Fire-and-forget;
+      // a failure here must not break the save.
+      void mirrorToAddendumItems(admin, vid, effectiveDealerId, body.options);
       return NextResponse.json({ data });
     }
 
@@ -239,6 +272,7 @@ export async function POST(
       return NextResponse.json({ error: insertErr.message }, { status: 500 });
     }
 
+    void mirrorToAddendumItems(admin, vid, effectiveDealerId, body.options);
     return NextResponse.json({ data });
 
   } catch (err) {
