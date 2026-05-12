@@ -34,8 +34,11 @@ import * as dotenv from "dotenv";
 import * as path from "node:path";
 import { argv, exit } from "node:process";
 
-dotenv.config({ path: path.join(process.cwd(), ".env.local") });
-dotenv.config({ path: path.join(process.cwd(), ".env.production") });
+// Try a few env-file conventions so the script runs from either the DA
+// Platform repo (.env.production) or the da-legacy-etl repo (.env).
+for (const name of [".env.local", ".env.production", ".env"]) {
+  dotenv.config({ path: path.join(process.cwd(), name) });
+}
 
 // ── Args ──────────────────────────────────────────────────────────────────────
 function argFlag(name) {
