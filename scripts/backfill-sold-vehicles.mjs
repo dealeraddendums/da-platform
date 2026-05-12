@@ -54,7 +54,9 @@ const VEHICLE_BATCH = 500;
 const ADDENDUM_BATCH = 500;
 const DEALER_DELAY_MS = 50;
 
-const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+// Accept either DA Platform's NEXT_PUBLIC_SUPABASE_URL or da-legacy-etl's
+// SUPABASE_URL — same target Supabase, the two repos just name it differently.
+const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
 const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const AURORA_HOST = process.env.AURORA_HOST;
 const AURORA_USER = process.env.AURORA_USER;
@@ -232,13 +234,44 @@ async function loadExistingVehicleIds(dealerTextId, vins) {
   return map;
 }
 
-async function processDealer(dealer, index, total) {
-  const internalId = dealer.internal_id;
-  const dealerTextId = dealer.dealer_id; // dealers.dealer_id is the text key dealer_vehicles uses
+/**
+ * Returns a map of stock_number → vin for every row in this dealer's
+ * dealer_vehicles. Used to detect cases where the historical sold vehicle's
+ * stock_number is currently held by a *different* VIN (dealers recycle stock
+ * numbers after a sale) so we can swap the colliding insert's stock_number
+ * to its VIN before hitting the unique constraint.
+ */
+async function loadStockToVinMap(dealerTextId) {
+  const map = new Map();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb
+      .from("dealer_vehicles")
+      .select("vin, stock_number")
+      .eq("dealer_id", dealerTextId)
+      .range(from, from + 999);
+    if (error) throw new Error(`stock_number lookup: ${error.message}`);
+    const rows = data ?? [];
+    for (const r of rows) {
+      if (r.stock_number) {
+        map.set(r.stock_number, (r.vin ?? "").toUpperCase());
+      }
+    }
+    if (rows.length < 1000) break;
+  }
+  return map;
+}
 
-  const auroraVehicles = await fetchAuroraSoldVehicles(internalId);
+async function processDealer(dealer, index, total) {
+  // Verified against Aurora 2026-05-11: Aurora dealer_inventory.DEALER_ID
+  // matches Supabase dealers.dealer_id (e.g. "MP14056"), NOT internal_id —
+  // the user-spec assumption was the other way around. internal_id is a
+  // separate platform-side identifier and Aurora doesn't carry it.
+  const auroraDealerId = dealer.dealer_id;
+  const dealerTextId = dealer.dealer_id;
+
+  const auroraVehicles = await fetchAuroraSoldVehicles(auroraDealerId);
   if (auroraVehicles.length === 0) {
-    log(`[${index}/${total}] ${dealer.name} (${internalId}) — 0 sold vehicles in window, skip`);
+    log(`[${index}/${total}] ${dealer.name} (${auroraDealerId}) — 0 sold vehicles in window, skip`);
     return { vehicles: 0, addendums: 0 };
   }
 
@@ -248,6 +281,11 @@ async function processDealer(dealer, index, total) {
 
   // Build the existing VIN → vehicle_uuid map so we can split inserts vs updates.
   const existingByVin = await loadExistingVehicleIds(dealerTextId, auroraVins);
+  // Also load the full stock_number → vin map so we can detect collisions
+  // where a sold vehicle's stock_number is currently held by a different VIN
+  // in active inventory. Those collisions fail the dealer_id+stock_number
+  // unique constraint, so we swap to VIN-as-stock_number for those rows.
+  const takenStock = await loadStockToVinMap(dealerTextId);
 
   const toInsert = [];
   const toUpdate = []; // {id, patch}
@@ -267,15 +305,26 @@ async function processDealer(dealer, index, total) {
       delete patch.date_added;
       toUpdate.push({ id: existingId, patch });
     } else {
-      // INSERT requires a non-null stock_number per schema. Fall back to VIN
-      // if Aurora's stock number is empty — that's better than dropping the row.
-      if (!mapped.stock_number) mapped.stock_number = vinKey;
+      // INSERT path: ensure (dealer_id, stock_number) is unique.
+      //   1. If Aurora's stock_number is empty → use VIN.
+      //   2. If Aurora's stock_number is held by a different VIN already in
+      //      dealer_vehicles (recycled stock #) → use VIN.
+      //   3. Otherwise keep Aurora's stock_number.
+      const auroraStock = mapped.stock_number?.toString().trim() ?? "";
+      const takenBy = auroraStock ? takenStock.get(auroraStock) : "";
+      const stockConflict = takenBy && takenBy !== vinKey;
+      if (!auroraStock || stockConflict) {
+        mapped.stock_number = vinKey;
+      }
+      // Reserve this stock_number in-memory so two Aurora rows in the same
+      // batch with the same stock_number don't both pass the conflict check.
+      takenStock.set(mapped.stock_number, vinKey);
       toInsert.push(mapped);
     }
   }
 
   if (DRY_RUN) {
-    log(`[${index}/${total}] ${dealer.name} (${internalId}) — DRY: ${auroraVehicles.length} aurora, ${toInsert.length} to insert, ${toUpdate.length} to update`);
+    log(`[${index}/${total}] ${dealer.name} (${auroraDealerId}) — DRY: ${auroraVehicles.length} aurora, ${toInsert.length} to insert, ${toUpdate.length} to update`);
     return { vehicles: auroraVehicles.length, addendums: 0 };
   }
 
@@ -285,7 +334,7 @@ async function processDealer(dealer, index, total) {
     const batch = toInsert.slice(i, i + VEHICLE_BATCH);
     const { data, error } = await sb.from("dealer_vehicles").insert(batch).select("id, vin");
     if (error) {
-      console.error(`[insert vehicle batch] dealer=${internalId} batch=${i} error=${error.message}`);
+      console.error(`[insert vehicle batch] dealer=${auroraDealerId} batch=${i} error=${error.message}`);
       continue;
     }
     for (const r of data ?? []) {
@@ -299,14 +348,14 @@ async function processDealer(dealer, index, total) {
   for (const u of toUpdate) {
     const { error } = await sb.from("dealer_vehicles").update(u.patch).eq("id", u.id);
     if (error) {
-      console.error(`[update vehicle] dealer=${internalId} id=${u.id} error=${error.message}`);
+      console.error(`[update vehicle] dealer=${auroraDealerId} id=${u.id} error=${error.message}`);
       continue;
     }
     updatedCount++;
   }
 
   // ── Addendum line items ───────────────────────────────────────────────────
-  const auroraAddendums = await fetchAuroraAddendumItems(internalId, auroraVins);
+  const auroraAddendums = await fetchAuroraAddendumItems(auroraDealerId, auroraVins);
   let addendumInserted = 0;
   if (auroraAddendums.length > 0) {
     const items = [];
@@ -333,14 +382,14 @@ async function processDealer(dealer, index, total) {
         .from("vehicle_addendum_items")
         .upsert(batch, { onConflict: "dealer_id,aurora_id", ignoreDuplicates: true });
       if (error) {
-        console.error(`[insert addendum batch] dealer=${internalId} batch=${i} error=${error.message}`);
+        console.error(`[insert addendum batch] dealer=${auroraDealerId} batch=${i} error=${error.message}`);
         continue;
       }
       addendumInserted += batch.length;
     }
   }
 
-  log(`[${index}/${total}] ${dealer.name} (${internalId}) — ${auroraVehicles.length} vehicles (${insertedCount} new, ${updatedCount} updated), ${addendumInserted} addendum items — OK`);
+  log(`[${index}/${total}] ${dealer.name} (${auroraDealerId}) — ${auroraVehicles.length} vehicles (${insertedCount} new, ${updatedCount} updated), ${addendumInserted} addendum items — OK`);
   return { vehicles: auroraVehicles.length, addendums: addendumInserted };
 }
 
