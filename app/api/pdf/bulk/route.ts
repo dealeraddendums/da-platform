@@ -26,7 +26,7 @@ interface BulkBgJob {
   dvVin: string | null;
   dealerUuid: string | null;
   docType: "addendum" | "infosheet" | "buyer_guide";
-  options: { option_name: string; option_price: string; description: string | null }[];
+  options: { option_name: string; option_price: string; description: string | null; required?: boolean }[];
 }
 
 async function uploadAndLogBulkJob(
@@ -102,15 +102,23 @@ async function uploadAndLogBulkJob(
     if (adErr) console.error(`[BULK] addendum_data insert failed vehicleId=${job.vehicleId}:`, adErr.message);
   }
 
-  // Mirror to vehicle_addendum_items (reporting table). Same gating as the
-  // single-print path — only addendum doc type contributes the canonical
-  // current product set.
+  // Refresh save-state slice of addendum_data with what was just printed.
+  // Same gating as the single-print path — only addendum doc type
+  // contributes the dealer's canonical "current product set". Print-event
+  // rows inserted above (with printed_at + s3_key) are preserved.
   if (job.docType === "addendum" && job.dealerUuid) {
     await syncAddendumItems(admin, {
       vehicleId: job.vehicleId,
       dealerId: job.dealerUuid,
+      legacyDealerId: job.dvDealerId,
       vin: job.dvVin,
-      products: job.options.map(o => ({ name: o.option_name, price: o.option_price })),
+      documentType: "addendum",
+      products: job.options.map(o => ({
+        name: o.option_name,
+        price: o.option_price,
+        description: o.description ?? null,
+        required: o.required !== false,
+      })),
     });
   }
 }

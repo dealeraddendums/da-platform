@@ -12,11 +12,11 @@
  *
  * Target (Supabase project byouefbebqgffhtfdggu):
  *   - dealer_vehicles                   (insert if new, update if VIN exists for this dealer)
- *   - vehicle_addendum_items            (insert new, skip duplicates by aurora _ID)
+ *   - addendum_data                     (insert new, skip duplicates by (dealer_id, legacy_id))
  *
  * Idempotent: re-running is safe. Existing dealer_vehicles rows are updated
  * to status='inactive' with the latest Aurora field values; addendum line
- * items are skipped on (dealer_id, aurora_id) conflict.
+ * items are skipped on (dealer_id, legacy_id) conflict.
  *
  * Run (from DA Platform EC2):
  *   tmux new-session -d -s backfill 'cd /var/www/da-platform && node scripts/backfill-sold-vehicles.mjs 2>&1 | tee /tmp/backfill-sold-vehicles.log'
@@ -378,23 +378,35 @@ async function processDealer(dealer, index, total) {
       if (!vinKey) continue;
       const vehicleUuid = existingByVin.get(vinKey);
       if (!vehicleUuid) continue; // vehicle didn't insert/exist — skip orphan items
+      const nowIso = new Date().toISOString();
+      const createdAtIso = normalizeDate(a.created_at) ?? nowIso;
+      const updatedAtIso = normalizeDate(a.updated_at) ?? nowIso;
       items.push({
-        dealer_id: dealer.id, // UUID — vehicle_addendum_items.dealer_id is UUID FK
+        dealer_id: dealer.id,                // UUID — addendum_data.dealer_id is UUID FK
+        legacy_dealer_id: auroraDealerId,    // dealers.dealer_id text (Aurora-style)
         vehicle_id: vehicleUuid,
-        aurora_id: a._ID != null ? Number(a._ID) : null,
-        vin: vinKey,
-        item_name: a.ITEM_NAME ?? null,
-        item_price: a.ITEM_PRICE_NUM != null ? Number(a.ITEM_PRICE_NUM) : null,
-        creation_date: normalizeDateOnly(a.CREATION_DATE),
-        created_at_aurora: normalizeDate(a.created_at),
-        updated_at_aurora: normalizeDate(a.updated_at),
+        legacy_id: a._ID != null ? Number(a._ID) : null,
+        vin_number: vinKey,
+        item_name: a.ITEM_NAME ?? "(unknown)",
+        // item_price is varchar — keep as string to preserve modifier codes
+        // round-trip-safely. The numeric cast (ITEM_PRICE_NUM) is used only
+        // for Pulse aggregation, not for storage.
+        item_price: a.ITEM_PRICE_NUM != null ? String(a.ITEM_PRICE_NUM) : null,
+        document_type: "addendum",
+        active: "1",
+        or_or_ad: 1,
+        order_by: 0,
+        separator_spaces: 2,
+        editable: 1,
+        created_at: createdAtIso,
+        updated_at: updatedAtIso,
       });
     }
     for (let i = 0; i < items.length; i += ADDENDUM_BATCH) {
       const batch = items.slice(i, i + ADDENDUM_BATCH);
       const { error } = await sb
-        .from("vehicle_addendum_items")
-        .upsert(batch, { onConflict: "dealer_id,aurora_id", ignoreDuplicates: true });
+        .from("addendum_data")
+        .upsert(batch, { onConflict: "dealer_id,legacy_id", ignoreDuplicates: true });
       if (error) {
         console.error(`[insert addendum batch] dealer=${auroraDealerId} batch=${i} error=${error.message}`);
         continue;

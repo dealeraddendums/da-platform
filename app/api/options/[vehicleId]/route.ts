@@ -11,7 +11,7 @@ function isUUID(v: string) { return v.includes("-"); }
 function isManual(v: string) { return isUUID(v) || v === "0"; }
 
 /**
- * Mirror the current per-vehicle option set into vehicle_addendum_items.
+ * Mirror the current per-vehicle option set into addendum_data (save-state slice).
  * Resolves the dealer's UUID and the vehicle's vin from Supabase first
  * because the save path only has the text dealer_id and the vehicle UUID.
  * Fire-and-forget at the call site so a sync failure never blocks a save.
@@ -20,7 +20,7 @@ async function mirrorToAddendumItems(
   admin: ReturnType<typeof createAdminSupabaseClient>,
   vehicleId: string,
   dealerTextId: string,
-  options: Array<{ option_name: string; option_price?: string }>,
+  options: Array<{ option_name: string; option_price?: string; description?: string | null; required?: boolean }>,
 ): Promise<void> {
   try {
     if (!isUUID(vehicleId)) return; // legacy "0" sentinel — no real vehicle row
@@ -31,8 +31,15 @@ async function mirrorToAddendumItems(
     await syncAddendumItems(admin, {
       vehicleId,
       dealerId: dealerRes.data?.id ?? null,
+      legacyDealerId: dealerTextId,
       vin: vehicleRes.data?.vin ?? null,
-      products: options.map(o => ({ name: o.option_name, price: o.option_price })),
+      documentType: "addendum",
+      products: options.map(o => ({
+        name: o.option_name,
+        price: o.option_price,
+        description: o.description ?? null,
+        required: o.required !== false,
+      })),
     });
   } catch (err) {
     console.error("[options POST] addendum-items sync failed:", err instanceof Error ? err.message : err);
@@ -239,7 +246,7 @@ export async function POST(
       }));
       const { data, error: insertErr } = await admin.from("vehicle_options").insert(inserts).select("*");
       if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 });
-      // Mirror to vehicle_addendum_items (reporting table). Fire-and-forget;
+      // Mirror to addendum_data (save-state slice). Fire-and-forget;
       // a failure here must not break the save.
       void mirrorToAddendumItems(admin, vid, effectiveDealerId, body.options);
       return NextResponse.json({ data });

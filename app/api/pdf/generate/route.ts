@@ -105,15 +105,24 @@ async function logGeneratePdf(
     if (adErr) console.error("[pdf/generate] addendum_data insert failed:", adErr.message);
   }
 
-  // Mirror to vehicle_addendum_items (reporting table). Only the addendum
+  // Refresh the save-state slice of addendum_data (legacy_id IS NULL, no
+  // s3_key, no printed_at) with what was just printed. Only the addendum
   // doc type contributes the dealer's "current product set" — infosheet and
-  // buyer-guide prints aren't product-set events.
+  // buyer-guide prints aren't product-set events. The print-event rows above
+  // (with printed_at + s3_key) are independent and preserved.
   if (docType === "addendum" && dealer?.id) {
     await syncAddendumItems(admin, {
       vehicleId: dealerVehicleId,
       dealerId: dealer.id,
+      legacyDealerId: dv.dealer_id,
       vin: dv.vin,
-      products: options.map(o => ({ name: o.option_name, price: o.option_price })),
+      documentType: "addendum",
+      products: options.map(o => ({
+        name: o.option_name,
+        price: o.option_price,
+        description: o.description ?? null,
+        required: o.required !== false,
+      })),
     });
   }
 
