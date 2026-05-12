@@ -145,7 +145,9 @@ async function loadDealers() {
     let q = sb.from("dealers").select("id, dealer_id, internal_id, name, active")
       .order("internal_id", { ascending: true, nullsFirst: false })
       .range(from, from + 999);
-    if (DEALER_FILTER) q = q.eq("internal_id", DEALER_FILTER);
+    // --dealer accepts either the MP-style dealer_id (e.g. MP14056) or the
+    // numeric internal_id (Aurora's DEALER_ID). One will match.
+    if (DEALER_FILTER) q = q.or(`dealer_id.eq.${DEALER_FILTER},internal_id.eq.${DEALER_FILTER}`);
     const { data, error } = await q;
     if (error) throw new Error(`Failed to load dealers: ${error.message}`);
     const rows = data ?? [];
