@@ -210,6 +210,16 @@ export async function DELETE(
     return NextResponse.json({ error: `dealer_vehicles delete failed: ${dvErr.message}` }, { status: 500 });
   }
 
+  // ── Delete label_orders (FK to dealers(id) without ON DELETE CASCADE) ────
+  const { error: loErr } = await admin
+    .from("label_orders")
+    .delete()
+    .eq("dealer_id", dealer.id);
+  if (loErr) {
+    console.error(`[dealer DELETE] label_orders delete failed: ${loErr.message}`);
+    return NextResponse.json({ error: `label_orders delete failed: ${loErr.message}` }, { status: 500 });
+  }
+
   // ── Finally, delete the dealer row (cascade picks up the rest) ───────────
   const { error: dbError } = await admin
     .from("dealers")
