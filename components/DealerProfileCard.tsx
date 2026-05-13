@@ -475,13 +475,13 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
             )}
             <label className="block mb-4">
               <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                Type the dealer name to confirm: <span className="font-mono" style={{ color: "var(--text-primary)" }}>{dealer.name}</span>
+                Type the dealer name to confirm: <span className="font-mono" style={{ color: "var(--text-primary)" }}>{decodeHtmlEntities(dealer.name)}</span>
               </span>
               <input
                 className="input mt-1"
                 value={deleteConfirmName}
                 onChange={(e) => setDeleteConfirmName(e.target.value)}
-                placeholder={dealer.name}
+                placeholder={decodeHtmlEntities(dealer.name)}
                 autoFocus
                 disabled={deleting}
               />
@@ -497,23 +497,29 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
               >
                 Cancel
               </button>
-              <button
-                onClick={() => void confirmDelete()}
-                disabled={deleting || deleteConfirmName.trim() !== dealer.name.trim()}
-                style={{
-                  background: "#ff5252",
-                  color: "white",
-                  border: "1px solid #ff5252",
-                  borderRadius: 4,
-                  padding: "8px 16px",
-                  fontSize: 14,
-                  fontWeight: 500,
-                  cursor: deleting || deleteConfirmName.trim() !== dealer.name.trim() ? "not-allowed" : "pointer",
-                  opacity: deleting || deleteConfirmName.trim() !== dealer.name.trim() ? 0.5 : 1,
-                }}
-              >
-                {deleting ? "Deleting…" : "Permanently Delete"}
-              </button>
+              {(() => {
+                const expectedName = decodeHtmlEntities(dealer.name).trim();
+                const ready = !deleting && deleteConfirmName.trim() === expectedName;
+                return (
+                  <button
+                    onClick={() => void confirmDelete()}
+                    disabled={!ready}
+                    style={{
+                      background: "#ff5252",
+                      color: "white",
+                      border: "1px solid #ff5252",
+                      borderRadius: 4,
+                      padding: "8px 16px",
+                      fontSize: 14,
+                      fontWeight: 500,
+                      cursor: ready ? "pointer" : "not-allowed",
+                      opacity: ready ? 1 : 0.5,
+                    }}
+                  >
+                    {deleting ? "Deleting…" : "Permanently Delete"}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
