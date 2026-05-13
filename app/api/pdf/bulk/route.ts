@@ -708,6 +708,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           }));
         }
 
+        // ── Resolve ChromeData vehicle photo URLs (vehiclephoto + legacy) ───
+        const needsVehiclePhoto = widgets.some(
+          w => w.type === "vehiclephoto" || (w.type === "infobox" && (w.d.ibType as string) === "photo"),
+        );
+        if (needsVehiclePhoto && dv.vin) {
+          try {
+            const { resolveChromeVehicleImage } = await import("@/lib/chromedata");
+            const photo = await resolveChromeVehicleImage(dv.vin, dv.exterior_color ?? "");
+            if (photo.image_url) {
+              widgets = widgets.map(w => {
+                if (w.type === "vehiclephoto" || (w.type === "infobox" && (w.d.ibType as string) === "photo")) {
+                  return { ...w, d: { ...w.d, imgUrl: photo.image_url } };
+                }
+                return w;
+              });
+            }
+          } catch (err) {
+            console.error("[BULK] vehicle photo resolve failed:", err instanceof Error ? err.message : err);
+          }
+        }
+
         // ── Fetch AI content for infosheet description/features + {{ai.}} tokens ─
         // Always fetch for infosheet — ai_content_default controls AI vs DB preference,
         // but we always need content available so placeholders never appear in PDFs.

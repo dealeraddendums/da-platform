@@ -149,41 +149,38 @@ export function renderW(type: string, d: D, fontScale: number): string {
     return `<div style="padding:6px 0;width:100%"><div style="display:flex;gap:12px"><div style="flex:1"><div style="border-bottom:1px solid #1a1916;height:18px;margin-bottom:2px"></div><div style="font-size:8px;color:#888">${d.l1 || 'Buyers Signature'}</div></div><div style="flex:1"><div style="border-bottom:1px solid #1a1916;height:18px;margin-bottom:2px"></div><div style="font-size:8px;color:#888">${d.l2 || 'Date'}</div></div></div></div>`;
   }
 
-  if (type === 'infobox') {
-    const ibType = (d.ibType as string) || 'epa';
+  // Background Image — full-width image layer, no content. Defaults to the
+  // EPA/DOT Fuel Economy image so a new template prints something useful.
+  if (type === 'bgimage') {
     const imgSt = 'width:100%;height:100%;object-fit:fill;display:block;mix-blend-mode:multiply';
     const phSt = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#f0f0f0;border:1px dashed #bbb';
     const src = (d.imgUrl as string) || '';
-    if (ibType === 'epa') {
-      return `<div style="width:100%;height:100%"><img src="${src || IB_DEFAULT}" style="${imgSt}" alt="EPA"></div>`;
-    }
-    if (ibType === 'photo') {
-      return src
-        ? `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="Vehicle Photo"></div>`
-        : `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">Vehicle Photo</span></div>`;
-    }
-    if (ibType === 'qr') {
-      if (src) return `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="QR Code"></div>`;
-      const tmpl = ((d.qrUrlTemplate as string) || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      return `<div style="${phSt};flex-direction:column;gap:3px;padding:6px;box-sizing:border-box">
-        <span style="font-size:11px;color:#999;font-weight:500">QR Code</span>
-        ${tmpl ? `<span style="font-size:8px;color:#bbb;text-align:center;word-break:break-all;line-height:1.3">${tmpl}</span>` : '<span style="font-size:8px;color:#bbb">URL from VDP link or template</span>'}
-      </div>`;
-    }
-    if (ibType === 'barcode') {
-      return src
-        ? `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="VIN Barcode"></div>`
-        : `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">VIN Barcode</span></div>`;
-    }
-    if (ibType === 'upload') {
-      return src
-        ? `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="Custom Image"></div>`
-        : `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">Upload Custom Image</span></div>`;
-    }
-    // fallback — URL loaded directly via imgUrl input
-    return src
-      ? `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="Infobox"></div>`
-      : `<div style="width:100%;height:100%"><img src="${IB_DEFAULT}" style="${imgSt}" alt="Infobox"></div>`;
+    const alt = ((d.label as string) || 'Background Image').replace(/"/g, '&quot;');
+    if (src) return `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="${alt}"></div>`;
+    return `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">${alt}</span></div>`;
+  }
+
+  // Vehicle Photo — color-matched ChromeData image. The actual URL is
+  // resolved server-side at PDF render time (and via a fetch from the canvas
+  // for live preview); d.imgUrl carries the resolved value. Until then we
+  // show a placeholder so the dealer can position the widget.
+  if (type === 'vehiclephoto') {
+    const imgSt = 'width:100%;height:100%;object-fit:contain;display:block';
+    const phSt = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#fafafa;border:1px dashed #bbb';
+    const src = (d.imgUrl as string) || '';
+    if (src) return `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="Vehicle Photo"></div>`;
+    return `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">Vehicle Photo<br><span style="font-size:9px;color:#bbb">color-matched at print time</span></span></div>`;
+  }
+
+  // Legacy 'infobox' fallback — old saved templates may still reference this
+  // type. Render through the new widget logic based on the saved ibType so
+  // they look right even if BuilderPage's load-time converter hasn't run yet.
+  if (type === 'infobox') {
+    const ibType = (d.ibType as string) || 'epa';
+    if (ibType === 'qr') return renderW('qrcode', { url: d.url, qrUrlTemplate: d.qrUrlTemplate, label: d.label, imgUrl: d.imgUrl }, fontScale);
+    if (ibType === 'barcode') return renderW('barcode', { vin: d.vin }, fontScale);
+    if (ibType === 'photo') return renderW('vehiclephoto', { imgUrl: d.imgUrl, label: 'Vehicle Photo' }, fontScale);
+    return renderW('bgimage', { imgUrl: d.imgUrl || IB_DEFAULT, label: 'Background Image' }, fontScale);
   }
 
   if (type === 'description') {

@@ -26,16 +26,67 @@ const PALETTE_TILES = [
   { type: 'dealer',            emoji: '🏠', label: 'Dealer address',    hint: 'Contact info',          group: 'content' },
   { type: 'description',       emoji: '📝', label: 'Description',       hint: 'Populated at print time', group: 'infosheet' },
   { type: 'features',          emoji: '✦',  label: 'Features list',     hint: 'Populated at print time', group: 'infosheet' },
-  { type: 'barcode',           emoji: '▐▌', label: 'Barcode',           hint: 'VIN Code-128',          group: 'infosheet' },
-  { type: 'qrcode',            emoji: '⊞',  label: 'QR Code',           hint: 'Vehicle page link',     group: 'infosheet' },
   { type: 'headerbar',         emoji: '⬛', label: 'Header bar',        hint: 'Full-width text',       group: 'structural' },
   { type: 'customtext',        emoji: 'T',  label: 'Custom text',       hint: 'Free content',          group: 'structural' },
   { type: 'sigline',           emoji: '✎',  label: 'Signature line',    hint: 'Buyer + date',          group: 'structural' },
-  { type: 'infobox',           emoji: '📦', label: 'Infobox',           hint: 'EPA, QR, photo…',       group: 'infobox', addendum: true },
+  // Dynamic content — independent, multi-instance widgets that replaced the
+  // monolithic Infobox. Drop as many as needed; mix and match freely.
+  { type: 'bgimage',           emoji: '🖼️', label: 'Background Image',   hint: 'Full-width image',      group: 'dynamic' },
+  { type: 'qrcode',            emoji: '⊞',  label: 'QR Code',           hint: 'Scan for more info',    group: 'dynamic' },
+  { type: 'barcode',           emoji: '▐▌', label: 'VIN Barcode',       hint: 'Vehicle barcode',       group: 'dynamic' },
+  { type: 'vehiclephoto',      emoji: '📷', label: 'Vehicle Photo',     hint: 'Color-matched photo',   group: 'dynamic' },
   { type: 'suggested_options', emoji: '💭', label: 'Suggested Products', hint: 'Optional buyer add-ons', group: 'suggested', addendum: true },
   { type: 'suggested_price',   emoji: '💰', label: 'Suggested Price',   hint: 'MSRP + all options',    group: 'suggested', addendum: true },
 ];
 
+
+/**
+ * Convert legacy `infobox` widgets to the new independent widget types.
+ *   ibType=epa    → bgimage (EPA default already set on imgUrl)
+ *   ibType=upload → bgimage (carries the uploaded custom URL)
+ *   ibType=qr     → qrcode  (carries qrUrlTemplate + label/url)
+ *   ibType=barcode→ barcode (carries vin)
+ *   ibType=photo  → vehiclephoto (URL resolved at print time)
+ *
+ * Idempotent — only touches type==='infobox' rows. Logs a warning once per
+ * legacy widget so we can spot un-saved templates in production traffic.
+ */
+function convertLegacyInfoboxes(ws: Record<string, Widget>): Record<string, Widget> {
+  let changed = false;
+  const result: Record<string, Widget> = {};
+  for (const [id, w] of Object.entries(ws)) {
+    if (w.type !== 'infobox') { result[id] = w; continue; }
+    const ibType = (w.d.ibType as string) || 'epa';
+    let newType: Widget['type'];
+    let newD: Record<string, unknown>;
+    switch (ibType) {
+      case 'qr':
+        newType = 'qrcode';
+        newD = { url: w.d.url ?? 'https://dealeraddendums.com', qrUrlTemplate: w.d.qrUrlTemplate ?? null, label: w.d.label ?? 'Scan for more info', size: w.d.size ?? 120, imgUrl: w.d.imgUrl };
+        break;
+      case 'barcode':
+        newType = 'barcode';
+        newD = { vin: w.d.vin ?? '', stock: w.d.stock ?? '' };
+        break;
+      case 'photo':
+        newType = 'vehiclephoto';
+        newD = { angle: '03', imgUrl: w.d.imgUrl ?? '', label: 'Vehicle Photo' };
+        break;
+      case 'upload':
+      case 'epa':
+      default:
+        newType = 'bgimage';
+        newD = { imgUrl: w.d.imgUrl ?? '', label: 'Background Image' };
+        break;
+    }
+    result[id] = { ...w, type: newType, d: newD };
+    changed = true;
+    if (typeof console !== 'undefined') {
+      console.warn(`[builder] converted legacy infobox widget ${id} (ibType=${ibType}) → ${newType}`);
+    }
+  }
+  return changed ? result : ws;
+}
 
 // Nudge any widget whose top-left corner is outside canvas back to the nearest in-bounds position
 function clampWidgets(ws: Record<string, Widget>, pw: number, ph: number): Record<string, Widget> {
@@ -468,7 +519,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
 
   // ── Init default layout ────────────────────────────────────────────
   useEffect(() => {
-    const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox'];
+    // bgimage replaces the old monolithic 'infobox' slot — new templates get
+    // the EPA/DOT Fuel Economy image pre-placed (DEFS.bgimage sets imgUrl).
+    const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','bgimage'];
     let nextNid = 1;
     let ws: Record<string, Widget> = {};
     order.forEach(type => {
@@ -523,6 +576,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           const { w: pw, h: ph } = getPaperDims(ps, customSizesRef.current);
           let ws = json.widgets;
           let n = json.nid ?? 1;
+          ws = convertLegacyInfoboxes(ws);
           [ws, n] = ensureAskbar(ws, n, ps);
           ws = clampWidgets(ws, pw, ph);
           if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
@@ -579,7 +633,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       const scaleW = pw / PAPERS.standard.w;
       const customBg = customSizesRef.current.find(c => c.id === size)?.background_url;
       setBgUrl(customBg ?? BG_DEFAULT); setBgInputVal(customBg ?? BG_DEFAULT);
-      const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox'];
+      // bgimage replaces the old monolithic 'infobox' slot — new templates get
+    // the EPA/DOT Fuel Economy image pre-placed (DEFS.bgimage sets imgUrl).
+    const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','bgimage'];
       let nextNid = 1;
       let ws: Record<string, Widget> = {};
       order.forEach(type => {
@@ -850,6 +906,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       const { w: pw, h: ph } = getPaperDims(ps, customSizesRef.current);
       let ws = json.widgets;
       let n = json.nid ?? 1;
+      ws = convertLegacyInfoboxes(ws);
       [ws, n] = ensureAskbar(ws, n, ps);
       ws = clampWidgets(ws, pw, ph);
       if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
@@ -994,13 +1051,17 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
               <div style={{ fontSize: 10, fontWeight: 600, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.06em' }}>Widgets — drag to canvas</div>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px 20px' }}>
-              {(['content','suggested','infosheet','structural','infobox'] as const).map(group => {
+              {(['content','dynamic','suggested','infosheet','structural'] as const).map(group => {
                 const tiles = PALETTE_TILES.filter(t => t.group === group);
                 if (!tiles.length) return null;
                 return (
                   <div key={group}>
                     <div style={{ fontSize: 10, fontWeight: 600, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.05em', margin: '10px 0 5px' }}>
-                      {group === 'infosheet' ? 'Infosheet' : group === 'infobox' ? 'Infobox' : group === 'content' ? 'Content' : group === 'suggested' ? 'Suggested Products' : 'Structural'}
+                      {group === 'infosheet' ? 'Infosheet'
+                        : group === 'dynamic' ? 'Dynamic Content'
+                        : group === 'content' ? 'Content'
+                        : group === 'suggested' ? 'Suggested Products'
+                        : 'Structural'}
                     </div>
                     {tiles.map(tile => {
                       const hidden = isInfosheet
@@ -1441,14 +1502,19 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         />
       )}
 
-      {/* INFOBOX LIBRARY PICKER */}
+      {/* BACKGROUND IMAGE LIBRARY PICKER (also serves legacy infobox) */}
       {showInfoboxLibPicker && (
         <ImagePickerModal
           bucket="new-infobox-images"
-          title="Choose Infobox Image"
+          title="Choose Background Image"
           onSelect={url => {
             if (selId) {
-              updateWidget(selId, 'ibType', 'upload');
+              const selected = widgetsRef.current[selId];
+              // Old legacy infobox still flips ibType=upload + imgUrl.
+              // New bgimage widget just sets imgUrl.
+              if (selected?.type === 'infobox') {
+                updateWidget(selId, 'ibType', 'upload');
+              }
               updateWidget(selId, 'imgUrl', url);
             }
             setShowInfoboxLibPicker(false);
@@ -1902,7 +1968,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
 
       {w.type === 'barcode' && (
         <EpSection>
-          <Eps>Barcode</Eps>
+          <Eps>VIN Barcode</Eps>
           <Fd label="VIN (auto-populated at print time)">
             <input value={(d.vin as string) || ''} onChange={e => u('vin', e.target.value)} style={{ ...fiStyle, fontFamily: 'monospace', fontSize: 12 }} placeholder="VIN auto-filled from vehicle record" />
           </Fd>
@@ -1913,9 +1979,67 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
       {w.type === 'qrcode' && (
         <EpSection>
           <Eps>QR Code</Eps>
-          <Fd label="URL"><input value={(d.url as string) || ''} onChange={e => u('url', e.target.value)} style={{ ...fiStyle, fontSize: 11 }} placeholder="https://…" /></Fd>
-          <Fd label="Label"><input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} /></Fd>
-          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>QR code links to vehicle detail page. URL auto-populated at print time.</div>
+          <Fd label="Custom URL template (optional)">
+            <input value={(d.qrUrlTemplate as string) || ''} onChange={e => u('qrUrlTemplate', e.target.value || null)}
+              style={{ ...fiStyle, fontSize: 11 }} placeholder="https://dealer.com/inventory/[VIN]" />
+          </Fd>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, marginTop: 4 }}>
+            Use <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[VIN]</code> or <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[STOCK]</code> as variables. Leave blank to use VDP link from inventory data.
+          </div>
+          {dealerId && (
+            <div style={{ marginTop: 8 }}>
+              <button
+                onClick={() => void saveQrDefault()}
+                disabled={qrSavingDefault}
+                style={{ fontSize: 10, padding: '3px 8px', height: 24, background: '#fff', border: '1px solid #c0c0c0', borderRadius: 3, color: '#55595c', cursor: qrSavingDefault ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}
+              >
+                {qrSavingDefault ? 'Saving…' : qrDefaultSaved ? '✓ Saved as default' : 'Use as default QR URL for all addenda'}
+              </button>
+            </div>
+          )}
+          <Fd label="Label" style={{ marginTop: 8 }}>
+            <input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} />
+          </Fd>
+          <Fd label="Fallback URL" style={{ marginTop: 8 }}>
+            <input value={(d.url as string) || ''} onChange={e => u('url', e.target.value)} style={{ ...fiStyle, fontSize: 11 }} placeholder="https://…" />
+          </Fd>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Used when VDP link and template are both empty.</div>
+        </EpSection>
+      )}
+
+      {w.type === 'bgimage' && (
+        <EpSection>
+          <Eps>Background Image</Eps>
+          {onPickInfolibImage && (
+            <button
+              onClick={onPickInfolibImage}
+              style={{ width: '100%', padding: '6px', background: '#fff', color: '#1976d2', border: '1px solid #1976d2', borderRadius: 4, fontSize: 11, cursor: 'pointer', marginBottom: 4, fontFamily: 'inherit' }}
+            >
+              Choose from Image Library
+            </button>
+          )}
+          <Fd label="Or load from URL" style={{ marginTop: 8 }}>
+            <input value={(d.imgUrl as string) || ''} onChange={e => u('imgUrl', e.target.value)} style={{ ...fiStyle, fontSize: 11 }} placeholder="https://…" />
+          </Fd>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Full-width image layer. Use Layer Order below to control stacking against QR / barcode / photo widgets.</div>
+        </EpSection>
+      )}
+
+      {w.type === 'vehiclephoto' && (
+        <EpSection>
+          <Eps>Vehicle Photo</Eps>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>
+            Color-matched photo from ChromeData. URL is resolved at print time
+            from the vehicle&apos;s VIN and exterior color — no setup needed.
+          </div>
+          <Fd label="Angle" style={{ marginTop: 8 }}>
+            <select value={(d.angle as string) || '03'} onChange={e => u('angle', e.target.value)} style={fiStyle as React.CSSProperties}>
+              <option value="03">03 — Driver-side profile (default)</option>
+              <option value="01">01 — Front 3/4 driver</option>
+              <option value="05">05 — Rear 3/4 driver</option>
+              <option value="07">07 — Front 3/4 passenger</option>
+            </select>
+          </Fd>
         </EpSection>
       )}
 

@@ -25,6 +25,15 @@ export const LAYOUT: Record<string, { x: number; y: number; w: number; h: number
   subtotal:          { x: 40,  y: 608, w: 332, h: 28  },
   askbar:            { x: 40,  y: 624, w: 344, h: 45  },
   dealer:            { x: 40,  y: 676, w: 336, h: 80  },
+  // bgimage occupies the old infobox slot — when a fresh template is created
+  // it gets the EPA/DOT Fuel Economy default so the addendum prints something
+  // sensible out of the box.
+  bgimage:           { x: 28,  y: 760, w: 352, h: 240 },
+  vehiclephoto:      { x: 60,  y: 780, w: 280, h: 200 },
+  qrcode:            { x: 280, y: 280, w: 96,  h: 96  },
+  barcode:           { x: 40,  y: 760, w: 256, h: 52  },
+  // legacy alias — kept so old saved templates that still reference 'infobox'
+  // land in the right place during the backward-compat conversion pass.
   infobox:           { x: 28,  y: 760, w: 352, h: 240 },
 };
 
@@ -45,20 +54,38 @@ export const WIDGET_LABELS: Record<string, string> = {
   subtotal: 'Subtotal', askbar: 'Asking price', dealer: 'Dealer address',
   headerbar: 'Header bar', customtext: 'Custom text', sigline: 'Signature',
   infobox: 'Infobox', description: 'Description', features: 'Features',
-  barcode: 'Barcode', qrcode: 'QR Code', custom: 'Custom',
+  barcode: 'VIN Barcode', qrcode: 'QR Code', custom: 'Custom',
+  bgimage: 'Background Image', vehiclephoto: 'Vehicle Photo',
   suggested_options: 'Suggested Products', suggested_price: 'Suggested Price',
 };
 
+// One-instance-only widgets. QR Code, VIN Barcode, Background Image, and
+// Vehicle Photo are explicitly multi-instance — drop them from this list so
+// the palette lets the dealer drop as many as they want.
 export const UNIQUE_WIDGETS = [
   'logo','vehicle','msrp','options','subtotal','askbar','dealer',
-  'infobox','description','features','barcode',
+  'description','features',
   'suggested_options','suggested_price',
 ];
 
-export const ADDENDUM_WIDGETS = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','infobox','headerbar','customtext','sigline','suggested_options','suggested_price'];
-export const INFOSHEET_WIDGETS = ['logo','vehicle','description','features','askbar','qrcode','barcode','dealer','customtext'];
-export const PALETTE_HIDDEN_IN_ADDENDUM = ['description','features','barcode','qrcode'];
-export const PALETTE_HIDDEN_IN_INFOSHEET = ['msrp','options','subtotal','infobox','suggested_options','suggested_price'];
+export const ADDENDUM_WIDGETS = [
+  'logo','vehicle','msrp','options','subtotal','askbar','dealer',
+  'headerbar','customtext','sigline',
+  'suggested_options','suggested_price',
+  // Dynamic content (replaces the old monolithic Infobox)
+  'bgimage','qrcode','barcode','vehiclephoto',
+];
+export const INFOSHEET_WIDGETS = [
+  'logo','vehicle','description','features','askbar',
+  'qrcode','barcode','dealer','customtext',
+  'bgimage','vehiclephoto',
+];
+// Addendum hides only infosheet-specific content widgets. qrcode/barcode are
+// now first-class addendum widgets too.
+export const PALETTE_HIDDEN_IN_ADDENDUM = ['description','features'];
+// Infosheet hides addendum-only price math widgets. bgimage / vehiclephoto are
+// available on infosheets too.
+export const PALETTE_HIDDEN_IN_INFOSHEET = ['msrp','options','subtotal','suggested_options','suggested_price'];
 
 export const DEFS: Record<string, Record<string, unknown>> = {
   logo: {
@@ -106,7 +133,13 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     fs: 10,
   },
   sigline: { l1: 'Buyers Signature', l2: 'Date' },
+  // Legacy monolithic infobox — kept in DEFS only so an old saved widget
+  // dropped on the canvas before backward-compat conversion runs still has
+  // sane defaults. New widgets should never use type='infobox'.
   infobox: { ibType: 'epa', imgUrl: IB_DEFAULT },
+  // ── Dynamic content widgets (independent, multi-instance) ──────────────
+  bgimage: { imgUrl: IB_DEFAULT, label: 'Background Image' },
+  vehiclephoto: { angle: '03', label: 'Vehicle Photo' },
   description: {
     text: 'Vehicle description will appear here. AI or database content will be loaded at print time.',
     aiMode: 'db',
