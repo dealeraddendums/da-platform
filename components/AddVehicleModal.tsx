@@ -901,8 +901,8 @@ function ImportTab({
 
       {/* Import mode selector */}
       {fileHeaders.length > 0 && !importDone && (
-        <div style={{ marginBottom: 16, padding: "12px 14px", background: "#f5f6f7", border: "1px solid var(--border)", borderRadius: 4 }}>
-          <p style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <div style={{ marginBottom: 16, padding: "12px 14px", background: "#f5f6f7", border: "1px solid var(--border)", borderRadius: 4, textAlign: "left" }}>
+          <p style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "left" }}>
             Import Mode
           </p>
           <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 10, cursor: "pointer" }}>
