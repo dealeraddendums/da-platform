@@ -1,4 +1,4 @@
-import { IB_DEFAULT } from './constants';
+import { IB_DEFAULT, VEHICLE_PHOTO_COMING_SOON } from './constants';
 
 type D = Record<string, unknown>;
 
@@ -161,15 +161,16 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   // Vehicle Photo — color-matched ChromeData image. The actual URL is
-  // resolved server-side at PDF render time (and via a fetch from the canvas
-  // for live preview); d.imgUrl carries the resolved value. Until then we
-  // show a placeholder so the dealer can position the widget.
+  // resolved server-side at PDF render time; d.imgUrl carries the resolved
+  // value (or the Coming Soon fallback on a miss). The canvas preview shows
+  // a placeholder until the dealer prints — the resolver runs server-side
+  // because ChromeData credentials must not be exposed to the browser.
   if (type === 'vehiclephoto') {
     const imgSt = 'width:100%;height:100%;object-fit:contain;display:block';
     const phSt = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#fafafa;border:1px dashed #bbb';
     const src = (d.imgUrl as string) || '';
     if (src) return `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="Vehicle Photo"></div>`;
-    return `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">Vehicle Photo<br><span style="font-size:9px;color:#bbb">color-matched at print time</span></span></div>`;
+    return `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500;text-align:center;line-height:1.4">Vehicle Photo<br><span style="font-size:9px;color:#bbb">color-matched at print time<br>(falls back to "Coming Soon" if unavailable)</span></span></div>`;
   }
 
   // Legacy 'infobox' fallback — old saved templates may still reference this

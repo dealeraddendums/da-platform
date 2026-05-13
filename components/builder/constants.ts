@@ -7,6 +7,11 @@ export const MIN_H = 16;
 export const BG_DEFAULT = 'https://new-addendum-backgrounds.s3.us-east-1.amazonaws.com/01_Addendum_Default.png';
 export const IS_BG_DEFAULT = 'https://new-infosheet-backgrounds.s3.us-east-1.amazonaws.com/BaseTemplate.png';
 export const IB_DEFAULT = 'https://new-infobox-images.s3.us-east-1.amazonaws.com/EPA_Infobox_Default.png';
+// Vehicle Photo fallback — shown whenever ChromeData has no image for the
+// VIN, the VIN is missing, or the SOAP/MediaGallery calls fail. Same bucket
+// as the rest of the infobox imagery so dealers' allowlisted CDN paths still work.
+export const VEHICLE_PHOTO_COMING_SOON =
+  'https://new-infobox-images.s3.us-east-1.amazonaws.com/vehicle-photo-coming-soon.jpeg';
 
 export const PAPERS: Record<PaperSize, { w: number; h: number }> = {
   standard:  { w: 408,  h: 1056 },

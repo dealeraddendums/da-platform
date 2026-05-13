@@ -712,21 +712,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const needsVehiclePhoto = widgets.some(
           w => w.type === "vehiclephoto" || (w.type === "infobox" && (w.d.ibType as string) === "photo"),
         );
-        if (needsVehiclePhoto && dv.vin) {
-          try {
-            const { resolveChromeVehicleImage } = await import("@/lib/chromedata");
-            const photo = await resolveChromeVehicleImage(dv.vin, dv.exterior_color ?? "");
-            if (photo.image_url) {
-              widgets = widgets.map(w => {
-                if (w.type === "vehiclephoto" || (w.type === "infobox" && (w.d.ibType as string) === "photo")) {
-                  return { ...w, d: { ...w.d, imgUrl: photo.image_url } };
-                }
-                return w;
-              });
+        if (needsVehiclePhoto) {
+          const { VEHICLE_PHOTO_COMING_SOON } = await import("@/components/builder/constants");
+          let resolvedUrl: string | null = null;
+          if (dv.vin) {
+            try {
+              const { resolveChromeVehicleImage } = await import("@/lib/chromedata");
+              const photo = await resolveChromeVehicleImage(dv.vin, dv.exterior_color ?? "");
+              resolvedUrl = photo.image_url;
+            } catch (err) {
+              console.error("[BULK] vehicle photo resolve failed:", err instanceof Error ? err.message : err);
             }
-          } catch (err) {
-            console.error("[BULK] vehicle photo resolve failed:", err instanceof Error ? err.message : err);
           }
+          const finalUrl = resolvedUrl ?? VEHICLE_PHOTO_COMING_SOON;
+          widgets = widgets.map(w => {
+            if (w.type === "vehiclephoto" || (w.type === "infobox" && (w.d.ibType as string) === "photo")) {
+              return { ...w, d: { ...w.d, imgUrl: finalUrl } };
+            }
+            return w;
+          });
         }
 
         // ── Fetch AI content for infosheet description/features + {{ai.}} tokens ─
