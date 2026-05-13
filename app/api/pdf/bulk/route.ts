@@ -9,7 +9,7 @@ import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimer } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimer, matchesRulesRow } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent } from "@/lib/ai-content";
 import QRCode from "qrcode";
@@ -510,13 +510,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
 
         // For saved options that may have stale required=true, cross-reference library by option name.
-        // Also pull separator_above/below + spaces — vehicle_options doesn't store these.
+        // Also pull separator_above/below + spaces — vehicle_options doesn't store these — and the
+        // per-vehicle rules columns so the saved options can be re-gated by current library rules
+        // (a product whose Make/Model rule was tightened after saving must drop off the addendum).
+        const libRuleByName = new Map<string, Parameters<typeof matchesRulesRow>[0]>();
         if (optionsSource === "uuid" || optionsSource === "legacy_sentinel") {
           let dealerLib = libCache.get(dv.dealer_id);
           if (!dealerLib) {
             const { data: lib } = await admin
               .from("addendum_library")
-              .select("option_name, required, separator_above, separator_below, spaces")
+              .select([
+                "option_name", "required", "separator_above", "separator_below", "spaces",
+                "applies_to", "ad_types",
+                "makes", "makes_not", "models", "models_not", "trims", "trims_not", "body_styles",
+                "year_condition", "year_value", "miles_condition", "miles_value",
+                "msrp_condition", "msrp1", "msrp2",
+              ].join(", "))
               .eq("dealer_id", dv.dealer_id)
               .eq("active", true);
             dealerLib = (lib ?? []) as unknown as LibRow[];
@@ -531,6 +540,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               separator_below: r.separator_below === true,
               spaces: typeof r.spaces === "number" ? (r.spaces as number) : 0,
             };
+            // libRuleByName is only used to gate saved options at print time —
+            // null/undefined values fall back to "match anything" defaults inside matchesRulesRow.
+            libRuleByName.set(name, {
+              applies_to: r.applies_to as string | null,
+              ad_types: r.ad_types as string[] | null,
+              makes: r.makes as string | null,
+              makes_not: (r.makes_not as boolean | undefined) ?? false,
+              models: r.models as string | null,
+              models_not: (r.models_not as boolean | undefined) ?? false,
+              trims: r.trims as string | null,
+              trims_not: (r.trims_not as boolean | undefined) ?? false,
+              body_styles: r.body_styles as string | null,
+              year_condition: (r.year_condition as number | undefined) ?? 0,
+              year_value: r.year_value as number | null,
+              miles_condition: (r.miles_condition as number | undefined) ?? 0,
+              miles_value: r.miles_value as number | null,
+              msrp_condition: (r.msrp_condition as number | undefined) ?? 0,
+              msrp1: r.msrp1 as number | null,
+              msrp2: r.msrp2 as number | null,
+            });
           }
           effectiveOptions = effectiveOptions.map(o => ({
             ...o,
@@ -563,6 +592,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         // Corporate (group) products — rules-filtered for this vehicle, with layout fields
         const groupOpts = await getGroupOptionsForDealer(textDealerId, vehicleData);
+
+        // Re-gate saved options by current library rules. A saved product
+        // whose library row's Make/Model/etc rules no longer match this
+        // vehicle gets dropped — even though the user once saved it.
+        const effectiveFiltered = effectiveOptions.filter(o => {
+          const rule = libRuleByName.get(o.option_name);
+          if (!rule) return true;
+          return matchesRulesRow(rule, vehicleData);
+        });
+
         const options = [
           ...groupOpts.map(g => ({
             option_name: g.option_name, option_price: g.option_price,
@@ -572,7 +611,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             separator_below: g.separator_below === true,
             spaces: g.spaces ?? 0,
           })),
-          ...effectiveOptions,
+          ...effectiveFiltered,
         ];
 
         console.log(`[BULK]   options_result source=${optionsSource} count=${options.length} names=[${options.map(o => o.option_name).join(", ")}]`);

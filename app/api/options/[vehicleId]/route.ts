@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { getGroupOptionsForDealer } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, matchesRulesRow } from "@/lib/options-engine";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import type { VehicleOptionRow } from "@/lib/db";
 
@@ -142,6 +142,74 @@ function applyLibRequired<T extends { option_name: string; required?: boolean | 
 }
 
 /**
+ * Drop rows whose addendum_library entry exists but doesn't match the
+ * current vehicle's rules. Rows with no library match are kept — they're
+ * one-off custom additions the user explicitly attached to this vehicle.
+ *
+ * Library rules trump saved state by design: if a dealer narrows a
+ * product to CHEVROLET/Silverado after it was already saved on a Nissan,
+ * the Nissan's addendum should drop it. See bug report 2026-05-13.
+ */
+async function filterRowsByLibraryRules<T extends { option_name: string }>(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  dealerId: string,
+  rows: T[],
+  vehicle: import("@/lib/vehicles").VehicleRow | undefined,
+): Promise<T[]> {
+  if (!vehicle || rows.length === 0) return rows;
+  const names = Array.from(new Set(rows.map(r => r.option_name)));
+  const { data: lib } = await admin
+    .from("addendum_library")
+    .select("option_name, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
+    .eq("dealer_id", dealerId)
+    .in("option_name", names);
+  if (!lib || lib.length === 0) return rows;
+  type LibRule = {
+    option_name: string;
+    applies_to: string | null;
+    ad_types: string[] | null;
+    makes: string | null;
+    makes_not: boolean | null;
+    models: string | null;
+    models_not: boolean | null;
+    trims: string | null;
+    trims_not: boolean | null;
+    body_styles: string | null;
+    year_condition: number | null;
+    year_value: number | null;
+    miles_condition: number | null;
+    miles_value: number | null;
+    msrp_condition: number | null;
+    msrp1: number | null;
+    msrp2: number | null;
+  };
+  const ruleByName = new Map<string, LibRule>();
+  for (const r of lib as unknown as LibRule[]) ruleByName.set(r.option_name, r);
+  return rows.filter(r => {
+    const rule = ruleByName.get(r.option_name);
+    if (!rule) return true;        // no library row → custom add, keep
+    return matchesRulesRow({
+      applies_to: rule.applies_to,
+      ad_types: rule.ad_types,
+      makes: rule.makes,
+      makes_not: rule.makes_not ?? false,
+      models: rule.models,
+      models_not: rule.models_not ?? false,
+      trims: rule.trims,
+      trims_not: rule.trims_not ?? false,
+      body_styles: rule.body_styles,
+      year_condition: rule.year_condition ?? 0,
+      year_value: rule.year_value,
+      miles_condition: rule.miles_condition ?? 0,
+      miles_value: rule.miles_value,
+      msrp_condition: rule.msrp_condition ?? 0,
+      msrp1: rule.msrp1,
+      msrp2: rule.msrp2,
+    }, vehicle);
+  });
+}
+
+/**
  * GET /api/options/[vehicleId]
  * vehicleId can be:
  *   - UUID string: dealer_vehicle (dealer_vehicles.id)
@@ -179,7 +247,9 @@ export async function GET(
 
       if (saved && saved.length > 0) {
         const libMap = await buildLibRequiredMap(admin, effectiveDealerId, saved.map(r => r.option_name as string));
-        return NextResponse.json({ data: applyLibRequired(saved, libMap), groupOptions, source: "saved" });
+        const withRequired = applyLibRequired(saved, libMap);
+        const filtered = await filterRowsByLibraryRules(admin, effectiveDealerId, withRequired, vehicleForRules);
+        return NextResponse.json({ data: filtered, groupOptions, source: "saved" });
       }
 
       // If UUID and nothing found, also check legacy '0' sentinel as fallback
@@ -193,11 +263,13 @@ export async function GET(
 
         if (legacySaved && legacySaved.length > 0) {
           const libMap = await buildLibRequiredMap(admin, effectiveDealerId, legacySaved.map(r => r.option_name as string));
-          return NextResponse.json({ data: applyLibRequired(legacySaved, libMap), groupOptions, source: "saved" });
+          const withRequired = applyLibRequired(legacySaved, libMap);
+          const filtered = await filterRowsByLibraryRules(admin, effectiveDealerId, withRequired, vehicleForRules);
+          return NextResponse.json({ data: filtered, groupOptions, source: "saved" });
         }
       }
 
-      // No saved options — seed from dealer's addendum_library
+      // No saved options — seed from dealer's addendum_library, rules-filtered
       const { data: library } = await admin
         .from("addendum_library")
         .select("*")
@@ -206,7 +278,29 @@ export async function GET(
         .neq("applies_to", "none")
         .order("sort_order", { ascending: true });
 
-      const matched = (library ?? []).map((r, i) => ({
+      const libRows = library ?? [];
+      const ruleFiltered = vehicleForRules
+        ? libRows.filter(r => matchesRulesRow({
+            applies_to: r.applies_to as string | null,
+            ad_types: r.ad_types as string[] | null,
+            makes: r.makes as string | null,
+            makes_not: r.makes_not as boolean | undefined,
+            models: r.models as string | null,
+            models_not: r.models_not as boolean | undefined,
+            trims: r.trims as string | null,
+            trims_not: r.trims_not as boolean | undefined,
+            body_styles: r.body_styles as string | null,
+            year_condition: r.year_condition as number | undefined,
+            year_value: r.year_value as number | null | undefined,
+            miles_condition: r.miles_condition as number | undefined,
+            miles_value: r.miles_value as number | null | undefined,
+            msrp_condition: r.msrp_condition as number | undefined,
+            msrp1: r.msrp1 as number | null | undefined,
+            msrp2: r.msrp2 as number | null | undefined,
+          }, vehicleForRules))
+        : libRows;
+
+      const matched = ruleFiltered.map((r, i) => ({
         default_id: r.id,
         option_name: r.option_name,
         option_price: r.item_price ?? "NC",
@@ -225,7 +319,8 @@ export async function GET(
       return NextResponse.json({ data: [], groupOptions: [], source: "empty" });
     }
 
-    const groupOptions = await getGroupOptionsForDealer(effectiveDealerId);
+    const vehicleForRulesFallback = await loadVehicleForRules(admin, vid);
+    const groupOptions = await getGroupOptionsForDealer(effectiveDealerId, vehicleForRulesFallback);
 
     // Check for saved options keyed by this vehicleId
     const { data: saved } = await admin
@@ -237,7 +332,9 @@ export async function GET(
 
     if (saved && saved.length > 0) {
       const libMap = await buildLibRequiredMap(admin, effectiveDealerId, saved.map(r => r.option_name as string));
-      return NextResponse.json({ data: applyLibRequired(saved, libMap), groupOptions, source: "saved" });
+      const withRequired = applyLibRequired(saved, libMap);
+      const filtered = await filterRowsByLibraryRules(admin, effectiveDealerId, withRequired, vehicleForRulesFallback);
+      return NextResponse.json({ data: filtered, groupOptions, source: "saved" });
     }
 
     // No saved options — seed from dealer's addendum_library
@@ -249,7 +346,29 @@ export async function GET(
       .neq("applies_to", "none")
       .order("sort_order", { ascending: true });
 
-    const matched = (library ?? []).map((r, i) => ({
+    const libRowsFallback = library ?? [];
+    const ruleFilteredFallback = vehicleForRulesFallback
+      ? libRowsFallback.filter(r => matchesRulesRow({
+          applies_to: r.applies_to as string | null,
+          ad_types: r.ad_types as string[] | null,
+          makes: r.makes as string | null,
+          makes_not: r.makes_not as boolean | undefined,
+          models: r.models as string | null,
+          models_not: r.models_not as boolean | undefined,
+          trims: r.trims as string | null,
+          trims_not: r.trims_not as boolean | undefined,
+          body_styles: r.body_styles as string | null,
+          year_condition: r.year_condition as number | undefined,
+          year_value: r.year_value as number | null | undefined,
+          miles_condition: r.miles_condition as number | undefined,
+          miles_value: r.miles_value as number | null | undefined,
+          msrp_condition: r.msrp_condition as number | undefined,
+          msrp1: r.msrp1 as number | null | undefined,
+          msrp2: r.msrp2 as number | null | undefined,
+        }, vehicleForRulesFallback))
+      : libRowsFallback;
+
+    const matched = ruleFilteredFallback.map((r, i) => ({
       default_id: r.id,
       option_name: r.option_name,
       option_price: r.item_price ?? "NC",

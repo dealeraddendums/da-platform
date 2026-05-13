@@ -153,7 +153,7 @@ import {
   LAYOUT_INFOSHEET,
   makeWidget,
 } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimer } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimer, matchesRulesRow } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent } from "@/lib/ai-content";
 import QRCode from "qrcode";
@@ -256,6 +256,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // For options missing a description, fall back to addendum_library by name.
     // Also load required + layout (separator_above/below, spaces) so the
     // renderer can honor the dealer's library-side formatting on every print.
+    // The library rules (Make/Model/Year/...) also gate the saved options at
+    // print time — if a saved option's library row exists but doesn't match
+    // the vehicle, it's dropped here. Library rules trump saved state by design.
     const allOptNames = (optionRows ?? []).map(r => r.option_name as string);
     const nullDescNames = (optionRows ?? [])
       .filter(r => !r.description)
@@ -263,10 +266,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const libDescMap: Record<string, string | null> = {};
     const libRequiredMap: Record<string, boolean> = {};
     const libLayoutMap: Record<string, { separator_above: boolean; separator_below: boolean; spaces: number }> = {};
+    const libRuleByName = new Map<string, Parameters<typeof matchesRulesRow>[0]>();
     if (allOptNames.length > 0) {
       const { data: libRows } = await admin
         .from("addendum_library")
-        .select("option_name, description, required, separator_above, separator_below, spaces")
+        .select("option_name, description, required, separator_above, separator_below, spaces, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
         .eq("dealer_id", dv.dealer_id)
         .in("option_name", allOptNames);
       for (const lr of libRows ?? []) {
@@ -278,6 +282,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           separator_below: lr.separator_below === true,
           spaces: typeof lr.spaces === "number" ? lr.spaces : 0,
         };
+        libRuleByName.set(name, {
+          applies_to: lr.applies_to as string | null,
+          ad_types: lr.ad_types as string[] | null,
+          makes: lr.makes as string | null,
+          makes_not: (lr.makes_not as boolean | null) ?? false,
+          models: lr.models as string | null,
+          models_not: (lr.models_not as boolean | null) ?? false,
+          trims: lr.trims as string | null,
+          trims_not: (lr.trims_not as boolean | null) ?? false,
+          body_styles: lr.body_styles as string | null,
+          year_condition: (lr.year_condition as number | null) ?? 0,
+          year_value: lr.year_value as number | null,
+          miles_condition: (lr.miles_condition as number | null) ?? 0,
+          miles_value: lr.miles_value as number | null,
+          msrp_condition: (lr.msrp_condition as number | null) ?? 0,
+          msrp1: lr.msrp1 as number | null,
+          msrp2: lr.msrp2 as number | null,
+        });
       }
     }
 
@@ -318,6 +340,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // ── Corporate (group) products, rules-filtered for this vehicle ──────────
     const groupOpts = await getGroupOptionsForDealer(textDealerId, vehicleData);
 
+    // Drop saved options whose library row exists but doesn't match this
+    // vehicle. Custom saves (no library row) are kept.
+    const savedFiltered = (optionRows ?? []).filter(r => {
+      const rule = libRuleByName.get(r.option_name as string);
+      if (!rule) return true;
+      return matchesRulesRow(rule, vehicleData);
+    });
+
     const options = [
       ...groupOpts.map(g => ({
         option_name: g.option_name,
@@ -331,7 +361,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         separator_below: g.separator_below === true,
         spaces: g.spaces ?? 0,
       })),
-      ...(optionRows ?? []).map(r => {
+      ...savedFiltered.map(r => {
         const layout = libLayoutMap[r.option_name as string];
         return {
           ...r,
