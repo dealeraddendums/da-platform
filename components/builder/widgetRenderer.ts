@@ -17,6 +17,29 @@ function renderDescription(desc: string, fontPx: number): string {
   return `<div style="${baseStyle}">${escaped}</div>`;
 }
 
+/**
+ * Render one product row with optional layout hints (used by the 'options'
+ * and 'suggested_options' widgets). Per-row separator_above/below add
+ * horizontal rules; spaces adds vertical blank space ABOVE the row.
+ *
+ * One row in font px = roughly 1.4 × font size (matches widget line-height).
+ */
+function renderProductRow(
+  it: { name: string; desc: string; price: string; separator_above?: boolean; separator_below?: boolean; spaces?: number },
+  sz: number,
+  szm: number,
+  ls: number,
+  pricePadding: string = 'padding-left:6px',
+): string {
+  const lineHeightPx = Math.round(sz * 1.4);
+  const spacesPx = (it.spaces && it.spaces > 0) ? it.spaces * lineHeightPx : 0;
+  const spacerAbove = spacesPx > 0 ? `<div style="height:${spacesPx}px"></div>` : '';
+  const sepAbove = it.separator_above ? `<hr style="border:none;border-top:1px solid #1a1916;margin:4px 0"/>` : '';
+  const sepBelow = it.separator_below ? `<hr style="border:none;border-top:1px solid #1a1916;margin:4px 0"/>` : '';
+  const row = `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0;line-height:${ls}"><div><div style="font-size:${sz}px;font-weight:700;color:#333">${it.name}</div>${renderDescription(it.desc, szm)}</div><div style="font-size:${sz}px;font-weight:700;color:#333;font-family:monospace;white-space:nowrap;${pricePadding};flex-shrink:0">${it.price}</div></div>`;
+  return `${spacerAbove}${sepAbove}${row}${sepBelow}`;
+}
+
 export function renderW(type: string, d: D, fontScale: number): string {
   const fs = fontScale;
 
@@ -55,9 +78,10 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const sz = Math.round(10 * fs * ((d.fontSize as number) || 1));
     const szm = Math.round(9 * fs * ((d.fontSize as number) || 1));
     const ls = (d.lineSpacing as number) || 1.2;
-    const items = (d.items as Array<{name:string;desc:string;price:string}>) || [];
+    type OptItem = { name: string; desc: string; price: string; separator_above?: boolean; separator_below?: boolean; spaces?: number };
+    const items = (d.items as OptItem[]) || [];
     return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div>${items.map(it =>
-      `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0;line-height:${ls}"><div><div style="font-size:${sz}px;font-weight:700;color:#333">${it.name}</div>${renderDescription(it.desc, szm)}</div><div style="font-size:${sz}px;font-weight:700;color:#333;font-family:monospace;white-space:nowrap;padding-left:6px;flex-shrink:0">${it.price}</div></div>`
+      renderProductRow(it, sz, szm, ls)
     ).join('')}</div>`;
   }
 
@@ -65,12 +89,13 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const sz = Math.round(10 * fs * ((d.fontSize as number) || 1));
     const szm = Math.round(9 * fs * ((d.fontSize as number) || 1));
     const ls = (d.lineSpacing as number) || 1.2;
-    const items = (d.items as Array<{name:string;desc:string;price:string}>) || [];
+    type OptItem = { name: string; desc: string; price: string; separator_above?: boolean; separator_below?: boolean; spaces?: number };
+    const items = (d.items as OptItem[]) || [];
     if (items.length === 0) {
       return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div><div style="font-size:${szm}px;color:#bbb;font-style:italic">Suggested products will appear here at print time.</div></div>`;
     }
     return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div>${items.map(it =>
-      `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0;line-height:${ls}"><div><div style="font-size:${sz}px;font-weight:700;color:#333">${it.name}</div>${renderDescription(it.desc, szm)}</div><div style="font-size:${sz}px;font-weight:700;color:#333;font-family:monospace;white-space:nowrap;padding-left:6px;flex-shrink:0">${it.price}</div></div>`
+      renderProductRow(it, sz, szm, ls)
     ).join('')}</div>`;
   }
 

@@ -69,49 +69,71 @@ export function matchesAdTypes(
   return adTypes.includes(vehicleCond);
 }
 
-function matchesLibraryRow(row: LibraryRow, vehicle: VehicleRow): boolean {
+/**
+ * Generic rules-row shape: any row carrying the per-vehicle filter columns
+ * shared between addendum_library and group_options.
+ */
+type RulesRow = {
+  applies_to?: string | null;
+  ad_types?: string[] | null;
+  makes?: string | null;
+  makes_not?: boolean;
+  models?: string | null;
+  models_not?: boolean;
+  trims?: string | null;
+  trims_not?: boolean;
+  body_styles?: string | null;
+  year_condition?: number;
+  year_value?: number | null;
+  miles_condition?: number;
+  miles_value?: number | null;
+  msrp_condition?: number;
+  msrp1?: number | null;
+  msrp2?: number | null;
+};
+
+/**
+ * Per-vehicle rules evaluator shared by addendum_library and group_options.
+ * Returns false if the row should be filtered out for this vehicle. Exported
+ * so callers (pdf/generate, pdf/bulk, options route, etc.) can filter group
+ * products against vehicle context without duplicating the logic.
+ *
+ * NOTE: matches when row.applies_to is 'all' OR 'rules' — both flow through
+ * the same filter columns; 'all' rows simply tend to have empty filter lists.
+ * applies_to='none' is rejected outright.
+ */
+export function matchesRulesRow(row: RulesRow, vehicle: VehicleRow): boolean {
   const cond = vehicleCondition(vehicle);
 
-  // applies_to: 'none' never matches; 'rules' defers to ad_types; 'all' always continues
   if (row.applies_to === "none") return false;
 
-  // ad_types array (newer schema — 'New', 'Used', 'CPO')
   if (row.ad_types && row.ad_types.length > 0) {
     if (!row.ad_types.includes(cond)) return false;
   }
 
-  // Makes
-  if (!listMatchesWithNot(vehicle.MAKE, row.makes, row.makes_not)) return false;
+  if (!listMatchesWithNot(vehicle.MAKE, row.makes ?? null, !!row.makes_not)) return false;
+  if (!listMatchesWithNot(vehicle.MODEL, row.models ?? null, !!row.models_not)) return false;
+  if (!listMatchesWithNot(vehicle.TRIM, row.trims ?? null, !!row.trims_not)) return false;
 
-  // Models
-  if (!listMatchesWithNot(vehicle.MODEL, row.models, row.models_not)) return false;
-
-  // Trims
-  if (!listMatchesWithNot(vehicle.TRIM, row.trims, row.trims_not)) return false;
-
-  // Body styles (no NOT flag in library schema)
   if (row.body_styles && row.body_styles !== "NONE" && row.body_styles !== "") {
     if (!listMatchesWithNot(vehicle.BODYSTYLE, row.body_styles, false)) return false;
   }
 
-  // Year condition
   const vehicleYear = vehicle.YEAR ? parseInt(vehicle.YEAR, 10) : null;
-  if (row.year_condition !== 0 && row.year_value != null && vehicleYear != null) {
+  if ((row.year_condition ?? 0) !== 0 && row.year_value != null && vehicleYear != null) {
     if (row.year_condition === 1 && vehicleYear !== row.year_value) return false;
     if (row.year_condition === 2 && vehicleYear > row.year_value) return false;
     if (row.year_condition === 3 && vehicleYear < row.year_value) return false;
   }
 
-  // Miles condition
   const vehicleMiles = vehicle.MILEAGE ? parseInt(vehicle.MILEAGE, 10) : null;
-  if (row.miles_condition !== 0 && row.miles_value != null && vehicleMiles != null) {
+  if ((row.miles_condition ?? 0) !== 0 && row.miles_value != null && vehicleMiles != null) {
     if (row.miles_condition === 1 && vehicleMiles > row.miles_value) return false;
     if (row.miles_condition === 2 && vehicleMiles < row.miles_value) return false;
   }
 
-  // MSRP condition
   const vehicleMsrp = vehicle.MSRP ? parseFloat(vehicle.MSRP) : null;
-  if (row.msrp_condition !== 0 && vehicleMsrp != null) {
+  if ((row.msrp_condition ?? 0) !== 0 && vehicleMsrp != null) {
     if (row.msrp_condition === 1 && row.msrp1 != null && vehicleMsrp > row.msrp1) return false;
     if (row.msrp_condition === 2 && row.msrp1 != null && vehicleMsrp < row.msrp1) return false;
     if (row.msrp_condition === 3 && row.msrp1 != null && row.msrp2 != null) {
@@ -120,6 +142,10 @@ function matchesLibraryRow(row: LibraryRow, vehicle: VehicleRow): boolean {
   }
 
   return true;
+}
+
+function matchesLibraryRow(row: LibraryRow, vehicle: VehicleRow): boolean {
+  return matchesRulesRow(row, vehicle);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -193,6 +219,10 @@ export type LockedOption = {
   sort_order: number;
   required: boolean;
   is_locked: true;
+  /** Layout hints from group_options (migration 053). Default false / 0. */
+  separator_above?: boolean;
+  separator_below?: boolean;
+  spaces?: number;
 };
 
 /**
@@ -209,7 +239,8 @@ export type LockedOption = {
  * inventory_dealer_id.
  */
 export async function getGroupOptionsForDealer(
-  dealerTextId: string
+  dealerTextId: string,
+  vehicle?: VehicleRow,
 ): Promise<LockedOption[]> {
   const admin = createAdminSupabaseClient();
 
@@ -258,6 +289,16 @@ export async function getGroupOptionsForDealer(
       if (r.assign_all_dealers !== false) return true;
       return assignedIds.has(r.id);
     })
+    .filter(r => {
+      // Per-vehicle rules filter (Make/Model/Year/Mileage/MSRP/Trim/Bodystyle).
+      // When no vehicle context is passed (e.g. corporate-products admin list),
+      // skip the filter — the caller is looking at the product set, not a
+      // specific vehicle's effective set.
+      if (!vehicle) return true;
+      // group_options carries the same rules columns as addendum_library
+      // (migration 053). Cast through unknown so the type signature matches.
+      return matchesRulesRow(r as unknown as RulesRow, vehicle);
+    })
     .map(r => {
       // Prefer the explicit `required` column added in migration 053; fall back
       // to the inverted is_suggested mapping for rows that pre-date the backfill.
@@ -270,6 +311,9 @@ export async function getGroupOptionsForDealer(
         sort_order: r.sort_order,
         required,
         is_locked: true as const,
+        separator_above: r.separator_above === true,
+        separator_below: r.separator_below === true,
+        spaces: typeof r.spaces === "number" ? r.spaces : 0,
       };
     });
 }

@@ -11,6 +11,71 @@ function isUUID(v: string) { return v.includes("-"); }
 function isManual(v: string) { return isUUID(v) || v === "0"; }
 
 /**
+ * Load the dealer_vehicle and shape it into the VehicleRow contract used by
+ * the options-engine rules evaluator. Returns undefined for the legacy "0"
+ * sentinel (manual / no vehicle) so the rules filter is skipped — the user
+ * is editing the dealer's "no-vehicle" preset and we don't want to hide
+ * rules-targeted corporate products in that surface.
+ */
+async function loadVehicleForRules(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  vehicleId: string,
+): Promise<import("@/lib/vehicles").VehicleRow | undefined> {
+  if (!isUUID(vehicleId)) return undefined;
+  const { data: dv } = await admin
+    .from("dealer_vehicles")
+    .select("dealer_id, vin, stock_number, year, make, model, trim, body_style, exterior_color, mileage, msrp, condition")
+    .eq("id", vehicleId)
+    .maybeSingle();
+  if (!dv) return undefined;
+  type DV = {
+    dealer_id: string;
+    vin: string | null;
+    stock_number: string | null;
+    year: number | null;
+    make: string | null;
+    model: string | null;
+    trim: string | null;
+    body_style: string | null;
+    exterior_color: string | null;
+    mileage: number | null;
+    msrp: number | null;
+    condition: string | null;
+  };
+  const v = dv as unknown as DV;
+  return {
+    id: 0 as const,
+    DEALER_ID: v.dealer_id,
+    VIN_NUMBER: v.vin ?? "",
+    STOCK_NUMBER: v.stock_number,
+    YEAR: v.year != null ? String(v.year) : null,
+    MAKE: v.make,
+    MODEL: v.model,
+    TRIM: v.trim,
+    BODYSTYLE: v.body_style,
+    EXT_COLOR: v.exterior_color,
+    INT_COLOR: null,
+    ENGINE: null,
+    FUEL: null,
+    DRIVETRAIN: null,
+    TRANSMISSION: null,
+    MILEAGE: v.mileage != null ? String(v.mileage) : null,
+    DATE_IN_STOCK: null,
+    STATUS: "1" as const,
+    MSRP: v.msrp != null ? String(v.msrp) : null,
+    NEW_USED: v.condition === "Used" ? "Used" : "New",
+    CERTIFIED: v.condition === "CPO" ? "Yes" : "No",
+    OPTIONS: null,
+    PHOTOS: null,
+    DESCRIPTION: null,
+    PRINT_STATUS: "0" as const,
+    HMPG: null,
+    CMPG: null,
+    MPG: null,
+  };
+}
+
+/**
  * Mirror the current per-vehicle option set into addendum_data (save-state slice).
  * Resolves the dealer's UUID and the vehicle's vin from Supabase first
  * because the save path only has the text dealer_id and the vehicle UUID.
@@ -101,7 +166,8 @@ export async function GET(
         return NextResponse.json({ data: [], groupOptions: [], source: "empty" });
       }
 
-      const groupOptions = await getGroupOptionsForDealer(effectiveDealerId);
+      const vehicleForRules = await loadVehicleForRules(admin, vid);
+      const groupOptions = await getGroupOptionsForDealer(effectiveDealerId, vehicleForRules);
 
       // Check for saved options keyed by this vehicleId
       const { data: saved } = await admin

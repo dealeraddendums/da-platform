@@ -34,7 +34,16 @@ const PAPER_DIMS: Record<string, { w: number; h: number }> = {
   infosheet: { w: 816, h: 1056 },
 };
 
-type AnyOption = { option_name: string; option_price: string; active?: boolean; description?: string | null; required?: boolean };
+type AnyOption = {
+  option_name: string;
+  option_price: string;
+  active?: boolean;
+  description?: string | null;
+  required?: boolean;
+  separator_above?: boolean;
+  separator_below?: boolean;
+  spaces?: number;
+};
 
 export interface BuildPdfHtmlInput {
   widgets: Widget[];
@@ -158,6 +167,9 @@ export async function buildPdfHtml({
         name: o.option_name,
         desc: o.description ?? '',
         price: formatOptionPrice(o.option_price),
+        separator_above: o.separator_above === true,
+        separator_below: o.separator_below === true,
+        spaces: typeof o.spaces === 'number' ? o.spaces : 0,
       }));
     }
     if (options !== undefined && w.type === 'suggested_options') {
@@ -165,6 +177,9 @@ export async function buildPdfHtml({
         name: o.option_name,
         desc: o.description ?? '',
         price: formatOptionPrice(o.option_price),
+        separator_above: o.separator_above === true,
+        separator_below: o.separator_below === true,
+        spaces: typeof o.spaces === 'number' ? o.spaces : 0,
       }));
     }
 

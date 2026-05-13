@@ -413,7 +413,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
 
         // ── Options — UUID saved → legacy '0' sentinel → library matching ───
-        type EffectiveOption = { option_name: string; option_price: string; description: string | null; required?: boolean };
+        type EffectiveOption = {
+          option_name: string;
+          option_price: string;
+          description: string | null;
+          required?: boolean;
+          separator_above?: boolean;
+          separator_below?: boolean;
+          spaces?: number;
+        };
         let effectiveOptions: EffectiveOption[] = [];
         let optionsSource = "library";
 
@@ -469,6 +477,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                   "miles_condition", "miles_value",
                   "msrp_condition", "msrp1", "msrp2",
                   "required",
+                  "separator_above", "separator_below", "spaces",
                 ].join(", "))
                 .eq("dealer_id", dv.dealer_id)
                 .eq("active", true)
@@ -493,51 +502,44 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 option_price: (r.item_price as string) ?? "NC",
                 description: (r.description as string) || null,
                 required: (r.required as boolean | undefined) !== false,
+                separator_above: r.separator_above === true,
+                separator_below: r.separator_below === true,
+                spaces: typeof r.spaces === "number" ? (r.spaces as number) : 0,
               }));
           }
         }
 
-        // For saved options that may have stale required=true, cross-reference library by option name
+        // For saved options that may have stale required=true, cross-reference library by option name.
+        // Also pull separator_above/below + spaces — vehicle_options doesn't store these.
         if (optionsSource === "uuid" || optionsSource === "legacy_sentinel") {
-          const dealerLib = libCache.get(dv.dealer_id);
+          let dealerLib = libCache.get(dv.dealer_id);
           if (!dealerLib) {
-            // Fetch library required flags if not already cached
             const { data: lib } = await admin
               .from("addendum_library")
-              .select("option_name, required")
+              .select("option_name, required, separator_above, separator_below, spaces")
               .eq("dealer_id", dv.dealer_id)
               .eq("active", true);
-            const libMap: Record<string, boolean> = {};
-            for (const r of lib ?? []) {
-              if ((r as { required?: boolean }).required === false) libMap[r.option_name as string] = false;
-            }
-            effectiveOptions = effectiveOptions.map(o =>
-              libMap[o.option_name] === false ? { ...o, required: false } : o
-            );
-          } else {
-            const libMap: Record<string, boolean> = {};
-            for (const r of dealerLib) {
-              if ((r.required as boolean | undefined) === false) libMap[r.option_name as string] = false;
-            }
-            effectiveOptions = effectiveOptions.map(o =>
-              libMap[o.option_name] === false ? { ...o, required: false } : o
-            );
+            dealerLib = (lib ?? []) as unknown as LibRow[];
           }
+          const libRequiredMap: Record<string, boolean> = {};
+          const libLayoutMap: Record<string, { separator_above: boolean; separator_below: boolean; spaces: number }> = {};
+          for (const r of dealerLib) {
+            const name = r.option_name as string;
+            if ((r.required as boolean | undefined) === false) libRequiredMap[name] = false;
+            libLayoutMap[name] = {
+              separator_above: r.separator_above === true,
+              separator_below: r.separator_below === true,
+              spaces: typeof r.spaces === "number" ? (r.spaces as number) : 0,
+            };
+          }
+          effectiveOptions = effectiveOptions.map(o => ({
+            ...o,
+            required: libRequiredMap[o.option_name] === false ? false : o.required,
+            separator_above: libLayoutMap[o.option_name]?.separator_above ?? o.separator_above ?? false,
+            separator_below: libLayoutMap[o.option_name]?.separator_below ?? o.separator_below ?? false,
+            spaces: libLayoutMap[o.option_name]?.spaces ?? o.spaces ?? 0,
+          }));
         }
-
-        const groupOpts = await getGroupOptionsForDealer(textDealerId);
-        const options = [
-          ...groupOpts.map(g => ({
-            option_name: g.option_name, option_price: g.option_price,
-            description: g.description, active: true as const,
-            required: g.required,
-          })),
-          ...effectiveOptions,
-        ];
-
-        console.log(`[BULK]   options_result source=${optionsSource} count=${options.length} names=[${options.map(o => o.option_name).join(", ")}]`);
-
-        const disclaimer = await getGroupDisclaimer(textDealerId, dealer?.state ?? null, docType);
 
         // ── Vehicle data shape ───────────────────────────────────────────────
         const vehicleData = {
@@ -558,6 +560,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           OPTIONS: null, PHOTOS: null, DESCRIPTION: dv.description ?? null,
           PRINT_STATUS: "0" as const, HMPG: null, CMPG: null, MPG: null,
         };
+
+        // Corporate (group) products — rules-filtered for this vehicle, with layout fields
+        const groupOpts = await getGroupOptionsForDealer(textDealerId, vehicleData);
+        const options = [
+          ...groupOpts.map(g => ({
+            option_name: g.option_name, option_price: g.option_price,
+            description: g.description, active: true as const,
+            required: g.required,
+            separator_above: g.separator_above === true,
+            separator_below: g.separator_below === true,
+            spaces: g.spaces ?? 0,
+          })),
+          ...effectiveOptions,
+        ];
+
+        console.log(`[BULK]   options_result source=${optionsSource} count=${options.length} names=[${options.map(o => o.option_name).join(", ")}]`);
+
+        const disclaimer = await getGroupDisclaimer(textDealerId, dealer?.state ?? null, docType);
 
         // ── Build widget layout ──────────────────────────────────────────────
         let widgets: Widget[];

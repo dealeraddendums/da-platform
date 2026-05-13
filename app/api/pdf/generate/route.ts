@@ -254,47 +254,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // For options missing a description, fall back to addendum_library by name.
-    // Also load required flag from library to override stale vehicle_options.required=true values.
+    // Also load required + layout (separator_above/below, spaces) so the
+    // renderer can honor the dealer's library-side formatting on every print.
     const allOptNames = (optionRows ?? []).map(r => r.option_name as string);
     const nullDescNames = (optionRows ?? [])
       .filter(r => !r.description)
       .map(r => r.option_name as string);
     const libDescMap: Record<string, string | null> = {};
     const libRequiredMap: Record<string, boolean> = {};
+    const libLayoutMap: Record<string, { separator_above: boolean; separator_below: boolean; spaces: number }> = {};
     if (allOptNames.length > 0) {
       const { data: libRows } = await admin
         .from("addendum_library")
-        .select("option_name, description, required")
+        .select("option_name, description, required, separator_above, separator_below, spaces")
         .eq("dealer_id", dv.dealer_id)
         .in("option_name", allOptNames);
       for (const lr of libRows ?? []) {
         const name = lr.option_name as string;
         if (nullDescNames.includes(name) && lr.description) libDescMap[name] = lr.description as string;
         if (lr.required === false) libRequiredMap[name] = false;
+        libLayoutMap[name] = {
+          separator_above: lr.separator_above === true,
+          separator_below: lr.separator_below === true,
+          spaces: typeof lr.spaces === "number" ? lr.spaces : 0,
+        };
       }
     }
-
-    const groupOpts = await getGroupOptionsForDealer(textDealerId);
-
-    const options = [
-      ...groupOpts.map(g => ({
-        option_name: g.option_name,
-        option_price: g.option_price,
-        description: g.description,
-        active: true as const,
-        // Honor the corporate product's Required/Suggested flag — locked-assigned
-        // Suggested products are still rendered in the Suggested section.
-        required: g.required,
-      })),
-      ...(optionRows ?? []).map(r => ({
-        ...r,
-        description: r.description ?? libDescMap[r.option_name as string] ?? null,
-        // Library required=false takes precedence over stale vehicle_options value
-        required: libRequiredMap[r.option_name as string] === false
-          ? false
-          : (r.required as boolean | undefined) !== false,
-      })),
-    ];
 
     const disclaimer = await getGroupDisclaimer(textDealerId, dealer?.state ?? null, docType);
 
@@ -329,6 +314,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       CMPG: null,
       MPG: null,
     };
+
+    // ── Corporate (group) products, rules-filtered for this vehicle ──────────
+    const groupOpts = await getGroupOptionsForDealer(textDealerId, vehicleData);
+
+    const options = [
+      ...groupOpts.map(g => ({
+        option_name: g.option_name,
+        option_price: g.option_price,
+        description: g.description,
+        active: true as const,
+        // Honor the corporate product's Required/Suggested flag — locked-assigned
+        // Suggested products are still rendered in the Suggested section.
+        required: g.required,
+        separator_above: g.separator_above === true,
+        separator_below: g.separator_below === true,
+        spaces: g.spaces ?? 0,
+      })),
+      ...(optionRows ?? []).map(r => {
+        const layout = libLayoutMap[r.option_name as string];
+        return {
+          ...r,
+          description: r.description ?? libDescMap[r.option_name as string] ?? null,
+          // Library required=false takes precedence over stale vehicle_options value
+          required: libRequiredMap[r.option_name as string] === false
+            ? false
+            : (r.required as boolean | undefined) !== false,
+          separator_above: layout?.separator_above === true,
+          separator_below: layout?.separator_below === true,
+          spaces: layout?.spaces ?? 0,
+        };
+      }),
+    ];
 
     // ── Load dealer's saved default template from dealer_settings ────────────
     // Only runs when no widgets were supplied by the caller (i.e. Print Now,
