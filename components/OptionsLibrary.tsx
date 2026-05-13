@@ -860,7 +860,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                   <th style={th}>New/Used</th>
                   <th style={th}>Model</th>
                   <th style={th}>Trim</th>
-                  <th style={th}>Style</th>
+                  <th style={th}>Bodystyle</th>
                   <th style={{ ...th, textAlign: "right" }}>Price</th>
                   {!reorderMode && <th style={{ ...th, width: 90, textAlign: "center" }}>Actions</th>}
                 </tr>

@@ -19,11 +19,22 @@ const LABEL_CODES: Record<string, string> = {
   NC: 'No Charge',
 };
 
-function formatNumber(n: number): string {
-  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function formatNumber(n: number, decimals: boolean): string {
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: decimals ? 2 : 0,
+    maximumFractionDigits: decimals ? 2 : 0,
+  });
 }
 
-export function formatOptionPrice(price: string | null | undefined): string {
+/**
+ * Format a single option price. The optional `decimals` flag controls the
+ * fraction-digit policy for numeric portions:
+ *   - true  (default) → always two decimal places, e.g. $499.00
+ *   - false           → no decimals, e.g. $499
+ * Modifier codes (FR, INC, NC, NP, ^, |, ~, %) bypass numeric formatting
+ * and are unaffected by this flag.
+ */
+export function formatOptionPrice(price: string | null | undefined, decimals: boolean = true): string {
   if (price == null) return '';
   const p = String(price).trim();
   if (!p) return '';
@@ -49,8 +60,30 @@ export function formatOptionPrice(price: string | null | undefined): string {
   }
 
   const n = parseFloat(body);
-  if (!isNaN(n)) return `$${formatNumber(n)}${suffix}`;
+  if (!isNaN(n)) return `$${formatNumber(n, decimals)}${suffix}`;
   return p;
+}
+
+/**
+ * Decide whether a set of numeric prices should be displayed with two decimal
+ * places. Returns true if any amount has a fractional part. Use the result
+ * across every price label on the same addendum so they all agree (product
+ * rows, subtotal, MSRP, asking price, suggested price).
+ */
+export function priceSetUsesDecimals(amounts: Array<number | null | undefined>): boolean {
+  return amounts.some(a => typeof a === 'number' && Number.isFinite(a) && a % 1 !== 0);
+}
+
+/**
+ * Format a single numeric currency amount with or without decimals according
+ * to the shared rule. Pair with priceSetUsesDecimals() to keep every price on
+ * one addendum aligned.
+ */
+export function formatCurrencyAmount(amount: number, decimals: boolean): string {
+  return '$' + amount.toLocaleString('en-US', {
+    minimumFractionDigits: decimals ? 2 : 0,
+    maximumFractionDigits: decimals ? 2 : 0,
+  });
 }
 
 export function parseOptionPriceValue(price: string | null | undefined): number {

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { VehicleRow } from "@/lib/vehicles";
 import { vehicleCondition, parsePhotos } from "@/lib/vehicles";
-import { formatOptionPrice, parseOptionPriceValue } from "@/lib/option-price";
+import { formatOptionPrice, parseOptionPriceValue, priceSetUsesDecimals, formatCurrencyAmount } from "@/lib/option-price";
 import type { VehicleOptionRow } from "@/lib/db";
 import PrintPreviewModal from "@/components/PrintPreviewModal";
 import BuyersGuideModal from "@/components/BuyersGuideModal";
@@ -296,6 +296,18 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
   const askingPrice = msrp != null ? msrp + reqTotal : null;
   const suggestedAskingPrice = sugTotal > 0 && msrp != null ? msrp + reqTotal + sugTotal : null;
 
+  // Shared decimals policy — match pdf-html.ts so the UI stays WYSIWYG.
+  // If any price (product, subtotal, MSRP, asking, suggested) has cents,
+  // render every label with two decimals; otherwise drop them everywhere.
+  const decimals = priceSetUsesDecimals([
+    msrp,
+    reqTotal,
+    sugTotal,
+    askingPrice,
+    suggestedAskingPrice,
+    ...[...reqGroup, ...reqOptions, ...sugGroup, ...sugOptions].map(o => parseOptionPriceValue(o.option_price)),
+  ]);
+
   const cond = vehicleCondition(vehicle);
   const photos = parsePhotos(vehicle.PHOTOS ?? null);
   const appliedNames = new Set(options.map(o => o.option_name.toLowerCase().trim()));
@@ -337,7 +349,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
               <InfoRow label="Miles" value={parseInt(vehicle.MILEAGE, 10).toLocaleString()} />
             )}
             {msrp != null && (
-              <InfoRow label="MSRP" value={`$${msrp.toLocaleString()}`} />
+              <InfoRow label="MSRP" value={formatCurrencyAmount(msrp, decimals)} />
             )}
           </div>
         </div>
@@ -422,7 +434,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                       </td>
                       <td className="px-3 py-2 text-right">
                         <span className="font-medium" style={{ color: "var(--text-secondary)" }}>
-                          {formatOptionPrice(opt.option_price)}
+                          {formatOptionPrice(opt.option_price, decimals)}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-center">
@@ -507,7 +519,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                             style={{ color: "var(--text-primary)", cursor: "text" }}
                             onClick={() => setEditingId(String(id))}
                           >
-                            {formatOptionPrice(opt.option_price)}
+                            {formatOptionPrice(opt.option_price, decimals)}
                           </span>
                         )}
                       </td>
@@ -598,7 +610,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                 <div className="flex justify-between text-sm mb-1">
                   <span style={{ color: "var(--text-secondary)" }}>Required Products</span>
                   <span className="font-medium" style={{ color: "var(--text-primary)" }}>
-                    ${reqTotal.toLocaleString()}
+                    {formatCurrencyAmount(reqTotal, decimals)}
                   </span>
                 </div>
               )}
@@ -606,7 +618,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                 <div className="flex justify-between text-sm mb-1">
                   <span style={{ color: "#e65100" }}>Suggested Products</span>
                   <span className="font-medium" style={{ color: "#e65100" }}>
-                    ${sugTotal.toLocaleString()}
+                    {formatCurrencyAmount(sugTotal, decimals)}
                   </span>
                 </div>
               )}
@@ -614,7 +626,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                 <div className="flex justify-between text-sm mb-1">
                   <span style={{ color: "var(--text-secondary)" }}>MSRP</span>
                   <span className="font-medium" style={{ color: "var(--text-primary)" }}>
-                    ${msrp.toLocaleString()}
+                    {formatCurrencyAmount(msrp, decimals)}
                   </span>
                 </div>
               )}
@@ -622,7 +634,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                 <div className="flex justify-between text-sm font-semibold" style={{ borderTop: "1px solid var(--border)", paddingTop: 8, marginTop: 4 }}>
                   <span style={{ color: "var(--text-primary)" }}>Asking Price</span>
                   <span style={{ color: "var(--blue)" }}>
-                    ${askingPrice.toLocaleString()}
+                    {formatCurrencyAmount(askingPrice, decimals)}
                   </span>
                 </div>
               )}
@@ -630,7 +642,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                 <div className="flex justify-between text-sm" style={{ marginTop: 4 }}>
                   <span style={{ color: "#e65100", fontSize: 12 }}>+ w/ Suggestions</span>
                   <span style={{ color: "#e65100", fontSize: 12, fontWeight: 600 }}>
-                    ${suggestedAskingPrice.toLocaleString()}
+                    {formatCurrencyAmount(suggestedAskingPrice, decimals)}
                   </span>
                 </div>
               )}
@@ -718,7 +730,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                     >
                       <td className="px-4 py-2.5" style={{ color: "var(--text-primary)" }}>{opt.option_name}</td>
                       <td className="px-4 py-2.5 text-right font-medium" style={{ color: "var(--text-secondary)", width: 90 }}>
-                        {formatOptionPrice(opt.option_price)}
+                        {formatOptionPrice(opt.option_price, decimals)}
                       </td>
                     </tr>
                   ))}

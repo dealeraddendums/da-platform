@@ -1,7 +1,7 @@
 // Server-only: builds an HTML string for Puppeteer to render as a PDF.
 import { renderW } from '@/components/builder/widgetRenderer';
 import type { Widget, PaperSize } from '@/components/builder/types';
-import { formatOptionPrice } from '@/lib/option-price';
+import { formatOptionPrice, parseOptionPriceValue, priceSetUsesDecimals, formatCurrencyAmount } from '@/lib/option-price';
 import { parsePhotos } from '@/lib/vehicles';
 import type { VehicleRow } from '@/lib/vehicles';
 
@@ -89,6 +89,28 @@ export async function buildPdfHtml({
   const requiredOptions = allOptions.filter(o => o.required !== false);
   const suggestedOptions = allOptions.filter(o => o.required === false);
 
+  // ── Decimals policy ──────────────────────────────────────────────────────
+  // If every price on this addendum is a whole dollar amount, drop the .00
+  // suffix everywhere. As soon as one price has cents, render every price
+  // with two decimals so the columns line up. The set must include each
+  // product row, the subtotal, MSRP, asking price, and suggested price.
+  const msrpParsed = (() => {
+    const v = vehicle?.MSRP != null ? parseFloat(vehicle.MSRP) : null;
+    return v != null && Number.isFinite(v) ? v : null;
+  })();
+  const optionNumericValues = allOptions.map(o => parseOptionPriceValue(o.option_price));
+  const requiredTotal = requiredOptions.reduce((s, o) => s + parseOptionPriceValue(o.option_price), 0);
+  const allOptionsTotal = allOptions.reduce((s, o) => s + parseOptionPriceValue(o.option_price), 0);
+  const askingTotal = (msrpParsed ?? 0) + requiredTotal;
+  const suggestedTotal = (msrpParsed ?? 0) + allOptionsTotal;
+  const decimals = priceSetUsesDecimals([
+    msrpParsed,
+    requiredTotal,
+    askingTotal,
+    suggestedTotal,
+    ...optionNumericValues,
+  ]);
+
   const enriched = widgets.map(w => {
     const d = { ...w.d };
 
@@ -110,36 +132,28 @@ export async function buildPdfHtml({
     }
 
     // MSRP / askbar / subtotal: always use live vehicle data, never saved template values.
-    if (w.type === 'msrp' && vehicle?.MSRP) {
-      const msrp = parseFloat(vehicle.MSRP);
-      if (!isNaN(msrp)) d.value = msrp.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+    if (w.type === 'msrp' && msrpParsed != null) {
+      d.value = formatCurrencyAmount(msrpParsed, decimals);
     }
     if (w.type === 'askbar' && vehicle) {
-      const msrp = vehicle.MSRP != null ? parseFloat(vehicle.MSRP) : null;
       if (paperSize === 'infosheet') {
         // Infosheet: asking price = MSRP only (no addendum options total)
-        if (msrp != null && !isNaN(msrp) && msrp > 0) {
-          d.value = msrp.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-          console.log('[pdf-html] infosheet askbar msrp:', msrp, '→', d.value);
+        if (msrpParsed != null && msrpParsed > 0) {
+          d.value = formatCurrencyAmount(msrpParsed, decimals);
+          console.log('[pdf-html] infosheet askbar msrp:', msrpParsed, '→', d.value);
         }
       } else {
         // Asking price = MSRP + required options only
-        const reqTotal = requiredOptions.reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
-        const total = (msrp ?? 0) + reqTotal;
-        if (total > 0) d.value = total.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+        if (askingTotal > 0) d.value = formatCurrencyAmount(askingTotal, decimals);
       }
     }
     if (w.type === 'subtotal') {
       // Subtotal = required options only
-      const reqTotal = requiredOptions.reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
-      if (reqTotal > 0) d.value = `$${reqTotal.toLocaleString()}`;
+      if (requiredTotal > 0) d.value = formatCurrencyAmount(requiredTotal, decimals);
     }
     if (w.type === 'suggested_price' && vehicle) {
-      const msrp = vehicle.MSRP != null ? parseFloat(vehicle.MSRP) : null;
       // Suggested asking price = MSRP + all options (required + suggested)
-      const allTotal = allOptions.reduce((s, o) => s + (parseFloat(o.option_price) || 0), 0);
-      const total = (msrp ?? 0) + allTotal;
-      if (total > 0) d.value = total.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+      if (suggestedTotal > 0) d.value = formatCurrencyAmount(suggestedTotal, decimals);
     }
 
     if (vehicle) {
@@ -166,7 +180,7 @@ export async function buildPdfHtml({
       d.items = requiredOptions.map(o => ({
         name: o.option_name,
         desc: o.description ?? '',
-        price: formatOptionPrice(o.option_price),
+        price: formatOptionPrice(o.option_price, decimals),
         separator_above: o.separator_above === true,
         separator_below: o.separator_below === true,
         spaces: typeof o.spaces === 'number' ? o.spaces : 0,
@@ -176,7 +190,7 @@ export async function buildPdfHtml({
       d.items = suggestedOptions.map(o => ({
         name: o.option_name,
         desc: o.description ?? '',
-        price: formatOptionPrice(o.option_price),
+        price: formatOptionPrice(o.option_price, decimals),
         separator_above: o.separator_above === true,
         separator_below: o.separator_below === true,
         spaces: typeof o.spaces === 'number' ? o.spaces : 0,
