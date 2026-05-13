@@ -1599,6 +1599,33 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
   // Must be unconditional — calling useRef inside a conditional IIFE causes React error #310
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // BG Image upload state — used by the bgimage property panel
+  const bgUploadRef = useRef<HTMLInputElement>(null);
+  const [bgUploading, setBgUploading] = useState(false);
+  const [bgUploadError, setBgUploadError] = useState<string | null>(null);
+  async function handleBgUpload(file: File) {
+    setBgUploading(true);
+    setBgUploadError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('bucket', 'new-infobox-images');
+      fd.append('keyPrefix', dealerId ?? 'shared');
+      const res = await fetch('/api/upload-image', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({ error: 'Upload failed' }));
+        setBgUploadError(j.error ?? 'Upload failed');
+        return;
+      }
+      const { url } = await res.json() as { url: string };
+      u('imgUrl', url);
+    } catch (e) {
+      setBgUploadError(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setBgUploading(false);
+    }
+  }
+
   async function saveQrDefault() {
     if (!dealerId) return;
     const tmpl = (d.qrUrlTemplate as string) || '';
@@ -2013,15 +2040,36 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           {onPickInfolibImage && (
             <button
               onClick={onPickInfolibImage}
-              style={{ width: '100%', padding: '6px', background: '#fff', color: '#1976d2', border: '1px solid #1976d2', borderRadius: 4, fontSize: 11, cursor: 'pointer', marginBottom: 4, fontFamily: 'inherit' }}
+              style={{ width: '100%', padding: '6px', background: '#fff', color: '#1976d2', border: '1px solid #1976d2', borderRadius: 4, fontSize: 11, cursor: 'pointer', marginBottom: 6, fontFamily: 'inherit' }}
             >
               Choose from Image Library
             </button>
           )}
+          <button
+            onClick={() => bgUploadRef.current?.click()}
+            disabled={bgUploading}
+            style={{ width: '100%', padding: '6px', background: bgUploading ? '#f5f6f7' : '#fff', color: '#1976d2', border: '1px dashed #1976d2', borderRadius: 4, fontSize: 11, cursor: bgUploading ? 'wait' : 'pointer', marginBottom: 4, fontFamily: 'inherit' }}
+          >
+            {bgUploading ? 'Uploading…' : 'Upload Image'}
+          </button>
+          <input
+            ref={bgUploadRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+            style={{ display: 'none' }}
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) void handleBgUpload(f);
+              e.target.value = '';
+            }}
+          />
+          {bgUploadError && (
+            <div style={{ fontSize: 10, color: '#ff5252', lineHeight: 1.5, paddingTop: 2 }}>{bgUploadError}</div>
+          )}
           <Fd label="Or load from URL" style={{ marginTop: 8 }}>
             <input value={(d.imgUrl as string) || ''} onChange={e => u('imgUrl', e.target.value)} style={{ ...fiStyle, fontSize: 11 }} placeholder="https://…" />
           </Fd>
-          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Full-width image layer. Use Layer Order below to control stacking against QR / barcode / photo widgets.</div>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Full-width image layer. PNG/JPG/WebP/GIF/SVG up to 5 MB. Use Layer Order below to control stacking.</div>
         </EpSection>
       )}
 
