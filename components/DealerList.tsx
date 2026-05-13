@@ -475,6 +475,20 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                         >
                           {(impersonating === d.dealer_id || enteringGhost === d.dealer_id) ? "…" : decodeHtml(d.name || `Dealer ${d.dealer_id}`)}
                         </button>
+                        {d.is_test && (
+                          <span
+                            className="text-xs font-semibold px-2 py-0.5"
+                            style={{
+                              background: "#ffa500",
+                              color: "#fff",
+                              borderRadius: 20,
+                              flexShrink: 0,
+                            }}
+                            title="Test account — eligible for permanent deletion"
+                          >
+                            TEST
+                          </span>
+                        )}
                         <Link
                           href={`/dealers/${d.id}`}
                           title="View dealer profile"

@@ -83,6 +83,7 @@ export async function PATCH(
   const patch: DealerUpdate = {};
   if (body.name !== undefined) patch.name = body.name;
   if (body.active !== undefined && claims.role === "super_admin") patch.active = body.active;
+  if (body.is_test !== undefined && claims.role === "super_admin") patch.is_test = body.is_test;
   if (body.group_id !== undefined && claims.role === "super_admin") patch.group_id = body.group_id;
   if (body.primary_contact !== undefined) patch.primary_contact = body.primary_contact;
   if (body.primary_contact_email !== undefined) patch.primary_contact_email = body.primary_contact_email;
@@ -127,24 +128,120 @@ export async function PATCH(
 
 /**
  * DELETE /api/dealers/[id]
- * Permanently delete a dealer. super_admin only.
+ * Permanently hard-deletes a dealer. super_admin only AND only when
+ * dealers.is_test = true. The is_test gate is the safety rail: real
+ * dealerships are protected from this endpoint regardless of caller.
+ *
+ * Order of deletion:
+ *   1. Count children for the audit record
+ *   2. Delete auth.users for dealer-scoped profiles (cascades profiles)
+ *   3. Delete dealer_vehicles by text dealer_id (no FK cascade exists)
+ *   4. Delete the dealers row (FK cascade handles addendum_data,
+ *      vehicle_options, vehicle_addendum_items, dealer_admins,
+ *      dealer_invites, group_*_assignments, dealer_settings,
+ *      addendum_library, addendum_history, print_history, templates)
+ *   5. Log to admin_audit
+ *
+ * Returns the counts so the UI can show what was removed.
  */
 export async function DELETE(
   _req: NextRequest,
   { params }: Params
 ): Promise<NextResponse> {
-  const { error } = await requireSuperAdmin();
+  const { claims, error } = await requireSuperAdmin();
   if (error) return error;
 
   const admin = createAdminSupabaseClient();
+
+  // Load the dealer first so we can verify is_test and grab the text dealer_id
+  // (needed for the non-FK-cascading dealer_vehicles delete).
+  const { data: dealer, error: loadErr } = await admin
+    .from("dealers")
+    .select("id, dealer_id, name, is_test")
+    .eq("id", params.id)
+    .maybeSingle<{ id: string; dealer_id: string; name: string; is_test: boolean }>();
+
+  if (loadErr) return NextResponse.json({ error: loadErr.message }, { status: 500 });
+  if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
+  if (!dealer.is_test) {
+    return NextResponse.json(
+      { error: "Refusing to delete: dealer is not flagged as a test account. Toggle is_test first." },
+      { status: 403 },
+    );
+  }
+
+  // ── Counts (run in parallel; failures here aren't fatal, just log) ───────
+  const [vehiclesC, addendumC, printC, optionsC, usersRes] = await Promise.all([
+    admin.from("dealer_vehicles").select("id", { count: "exact", head: true }).eq("dealer_id", dealer.dealer_id),
+    admin.from("addendum_data").select("id", { count: "exact", head: true }).eq("dealer_id", dealer.id),
+    admin.from("print_history").select("id", { count: "exact", head: true }).eq("dealer_id", dealer.dealer_id),
+    admin.from("vehicle_options").select("id", { count: "exact", head: true }).eq("dealer_id", dealer.dealer_id),
+    admin.from("profiles").select("id").eq("dealer_id", dealer.dealer_id),
+  ]);
+  const counts = {
+    vehicles: vehiclesC.count ?? 0,
+    addendum_line_items: addendumC.count ?? 0,
+    print_records: printC.count ?? 0,
+    options: optionsC.count ?? 0,
+    users: usersRes.data?.length ?? 0,
+  };
+  const userIds = (usersRes.data ?? []).map(r => r.id as string);
+
+  // ── Delete dealer-scoped auth users (profiles cascade via auth FK) ───────
+  // Use Supabase admin auth API rather than DELETE from profiles directly so
+  // the auth.users row goes away too (otherwise the user could still log in).
+  let usersDeleted = 0;
+  for (const uid of userIds) {
+    const { error: authErr } = await admin.auth.admin.deleteUser(uid);
+    if (authErr) {
+      console.error(`[dealer DELETE] auth.deleteUser failed for ${uid}: ${authErr.message}`);
+    } else {
+      usersDeleted++;
+    }
+  }
+
+  // ── Delete dealer_vehicles (no FK cascade — must be explicit) ────────────
+  const { error: dvErr } = await admin
+    .from("dealer_vehicles")
+    .delete()
+    .eq("dealer_id", dealer.dealer_id);
+  if (dvErr) {
+    console.error(`[dealer DELETE] dealer_vehicles delete failed: ${dvErr.message}`);
+    return NextResponse.json({ error: `dealer_vehicles delete failed: ${dvErr.message}` }, { status: 500 });
+  }
+
+  // ── Finally, delete the dealer row (cascade picks up the rest) ───────────
   const { error: dbError } = await admin
     .from("dealers")
     .delete()
-    .eq("id", params.id);
-
+    .eq("id", dealer.id);
   if (dbError) {
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
 
-  return NextResponse.json({ success: true });
+  // ── Audit log (best-effort — don't fail the response if it errors) ───────
+  try {
+    await admin.from("admin_audit").insert({
+      admin_user_id: claims.sub,
+      action: "dealer_deleted",
+      target_dealer_id: dealer.dealer_id,
+      metadata: {
+        dealer_name: dealer.name,
+        dealer_uuid: dealer.id,
+        counts: { ...counts, users_deleted: usersDeleted },
+      },
+    });
+  } catch (auditErr) {
+    console.error("[dealer DELETE] admin_audit insert failed:", auditErr);
+  }
+
+  return NextResponse.json({
+    success: true,
+    deleted: {
+      dealer_name: dealer.name,
+      dealer_id: dealer.dealer_id,
+      ...counts,
+      users_deleted: usersDeleted,
+    },
+  });
 }

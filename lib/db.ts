@@ -175,6 +175,7 @@ export type DealerRow = {
   legacy_id: number | null;
   name: string;
   active: boolean;
+  is_test: boolean;
   account_type: string;
   group_id: string | null;
   dealer_group_legacy: string | null;
@@ -232,6 +233,7 @@ type DealerInsert = {
   inventory_dealer_id?: string | null;
   legacy_id?: number | null;
   active?: boolean;
+  is_test?: boolean;
   account_type?: string;
   group_id?: string | null;
   dealer_group_legacy?: string | null;
@@ -286,6 +288,7 @@ export type DealerUpdate = {
   /** inventory_dealer_id can be updated by super_admin when feed goes live. internal_id must never be updated. */
   inventory_dealer_id?: string | null;
   active?: boolean;
+  is_test?: boolean;
   account_type?: string;
   group_id?: string | null;
   dealer_group_legacy?: string | null;

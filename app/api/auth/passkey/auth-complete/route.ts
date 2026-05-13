@@ -100,6 +100,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "User not found" }, { status: 500 });
   }
 
+  // Block login if the dealer this user belongs to is inactive. super_admin
+  // (no dealer assignment) and group_admin (group-scoped, dealer_id may be
+  // null) bypass the check — only dealer-scoped users are gated here.
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("role, dealer_id")
+    .eq("id", passkey.user_id)
+    .maybeSingle<{ role: string; dealer_id: string | null }>();
+  if (profile?.dealer_id && profile.role !== "super_admin" && profile.role !== "group_admin") {
+    const { data: dealerRow } = await admin
+      .from("dealers")
+      .select("active")
+      .eq("dealer_id", profile.dealer_id)
+      .maybeSingle<{ active: boolean }>();
+    if (dealerRow && dealerRow.active === false) {
+      return NextResponse.json(
+        { error: "This dealer account is inactive. Contact support to restore access." },
+        { status: 403 },
+      );
+    }
+  }
+
   // Generate a magic link token and immediately exchange it server-side for a session
   const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
     type: "magiclink",

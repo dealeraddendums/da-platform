@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
@@ -77,6 +78,7 @@ function dealerToForm(d: DealerRow): FormData {
 }
 
 export default function DealerProfileCard({ dealer: initialDealer, group, canEdit, isSuperAdmin, hubspotCompanyId }: Props) {
+  const router = useRouter();
   const [dealer, setDealer] = useState(initialDealer);
   const [logoUrl, setLogoUrl] = useState<string | null>(initialDealer.logo_url ?? null);
   const [editing, setEditing] = useState(false);
@@ -84,6 +86,15 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Test Account flag + Delete modal state
+  const [testToggling, setTestToggling] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePreview, setDeletePreview] = useState<{ vehicles: number; addendum_line_items: number; print_records: number; options: number; users: number } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Inventory Dealer ID inline edit state
   const [invIdEditing, setInvIdEditing] = useState(false);
@@ -160,6 +171,61 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
     setToggling(false);
   }
 
+  async function toggleIsTest() {
+    setTestToggling(true);
+    const res = await fetch(`/api/dealers/${dealer.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_test: !dealer.is_test }),
+    });
+    if (res.ok) {
+      const json = (await res.json()) as { data: DealerRow };
+      setDealer(json.data);
+    }
+    setTestToggling(false);
+  }
+
+  async function openDeleteModal() {
+    setShowDeleteModal(true);
+    setDeleteConfirmName("");
+    setDeleteError(null);
+    setDeletePreview(null);
+    setPreviewLoading(true);
+    try {
+      const res = await fetch(`/api/dealers/${dealer.id}/delete-preview`);
+      if (!res.ok) {
+        const j = (await res.json()) as { error?: string };
+        setDeleteError(j.error ?? "Failed to load preview");
+        return;
+      }
+      const j = (await res.json()) as { counts: { vehicles: number; addendum_line_items: number; print_records: number; options: number; users: number } };
+      setDeletePreview(j.counts);
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "Failed to load preview");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function confirmDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/dealers/${dealer.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const j = (await res.json()) as { error?: string };
+        setDeleteError(j.error ?? "Delete failed");
+        return;
+      }
+      // Hard-redirect back to the dealers list so the deleted row vanishes
+      // and the user lands somewhere coherent.
+      router.push("/dealers");
+      router.refresh();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   async function handleInvIdSave() {
     const newId = invIdValue.trim();
     if (!newId) { setInvIdError("Inventory Dealer ID cannot be empty"); return; }
@@ -228,6 +294,19 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
             >
               {dealer.active ? "Active" : "Inactive"}
             </span>
+            {dealer.is_test && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5"
+                style={{
+                  background: "#ffa500",
+                  color: "#fff",
+                  borderRadius: 20,
+                }}
+                title="Test account — eligible for permanent deletion"
+              >
+                TEST
+              </span>
+            )}
             {hubspotCompanyId && (
               <HubSpotPill href={`https://app.hubspot.com/contacts/23896347/record/0-2/${hubspotCompanyId}`} />
             )}
@@ -239,6 +318,23 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                 style={{ fontSize: 13 }}
               >
                 {toggling ? "…" : dealer.active ? "Deactivate" : "Activate"}
+              </button>
+            )}
+            {isSuperAdmin && !editing && dealer.is_test && (
+              <button
+                onClick={() => void openDeleteModal()}
+                style={{
+                  fontSize: 13,
+                  padding: "6px 12px",
+                  background: "#ff5252",
+                  color: "#fff",
+                  border: "1px solid #ff5252",
+                  borderRadius: 4,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                Delete Dealer
               </button>
             )}
             {canEdit && !editing && (
@@ -327,6 +423,96 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                 }}
               >
                 {invIdSaving ? "Updating…" : "Confirm Change"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Dealer confirmation modal (test accounts only) */}
+      {showDeleteModal && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+            zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e0e0e0",
+              borderRadius: 6,
+              maxWidth: 520,
+              width: "100%",
+              margin: "0 16px",
+              padding: 24,
+            }}
+          >
+            <h3 className="text-base font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
+              Permanently Delete Dealer
+            </h3>
+            <div
+              className="mb-4 px-4 py-3 rounded text-sm"
+              style={{ background: "#ffebee", color: "#b71c1c", border: "1px solid #ffcdd2", lineHeight: 1.6 }}
+            >
+              This is irreversible. <strong>{decodeHtmlEntities(dealer.name)}</strong> and all of
+              its associated data will be permanently removed from Supabase. Aurora is read-only and is not affected.
+            </div>
+            {previewLoading && (
+              <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>Loading counts…</p>
+            )}
+            {deletePreview && (
+              <div className="mb-4 text-sm" style={{ color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                This will permanently delete:
+                <ul className="mt-1 ml-4" style={{ listStyle: "disc" }}>
+                  <li><strong>{deletePreview.vehicles}</strong> vehicle{deletePreview.vehicles === 1 ? "" : "s"}</li>
+                  <li><strong>{deletePreview.print_records}</strong> print record{deletePreview.print_records === 1 ? "" : "s"}</li>
+                  <li><strong>{deletePreview.users}</strong> user{deletePreview.users === 1 ? "" : "s"}</li>
+                  <li><strong>{deletePreview.addendum_line_items}</strong> addendum line item{deletePreview.addendum_line_items === 1 ? "" : "s"}</li>
+                  <li><strong>{deletePreview.options}</strong> saved product{deletePreview.options === 1 ? "" : "s"}</li>
+                </ul>
+              </div>
+            )}
+            <label className="block mb-4">
+              <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                Type the dealer name to confirm: <span className="font-mono" style={{ color: "var(--text-primary)" }}>{dealer.name}</span>
+              </span>
+              <input
+                className="input mt-1"
+                value={deleteConfirmName}
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                placeholder={dealer.name}
+                autoFocus
+                disabled={deleting}
+              />
+            </label>
+            {deleteError && (
+              <p className="text-xs mb-3" style={{ color: "var(--error)" }}>{deleteError}</p>
+            )}
+            <div className="flex gap-2 justify-end">
+              <button
+                className="btn btn-secondary"
+                onClick={() => { setShowDeleteModal(false); setDeleteError(null); }}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void confirmDelete()}
+                disabled={deleting || deleteConfirmName.trim() !== dealer.name.trim()}
+                style={{
+                  background: "#ff5252",
+                  color: "white",
+                  border: "1px solid #ff5252",
+                  borderRadius: 4,
+                  padding: "8px 16px",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  cursor: deleting || deleteConfirmName.trim() !== dealer.name.trim() ? "not-allowed" : "pointer",
+                  opacity: deleting || deleteConfirmName.trim() !== dealer.name.trim() ? 0.5 : 1,
+                }}
+              >
+                {deleting ? "Deleting…" : "Permanently Delete"}
               </button>
             </div>
           </div>
@@ -450,6 +636,34 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                 }
               </span>
             </div>
+
+            {/* Test Account flag — super_admin only. Setting this enables the
+                red Delete Dealer button in the action bar. */}
+            {isSuperAdmin && (
+              <div className="flex items-start justify-between gap-4">
+                <div style={{ flexShrink: 0 }}>
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Test Account</span>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                    Enables permanent deletion. Never enable for a real dealership.
+                  </p>
+                </div>
+                <label
+                  className="flex items-center gap-2 cursor-pointer"
+                  style={{ userSelect: "none" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={dealer.is_test}
+                    disabled={testToggling || editing}
+                    onChange={() => void toggleIsTest()}
+                    style={{ cursor: testToggling ? "wait" : "pointer" }}
+                  />
+                  <span className="text-sm font-medium" style={{ color: dealer.is_test ? "#ffa500" : "var(--text-muted)" }}>
+                    {testToggling ? "…" : dealer.is_test ? "TEST" : "Off"}
+                  </span>
+                </label>
+              </div>
+            )}
 
             {/* External / self-reported group — only shown if dealer_group_legacy is non-numeric */}
             {isExternalGroup(dealer.dealer_group_legacy) && (

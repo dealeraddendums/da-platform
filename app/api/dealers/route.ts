@@ -93,7 +93,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const activeFilter = searchParams.get("active");
     let query = admin
       .from("dealers")
-      .select("id, dealer_id, name, active, city, state, phone, primary_contact, primary_contact_email, account_type, group_id, internal_id", { count: "exact" })
+      .select("id, dealer_id, name, active, is_test, city, state, phone, primary_contact, primary_contact_email, account_type, group_id, internal_id", { count: "exact" })
       .eq("group_id", claims.group_id)
       .order("name");
     if (q) query = query.or(`name.ilike.%${q}%`);
