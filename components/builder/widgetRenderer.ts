@@ -220,10 +220,19 @@ export function renderW(type: string, d: D, fontScale: number): string {
 
   if (type === 'qrcode') {
     const url = encodeURIComponent((d.url as string) || 'https://dealeraddendums.com');
-    const label = (d.label as string) || 'Scan for more info';
+    // Distinguish "not set" (undefined/null → default placeholder) from
+    // "explicitly cleared" (''/whitespace → render no label at all). Without
+    // this the || fallback re-injected "Scan for more info" whenever the
+    // dealer wiped the field.
+    const rawLabel = d.label as string | null | undefined;
+    const label = rawLabel == null ? 'Scan for more info' : rawLabel;
+    const labelHtml = label.trim()
+      ? `<div style="font-size:9px;color:#555;margin-top:3px;text-align:center;font-weight:600">${label}</div>`
+      : '';
     // d.imgUrl is set at PDF render time to a pre-generated base64 data URL; falls back to external API for canvas preview
     const imgSrc = (d.imgUrl as string) || `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${url}&margin=2`;
-    return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:4px;background:#fff;box-sizing:border-box"><img src="${imgSrc}" style="width:calc(100% - 4px);height:calc(100% - 20px);object-fit:contain;display:block" alt="QR Code"><div style="font-size:9px;color:#555;margin-top:3px;text-align:center;font-weight:600">${label}</div></div>`;
+    const imgHeight = labelHtml ? 'calc(100% - 20px)' : '100%';
+    return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:4px;background:#fff;box-sizing:border-box"><img src="${imgSrc}" style="width:calc(100% - 4px);height:${imgHeight};object-fit:contain;display:block" alt="QR Code">${labelHtml}</div>`;
   }
 
   if (type === 'custom') {
