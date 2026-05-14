@@ -197,22 +197,33 @@ export async function buildPdfHtml({
       }));
     }
 
-    // Infosheet description: inject AI or DB vehicle description if widget has no custom content
+    // Infosheet description: inject AI or DB vehicle description if widget has no custom content.
+    // d.aiMode arrives carrying the dealer's PREFERENCE; we overwrite it
+    // with the ACTUAL source picked so the rendered AI/DB pill matches the
+    // text the dealer sees.
     if (w.type === 'description') {
       // Detect all known placeholder variants (from DEFS default or widgetRenderer fallback)
       const isPlaceholder = d.text == null || d.text === '' ||
         (typeof d.text === 'string' && d.text.startsWith('Vehicle description will appear here'));
       if (isPlaceholder) {
         // prefer DB when ai_content_default=false; prefer AI when true; fallback to whichever exists
-        const text = aiEnabled
-          ? (aiDescription || dbDescription || null)
-          : (dbDescription || aiDescription || null);
-        // empty string suppresses the placeholder without showing stray text in PDF
+        let text: string | null = null;
+        let source: 'db' | 'ai' | null = null;
+        if (aiEnabled) {
+          if (aiDescription) { text = aiDescription; source = 'ai'; }
+          else if (dbDescription) { text = dbDescription; source = 'db'; }
+        } else {
+          if (dbDescription) { text = dbDescription; source = 'db'; }
+          else if (aiDescription) { text = aiDescription; source = 'ai'; }
+        }
         d.text = text ?? '';
+        if (source) d.aiMode = source;
       }
     }
 
-    // Infosheet features: inject AI features or DB options text if widget has no custom content
+    // Infosheet features: inject AI features or DB options text if widget has no custom content.
+    // Same pill-match logic as description — set d.aiMode to whatever source
+    // ended up populating d.items.
     if (w.type === 'features') {
       const rawItems = d.items as [string, string][] | null | undefined;
       // Detect default placeholder: null/empty, or every row starts with 'Feature' (DEFS default pattern)
@@ -221,11 +232,8 @@ export async function buildPdfHtml({
         rawItems.every(row => Array.isArray(row) && typeof row[0] === 'string' && row[0].startsWith('Feature'))
       );
       if (isDefault) {
-        // Determine content: prefer based on aiEnabled, fallback to the other source
-        const featuresContent = aiEnabled
-          ? (aiFeatures?.length ? aiFeatures : null)
-          : null;
-        const dbContent = dbOptionsText
+        const aiPairs = aiFeatures?.length ? aiFeatures : null;
+        const dbPairs = dbOptionsText
           ? (() => {
               const lines = dbOptionsText.split(/[\n\r,]+/).map((s: string) => s.trim()).filter(Boolean);
               if (!lines.length) return null;
@@ -234,12 +242,17 @@ export async function buildPdfHtml({
               return pairs;
             })()
           : null;
-
-        const chosen = aiEnabled
-          ? (featuresContent || dbContent || (aiFeatures?.length ? aiFeatures : null))
-          : (dbContent || (aiFeatures?.length ? aiFeatures : null));
-
-        d.items = chosen ?? []; // empty array suppresses placeholder; [] is truthy so || fallback won't fire
+        let chosen: [string, string][] | null = null;
+        let source: 'db' | 'ai' | null = null;
+        if (aiEnabled) {
+          if (aiPairs) { chosen = aiPairs; source = 'ai'; }
+          else if (dbPairs) { chosen = dbPairs; source = 'db'; }
+        } else {
+          if (dbPairs) { chosen = dbPairs; source = 'db'; }
+          else if (aiPairs) { chosen = aiPairs; source = 'ai'; }
+        }
+        d.items = chosen ?? []; // empty array suppresses placeholder
+        if (source) d.aiMode = source;
       }
     }
 
