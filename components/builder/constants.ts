@@ -11,7 +11,7 @@ export const IB_DEFAULT = 'https://new-infobox-images.s3.us-east-1.amazonaws.com
 // VIN, the VIN is missing, or the SOAP/MediaGallery calls fail. Same bucket
 // as the rest of the infobox imagery so dealers' allowlisted CDN paths still work.
 export const VEHICLE_PHOTO_COMING_SOON =
-  'https://new-infobox-images.s3.us-east-1.amazonaws.com/vehicle-photo-coming-soon.jpeg';
+  'https://new-infobox-images.s3.us-east-1.amazonaws.com/vehicle-photo-coming-soon.png';
 
 export const PAPERS: Record<PaperSize, { w: number; h: number }> = {
   standard:  { w: 408,  h: 1056 },
