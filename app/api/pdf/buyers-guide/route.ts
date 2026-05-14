@@ -12,6 +12,20 @@ import JSZip from "jszip";
  * Body: { vehicleId, language?, both?, warranty? }
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
+    return await handleBuyersGuide(req);
+  } catch (err) {
+    // Any unhandled exception (pdf-lib failure, S3 download, missing
+    // assets, Supabase outage, etc.) lands here so the client always sees
+    // valid JSON. Without this, Next.js' default error page returns HTML
+    // and the modal's `await res.json()` blows up on "Unexpected token <".
+    const msg = err instanceof Error ? err.message : "Buyer's Guide generation failed";
+    console.error("[buyers-guide] uncaught:", err);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
