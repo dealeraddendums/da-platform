@@ -53,11 +53,33 @@ export function renderW(type: string, d: D, fontScale: number): string {
   if (type === 'vehicle') {
     const vd = (d.vehicleData as Record<string, string>) || { stock: 'STOCK_TEST1', vin: '2HGFC3B96HH362096', year: '2017', color: 'White', make: 'Honda', trim: 'Touring', model: 'Civic', mileage: '10' };
     const lb: Record<string, string> = { stock: 'Stock:', vin: 'VIN:', year: 'Year:', color: 'Color:', make: 'Make:', trim: 'Trim:', model: 'Model:', mileage: 'Mileage:' };
-    const flds = (d.fields as string[]) || Object.keys(vd);
+    // Stock/VIN/Year/Make/Model are always rendered, even if a particular
+    // record happens to be missing one — the dealer expects the row to be
+    // there. Color / Trim / Mileage are hidden when the value is empty,
+    // whitespace, or a zero-ish default ("0" or 0). All other field names
+    // (custom additions) default to hiding when empty.
+    const ALWAYS_SHOW = new Set(['stock', 'vin', 'year', 'make', 'model']);
+    const isMeaningful = (field: string, raw: unknown): boolean => {
+      if (ALWAYS_SHOW.has(field)) return true;
+      if (raw == null) return false;
+      const s = String(raw).trim();
+      if (!s) return false;
+      if (field === 'mileage' && (s === '0' || s === '0.0' || s === '0.00')) return false;
+      return true;
+    };
+
+    const flds = ((d.fields as string[]) || Object.keys(vd)).filter(f => isMeaningful(f, vd[f]));
     const hdrFs = Math.round(13 * fs * ((d.headerFontSize as number) || 1));
     const detFs = Math.round(9 * fs * ((d.fontSize as number) || 1));
-    const hdr = d.showHeader !== false
-      ? `<div style="font-size:${hdrFs}px;font-weight:800;color:#1a1916;line-height:1.2;margin-bottom:3px;letter-spacing:-.01em">${vd.year} ${vd.make} ${vd.model} ${vd.trim}</div>`
+    // Header line: collapse to non-empty tokens so a missing trim doesn't
+    // leave a trailing space and an empty year/make/model doesn't expand into
+    // weird gaps. Always-show fields can still be empty for edge cases.
+    const headerText = [vd.year, vd.make, vd.model, vd.trim]
+      .map(v => (v == null ? '' : String(v).trim()))
+      .filter(Boolean)
+      .join(' ');
+    const hdr = d.showHeader !== false && headerText
+      ? `<div style="font-size:${hdrFs}px;font-weight:800;color:#1a1916;line-height:1.2;margin-bottom:3px;letter-spacing:-.01em">${headerText}</div>`
       : '';
     const pairs: string[][] = [];
     for (let i = 0; i < flds.length; i += 2) pairs.push([flds[i], flds[i + 1]].filter(Boolean));
