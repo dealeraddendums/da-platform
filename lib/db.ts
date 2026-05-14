@@ -74,6 +74,7 @@ export type GroupRow = {
   id: string;
   name: string;
   active: boolean;
+  is_test: boolean;
   account_type: string;
   internal_id: string | null;
   legacy_id: number | null;
@@ -107,6 +108,7 @@ export type GroupRow = {
 type GroupInsert = {
   name: string;
   active?: boolean;
+  is_test?: boolean;
   account_type?: string;
   internal_id?: string | null;
   legacy_id?: number | null;
@@ -139,6 +141,7 @@ type GroupInsert = {
 export type GroupUpdate = {
   name?: string;
   active?: boolean;
+  is_test?: boolean;
   account_type?: string;
   primary_contact?: string | null;
   primary_contact_email?: string | null;

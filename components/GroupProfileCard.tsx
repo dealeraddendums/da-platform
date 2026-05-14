@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
@@ -70,12 +71,22 @@ function HubSpotPill({ href }: { href: string }) {
 }
 
 export default function GroupProfileCard({ group: initialGroup, canEdit, isSuperAdmin, isGroupAdmin = false, hubspotCompanyId }: Props) {
+  const router = useRouter();
   const [group, setGroup] = useState(initialGroup);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<FormData>(groupToForm(initialGroup));
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Test Account flag + Delete modal state (mirrors DealerProfileCard).
+  const [testToggling, setTestToggling] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePreview, setDeletePreview] = useState<{ member_dealers: number; group_templates: number; group_options: number; users: number } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   function startEdit() {
     setForm(groupToForm(group));
@@ -140,6 +151,59 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
     setToggling(false);
   }
 
+  async function toggleIsTest() {
+    setTestToggling(true);
+    const res = await fetch(`/api/groups/${group.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_test: !group.is_test }),
+    });
+    if (res.ok) {
+      const json = (await res.json()) as { data: GroupRow };
+      setGroup(json.data);
+    }
+    setTestToggling(false);
+  }
+
+  async function openDeleteModal() {
+    setShowDeleteModal(true);
+    setDeleteConfirmName("");
+    setDeleteError(null);
+    setDeletePreview(null);
+    setPreviewLoading(true);
+    try {
+      const res = await fetch(`/api/groups/${group.id}/delete-preview`);
+      if (!res.ok) {
+        const j = (await res.json()) as { error?: string };
+        setDeleteError(j.error ?? "Failed to load preview");
+        return;
+      }
+      const j = (await res.json()) as { counts: { member_dealers: number; group_templates: number; group_options: number; users: number } };
+      setDeletePreview(j.counts);
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "Failed to load preview");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function confirmDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/groups/${group.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const j = (await res.json()) as { error?: string };
+        setDeleteError(j.error ?? "Delete failed");
+        return;
+      }
+      router.push("/groups");
+      router.refresh();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -157,6 +221,15 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
             >
               {group.active ? "Active" : "Inactive"}
             </span>
+            {group.is_test && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5"
+                style={{ background: "#ffa500", color: "#fff", borderRadius: 20 }}
+                title="Test account — eligible for permanent deletion"
+              >
+                TEST
+              </span>
+            )}
             {hubspotCompanyId && (
               <HubSpotPill href={`https://app.hubspot.com/contacts/23896347/record/0-2/${hubspotCompanyId}`} />
             )}
@@ -168,6 +241,23 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
                 style={{ fontSize: 13 }}
               >
                 {toggling ? "…" : group.active ? "Deactivate" : "Activate"}
+              </button>
+            )}
+            {isSuperAdmin && !editing && group.is_test && (
+              <button
+                onClick={() => void openDeleteModal()}
+                style={{
+                  fontSize: 13,
+                  padding: "6px 12px",
+                  background: "#ff5252",
+                  color: "#fff",
+                  border: "1px solid #ff5252",
+                  borderRadius: 4,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                Delete Group
               </button>
             )}
             {canEdit && !editing && (
@@ -206,6 +296,28 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
             <Field label="Primary Contact" value={form.primary_contact} editing={editing} onChange={set("primary_contact")} view={group.primary_contact} />
             <Field label="Email" value={form.primary_contact_email} editing={editing} type="email" onChange={set("primary_contact_email")} view={group.primary_contact_email} isEmail />
             <Field label="Phone" value={form.phone} editing={editing} onChange={set("phone")} view={group.phone} />
+            {isSuperAdmin && (
+              <div className="flex items-start justify-between gap-4">
+                <div style={{ flexShrink: 0 }}>
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Test Account</span>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                    Enables permanent deletion. Member dealers stay; they&apos;re just dissociated.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
+                  <input
+                    type="checkbox"
+                    checked={group.is_test}
+                    disabled={testToggling || editing}
+                    onChange={() => void toggleIsTest()}
+                    style={{ cursor: testToggling ? "wait" : "pointer" }}
+                  />
+                  <span className="text-sm font-medium" style={{ color: group.is_test ? "#ffa500" : "var(--text-muted)" }}>
+                    {testToggling ? "…" : group.is_test ? "TEST" : "Off"}
+                  </span>
+                </label>
+              </div>
+            )}
           </div>
         </div>
 
@@ -228,6 +340,102 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
           </div>
         </div>
       </div>
+
+      {/* Delete Group confirmation modal (test groups only) */}
+      {showDeleteModal && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+            zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e0e0e0",
+              borderRadius: 6,
+              maxWidth: 520,
+              width: "100%",
+              margin: "0 16px",
+              padding: 24,
+            }}
+          >
+            <h3 className="text-base font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
+              Permanently Delete Group
+            </h3>
+            <div
+              className="mb-4 px-4 py-3 rounded text-sm"
+              style={{ background: "#ffebee", color: "#b71c1c", border: "1px solid #ffcdd2", lineHeight: 1.6 }}
+            >
+              This is irreversible. <strong>{decodeHtmlEntities(group.name)}</strong> will be
+              permanently removed. <strong>Member dealers are NOT deleted</strong> — they&apos;ll just be
+              dissociated from the group.
+            </div>
+            {previewLoading && (
+              <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>Loading counts…</p>
+            )}
+            {deletePreview && (
+              <div className="mb-4 text-sm" style={{ color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                This will:
+                <ul className="mt-1 ml-4" style={{ listStyle: "disc" }}>
+                  <li>Dissociate <strong>{deletePreview.member_dealers}</strong> member dealer{deletePreview.member_dealers === 1 ? "" : "s"} (their data stays)</li>
+                  <li>Delete <strong>{deletePreview.group_templates}</strong> group template{deletePreview.group_templates === 1 ? "" : "s"}</li>
+                  <li>Delete <strong>{deletePreview.group_options}</strong> corporate product{deletePreview.group_options === 1 ? "" : "s"}</li>
+                  <li>Delete <strong>{deletePreview.users}</strong> group user{deletePreview.users === 1 ? "" : "s"}</li>
+                </ul>
+              </div>
+            )}
+            <label className="block mb-4">
+              <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                Type the group name to confirm: <span className="font-mono" style={{ color: "var(--text-primary)" }}>{decodeHtmlEntities(group.name)}</span>
+              </span>
+              <input
+                className="input mt-1"
+                value={deleteConfirmName}
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                placeholder={decodeHtmlEntities(group.name)}
+                autoFocus
+                disabled={deleting}
+              />
+            </label>
+            {deleteError && (
+              <p className="text-xs mb-3" style={{ color: "var(--error)" }}>{deleteError}</p>
+            )}
+            <div className="flex gap-2 justify-end">
+              <button
+                className="btn btn-secondary"
+                onClick={() => { setShowDeleteModal(false); setDeleteError(null); }}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              {(() => {
+                const expected = decodeHtmlEntities(group.name).trim();
+                const ready = !deleting && deleteConfirmName.trim() === expected;
+                return (
+                  <button
+                    onClick={() => void confirmDelete()}
+                    disabled={!ready}
+                    style={{
+                      background: "#ff5252",
+                      color: "white",
+                      border: "1px solid #ff5252",
+                      borderRadius: 4,
+                      padding: "8px 16px",
+                      fontSize: 14,
+                      fontWeight: 500,
+                      cursor: ready ? "pointer" : "not-allowed",
+                      opacity: ready ? 1 : 0.5,
+                    }}
+                  >
+                    {deleting ? "Deleting…" : "Permanently Delete"}
+                  </button>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Member dealers */}
       <GroupDealers groupId={group.id} isSuperAdmin={isSuperAdmin} isGroupAdmin={isGroupAdmin} />

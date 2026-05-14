@@ -358,6 +358,15 @@ export default function GroupList() {
                       >
                         {(ghosting === g.id || impersonatingGroup === g.id) ? "Entering…" : g.name}
                       </button>
+                      {g.is_test && (
+                        <span
+                          className="text-xs font-semibold px-2 py-0.5"
+                          style={{ background: "#ffa500", color: "#fff", borderRadius: 20, flexShrink: 0 }}
+                          title="Test account — eligible for permanent deletion"
+                        >
+                          TEST
+                        </span>
+                      )}
                       {!g.has_group_admin && (
                         <span title="No group admin — will use ghost mode" style={{ fontSize: 13, lineHeight: 1 }}>👻</span>
                       )}
