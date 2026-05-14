@@ -584,6 +584,10 @@ type Props = {
   userRole: string;
   memberSince: string;
   initialProfile: StaffProfileRow | null;
+  /** profiles.full_name from the parent profile row — used as a fallback
+   *  when staff_profiles.full_name hasn't been set yet (lazy row creation
+   *  pattern; staff_profiles is created on first save). */
+  profileFullName?: string;
   viewerIsSuperAdmin?: boolean;
 };
 
@@ -604,9 +608,9 @@ type FormState = {
   notification_sms: string;
 };
 
-function initForm(p: StaffProfileRow | null, email: string): FormState {
+function initForm(p: StaffProfileRow | null, email: string, profileFullName: string = ""): FormState {
   return {
-    full_name: p?.full_name ?? "",
+    full_name: p?.full_name ?? profileFullName ?? "",
     title: p?.title ?? "",
     phone: p?.phone ?? "",
     mobile: p?.mobile ?? "",
@@ -631,6 +635,7 @@ export default function StaffProfileClient({
   userRole,
   memberSince,
   initialProfile,
+  profileFullName = "",
   viewerIsSuperAdmin = false,
 }: Props) {
   const searchParams = useSearchParams();
@@ -638,7 +643,7 @@ export default function StaffProfileClient({
     searchParams.get("tab") === "security" ? "security" : "profile"
   );
 
-  const [form, setForm] = useState<FormState>(() => initForm(initialProfile, userEmail));
+  const [form, setForm] = useState<FormState>(() => initForm(initialProfile, userEmail, profileFullName));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");

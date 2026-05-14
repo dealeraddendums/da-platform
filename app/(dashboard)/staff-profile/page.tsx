@@ -37,6 +37,11 @@ export default async function StaffProfilePage() {
       userRole={role}
       memberSince={profile?.created_at ?? ""}
       initialProfile={staffProfile ?? null}
+      // profiles.full_name is set at invite time. staff_profiles is a
+      // separate, lazily-created row; when it doesn't exist or its
+      // full_name is blank, pre-fill from the parent profile so the
+      // user's name doesn't appear missing on first visit.
+      profileFullName={profile?.full_name ?? ""}
     />
   );
 }
