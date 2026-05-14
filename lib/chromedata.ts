@@ -122,30 +122,52 @@ interface JsonColorizedEntry {
 }
 
 /**
- * Pick the best matching image from the MediaGallery JSON listing per the
- * legacy precedence:
- *   1. transparent 320x240 shotCode=03 with primaryColorOptionCode = colorCode
- *   2. transparent 320x240 shotCode=03 (any color)
- *   3. transparent 320x240 (any color, any shot)
- *   4. give up
+ * Pick the best matching image from the MediaGallery JSON listing.
+ *
+ * Precedence by content (most specific first):
+ *   1. transparent shotCode=03 with primaryColorOptionCode = colorCode
+ *   2. transparent shotCode=03 (any color)
+ *   3. transparent any-shot (any color)
+ *
+ * Within each tier we prefer the highest resolution available (1280 > 640
+ * > 320). ChromeData's MediaGallery listing returns one signed URL per
+ * (size, shot, color) tuple — so we just pick the largest one. The URL
+ * itself is HMAC-signed; we can't synthesize a higher-res URL by editing
+ * the filename, so we have to find an entry that already exists.
+ *
+ * 2100×1575 is excluded as a candidate because it's only published for
+ * 2016+ vehicles per ChromeData's docs — and 1280 is plenty for a 4×3
+ * print at 300dpi.
  */
+const PREFERRED_WIDTHS = ['1280', '640', '320'] as const;
+
+function bestByWidth(entries: JsonColorizedEntry[]): JsonColorizedEntry | undefined {
+  for (const w of PREFERRED_WIDTHS) {
+    const hit = entries.find(e => e["@width"] === w);
+    if (hit) return hit;
+  }
+  return entries[0];
+}
+
 function pickImage(entries: JsonColorizedEntry[], colorCode: string | null): string | null {
   if (!entries?.length) return null;
-  const isTransparent = (e: JsonColorizedEntry) =>
-    e["@width"] === "320" && e["@height"] === "240" && e["@backgroundDescription"] === "Transparent";
+  const isTransparent = (e: JsonColorizedEntry) => e["@backgroundDescription"] === "Transparent";
   const transparent = entries.filter(isTransparent);
   if (transparent.length === 0) return null;
 
   if (colorCode) {
-    const colorMatch = transparent.find(e =>
+    const colorShot03 = transparent.filter(e =>
       e["@primaryColorOptionCode"] === colorCode && e["@shotCode"] === "03");
-    if (colorMatch?.["@href"]) return colorMatch["@href"];
-    const anyShotColor = transparent.find(e => e["@primaryColorOptionCode"] === colorCode);
-    if (anyShotColor?.["@href"]) return anyShotColor["@href"];
+    const best = bestByWidth(colorShot03);
+    if (best?.["@href"]) return best["@href"];
+    const anyShotColor = transparent.filter(e => e["@primaryColorOptionCode"] === colorCode);
+    const bestAny = bestByWidth(anyShotColor);
+    if (bestAny?.["@href"]) return bestAny["@href"];
   }
-  const shot03 = transparent.find(e => e["@shotCode"] === "03");
-  if (shot03?.["@href"]) return shot03["@href"];
-  return transparent[0]?.["@href"] ?? null;
+  const shot03 = transparent.filter(e => e["@shotCode"] === "03");
+  const bestShot03 = bestByWidth(shot03);
+  if (bestShot03?.["@href"]) return bestShot03["@href"];
+  return bestByWidth(transparent)?.["@href"] ?? null;
 }
 
 /**
