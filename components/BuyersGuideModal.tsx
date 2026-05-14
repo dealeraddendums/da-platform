@@ -188,6 +188,14 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
                   <label className="label">Dealer Email (optional)</label>
                   <input className="input w-full" type="email" value={warranty.dealer_email ?? ""} onChange={e => setW("dealer_email", e.target.value)} placeholder="sales@dealer.com" />
                 </div>
+
+                <div className="mb-4">
+                  <label className="label">For Complaints After Sale, Contact (optional)</label>
+                  <input className="input w-full" value={warranty.complaints_contact ?? ""} onChange={e => setW("complaints_contact", e.target.value)} placeholder="Jane Doe, (555) 555-1212, complaints@dealer.com" />
+                  <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                    Fills the &ldquo;FOR COMPLAINTS AFTER SALE, CONTACT:&rdquo; line on the back of both English and Spanish Buyer&apos;s Guides.
+                  </p>
+                </div>
               </>
             )}
           </div>

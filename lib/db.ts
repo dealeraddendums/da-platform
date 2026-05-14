@@ -390,6 +390,10 @@ export type BuyersGuideDefaults = {
   non_dealer_warranties?: string[];
   service_contract?: boolean;
   dealer_email?: string;
+  /** Name + phone/email of the person handling after-sale complaints.
+   *  Drawn on the back page in the "FOR COMPLAINTS AFTER SALE, CONTACT:" slot
+   *  of both EN and ES Buyer's Guides (same field on both). */
+  complaints_contact?: string;
 };
 
 export type DealerCustomSizeRow = {

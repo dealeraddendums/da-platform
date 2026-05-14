@@ -111,6 +111,9 @@ const BACK = {
   addrX:  104, addrY:  175,
   phoneX: 104, phoneY: 152,
   emailX: 346, emailY: 152,
+  // "FOR COMPLAINTS AFTER SALE, CONTACT:" sits one row below telephone/email
+  // (~23pt below). Full-width line, left-aligned at nameX.
+  complaintsX: 104, complaintsY: 128,
 };
 
 // ── Drawing helpers ───────────────────────────────────────────────────────────
@@ -202,6 +205,7 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
   drawTxt(bp, font, BACK.addrX,  BACK.addrY,  dealerAddr,  8);
   drawTxt(bp, font, BACK.phoneX, BACK.phoneY, dealerPhone, 8);
   if (dealerEmail) drawTxt(bp, font, BACK.emailX, BACK.emailY, dealerEmail, 8);
+  if (w.complaints_contact) drawTxt(bp, font, BACK.complaintsX, BACK.complaintsY, w.complaints_contact, 8);
 
   const bytes = await outDoc.save();
   return Buffer.from(bytes);
