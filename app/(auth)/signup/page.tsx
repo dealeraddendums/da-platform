@@ -13,6 +13,25 @@ type InviteDetails = {
   role: string;
 };
 
+/**
+ * Score a password on a simple 0-4 scale: length, mixed case, digit, symbol.
+ * Renders the strength bar + label under the New Password input.
+ */
+function passwordStrength(pw: string): { pct: number; label: string; color: string } {
+  if (!pw) return { pct: 0, label: "", color: "transparent" };
+  let score = 0;
+  if (pw.length >= 8) score++;
+  if (pw.length >= 12) score++;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+  if (/\d/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw)) score++;
+  if (pw.length < 8) return { pct: 25, label: "Too short", color: "#ff5252" };
+  if (score <= 2) return { pct: 40, label: "Weak", color: "#f57c00" };
+  if (score === 3) return { pct: 65, label: "Fair", color: "#fbc02d" };
+  if (score === 4) return { pct: 85, label: "Strong", color: "#4caf50" };
+  return { pct: 100, label: "Excellent", color: "#2e7d32" };
+}
+
 function SignupPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -49,8 +68,8 @@ function SignupPageInner() {
   async function handleInviteSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (password !== confirm) { setError("Passwords do not match."); return; }
-    if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
+    if (password !== confirm) { setError("Passwords don't match. Please re-enter."); return; }
     setLoading(true);
 
     const res = await fetch("/api/invite/accept", {
@@ -151,17 +170,24 @@ function SignupPageInner() {
       );
     }
 
+    const strength = passwordStrength(password);
+    const passwordsMatch = password.length > 0 && password === confirm;
+    const ready = !loading && password.length >= 8 && passwordsMatch;
+
     return (
       <div className="w-full max-w-sm">
         {logo}
         <div className="card p-8">
-          <h1 className="text-lg font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
-            Set your password
+          <h1 className="text-xl font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
+            Welcome to DA Platform
           </h1>
+          <p className="text-sm mb-1" style={{ color: "var(--text-secondary)" }}>
+            Create a password to complete your account setup
+          </p>
           {inviteDetails && (
-            <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
-              You&rsquo;ve been invited to <strong>{inviteDetails.dealerName}</strong> as a{" "}
-              {inviteDetails.role.replace(/_/g, " ")}.
+            <p className="text-xs mt-3 mb-6 px-3 py-2 rounded" style={{ background: "var(--bg-subtle)", color: "var(--text-secondary)" }}>
+              Invited to <strong>{inviteDetails.dealerName}</strong> as{" "}
+              <strong>{inviteDetails.role.replace(/_/g, " ")}</strong>.
             </p>
           )}
 
@@ -172,22 +198,37 @@ function SignupPageInner() {
                 style={{ background: "var(--bg-subtle)", color: "var(--text-muted)", cursor: "not-allowed" }} />
             </div>
 
-            <div className="mb-4">
-              <label className="label" htmlFor="inv-password">Password</label>
+            <div className="mb-3">
+              <label className="label" htmlFor="inv-password">New Password</label>
               <input
                 id="inv-password"
                 className="input"
                 type="password"
                 autoComplete="new-password"
                 required
-                placeholder="Min. 6 characters"
+                placeholder="At least 8 characters"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
               />
+              {password.length > 0 && (
+                <div className="mt-1 flex items-center gap-2" style={{ fontSize: 11 }}>
+                  <div style={{ flex: 1, height: 4, background: "var(--bg-subtle)", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{
+                      width: `${strength.pct}%`,
+                      height: "100%",
+                      background: strength.color,
+                      transition: "width 150ms, background 150ms",
+                    }} />
+                  </div>
+                  <span style={{ color: strength.color, fontWeight: 500, minWidth: 56, textAlign: "right" }}>
+                    {strength.label}
+                  </span>
+                </div>
+              )}
             </div>
 
-            <div className="mb-6">
-              <label className="label" htmlFor="inv-confirm">Confirm password</label>
+            <div className="mb-2">
+              <label className="label" htmlFor="inv-confirm">Confirm Password</label>
               <input
                 id="inv-confirm"
                 className="input"
@@ -197,20 +238,32 @@ function SignupPageInner() {
                 placeholder="Repeat password"
                 value={confirm}
                 onChange={e => setConfirm(e.target.value)}
+                style={{
+                  borderColor: confirm.length > 0 && !passwordsMatch ? "#ff5252" : undefined,
+                }}
               />
+              {confirm.length > 0 && !passwordsMatch && (
+                <p className="text-xs mt-1" style={{ color: "#ff5252" }}>Passwords don&apos;t match</p>
+              )}
+              {passwordsMatch && (
+                <p className="text-xs mt-1" style={{ color: "var(--success)" }}>✓ Passwords match</p>
+              )}
             </div>
 
             {error && (
-              <div className="mb-4 px-3 py-2 rounded text-sm"
+              <div className="mt-4 mb-2 px-3 py-2 rounded text-sm"
                 style={{ background: "#ffebee", color: "#c62828", border: "1px solid #ffcdd2" }}>
                 {error}
               </div>
             )}
 
-            <button type="submit" className="btn btn-primary w-full"
-              style={{ background: "var(--success)" }}
-              disabled={loading || !password || !confirm}>
-              {loading ? "Activating account…" : "Activate account"}
+            <button
+              type="submit"
+              className="btn btn-primary w-full mt-4"
+              disabled={!ready}
+              style={{ opacity: ready ? 1 : 0.5, cursor: ready ? "pointer" : "not-allowed" }}
+            >
+              {loading ? "Creating password…" : "Create Password & Sign In"}
             </button>
           </form>
         </div>

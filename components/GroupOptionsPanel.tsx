@@ -64,7 +64,11 @@ type GroupUserProfile = {
   full_name: string | null;
   role: string;
   active: boolean;
+  /** Legacy column on profiles — never updated, always null. Kept for
+   *  back-compat in case other call sites still read it. Use
+   *  last_sign_in_at instead, which the API merges in from auth.users. */
   last_login: string | null;
+  last_sign_in_at: string | null;
   created_at: string;
 };
 
@@ -314,7 +318,12 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
                     )}
                   </td>
                   <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text-muted)" }}>
-                    {u.last_login ? new Date(u.last_login).toLocaleDateString() : "Never"}
+                    {u.last_sign_in_at
+                      ? new Date(u.last_sign_in_at).toLocaleString('en-US', {
+                          month: 'short', day: 'numeric', year: 'numeric',
+                          hour: 'numeric', minute: '2-digit', hour12: true,
+                        })
+                      : (u.last_login ? new Date(u.last_login).toLocaleDateString() : "Never")}
                   </td>
                   <td className="px-4 py-2.5 text-right" style={{ whiteSpace: "nowrap" }}>
                     {isEditing ? (

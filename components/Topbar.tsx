@@ -219,23 +219,17 @@ export default function Topbar({ user }: Props) {
               <span style={{ color: "rgba(255,255,255,0.6)", fontWeight: 400 }}>{displayName}</span>
             </div>
           ) : isGroupAdmin ? (
-            /* Group admin: show group name + Select Dealer button */
-            <div className="flex items-center gap-3">
-              <span style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
-                {user.groupName ?? "Group Admin"}
-              </span>
-              <button
-                onClick={() => setShowPicker(true)}
-                disabled={switching}
-                style={{
-                  height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, borderRadius: 4,
-                  background: "var(--orange)", color: "#333", border: "none",
-                  cursor: switching ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 4,
-                  opacity: switching ? 0.7 : 1,
-                }}
-              >
-                {switching ? "Switching…" : "Select Dealer ▾"}
-              </button>
+            /* Group admin: clean identity row — "Allan Tone — Allan's Test Group".
+               Switching into a specific dealer is handled from the Dealers
+               table (per-row impersonate), not a header dropdown. */
+            <div className="flex items-center text-sm gap-3">
+              <span style={{ fontWeight: 600, color: "#ffffff" }}>{displayName}</span>
+              {user.groupName && (
+                <>
+                  <span style={{ color: "rgba(255,255,255,0.4)" }}>—</span>
+                  <span style={{ color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>{user.groupName}</span>
+                </>
+              )}
             </div>
           ) : (
             /* Super admin: role badge + user name */
