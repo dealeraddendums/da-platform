@@ -248,10 +248,94 @@ function DealerActivityReport() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+function ChromeDataUsageReport() {
+  const [month, setMonth] = useState<string>(() => {
+    // Default to previous calendar month, formatted YYYY-MM for <input type="month">.
+    const now = new Date();
+    const ref = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const y = ref.getUTCFullYear();
+    const m = String(ref.getUTCMonth() + 1).padStart(2, "0");
+    return `${y}-${m}`;
+  });
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{ dealers: number; file: string; s3_key: string | null; month: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setRunning(true);
+    setResult(null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/cron/chromedata-usage-report?month=${encodeURIComponent(month)}`, {
+        method: "POST",
+      });
+      const j = await res.json() as { success?: boolean; dealers?: number; file?: string; s3_key?: string | null; month?: string; error?: string };
+      if (!res.ok || !j.success) {
+        setError(j.error ?? `Request failed (${res.status})`);
+        return;
+      }
+      setResult({ dealers: j.dealers ?? 0, file: j.file ?? "", s3_key: j.s3_key ?? null, month: j.month ?? month });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="card p-6 mb-6">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>ChromeData Usage Report</h2>
+          <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+            Builds the monthly billing report for ChromeData (contract #9310). Runs automatically on the 5th of each month —
+            use this to re-run or backfill a prior month.
+          </p>
+        </div>
+        <div className="flex items-end gap-2">
+          <div>
+            <label className="block text-xs font-semibold mb-1" style={{ color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Reporting Month
+            </label>
+            <input
+              type="month"
+              className="input"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              style={{ height: 36, width: 180 }}
+            />
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void run()}
+            disabled={running || !month}
+            style={{ height: 36 }}
+          >
+            {running ? "Generating…" : "Generate & Email"}
+          </button>
+        </div>
+      </div>
+      {error && (
+        <div className="mt-4 px-3 py-2 rounded text-sm" style={{ background: "#ffebee", color: "var(--error)", border: "1px solid #ffcdd2" }}>
+          {error}
+        </div>
+      )}
+      {result && (
+        <div className="mt-4 px-3 py-2 rounded text-sm" style={{ background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" }}>
+          Sent <strong>{result.file}</strong> to billing@chromedata.com — <strong>{result.dealers}</strong> dealer{result.dealers === 1 ? "" : "s"} reported for {result.month}.
+          {result.s3_key && <span style={{ display: "block", fontSize: 11, opacity: 0.8, marginTop: 2 }}>Archived to S3 at <code>{result.s3_key}</code>.</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ReportsPage() {
   return (
     <div>
       <PageHeader title="Reports" subtitle="Historical addendum data across all dealers" />
+      <ChromeDataUsageReport />
       <OptionsUsageReport />
       <DealerActivityReport />
     </div>

@@ -6,12 +6,23 @@ interface MandrillRecipient {
   type?: 'to' | 'cc' | 'bcc';
 }
 
+interface MandrillAttachment {
+  /** MIME type, e.g. "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" */
+  type: string;
+  /** Filename including extension as shown to the recipient. */
+  name: string;
+  /** Base64-encoded file contents (no data: prefix). */
+  content: string;
+}
+
 interface MandrillMessage {
   html: string;
   subject: string;
   from_email: string;
   from_name?: string;
   to: MandrillRecipient[];
+  /** Optional attachments (passed through to Mandrill's attachments[] field). */
+  attachments?: MandrillAttachment[];
 }
 
 export async function sendMandrillEmail(message: MandrillMessage): Promise<void> {
