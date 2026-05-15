@@ -591,7 +591,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         };
 
         // Corporate (group) products — rules-filtered for this vehicle, with layout fields
-        const groupOpts = await getGroupOptionsForDealer(textDealerId, vehicleData);
+        const groupOpts = await getGroupOptionsForDealer(textDealerId, vehicleData, vehicleId);
 
         // Re-gate saved options by current library rules. A saved product
         // whose library row's Make/Model/etc rules no longer match this

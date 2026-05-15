@@ -10,6 +10,7 @@ type FormState = {
   option_price: string;
   description: string;
   required: boolean;            // true = Required, false = Suggested
+  locked: boolean;              // true (default) = dealer cannot remove on a vehicle
   applies_to: "all" | "rules" | "none";
   ad_types: string[];           // ["New","Used","CPO"]
   models: string;
@@ -28,6 +29,7 @@ const BLANK: FormState = {
   option_price: "NC",
   description: "",
   required: true,
+  locked: true,
   applies_to: "all",
   ad_types: ["New", "Used", "CPO"],
   models: "",
@@ -48,6 +50,7 @@ function rowToForm(r: GroupOptionRow): FormState {
     option_price: r.option_price ?? "NC",
     description: r.description ?? "",
     required: r.required ?? !(r.is_suggested ?? false),
+    locked: typeof r.locked === "boolean" ? r.locked : true,
     applies_to: (r.applies_to as "all" | "rules" | "none") ?? "all",
     ad_types: adTypes,
     models: r.models ?? "",
@@ -129,6 +132,7 @@ export default function CorporateProductModal({
       option_price: form.option_price.trim() || "NC",
       description: form.description,
       required: form.required,
+      locked: form.locked,
       // Mirror old is_suggested semantics for backward-compat with the engine
       // until Stage 4 lands and everything reads the new required column.
       is_suggested: !form.required,
@@ -211,6 +215,25 @@ export default function CorporateProductModal({
                 ? "Required — auto-prepended and locked on every assigned dealer's addendum."
                 : "Suggested — offered to dealers; visibility controlled by dealer assignment below."}
             </p>
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={form.locked}
+                onChange={e => f("locked", e.target.checked)}
+                style={{ width: 16, height: 16, cursor: "pointer" }}
+              />
+              <span style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 500 }}>
+                {form.locked ? "🔒 Locked" : "🔓 Unlocked"}
+              </span>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                {form.locked
+                  ? "Dealers cannot remove this product from their addendums."
+                  : "Dealers can dismiss this product on individual vehicles."}
+              </span>
+            </label>
           </div>
 
           <div style={{ marginBottom: 14 }}>

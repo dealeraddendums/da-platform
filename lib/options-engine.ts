@@ -218,7 +218,12 @@ export type LockedOption = {
   description: string | null;
   sort_order: number;
   required: boolean;
+  /** Carried for back-compat; new callers should read `locked` instead. */
   is_locked: true;
+  /** Per-product lock flag (migration 063). When false, the dealer may
+   *  dismiss this product on a specific vehicle's addendum. Defaults to
+   *  true so older rows stay locked. */
+  locked: boolean;
   /** Layout hints from group_options (migration 053). Default false / 0. */
   separator_above?: boolean;
   separator_below?: boolean;
@@ -241,6 +246,7 @@ export type LockedOption = {
 export async function getGroupOptionsForDealer(
   dealerTextId: string,
   vehicle?: VehicleRow,
+  vehicleId?: string,
 ): Promise<LockedOption[]> {
   const admin = createAdminSupabaseClient();
 
@@ -279,6 +285,22 @@ export async function getGroupOptionsForDealer(
     assignedIds = new Set((assigns ?? []).map(a => a.option_id as string));
   }
 
+  // Per-vehicle dismissals (migration 063): when a product is unlocked
+  // (locked=false), the dealer can hide it on one vehicle without removing
+  // it from the group library. Skip the lookup when no vehicle id was
+  // passed — admin list views don't need dismissals filtered out.
+  let dismissedIds = new Set<string>();
+  if (vehicleId) {
+    // Cast through any — lib/db.ts Database type hasn't regenerated to
+    // include the new dealer_dismissed_group_options table yet.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: dismissals } = await (admin as any)
+      .from("dealer_dismissed_group_options")
+      .select("group_option_id")
+      .eq("vehicle_id", vehicleId);
+    dismissedIds = new Set(((dismissals ?? []) as Array<{ group_option_id: string }>).map(d => d.group_option_id));
+  }
+
   return (rows as GroupOptionRow[])
     .filter(r => {
       // assign_all_dealers=true → product applies to every current and future
@@ -299,10 +321,22 @@ export async function getGroupOptionsForDealer(
       // (migration 053). Cast through unknown so the type signature matches.
       return matchesRulesRow(r as unknown as RulesRow, vehicle);
     })
+    .filter(r => {
+      // Drop products the dealer has dismissed on this specific vehicle.
+      // Only meaningful for locked=false products, but a row in
+      // dealer_dismissed_group_options unconditionally wins — if a product
+      // was unlocked, dismissed, then re-locked, the dismissal should still
+      // hold for that vehicle. The toggle is an admin choice; the dismissal
+      // is a dealer choice for one car.
+      return !dismissedIds.has(r.id);
+    })
     .map(r => {
       // Prefer the explicit `required` column added in migration 053; fall back
       // to the inverted is_suggested mapping for rows that pre-date the backfill.
       const required = typeof r.required === "boolean" ? r.required : !r.is_suggested;
+      // locked column added in migration 063; pre-063 rows default to true
+      // (the historical behavior) so existing corporate products stay locked.
+      const locked = typeof r.locked === "boolean" ? r.locked : true;
       return {
         id: r.id,
         option_name: r.option_name,
@@ -311,6 +345,7 @@ export async function getGroupOptionsForDealer(
         sort_order: r.sort_order,
         required,
         is_locked: true as const,
+        locked,
         separator_above: r.separator_above === true,
         separator_below: r.separator_below === true,
         spaces: typeof r.spaces === "number" ? r.spaces : 0,

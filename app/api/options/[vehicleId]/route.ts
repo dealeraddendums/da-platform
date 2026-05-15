@@ -235,7 +235,7 @@ export async function GET(
       }
 
       const vehicleForRules = await loadVehicleForRules(admin, vid);
-      const groupOptions = await getGroupOptionsForDealer(effectiveDealerId, vehicleForRules);
+      const groupOptions = await getGroupOptionsForDealer(effectiveDealerId, vehicleForRules, isUUID(vid) ? vid : undefined);
 
       // Check for saved options keyed by this vehicleId
       const { data: saved } = await admin
@@ -320,7 +320,7 @@ export async function GET(
     }
 
     const vehicleForRulesFallback = await loadVehicleForRules(admin, vid);
-    const groupOptions = await getGroupOptionsForDealer(effectiveDealerId, vehicleForRulesFallback);
+    const groupOptions = await getGroupOptionsForDealer(effectiveDealerId, vehicleForRulesFallback, isUUID(vid) ? vid : undefined);
 
     // Check for saved options keyed by this vehicleId
     const { data: saved } = await admin

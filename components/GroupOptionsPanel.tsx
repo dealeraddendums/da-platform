@@ -473,7 +473,7 @@ function OptionSection({ groupId }: { groupId: string }) {
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
-                {["Product", "Price", "Type", "Active", ""].map((h) => (
+                {["Product", "Price", "Type", "Locked", "Active", ""].map((h) => (
                   <th key={h} className="px-4 py-2 text-left font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>{h}</th>
                 ))}
               </tr>
@@ -493,6 +493,15 @@ function OptionSection({ groupId }: { groupId: string }) {
                     </td>
                     <td className="px-4 py-2.5" style={{ width: 140 }}>
                       {typePill(suggested)}
+                    </td>
+                    <td className="px-4 py-2.5" style={{ width: 90 }}>
+                      <span
+                        className="text-xs font-semibold"
+                        style={{ color: opt.locked === false ? "var(--text-muted)" : "var(--text-secondary)" }}
+                        title={opt.locked === false ? "Dealers may dismiss this product on individual vehicles" : "Dealers cannot remove this product"}
+                      >
+                        {opt.locked === false ? "🔓 Unlocked" : "🔒 Locked"}
+                      </span>
                     </td>
                     <td className="px-4 py-2.5">
                       <button
@@ -577,6 +586,22 @@ function assignmentBadge(allDealers: boolean, count: number): React.ReactNode {
 // ── Disclaimers Tab ───────────────────────────────────────────────────────────
 
 const DOC_TYPES = ["all", "addendum", "infosheet"] as const;
+
+// 50 states + DC. "ALL" is the universal disclaimer; the dropdown shows
+// "All States" for that value so the wording matches a state-agnostic
+// pick. Existing rows with empty/null state_code render as "All States".
+const US_STATES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
+  "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
+  "VA","WA","WV","WI","WY","DC",
+] as const;
+
+function normalizeStateValue(v: string | null | undefined): string {
+  const s = (v ?? "").toUpperCase().trim();
+  if (!s || s === "ALL") return "ALL";
+  return s;
+}
 
 function DisclaimersTab({ groupId }: { groupId: string }) {
   const [disclaimers, setDisclaimers] = useState<GroupDisclaimerRow[]>([]);
@@ -688,14 +713,15 @@ function DisclaimersTab({ groupId }: { groupId: string }) {
           <div className="flex gap-3">
             <div>
               <label className="label">State</label>
-              <input
+              <select
                 className="input text-sm"
-                style={{ height: 32, width: 70 }}
-                placeholder="ALL"
-                value={newState}
-                maxLength={3}
-                onChange={(e) => setNewState(e.target.value.toUpperCase())}
-              />
+                style={{ height: 32, width: 130 }}
+                value={normalizeStateValue(newState)}
+                onChange={(e) => setNewState(e.target.value)}
+              >
+                <option value="ALL">All States</option>
+                {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
             </div>
             <div>
               <label className="label">Document</label>
@@ -722,7 +748,7 @@ function DisclaimersTab({ groupId }: { groupId: string }) {
           </div>
           <div className="flex gap-2">
             <button type="submit" className="btn btn-primary text-xs" style={{ height: 32 }} disabled={saving}>
-              {saving ? "Adding…" : "Add Disclaimer"}
+              {saving ? "Saving…" : "Save Disclaimer"}
             </button>
             <button type="button" className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={() => setShowAddForm(false)}>
               Cancel
@@ -797,13 +823,15 @@ function DisclaimersTab({ groupId }: { groupId: string }) {
                     <div className="flex gap-3">
                       <div>
                         <label className="label">State</label>
-                        <input
+                        <select
                           className="input text-sm"
-                          style={{ height: 30, width: 70 }}
-                          value={editFields.state_code ?? "ALL"}
-                          maxLength={3}
-                          onChange={(e) => setEditFields((f) => ({ ...f, state_code: e.target.value.toUpperCase() }))}
-                        />
+                          style={{ height: 30, width: 130 }}
+                          value={normalizeStateValue(editFields.state_code)}
+                          onChange={(e) => setEditFields((f) => ({ ...f, state_code: e.target.value }))}
+                        >
+                          <option value="ALL">All States</option>
+                          {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                        </select>
                       </div>
                       <div>
                         <label className="label">Document</label>

@@ -8,7 +8,8 @@ type RichInsert = Partial<Pick<GroupOptionRow,
   "makes" | "makes_not" | "models" | "models_not" | "trims" | "trims_not" |
   "body_styles" | "year_condition" | "year_value" | "miles_condition" |
   "miles_value" | "msrp_condition" | "msrp1" | "msrp2" |
-  "show_models_only" | "separator_above" | "separator_below" | "spaces"
+  "show_models_only" | "separator_above" | "separator_below" | "spaces" |
+  "locked"
 >>;
 
 function pickRich(body: Record<string, unknown>): RichInsert {
@@ -36,6 +37,7 @@ function pickRich(body: Record<string, unknown>): RichInsert {
   if (typeof body.separator_above === "boolean") out.separator_above = body.separator_above;
   if (typeof body.separator_below === "boolean") out.separator_below = body.separator_below;
   if (typeof body.spaces === "number") out.spaces = body.spaces;
+  if (typeof body.locked === "boolean") out.locked = body.locked;
   return out;
 }
 

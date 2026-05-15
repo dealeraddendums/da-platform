@@ -25,7 +25,7 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     "body_styles", "year_condition", "year_value", "miles_condition",
     "miles_value", "msrp_condition", "msrp1", "msrp2",
     "show_models_only", "separator_above", "separator_below", "spaces",
-    "assign_all_dealers",
+    "assign_all_dealers", "locked",
   ];
   const patch = Object.fromEntries(Object.entries(body).filter(([k]) => allowed.includes(k)));
 

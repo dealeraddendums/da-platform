@@ -338,7 +338,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     };
 
     // ── Corporate (group) products, rules-filtered for this vehicle ──────────
-    const groupOpts = await getGroupOptionsForDealer(textDealerId, vehicleData);
+    const groupOpts = await getGroupOptionsForDealer(textDealerId, vehicleData, dealerVehicleId);
 
     // Drop saved options whose library row exists but doesn't match this
     // vehicle. Custom saves (no library row) are kept.

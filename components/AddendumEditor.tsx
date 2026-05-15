@@ -28,6 +28,9 @@ type GroupOption = {
   sort_order: number;
   required?: boolean;
   is_locked: true;
+  /** Per-product lock (migration 063). When false, dealer can dismiss
+   *  this product on this specific vehicle without affecting others. */
+  locked?: boolean;
 };
 
 type LibraryOption = {
@@ -128,6 +131,26 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
   }, [fetchOptions]);
 
   // ── Library ─────────────────────────────────────────────────────────────────
+
+  async function dismissGroupOption(groupOptionId: string) {
+    // Remove an unlocked corporate product from this specific vehicle.
+    // The product stays in the group library and on other vehicles —
+    // see /api/options/[vehicleId]/dismiss-group-option for the
+    // server-side guard against dismissing locked products.
+    const res = await fetch(`/api/options/${vehicleId}/dismiss-group-option`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groupOptionId }),
+    });
+    if (res.ok) {
+      setGroupOptions(prev => prev.filter(g => g.id !== groupOptionId));
+    } else {
+      const j = await res.json().catch(() => ({})) as { error?: string };
+      // Surface a minimal alert — the only realistic failure is the server
+      // refusing because the product is actually locked.
+      alert(j.error ?? "Failed to remove product");
+    }
+  }
 
   async function openLibrary() {
     setShowLibrary(true);
@@ -415,13 +438,18 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                 {/* Locked group options at top */}
                 {groupOptions.map((opt) => {
                   const required = opt.required !== false;
+                  // Unlocked corporate products can be dismissed on this
+                  // specific vehicle. The lock icon flips and a remove (×)
+                  // button appears, gated by the `locked` flag from the
+                  // group_options row (migration 063).
+                  const unlocked = opt.locked === false;
                   return (
                     <tr
                       key={`group-${opt.id}`}
                       style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}
                     >
                       <td className="px-3 py-2 text-center" style={{ color: "#1565c0", fontSize: 13 }}>
-                        🔒
+                        {unlocked ? "🔓" : "🔒"}
                       </td>
                       <td className="px-3 py-2">
                         <span style={{ color: "var(--text-secondary)" }}>{opt.option_name}</span>
@@ -444,7 +472,21 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                           <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#fff3e0", color: "#e65100" }}>Suggested</span>
                         )}
                       </td>
-                      <td className="px-3 py-2"></td>
+                      <td className="px-3 py-2 text-center">
+                        {unlocked && (
+                          <button
+                            type="button"
+                            onClick={() => void dismissGroupOption(opt.id)}
+                            title="Remove this product from this vehicle's addendum (group library is unaffected)"
+                            style={{
+                              background: "none", border: "none", color: "var(--text-muted)",
+                              fontSize: 16, cursor: "pointer", padding: 4, lineHeight: 1,
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}

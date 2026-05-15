@@ -778,6 +778,9 @@ export type GroupOptionRow = {
   separator_below: boolean;
   spaces: number;
   assign_all_dealers: boolean;
+  /** When true (default), dealer cannot remove this product from a
+   *  specific vehicle's addendum. When false, dealer may dismiss per-vehicle. */
+  locked: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -813,6 +816,7 @@ type GroupOptionInsert = {
   separator_below?: boolean;
   spaces?: number;
   assign_all_dealers?: boolean;
+  locked?: boolean;
 };
 
 type GroupOptionUpdate = {
@@ -845,6 +849,7 @@ type GroupOptionUpdate = {
   separator_below?: boolean;
   spaces?: number;
   assign_all_dealers?: boolean;
+  locked?: boolean;
   updated_at?: string;
 };
 
