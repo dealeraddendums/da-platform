@@ -77,7 +77,10 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       subject: `DealerAddendums — ChromeData Usage Report — ${report.monthLabel}`,
       from_email: "billing@dealeraddendums.com",
       from_name: "DealerAddendums Billing",
-      to: [{ email: "billing@chromedata.com", name: "ChromeData Billing", type: "to" }],
+      to: [
+        { email: "billing@chromedata.com", name: "ChromeData Billing", type: "to" },
+        { email: "support@dealeraddendums.com", name: "DealerAddendums Support", type: "cc" },
+      ],
       html: `<div style="font-family: Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; color: #333; line-height: 1.6;">
   <p>Please find attached the DealerAddendums vehicle image usage report for <strong>${report.monthLabel}</strong>.</p>
   <p>
