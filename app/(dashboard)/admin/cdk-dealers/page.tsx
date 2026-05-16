@@ -67,13 +67,22 @@ export default function CdkDealersPage() {
     }
   }
 
-  const filtered = rows.filter(r => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (r.DEALER_NAME ?? "").toLowerCase().includes(q)
-      || (r.DEALER_ID ?? "").toLowerCase().includes(q)
-      || (r.ICOMPANY ?? "").toLowerCase().includes(q);
-  });
+  // Default sort: NEW='Yes' first, then alphabetical by DEALER_NAME within
+  // each group. Search filter applied on top.
+  const filtered = rows
+    .filter(r => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (r.DEALER_NAME ?? "").toLowerCase().includes(q)
+        || (r.DEALER_ID ?? "").toLowerCase().includes(q)
+        || (r.ICOMPANY ?? "").toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      const aNew = (a.NEW ?? "").toLowerCase() === "yes" ? 0 : 1;
+      const bNew = (b.NEW ?? "").toLowerCase() === "yes" ? 0 : 1;
+      if (aNew !== bNew) return aNew - bNew;
+      return (a.DEALER_NAME ?? "").localeCompare(b.DEALER_NAME ?? "");
+    });
 
   return (
     <div>
