@@ -61,8 +61,11 @@ export interface CdkExtractResponse {
  * Make the raw CDK extract call. Returns body as text so callers can decide
  * how to parse it (the PIP endpoint returns XML in production; some test
  * dealers return JSON via the same URL).
+ *
+ * Optional `signal` aborts the request — bulk-update wires this to a 30s
+ * AbortController per dealer so a hung connection doesn't stall the loop.
  */
-export async function fetchCdkExtract(opts: { dealerId: string; iCompany: string; deltaDate: string }): Promise<CdkExtractResponse> {
+export async function fetchCdkExtract(opts: { dealerId: string; iCompany: string; deltaDate: string; signal?: AbortSignal }): Promise<CdkExtractResponse> {
   if (!cdkCredsConfigured()) {
     throw new Error("CDK_API_USERNAME / CDK_API_PASSWORD not set in environment");
   }
@@ -73,6 +76,7 @@ export async function fetchCdkExtract(opts: { dealerId: string; iCompany: string
       Authorization: cdkBasicAuthHeader(),
       Accept: "application/xml, application/json",
     },
+    signal: opts.signal,
   });
   const bodyText = await res.text();
   return { status: res.status, bodyText, contentType: res.headers.get("content-type") };

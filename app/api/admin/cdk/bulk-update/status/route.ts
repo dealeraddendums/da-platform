@@ -46,12 +46,12 @@ export async function GET(): Promise<NextResponse> {
   }
 
   // Stalled-job detector: if status is still "running" but admin_settings
-  // hasn't been touched in 30+ min, the worker process likely died (pm2
-  // restart mid-run). Surface this so the UI can offer a dismiss link.
+  // hasn't been touched in 5+ min, the worker is hung or dead. With a 30s
+  // per-dealer timeout in place, 5 min of no progress is unambiguous.
   let stalled = false;
   if (parsed.status === "running" && data.updated_at) {
     const ageMs = Date.now() - new Date(data.updated_at).getTime();
-    if (ageMs > 30 * 60 * 1000) stalled = true;
+    if (ageMs > 5 * 60 * 1000) stalled = true;
   }
 
   return NextResponse.json({ status: parsed, stalled });

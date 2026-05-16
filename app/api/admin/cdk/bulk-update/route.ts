@@ -2,9 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { fetchCdkExtract, parseCdkVehicles, cdkCredsConfigured, type CdkVehicle } from "@/lib/cdk-api";
+import { sendMandrillEmail } from "@/lib/mandrill";
 
 const STATUS_KEY = "cdk_bulk_update_status";
 const EXCLUSION_RE = /(test|allan)/i;
+const CDK_TIMEOUT_MS = 30_000;
+const SUPPORT_EMAIL = "support@dealeraddendums.com";
+
+type CdkErrorType = "auth_401" | "no_supabase_dealer" | "timeout" | "other";
+
+interface CdkBulkError {
+  dealer_id: string;
+  dealer_name: string;
+  error: string;
+  error_type: CdkErrorType;
+}
 
 interface CdkBulkStatus {
   status: "running" | "completed" | "failed";
@@ -17,7 +29,19 @@ interface CdkBulkStatus {
   current_dealer?: string | null;
   total_vehicles_imported: number;
   total_vehicles_skipped: number;
-  errors: Array<{ dealer_id: string; dealer_name: string; error: string }>;
+  errors: CdkBulkError[];
+}
+
+/**
+ * Tagged error so the loop can classify HTTP 401, missing-Supabase-dealer,
+ * timeouts, and everything else without parsing string messages.
+ */
+class CdkDealerError extends Error {
+  type: CdkErrorType;
+  constructor(type: CdkErrorType, message: string) {
+    super(message);
+    this.type = type;
+  }
 }
 
 interface CdkDealerRow {
@@ -77,7 +101,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "CDK API credentials not configured" }, { status: 500 });
   }
 
-  let body: { delta_date?: string };
+  let body: { delta_date?: string; retry_dealer_ids?: string[] };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -85,6 +109,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!deltaDate) {
     return NextResponse.json({ error: "delta_date is required" }, { status: 400 });
   }
+  const retryDealerIds = Array.isArray(body.retry_dealer_ids)
+    ? body.retry_dealer_ids.map(s => String(s).trim()).filter(Boolean)
+    : null;
 
   const admin = createAdminSupabaseClient();
 
@@ -107,15 +134,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // Load dealers to process. NEW filter is intentionally omitted — bulk
-  // update covers everyone. Exclude test/allan by name.
+  // update covers everyone. Exclude test/allan by name. In retry mode,
+  // narrow the list to the explicit set of DEALER_IDs from the client
+  // (typically the non-401 failed dealers from the previous run).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: dealersRaw } = await (admin as any)
     .from("cdk_dealers")
     .select("DEALER_ID, ICOMPANY, DEALER_NAME");
   const allDealers = (dealersRaw ?? []) as CdkDealerRow[];
-  const dealers = allDealers.filter(d =>
+  let dealers = allDealers.filter(d =>
     d.DEALER_ID && d.ICOMPANY && !EXCLUSION_RE.test(d.DEALER_NAME ?? ""),
   );
+  if (retryDealerIds) {
+    const wanted = new Set(retryDealerIds);
+    dealers = dealers.filter(d => d.DEALER_ID && wanted.has(d.DEALER_ID));
+  }
 
   const initialStatus: CdkBulkStatus = {
     status: "running",
@@ -166,10 +199,14 @@ async function runBulkUpdate(dealers: CdkDealerRow[], deltaDate: string): Promis
       status.total_vehicles_skipped += result.skipped;
     } catch (err) {
       status.failed++;
+      const tagged = err instanceof CdkDealerError
+        ? err
+        : new CdkDealerError("other", err instanceof Error ? err.message : String(err));
       status.errors.push({
         dealer_id: dealer.DEALER_ID ?? "",
         dealer_name: dealer.DEALER_NAME ?? "",
-        error: err instanceof Error ? err.message : String(err),
+        error: tagged.message,
+        error_type: tagged.type,
       });
     }
     status.completed++;
@@ -183,6 +220,48 @@ async function runBulkUpdate(dealers: CdkDealerRow[], deltaDate: string): Promis
   status.current_dealer = null;
   status.completed_at = new Date().toISOString();
   await writeStatus(status);
+
+  // Post-run: notify support if any dealers came back 401 so the team can
+  // chase CDK account configuration. Best-effort — never let mail failure
+  // poison the job result.
+  try {
+    await notify401Dealers(status);
+  } catch (mailErr) {
+    console.error("[cdk-bulk-update] support email failed:", mailErr instanceof Error ? mailErr.message : mailErr);
+  }
+}
+
+async function notify401Dealers(status: CdkBulkStatus): Promise<void> {
+  const auth401 = status.errors.filter(e => e.error_type === "auth_401");
+  if (auth401.length === 0) return;
+
+  const dateStr = new Date(status.completed_at ?? new Date().toISOString()).toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles",
+    dateStyle: "full",
+    timeStyle: "short",
+  });
+
+  const list = auth401
+    .map(e => `<li>${escapeHtml(e.dealer_name || e.dealer_id)} <code style="color:#666;font-size:11px;">${escapeHtml(e.dealer_id)}</code></li>`)
+    .join("\n");
+  const html = `
+    <p>The following CDK dealers returned HTTP 401 (Unauthorized) during the latest CDK Update run on <strong>${escapeHtml(dateStr)}</strong>.</p>
+    <p>These dealers may have stopped sharing their CDK data with DealerAddendums. Please review and remove if no longer active.</p>
+    <ul>${list}</ul>
+    <p><strong>Total: ${auth401.length} dealer${auth401.length === 1 ? "" : "s"}</strong></p>
+  `;
+
+  await sendMandrillEmail({
+    subject: `CDK Authorization Errors — ${auth401.length} dealer${auth401.length === 1 ? "" : "s"} need attention`,
+    from_email: "noreply@dealeraddendums.com",
+    from_name: "DA Platform",
+    to: [{ email: SUPPORT_EMAIL, type: "to" }],
+    html,
+  });
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
 async function importOneDealer(
@@ -193,9 +272,29 @@ async function importOneDealer(
   const dealerId = dealer.DEALER_ID!;
   const iCompany = dealer.ICOMPANY!;
 
-  const { status, bodyText } = await fetchCdkExtract({ dealerId, iCompany, deltaDate });
-  if (status < 200 || status >= 300) {
-    throw new Error(`CDK HTTP ${status}`);
+  // 30s hard timeout per dealer. CDK hangs occasionally — without this the
+  // whole bulk job stalls on a single bad endpoint.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CDK_TIMEOUT_MS);
+  let cdkStatus: number;
+  let bodyText: string;
+  try {
+    const res = await fetchCdkExtract({ dealerId, iCompany, deltaDate, signal: controller.signal });
+    cdkStatus = res.status;
+    bodyText = res.bodyText;
+  } catch (err) {
+    if ((err as { name?: string })?.name === "AbortError") {
+      throw new CdkDealerError("timeout", `CDK request timed out after ${CDK_TIMEOUT_MS / 1000}s`);
+    }
+    throw new CdkDealerError("other", err instanceof Error ? err.message : String(err));
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  if (cdkStatus === 401) {
+    throw new CdkDealerError("auth_401", `CDK HTTP 401 (Unauthorized) — dealer not authorized under DA credentials`);
+  }
+  if (cdkStatus < 200 || cdkStatus >= 300) {
+    throw new CdkDealerError("other", `CDK HTTP ${cdkStatus}`);
   }
   const vehicles = parseCdkVehicles(bodyText);
   if (vehicles.length === 0) return { imported: 0, skipped: 0 };
@@ -207,7 +306,7 @@ async function importOneDealer(
     .or(`dealer_id.eq.${dealerId},inventory_dealer_id.eq.${dealerId}`)
     .maybeSingle<{ dealer_id: string }>();
   if (!matched) {
-    throw new Error(`No Supabase dealer found for ${dealerId}`);
+    throw new CdkDealerError("no_supabase_dealer", `No Supabase dealer found for ${dealerId}`);
   }
   const dealerTextId = matched.dealer_id;
 

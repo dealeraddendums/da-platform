@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
 import { PageHeader } from "@/components/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +25,15 @@ const BLANK_FORM: FormState = { DEALER_NAME: "", DEALER_ID: "", ICOMPANY: "", NE
 const inp: React.CSSProperties = { width: "100%", padding: "8px 10px", height: 36, border: "1px solid #e0e0e0", borderRadius: 6, background: "#fff", fontSize: 13, color: "#333" };
 const lbl: React.CSSProperties = { display: "block", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 };
 
+type CdkErrorType = "auth_401" | "no_supabase_dealer" | "timeout" | "other";
+
+interface CdkBulkError {
+  dealer_id: string;
+  dealer_name: string;
+  error: string;
+  error_type?: CdkErrorType;
+}
+
 interface CdkBulkStatus {
   status: "running" | "completed" | "failed";
   started_at: string;
@@ -36,7 +45,7 @@ interface CdkBulkStatus {
   current_dealer?: string | null;
   total_vehicles_imported: number;
   total_vehicles_skipped: number;
-  errors: Array<{ dealer_id: string; dealer_name: string; error: string }>;
+  errors: CdkBulkError[];
 }
 
 export default function CdkDealersPage() {
@@ -116,6 +125,72 @@ export default function CdkDealersPage() {
     setBulkStalled(false);
   }
 
+  // Remove a single dealer (used inline next to each 401 error). Looks
+  // up the cdk_dealers.id by DEALER_ID since the error list only carries
+  // the CDK code, not the row PK.
+  async function removeDealerByDealerId(dealerId: string): Promise<boolean> {
+    const row = rows.find(r => r.DEALER_ID === dealerId);
+    if (!row) return false;
+    const res = await fetch(`/api/admin/cdk-dealers/${row.id}`, { method: "DELETE" });
+    if (!res.ok) return false;
+    setRows(prev => prev.filter(r => r.id !== row.id));
+    setBulkStatus(prev => prev ? { ...prev, errors: prev.errors.filter(e => e.dealer_id !== dealerId) } : prev);
+    return true;
+  }
+
+  async function removeAllAuth401(): Promise<number> {
+    const ids = (bulkStatus?.errors ?? []).filter(e => e.error_type === "auth_401").map(e => e.dealer_id);
+    if (ids.length === 0) return 0;
+    const res = await fetch("/api/admin/cdk-dealers/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dealer_ids: ids }),
+    });
+    if (!res.ok) return 0;
+    const j = await res.json() as { deleted?: number };
+    const idSet = new Set(ids);
+    setRows(prev => prev.filter(r => !(r.DEALER_ID && idSet.has(r.DEALER_ID))));
+    setBulkStatus(prev => prev ? { ...prev, errors: prev.errors.filter(e => !idSet.has(e.dealer_id)) } : prev);
+    return j.deleted ?? ids.length;
+  }
+
+  // Retry only the non-401 failed dealers from the most recent run.
+  async function retryFailed(): Promise<boolean> {
+    const failed = (bulkStatus?.errors ?? []).filter(e => e.error_type !== "auth_401");
+    if (failed.length === 0 || !bulkStatus) return false;
+    // Dismiss the current banner state on the server so the new run can write fresh status.
+    await fetch("/api/admin/cdk/bulk-update/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "dismiss" }),
+    });
+    const res = await fetch("/api/admin/cdk/bulk-update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        delta_date: bulkStatus.delta_date,
+        retry_dealer_ids: failed.map(e => e.dealer_id),
+      }),
+    });
+    if (!res.ok) return false;
+    const j = await res.json() as { ok?: boolean; total_dealers?: number; started_at?: string };
+    setBulkStatus({
+      status: "running",
+      started_at: j.started_at ?? new Date().toISOString(),
+      delta_date: bulkStatus.delta_date,
+      total_dealers: j.total_dealers ?? failed.length,
+      completed: 0,
+      failed: 0,
+      current_dealer: null,
+      total_vehicles_imported: 0,
+      total_vehicles_skipped: 0,
+      errors: [],
+    });
+    setBulkStalled(false);
+    void pollBulkStatus();
+    return true;
+  }
+
   async function runTest(r: CdkRow) {
     if (!r.DEALER_ID || !r.ICOMPANY) return;
     setTesting(prev => ({ ...prev, [r.id]: true }));
@@ -185,7 +260,14 @@ export default function CdkDealersPage() {
       />
 
       {bulkStatus && (
-        <BulkStatusBanner status={bulkStatus} stalled={bulkStalled} onDismiss={() => void dismissBulkStatus()} />
+        <BulkStatusBanner
+          status={bulkStatus}
+          stalled={bulkStalled}
+          onDismiss={() => void dismissBulkStatus()}
+          onRemoveDealer={removeDealerByDealerId}
+          onRemoveAll401={removeAllAuth401}
+          onRetryFailed={retryFailed}
+        />
       )}
 
       <div className="card p-4 mb-4">
@@ -323,7 +405,21 @@ export default function CdkDealersPage() {
 
 // ── Bulk progress banner ─────────────────────────────────────────────────────
 
-function BulkStatusBanner({ status, stalled, onDismiss }: { status: CdkBulkStatus; stalled: boolean; onDismiss: () => void }) {
+function BulkStatusBanner({
+  status,
+  stalled,
+  onDismiss,
+  onRemoveDealer,
+  onRemoveAll401,
+  onRetryFailed,
+}: {
+  status: CdkBulkStatus;
+  stalled: boolean;
+  onDismiss: () => void;
+  onRemoveDealer: (dealerId: string) => Promise<boolean>;
+  onRemoveAll401: () => Promise<number>;
+  onRetryFailed: () => Promise<boolean>;
+}) {
   const running = status.status === "running" && !stalled;
   const failedAll = status.status === "failed";
   const done = status.status === "completed" || stalled;
@@ -461,49 +557,171 @@ function BulkStatusBanner({ status, stalled, onDismiss }: { status: CdkBulkStatu
   const border = failedAll ? "#ffcdd2" : stalled ? "#ffe082" : "#c8e6c9";
   const color = failedAll ? "#c62828" : stalled ? "#7a5c00" : "#2e7d32";
 
+  const auth401 = status.errors.filter(e => e.error_type === "auth_401");
+  const otherErrors = status.errors.filter(e => e.error_type !== "auth_401");
+  const hasRetryable = otherErrors.length > 0;
+
   return (
-    <div className="card p-4 mb-4" style={{ background: tone, border: `1px solid ${border}` }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-        <div style={{ fontSize: 13, color, lineHeight: 1.7 }}>
-          {stalled ? (
-            <strong>CDK Update stalled — last activity over 30 minutes ago. The worker may have restarted mid-run.</strong>
-          ) : failedAll ? (
-            <strong>CDK Update failed</strong>
-          ) : (
-            <strong>CDK Update complete — {status.total_vehicles_imported.toLocaleString()} vehicles imported across {succeeded} dealer{succeeded === 1 ? "" : "s"}{status.failed > 0 ? `. ${status.failed} failed.` : "."}</strong>
-          )}
-          {done && !stalled && (
-            <div style={{ fontSize: 12, marginTop: 4, color }}>
-              {status.total_vehicles_skipped.toLocaleString()} skipped (already in inventory)
-            </div>
-          )}
-          {status.errors.length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>
-                Errors ({status.errors.length}):
+    <ErrorActionsContext.Provider value={{ onRemoveDealer, onRemoveAll401, onRetryFailed }}>
+      <div className="card p-4 mb-4" style={{ background: tone, border: `1px solid ${border}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div style={{ fontSize: 13, color, lineHeight: 1.7, flex: 1, minWidth: 0 }}>
+            {stalled ? (
+              <strong>CDK Update stalled — no activity for over 5 minutes. The worker likely hung or restarted mid-run.</strong>
+            ) : failedAll ? (
+              <strong>CDK Update failed</strong>
+            ) : (
+              <strong>CDK Update complete — {status.total_vehicles_imported.toLocaleString()} vehicles imported across {succeeded} dealer{succeeded === 1 ? "" : "s"}{status.failed > 0 ? `. ${status.failed} failed.` : "."}</strong>
+            )}
+            {done && !stalled && (
+              <div style={{ fontSize: 12, marginTop: 4, color }}>
+                {status.total_vehicles_skipped.toLocaleString()} skipped (already in inventory)
               </div>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color }}>
-                {status.errors.slice(0, 25).map((e, i) => (
-                  <li key={i}>
-                    <strong>{e.dealer_name || e.dealer_id}</strong> — {e.error}
-                  </li>
-                ))}
-                {status.errors.length > 25 && (
-                  <li style={{ listStyle: "none", fontStyle: "italic" }}>
-                    …and {status.errors.length - 25} more.
-                  </li>
-                )}
-              </ul>
-            </div>
-          )}
+            )}
+            {(hasRetryable || stalled) && hasRetryable && (
+              <div style={{ marginTop: 10 }}>
+                <RetryFailedButton count={otherErrors.length} />
+              </div>
+            )}
+            {auth401.length > 0 && (
+              <Auth401Section errors={auth401} />
+            )}
+            {otherErrors.length > 0 && (
+              <OtherErrorsSection errors={otherErrors} color={color} />
+            )}
+          </div>
+          <button
+            onClick={onDismiss}
+            style={{ background: "none", border: "none", color, cursor: "pointer", fontSize: 12, textDecoration: "underline", padding: 0, whiteSpace: "nowrap" }}
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </ErrorActionsContext.Provider>
+  );
+}
+
+// ── Error-action plumbing ────────────────────────────────────────────────────
+
+interface ErrorActions {
+  onRemoveDealer: (dealerId: string) => Promise<boolean>;
+  onRemoveAll401: () => Promise<number>;
+  onRetryFailed: () => Promise<boolean>;
+}
+const ErrorActionsContext = createContext<ErrorActions | null>(null);
+
+function useErrorActions(): ErrorActions {
+  const ctx = useContext(ErrorActionsContext);
+  if (!ctx) throw new Error("ErrorActionsContext missing");
+  return ctx;
+}
+
+function RetryFailedButton({ count }: { count: number }) {
+  const { onRetryFailed } = useErrorActions();
+  const [running, setRunning] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        setRunning(true);
+        const ok = await onRetryFailed();
+        if (!ok) setRunning(false);
+      }}
+      disabled={running}
+      style={{
+        padding: "6px 12px",
+        background: "#1976d2",
+        color: "#fff",
+        border: "none",
+        borderRadius: 4,
+        fontSize: 12,
+        fontWeight: 600,
+        cursor: running ? "wait" : "pointer",
+        fontFamily: "inherit",
+      }}
+    >
+      {running ? "Retrying…" : `Retry Failed Dealers (${count})`}
+    </button>
+  );
+}
+
+function Auth401Section({ errors }: { errors: CdkBulkError[] }) {
+  const { onRemoveDealer, onRemoveAll401 } = useErrorActions();
+  const [removingAll, setRemovingAll] = useState(false);
+  const [pending, setPending] = useState<Record<string, boolean>>({});
+
+  async function handleRemoveAll() {
+    const ok = window.confirm(`Remove all ${errors.length} unauthorized dealers from CDK Dealers list? This cannot be undone.`);
+    if (!ok) return;
+    setRemovingAll(true);
+    await onRemoveAll401();
+    setRemovingAll(false);
+  }
+
+  async function handleRemoveOne(dealerId: string, name: string) {
+    const ok = window.confirm(`Remove "${name || dealerId}" from CDK Dealers? This cannot be undone.`);
+    if (!ok) return;
+    setPending(p => ({ ...p, [dealerId]: true }));
+    await onRemoveDealer(dealerId);
+    // No need to clear pending — the row vanishes from props after success.
+  }
+
+  return (
+    <div style={{ marginTop: 12, padding: "10px 12px", background: "#fff", border: "1px solid #ffcdd2", borderRadius: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#c62828", textTransform: "uppercase", letterSpacing: ".05em" }}>
+          CDK Authorization Errors (401) — {errors.length}
         </div>
         <button
-          onClick={onDismiss}
-          style={{ background: "none", border: "none", color, cursor: "pointer", fontSize: 12, textDecoration: "underline", padding: 0, whiteSpace: "nowrap" }}
+          onClick={() => void handleRemoveAll()}
+          disabled={removingAll}
+          style={{ padding: "4px 10px", background: "#c62828", color: "#fff", border: "none", borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: removingAll ? "wait" : "pointer", fontFamily: "inherit" }}
         >
-          Dismiss
+          {removingAll ? "Removing…" : `Remove All ${errors.length}`}
         </button>
       </div>
+      <div style={{ fontSize: 11, color: "#7a5c00", marginBottom: 8, fontStyle: "italic" }}>
+        These dealers are not authorized under DA credentials. Email sent to support@dealeraddendums.com.
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", fontSize: 12, color: "#c62828", maxHeight: 240, overflowY: "auto" }}>
+        {errors.map(e => (
+          <li key={e.dealer_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", borderBottom: "1px dashed #ffcdd2", gap: 8 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <strong>{e.dealer_name || e.dealer_id}</strong>
+              {e.dealer_name && <span style={{ color: "#999", marginLeft: 6, fontSize: 11 }}>{e.dealer_id}</span>}
+            </span>
+            <button
+              onClick={() => void handleRemoveOne(e.dealer_id, e.dealer_name)}
+              disabled={pending[e.dealer_id]}
+              style={{ padding: "2px 8px", background: "#fff", color: "#c62828", border: "1px solid #c62828", borderRadius: 3, fontSize: 10, fontWeight: 600, cursor: pending[e.dealer_id] ? "wait" : "pointer", whiteSpace: "nowrap", fontFamily: "inherit" }}
+            >
+              {pending[e.dealer_id] ? "…" : "Remove"}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function OtherErrorsSection({ errors, color }: { errors: CdkBulkError[]; color: string }) {
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>
+        Other Errors ({errors.length})
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color, maxHeight: 200, overflowY: "auto" }}>
+        {errors.slice(0, 50).map((e, i) => (
+          <li key={i}>
+            <strong>{e.dealer_name || e.dealer_id}</strong> — {e.error}
+          </li>
+        ))}
+        {errors.length > 50 && (
+          <li style={{ listStyle: "none", fontStyle: "italic" }}>
+            …and {errors.length - 50} more.
+          </li>
+        )}
+      </ul>
     </div>
   );
 }
