@@ -200,6 +200,12 @@ export default function CdkDealersPage() {
         <ImportModal
           row={importRow}
           onClose={() => setImportRow(null)}
+          onImported={() => {
+            // The server flips NEW='No' on success — mirror that locally so
+            // the Test + Import buttons disappear without a refetch. The
+            // user can still close the modal at their own pace.
+            setRows(prev => prev.map(r => r.id === importRow.id ? { ...r, NEW: "No" } : r));
+          }}
         />
       )}
     </div>
@@ -321,7 +327,7 @@ function DeleteModal({ row, onClose, onDeleted }: { row: CdkRow; onClose: () => 
 
 // ── Import modal ─────────────────────────────────────────────────────────────
 
-function ImportModal({ row, onClose }: { row: CdkRow; onClose: () => void }) {
+function ImportModal({ row, onClose, onImported }: { row: CdkRow; onClose: () => void; onImported?: () => void }) {
   const [window, setWindow] = useState<"2" | "7" | "30" | "90" | "custom">("90");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -365,6 +371,7 @@ function ImportModal({ row, onClose }: { row: CdkRow; onClose: () => void }) {
         imported: j.vehicles_imported ?? 0,
         skipped: j.vehicles_skipped ?? 0,
       });
+      onImported?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed");
     } finally {

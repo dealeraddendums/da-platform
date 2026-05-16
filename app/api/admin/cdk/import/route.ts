@@ -179,14 +179,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // ── Update LAST_DELTA on the CDK row so we know it was imported ───────────
+  // ── Mark the CDK row as imported: flip NEW → 'No' and stamp LAST_DELTA ──
+  // Only happens on a successful CDK fetch + parse. If we reached here, the
+  // CDK call returned 2xx and we parsed vehicles (or got an empty list,
+  // which is still a valid response — the dealer just had no inventory
+  // in that window). Failures earlier in the handler return before this.
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (admin as any).from("cdk_dealers")
-      .update({ LAST_DELTA: new Date().toISOString() })
+      .update({ NEW: "No", LAST_DELTA: new Date().toISOString() })
       .eq("DEALER_ID", dealerId);
   } catch (err) {
-    console.error("[cdk-import] LAST_DELTA update failed:", err instanceof Error ? err.message : err);
+    console.error("[cdk-import] CDK row update failed:", err instanceof Error ? err.message : err);
   }
 
   return NextResponse.json({
