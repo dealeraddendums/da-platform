@@ -88,7 +88,7 @@ export default function CdkDealersPage() {
       setBulkStatus(j.status);
       setBulkStalled(Boolean(j.stalled));
       if (j.status?.status === "running" && !j.stalled) {
-        pollTimerRef.current = setTimeout(() => { void pollBulkStatus(); }, 1500);
+        pollTimerRef.current = setTimeout(() => { void pollBulkStatus(); }, 1000);
       }
     } catch {
       if (!pollCancelledRef.current) {
@@ -328,26 +328,131 @@ function BulkStatusBanner({ status, stalled, onDismiss }: { status: CdkBulkStatu
   const failedAll = status.status === "failed";
   const done = status.status === "completed" || stalled;
 
+  // Tick a local clock once per second so elapsed/ETA advance smoothly
+  // between server polls — makes the banner feel alive even during a 30s
+  // CDK call when `completed` doesn't change.
+  const [, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [running]);
+
+  // Track recently-finished dealers by watching current_dealer transitions
+  // client-side. The server only carries the active dealer, so this gives
+  // the UI a rolling history without any extra payload.
+  const recentRef = useRef<Array<{ name: string; at: number }>>([]);
+  const prevDealerRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!running) return;
+    const cur = status.current_dealer ?? null;
+    if (cur !== prevDealerRef.current && prevDealerRef.current) {
+      recentRef.current = [
+        { name: prevDealerRef.current, at: Date.now() },
+        ...recentRef.current.slice(0, 4),
+      ];
+    }
+    prevDealerRef.current = cur;
+  }, [running, status.current_dealer]);
+  // Reset recent buffer when the job ends so a new run starts fresh.
+  useEffect(() => {
+    if (!running) {
+      recentRef.current = [];
+      prevDealerRef.current = null;
+    }
+  }, [running]);
+
   if (running) {
     const pct = status.total_dealers > 0 ? Math.round((status.completed / status.total_dealers) * 100) : 0;
+    const elapsedMs = Date.now() - new Date(status.started_at).getTime();
+    const elapsedSec = Math.max(1, Math.floor(elapsedMs / 1000));
+    const fmt = (s: number) => {
+      const m = Math.floor(s / 60);
+      const sec = s % 60;
+      return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+    };
+    let etaText = "calculating…";
+    if (status.completed > 0) {
+      const avgMs = elapsedMs / status.completed;
+      const remaining = Math.max(0, status.total_dealers - status.completed);
+      const etaMs = Math.round(avgMs * remaining);
+      etaText = fmt(Math.floor(etaMs / 1000));
+    }
+    const ratePerMin = status.completed > 0 && elapsedSec > 0
+      ? ((status.completed / elapsedSec) * 60).toFixed(1)
+      : "—";
+
     return (
-      <div className="card p-4 mb-4" style={{ background: "#fff8e1", border: "1px solid #ffe082" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#7a5c00" }}>
-            CDK Update in progress — {status.completed} of {status.total_dealers} dealers
-            {status.current_dealer ? ` — ${status.current_dealer}…` : "…"}
+      <>
+        <style>{`
+          @keyframes cdkBarShimmer {
+            0% { background-position: 0 0; }
+            100% { background-position: 32px 0; }
+          }
+          @keyframes cdkPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.55; }
+          }
+          @keyframes cdkSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+        <div className="card p-4 mb-4" style={{ background: "#fff8e1", border: "1px solid #ffe082" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+              <span style={{
+                display: "inline-block",
+                width: 14, height: 14, borderRadius: "50%",
+                border: "2px solid #ffe082",
+                borderTopColor: "#ffa500",
+                animation: "cdkSpin 0.8s linear infinite",
+                flexShrink: 0,
+              }} />
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#7a5c00", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                CDK Update in progress — {status.completed} of {status.total_dealers}
+                {status.current_dealer && (
+                  <>
+                    {" — "}
+                    <span style={{ animation: "cdkPulse 1.4s ease-in-out infinite" }}>{status.current_dealer}…</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#7a5c00", whiteSpace: "nowrap" }}>{pct}%</div>
           </div>
-          <div style={{ fontSize: 12, color: "#7a5c00" }}>{pct}%</div>
-        </div>
-        <div style={{ height: 6, background: "#fff", borderRadius: 3, overflow: "hidden", border: "1px solid #ffe082" }}>
-          <div style={{ width: `${pct}%`, height: "100%", background: "#ffa500", transition: "width 0.3s ease" }} />
-        </div>
-        {status.failed > 0 && (
-          <div style={{ fontSize: 11, color: "#c62828", marginTop: 6 }}>
-            {status.failed} dealer{status.failed === 1 ? "" : "s"} failed so far
+          <div style={{ height: 8, background: "#fff", borderRadius: 4, overflow: "hidden", border: "1px solid #ffe082" }}>
+            <div
+              style={{
+                width: `${pct}%`,
+                height: "100%",
+                background: "repeating-linear-gradient(45deg, #ffa500 0 8px, #ffb733 8px 16px)",
+                backgroundSize: "32px 32px",
+                animation: "cdkBarShimmer 0.9s linear infinite",
+                transition: "width 0.5s ease",
+              }}
+            />
           </div>
-        )}
-      </div>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginTop: 8, fontSize: 11, color: "#7a5c00", flexWrap: "wrap" }}>
+            <span><strong>Elapsed:</strong> {fmt(elapsedSec)}</span>
+            <span><strong>ETA:</strong> {etaText}</span>
+            <span><strong>Rate:</strong> {ratePerMin}/min</span>
+            <span><strong>Imported:</strong> {status.total_vehicles_imported.toLocaleString()}</span>
+            <span><strong>Skipped:</strong> {status.total_vehicles_skipped.toLocaleString()}</span>
+            {status.failed > 0 && <span style={{ color: "#c62828" }}><strong>Failed:</strong> {status.failed}</span>}
+          </div>
+          {recentRef.current.length > 0 && (
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #ffe082", fontSize: 11, color: "#7a5c00" }}>
+              <span style={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", marginRight: 8 }}>Just finished:</span>
+              {recentRef.current.map((r, i) => (
+                <span key={`${r.name}-${r.at}`} style={{ marginRight: 10, opacity: 1 - i * 0.15 }}>
+                  ✓ {r.name}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </>
     );
   }
 
