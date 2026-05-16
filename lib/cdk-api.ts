@@ -79,8 +79,10 @@ export async function fetchCdkExtract(opts: { dealerId: string; iCompany: string
 }
 
 /**
- * Quick-and-dirty vehicle count for the Test button. Looks for VIN-bearing
- * elements in the XML payload — falls back to JSON if CDK returned JSON.
+ * Quick-and-dirty vehicle count for the Test button. The CDK IVEH_Bulk
+ * response wraps each car in <InventoryVehicle>...</InventoryVehicle> under
+ * an <InventoryVehicleExtract> root. Older PIP queries used <Vehicle> or
+ * <ROW> — match either.
  */
 export function countCdkVehicles(body: string): number {
   const trimmed = body.trim();
@@ -88,17 +90,17 @@ export function countCdkVehicles(body: string): number {
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
       const parsed = JSON.parse(trimmed);
-      // Common PIP JSON shapes: { vehicles: [...] } or { Vehicles: [...] }
-      const arr = parsed?.vehicles ?? parsed?.Vehicles ?? (Array.isArray(parsed) ? parsed : []);
+      const arr = parsed?.InventoryVehicle ?? parsed?.vehicles ?? parsed?.Vehicles ?? (Array.isArray(parsed) ? parsed : []);
       return Array.isArray(arr) ? arr.length : 0;
     } catch { return 0; }
   }
-  // XML — count top-level vehicle nodes. PIP standard uses <Vehicle> or
-  // <ROW> wrappers depending on the queryId. Match either.
-  const vehicleMatches = body.match(/<Vehicle\b/gi) ?? [];
-  if (vehicleMatches.length > 0) return vehicleMatches.length;
-  const rowMatches = body.match(/<ROW\b/gi) ?? [];
-  return rowMatches.length;
+  // Try InventoryVehicle first (current IVEH_Bulk shape), fall back to
+  // historical wrappers.
+  for (const tag of ["InventoryVehicle", "Vehicle", "ROW"]) {
+    const matches = body.match(new RegExp(`<${tag}\\b`, "gi")) ?? [];
+    if (matches.length > 0) return matches.length;
+  }
+  return 0;
 }
 
 /** Pull a single tag value out of an XML chunk. Returns null if missing. */
@@ -139,29 +141,49 @@ export interface CdkVehicle {
 export function parseCdkVehicles(body: string): CdkVehicle[] {
   const trimmed = body.trim();
   if (!trimmed) return [];
-  // Pull each <Vehicle>...</Vehicle> (or <ROW>...</ROW>) chunk.
-  const chunkRe = /<(Vehicle|ROW)\b[^>]*>[\s\S]*?<\/\1>/gi;
+  // Pull every <InventoryVehicle>...</InventoryVehicle> chunk (current PIP
+  // IVEH_Bulk shape verified against Visalia Hyundai 2026-05-16 sample).
+  // Fall through to the older <Vehicle>/<ROW> wrappers in case a different
+  // queryId is ever used.
+  const chunkRe = /<(InventoryVehicle|Vehicle|ROW)\b[^>]*>[\s\S]*?<\/\1>/gi;
   const chunks = trimmed.match(chunkRe) ?? [];
   const out: CdkVehicle[] = [];
   for (const chunk of chunks) {
+    // <UsedVehicleData /> is self-closing for new vehicles; when present
+    // for used cars, mileage lives inside it. Search the whole chunk —
+    // xmlTag will find <Mileage> wherever it sits.
     const year = xmlTag(chunk, "Year") ?? xmlTag(chunk, "ModelYear");
-    const msrp = xmlTag(chunk, "Msrp") ?? xmlTag(chunk, "MSRP") ?? xmlTag(chunk, "ListPrice");
+    // BaseRetailPrice is CDK's MSRP. BaseInvoicePrice is dealer cost (skip).
+    const msrp = xmlTag(chunk, "BaseRetailPrice") ?? xmlTag(chunk, "Msrp") ?? xmlTag(chunk, "MSRP") ?? xmlTag(chunk, "ListPrice");
     const mileage = xmlTag(chunk, "Mileage") ?? xmlTag(chunk, "Odometer");
+    // Used flag: <Wholesale>N</Wholesale> appears on both new and used. The
+    // canonical signal is whether <UsedVehicleData> has content, but we can
+    // approximate from the Year + presence of Mileage. A simpler proxy:
+    // <Status>S</Status> = sold/inventoried, regardless of new/used. Use
+    // mileage > 0 → Used, else New.
+    const inferredUsed = mileage && parseInt(mileage.replace(/[^\d]/g, ""), 10) > 0 ? "Used" : "New";
     out.push({
-      vin: xmlTag(chunk, "Vin") ?? xmlTag(chunk, "VIN"),
-      stock_number: xmlTag(chunk, "Stock") ?? xmlTag(chunk, "StockNumber"),
+      vin: xmlTag(chunk, "VIN") ?? xmlTag(chunk, "Vin"),
+      // CDK PIP IVEH_Bulk doesn't always include a stock number in the
+      // standard fields; some dealers store it in DealerDefined1/2. Try
+      // both; fall back to VIN at insert time if missing.
+      stock_number: xmlTag(chunk, "StockNumber") ?? xmlTag(chunk, "Stock") ?? xmlTag(chunk, "DealerDefined1"),
       year: year ? parseInt(year, 10) || null : null,
-      make: xmlTag(chunk, "Make"),
-      model: xmlTag(chunk, "Model"),
-      trim: xmlTag(chunk, "Trim"),
+      make: xmlTag(chunk, "Make") ?? xmlTag(chunk, "Manufacturer"),
+      // ModelName is the human-readable "Elantra"; Model is the code "ELAN".
+      model: xmlTag(chunk, "ModelName") ?? xmlTag(chunk, "Model"),
+      trim: xmlTag(chunk, "TrimLevel") ?? xmlTag(chunk, "Trim"),
       msrp: msrp ? parseFloat(msrp.replace(/[$,\s]/g, "")) || null : null,
-      internet_price: xmlTag(chunk, "InternetPrice") ?? xmlTag(chunk, "AskingPrice"),
+      // AdvertisedPrice is CDK's customer-facing/internet price.
+      internet_price: xmlTag(chunk, "AdvertisedPrice") ?? xmlTag(chunk, "InternetPrice") ?? xmlTag(chunk, "AskingPrice"),
       mileage: mileage ? parseInt(mileage.replace(/[^\d]/g, ""), 10) || null : null,
-      ext_color: xmlTag(chunk, "ExteriorColor") ?? xmlTag(chunk, "ExtColor"),
+      // Exterior color = <Color>; interior = <InteriorColor>.
+      ext_color: xmlTag(chunk, "Color") ?? xmlTag(chunk, "ExteriorColor") ?? xmlTag(chunk, "ExtColor"),
       int_color: xmlTag(chunk, "InteriorColor") ?? xmlTag(chunk, "IntColor"),
-      new_used: xmlTag(chunk, "NewUsed") ?? xmlTag(chunk, "Condition"),
+      new_used: xmlTag(chunk, "NewUsed") ?? xmlTag(chunk, "Condition") ?? inferredUsed,
       body_style: xmlTag(chunk, "BodyStyle") ?? xmlTag(chunk, "Bodystyle"),
-      date_in_stock: xmlTag(chunk, "DateInStock") ?? xmlTag(chunk, "DateInventoried"),
+      // EntryDate = when the car landed in inventory in CDK.
+      date_in_stock: xmlTag(chunk, "EntryDate") ?? xmlTag(chunk, "DateInStock") ?? xmlTag(chunk, "DateInventoried"),
       certified: xmlTag(chunk, "Certified"),
     });
   }
