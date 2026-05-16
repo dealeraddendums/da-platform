@@ -25,6 +25,20 @@ const BLANK_FORM: FormState = { DEALER_NAME: "", DEALER_ID: "", ICOMPANY: "", NE
 const inp: React.CSSProperties = { width: "100%", padding: "8px 10px", height: 36, border: "1px solid #e0e0e0", borderRadius: 6, background: "#fff", fontSize: 13, color: "#333" };
 const lbl: React.CSSProperties = { display: "block", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 };
 
+interface CdkBulkStatus {
+  status: "running" | "completed" | "failed";
+  started_at: string;
+  completed_at?: string | null;
+  delta_date: string;
+  total_dealers: number;
+  completed: number;
+  failed: number;
+  current_dealer?: string | null;
+  total_vehicles_imported: number;
+  total_vehicles_skipped: number;
+  errors: Array<{ dealer_id: string; dealer_name: string; error: string }>;
+}
+
 export default function CdkDealersPage() {
   const [rows, setRows] = useState<CdkRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,6 +48,9 @@ export default function CdkDealersPage() {
   const [testResult, setTestResult] = useState<Record<number, { ok: boolean; msg: string } | null>>({});
   const [testing, setTesting] = useState<Record<number, boolean>>({});
   const [search, setSearch] = useState("");
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState<CdkBulkStatus | null>(null);
+  const [bulkStalled, setBulkStalled] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,6 +62,43 @@ export default function CdkDealersPage() {
     setLoading(false);
   }, []);
   useEffect(() => { void load(); }, [load]);
+
+  // Poll the bulk job status. Always fetch once on mount in case a prior
+  // session left a completed/failed banner unread; while a job is running,
+  // poll every 2s.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    async function tick() {
+      try {
+        const res = await fetch("/api/admin/cdk/bulk-update/status", { cache: "no-store" });
+        if (!res.ok) return;
+        const j = await res.json() as { status: CdkBulkStatus | null; stalled?: boolean };
+        if (cancelled) return;
+        setBulkStatus(j.status);
+        setBulkStalled(Boolean(j.stalled));
+      } catch { /* network blip — try again on next tick */ }
+    }
+    void tick();
+    const isRunning = bulkStatus?.status === "running" && !bulkStalled;
+    if (isRunning) {
+      timer = setTimeout(() => { void tick(); }, 2000);
+    }
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [bulkStatus?.status, bulkStatus?.completed, bulkStalled]);
+
+  async function dismissBulkStatus() {
+    await fetch("/api/admin/cdk/bulk-update/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "dismiss" }),
+    });
+    setBulkStatus(null);
+    setBulkStalled(false);
+  }
 
   async function runTest(r: CdkRow) {
     if (!r.DEALER_ID || !r.ICOMPANY) return;
@@ -90,9 +144,33 @@ export default function CdkDealersPage() {
         title="CDK Dealers"
         subtitle={`${rows.length} dealer${rows.length === 1 ? "" : "s"} configured for CDK extracts`}
         action={
-          <button className="btn btn-primary" onClick={() => setEditRow("new")}>+ Add Dealer</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => setBulkModalOpen(true)}
+              disabled={bulkStatus?.status === "running" && !bulkStalled}
+              style={{
+                padding: "8px 16px",
+                background: "#ffa500",
+                color: "#fff",
+                border: "none",
+                borderRadius: 4,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: bulkStatus?.status === "running" && !bulkStalled ? "not-allowed" : "pointer",
+                opacity: bulkStatus?.status === "running" && !bulkStalled ? 0.6 : 1,
+                fontFamily: "inherit",
+              }}
+            >
+              CDK Update
+            </button>
+            <button className="btn btn-primary" onClick={() => setEditRow("new")}>+ Add Dealer</button>
+          </div>
         }
       />
+
+      {bulkStatus && (
+        <BulkStatusBanner status={bulkStatus} stalled={bulkStalled} onDismiss={() => void dismissBulkStatus()} />
+      )}
 
       <div className="card p-4 mb-4">
         <input
@@ -208,7 +286,225 @@ export default function CdkDealersPage() {
           }}
         />
       )}
+
+      {bulkModalOpen && (
+        <BulkUpdateModal
+          onClose={() => setBulkModalOpen(false)}
+          onStarted={(initial) => {
+            setBulkStatus(initial);
+            setBulkStalled(false);
+            setBulkModalOpen(false);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+// ── Bulk progress banner ─────────────────────────────────────────────────────
+
+function BulkStatusBanner({ status, stalled, onDismiss }: { status: CdkBulkStatus; stalled: boolean; onDismiss: () => void }) {
+  const running = status.status === "running" && !stalled;
+  const failedAll = status.status === "failed";
+  const done = status.status === "completed" || stalled;
+
+  if (running) {
+    const pct = status.total_dealers > 0 ? Math.round((status.completed / status.total_dealers) * 100) : 0;
+    return (
+      <div className="card p-4 mb-4" style={{ background: "#fff8e1", border: "1px solid #ffe082" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#7a5c00" }}>
+            CDK Update in progress — {status.completed} of {status.total_dealers} dealers
+            {status.current_dealer ? ` — ${status.current_dealer}…` : "…"}
+          </div>
+          <div style={{ fontSize: 12, color: "#7a5c00" }}>{pct}%</div>
+        </div>
+        <div style={{ height: 6, background: "#fff", borderRadius: 3, overflow: "hidden", border: "1px solid #ffe082" }}>
+          <div style={{ width: `${pct}%`, height: "100%", background: "#ffa500", transition: "width 0.3s ease" }} />
+        </div>
+        {status.failed > 0 && (
+          <div style={{ fontSize: 11, color: "#c62828", marginTop: 6 }}>
+            {status.failed} dealer{status.failed === 1 ? "" : "s"} failed so far
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const succeeded = status.total_dealers - status.failed;
+  const tone = failedAll ? "#ffebee" : stalled ? "#fff8e1" : "#e8f5e9";
+  const border = failedAll ? "#ffcdd2" : stalled ? "#ffe082" : "#c8e6c9";
+  const color = failedAll ? "#c62828" : stalled ? "#7a5c00" : "#2e7d32";
+
+  return (
+    <div className="card p-4 mb-4" style={{ background: tone, border: `1px solid ${border}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+        <div style={{ fontSize: 13, color, lineHeight: 1.7 }}>
+          {stalled ? (
+            <strong>CDK Update stalled — last activity over 30 minutes ago. The worker may have restarted mid-run.</strong>
+          ) : failedAll ? (
+            <strong>CDK Update failed</strong>
+          ) : (
+            <strong>CDK Update complete — {status.total_vehicles_imported.toLocaleString()} vehicles imported across {succeeded} dealer{succeeded === 1 ? "" : "s"}{status.failed > 0 ? `. ${status.failed} failed.` : "."}</strong>
+          )}
+          {done && !stalled && (
+            <div style={{ fontSize: 12, marginTop: 4, color }}>
+              {status.total_vehicles_skipped.toLocaleString()} skipped (already in inventory)
+            </div>
+          )}
+          {status.errors.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>
+                Errors ({status.errors.length}):
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color }}>
+                {status.errors.slice(0, 25).map((e, i) => (
+                  <li key={i}>
+                    <strong>{e.dealer_name || e.dealer_id}</strong> — {e.error}
+                  </li>
+                ))}
+                {status.errors.length > 25 && (
+                  <li style={{ listStyle: "none", fontStyle: "italic" }}>
+                    …and {status.errors.length - 25} more.
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
+        </div>
+        <button
+          onClick={onDismiss}
+          style={{ background: "none", border: "none", color, cursor: "pointer", fontSize: 12, textDecoration: "underline", padding: 0, whiteSpace: "nowrap" }}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Bulk update modal ────────────────────────────────────────────────────────
+
+function BulkUpdateModal({ onClose, onStarted }: { onClose: () => void; onStarted: (initial: CdkBulkStatus) => void }) {
+  const [window, setWindow] = useState<"2" | "7" | "30" | "90" | "custom">("90");
+  const [fromDate, setFromDate] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function computeDeltaDate(): string {
+    if (window === "custom" && fromDate) {
+      return `${fromDate}T00:00:00-0600`;
+    }
+    const days = parseInt(window, 10) || 90;
+    const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T00:00:00-0600`;
+  }
+
+  async function runUpdate() {
+    setError(null);
+    setStarting(true);
+    try {
+      const res = await fetch("/api/admin/cdk/bulk-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ delta_date: computeDeltaDate() }),
+      });
+      const j = await res.json() as { ok?: boolean; total_dealers?: number; started_at?: string; error?: string };
+      if (!res.ok || !j.ok) {
+        setError(j.error ?? `Request failed (${res.status})`);
+        return;
+      }
+      onStarted({
+        status: "running",
+        started_at: j.started_at ?? new Date().toISOString(),
+        delta_date: computeDeltaDate(),
+        total_dealers: j.total_dealers ?? 0,
+        completed: 0,
+        failed: 0,
+        current_dealer: null,
+        total_vehicles_imported: 0,
+        total_vehicles_skipped: 0,
+        errors: [],
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  return (
+    <Modal title="CDK Bulk Update — All Dealers" onClose={onClose}>
+      <label style={lbl}>Select Time Window</label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+        {([
+          { v: "2" as const, label: "Last 2 days" },
+          { v: "7" as const, label: "Last 7 days" },
+          { v: "30" as const, label: "Last 30 days" },
+          { v: "90" as const, label: "Last 90 days" },
+        ]).map(opt => (
+          <button
+            key={opt.v}
+            type="button"
+            onClick={() => setWindow(opt.v)}
+            style={{
+              padding: "8px 12px", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: "pointer",
+              background: window === opt.v ? "#fff3e0" : "#fff",
+              color: window === opt.v ? "#e65100" : "#78828c",
+              border: `1px solid ${window === opt.v ? "#ffa500" : "#e0e0e0"}`,
+            }}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={() => setWindow("custom")}
+        style={{
+          width: "100%", padding: "8px 12px", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: "pointer",
+          background: window === "custom" ? "#fff3e0" : "#fff",
+          color: window === "custom" ? "#e65100" : "#78828c",
+          border: `1px solid ${window === "custom" ? "#ffa500" : "#e0e0e0"}`,
+          marginBottom: 12,
+        }}
+      >
+        Custom date range
+      </button>
+      {window === "custom" && (
+        <div style={{ marginBottom: 12 }}>
+          <label style={lbl}>From</label>
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inp} />
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: "#78828c", lineHeight: 1.5, marginBottom: 12, padding: "8px 10px", background: "#fafafa", border: "1px solid #f0f0f0", borderRadius: 4 }}>
+        Runs sequentially across every CDK dealer (skipping test/allan accounts).
+        Existing vehicles are never overwritten. This job may take several minutes.
+      </div>
+      {error && <div style={{ marginBottom: 12, padding: "8px 12px", background: "#ffebee", color: "#c62828", borderRadius: 4, fontSize: 12 }}>{error}</div>}
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button className="btn btn-secondary" onClick={onClose} disabled={starting}>Cancel</button>
+        <button
+          onClick={() => void runUpdate()}
+          disabled={starting || (window === "custom" && !fromDate)}
+          style={{
+            padding: "8px 16px",
+            background: "#ffa500",
+            color: "#fff",
+            border: "none",
+            borderRadius: 4,
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: starting ? "wait" : "pointer",
+            opacity: starting || (window === "custom" && !fromDate) ? 0.5 : 1,
+            fontFamily: "inherit",
+          }}
+        >
+          {starting ? "Starting…" : "Run Update"}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
