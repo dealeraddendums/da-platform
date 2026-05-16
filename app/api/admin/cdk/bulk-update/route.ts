@@ -173,6 +173,10 @@ async function runBulkUpdate(dealers: CdkDealerRow[], deltaDate: string): Promis
       });
     }
     status.completed++;
+    // Persist completed/totals immediately so the UI advances the moment
+    // a dealer finishes, rather than waiting for the next iteration's
+    // "current_dealer" write.
+    await writeStatus(status);
   }
 
   status.status = "completed";

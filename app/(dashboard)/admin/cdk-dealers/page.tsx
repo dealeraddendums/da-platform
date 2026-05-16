@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { PageHeader } from "@/components/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -63,32 +63,48 @@ export default function CdkDealersPage() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  // Poll the bulk job status. Always fetch once on mount in case a prior
-  // session left a completed/failed banner unread; while a job is running,
-  // poll every 2s.
+  // Self-chaining poll on the bulk job status. The previous useEffect-based
+  // approach stopped polling whenever `completed` didn't change between two
+  // ticks (common during slow CDK calls — a single dealer can take 30s),
+  // so the bar froze. This version chains the next setTimeout from inside
+  // tick itself, decoupling it from React's render cycle.
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollCancelledRef = useRef(false);
+
+  const pollBulkStatus = useCallback(async () => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    try {
+      const res = await fetch("/api/admin/cdk/bulk-update/status", { cache: "no-store" });
+      if (pollCancelledRef.current) return;
+      if (!res.ok) {
+        pollTimerRef.current = setTimeout(() => { void pollBulkStatus(); }, 3000);
+        return;
+      }
+      const j = await res.json() as { status: CdkBulkStatus | null; stalled?: boolean };
+      if (pollCancelledRef.current) return;
+      setBulkStatus(j.status);
+      setBulkStalled(Boolean(j.stalled));
+      if (j.status?.status === "running" && !j.stalled) {
+        pollTimerRef.current = setTimeout(() => { void pollBulkStatus(); }, 1500);
+      }
+    } catch {
+      if (!pollCancelledRef.current) {
+        pollTimerRef.current = setTimeout(() => { void pollBulkStatus(); }, 3000);
+      }
+    }
+  }, []);
+
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let cancelled = false;
-    async function tick() {
-      try {
-        const res = await fetch("/api/admin/cdk/bulk-update/status", { cache: "no-store" });
-        if (!res.ok) return;
-        const j = await res.json() as { status: CdkBulkStatus | null; stalled?: boolean };
-        if (cancelled) return;
-        setBulkStatus(j.status);
-        setBulkStalled(Boolean(j.stalled));
-      } catch { /* network blip — try again on next tick */ }
-    }
-    void tick();
-    const isRunning = bulkStatus?.status === "running" && !bulkStalled;
-    if (isRunning) {
-      timer = setTimeout(() => { void tick(); }, 2000);
-    }
+    pollCancelledRef.current = false;
+    void pollBulkStatus();
     return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
+      pollCancelledRef.current = true;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     };
-  }, [bulkStatus?.status, bulkStatus?.completed, bulkStalled]);
+  }, [pollBulkStatus]);
 
   async function dismissBulkStatus() {
     await fetch("/api/admin/cdk/bulk-update/status", {
@@ -294,6 +310,10 @@ export default function CdkDealersPage() {
             setBulkStatus(initial);
             setBulkStalled(false);
             setBulkModalOpen(false);
+            // Kick polling back to life — on mount it stopped after seeing
+            // status=null, and the self-chaining loop won't restart on its
+            // own when state goes running.
+            void pollBulkStatus();
           }}
         />
       )}
