@@ -265,7 +265,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [saveVtypes, setSaveVtypes] = useState<Set<string>>(new Set(['new']));
   const [saveTname, setSaveTname] = useState('');
   const [saveDocType, setSaveDocType] = useState<'addendum' | 'infosheet'>('addendum');
-  const [saveAsGroupTemplate, setSaveAsGroupTemplate] = useState(false);
+  // In a group context (?group=… in the URL → groupId set) the only sensible
+  // save target is the group template library — group_admin / ghost-mode
+  // doesn't have a dealer to write to under /api/templates. Default the
+  // toggle ON so Save Template works on first try.
+  const [saveAsGroupTemplate, setSaveAsGroupTemplate] = useState<boolean>(() => Boolean(groupId));
   const [nudge, setNudge] = useState({ left: 0, right: 0, top: 0, bottom: 0 });
   const [printAiOverride, setPrintAiOverride] = useState<'db'|'ai'|'default'>('default');
   const [localCustomSizes, setLocalCustomSizes] = useState<CustomSize[]>(customSizes);
@@ -828,6 +832,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const saveTemplate = useCallback(async () => {
     if (loadedTemplateLocked) {
       showToast('Group templates cannot be saved — contact your group admin');
+      return;
+    }
+    // In group context there's no dealer to save to. Without the toggle on,
+    // the dealer-save path 400s ("dealer_id param required") — refuse early
+    // with a clearer message.
+    const effectiveDealerId = dealerId ?? vehicle?.dealer_id ?? null;
+    if (groupId && !effectiveDealerId && !saveAsGroupTemplate) {
+      showToast('Turn on “Save as Group Template” to save in group context');
       return;
     }
     const name = saveTname.trim() || templateName;
