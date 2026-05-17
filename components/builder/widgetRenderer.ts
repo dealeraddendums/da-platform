@@ -171,6 +171,24 @@ export function renderW(type: string, d: D, fontScale: number): string {
     return `<div style="padding:6px 0;width:100%"><div style="display:flex;gap:12px"><div style="flex:1"><div style="border-bottom:1px solid #1a1916;height:18px;margin-bottom:2px"></div><div style="font-size:8px;color:#888">${d.l1 || 'Buyers Signature'}</div></div><div style="flex:1"><div style="border-bottom:1px solid #1a1916;height:18px;margin-bottom:2px"></div><div style="font-size:8px;color:#888">${d.l2 || 'Date'}</div></div></div></div>`;
   }
 
+  if (type === 'disclaimer') {
+    // d.disclaimers is the resolved list, injected by applyDisclaimerToWidgets
+    // (canvas) or pdf-html.ts (PDF) right before render. Both surfaces hit
+    // this branch — keep parity strict.
+    const list = (d.disclaimers as Array<{ text: string; locked?: boolean }> | undefined) ?? [];
+    const sz = Math.round((d.fontSize as number || 7) * fs);
+    const lh = (d.lineHeight as number) || 1.3;
+    const ta = (d.align as string) || (d.textAlign as string) || 'left';
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (list.length === 0) {
+      return `<div style="font-size:${sz}px;line-height:${lh};color:#bbb;font-style:italic;text-align:${ta}">Disclaimer text will appear here</div>`;
+    }
+    const blocks = list
+      .map(r => `<div style="font-size:${sz}px;line-height:${lh};color:#666;text-align:${ta};margin-bottom:2px">${esc(r.text)}</div>`)
+      .join('');
+    return `<div style="width:100%">${blocks}</div>`;
+  }
+
   // Background Image — full-width image layer, no content. Defaults to the
   // EPA/DOT Fuel Economy image so a new template prints something useful.
   if (type === 'bgimage') {

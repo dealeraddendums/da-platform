@@ -40,6 +40,9 @@ export const LAYOUT: Record<string, { x: number; y: number; w: number; h: number
   // legacy alias — kept so old saved templates that still reference 'infobox'
   // land in the right place during the backward-compat conversion pass.
   infobox:           { x: 28,  y: 760, w: 352, h: 240 },
+  // Disclaimer — narrow strip near the bottom by default. Resizable like
+  // any other widget; group admins typically own the placement decision.
+  disclaimer:        { x: 16,  y: 1020, w: 376, h: 28  },
 };
 
 export const LAYOUT_INFOSHEET: Record<string, { x: number; y: number; w: number; h: number }> = {
@@ -52,6 +55,7 @@ export const LAYOUT_INFOSHEET: Record<string, { x: number; y: number; w: number;
   barcode:     { x: 508, y: 868, w: 256, h: 52  },
   dealer:      { x: 536, y: 68,  w: 216, h: 60  },
   customtext:  { x: 40,  y: 944, w: 744, h: 60  },
+  disclaimer:  { x: 40,  y: 1010, w: 744, h: 32 },
 };
 
 export const WIDGET_LABELS: Record<string, string> = {
@@ -62,27 +66,30 @@ export const WIDGET_LABELS: Record<string, string> = {
   barcode: 'VIN Barcode', qrcode: 'QR Code', custom: 'Custom',
   bgimage: 'Background Image', vehiclephoto: 'Vehicle Photo',
   suggested_options: 'Suggested Products', suggested_price: 'Suggested Price',
+  disclaimer: 'Disclaimer',
 };
 
 // One-instance-only widgets. QR Code, VIN Barcode, Background Image, and
 // Vehicle Photo are explicitly multi-instance — drop them from this list so
-// the palette lets the dealer drop as many as they want.
+// the palette lets the dealer drop as many as they want. Disclaimer is also
+// single-instance — a template carries one disclaimer block.
 export const UNIQUE_WIDGETS = [
   'logo','vehicle','msrp','options','subtotal','askbar','dealer',
   'description','features',
   'suggested_options','suggested_price',
+  'disclaimer',
 ];
 
 export const ADDENDUM_WIDGETS = [
   'logo','vehicle','msrp','options','subtotal','askbar','dealer',
-  'headerbar','customtext','sigline',
+  'headerbar','customtext','sigline','disclaimer',
   'suggested_options','suggested_price',
   // Dynamic content (replaces the old monolithic Infobox)
   'bgimage','qrcode','barcode','vehiclephoto',
 ];
 export const INFOSHEET_WIDGETS = [
   'logo','vehicle','description','features','askbar',
-  'qrcode','barcode','dealer','customtext',
+  'qrcode','barcode','dealer','customtext','disclaimer',
   'bgimage','vehiclephoto',
 ];
 // Addendum hides only infosheet-specific content widgets. qrcode/barcode are
@@ -138,6 +145,11 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     fs: 10,
   },
   sigline: { l1: 'Buyers Signature', l2: 'Date' },
+  // Disclaimer — text is resolved at render time from group_disclaimers
+  // matching the dealer's state + document_type. d.disclaimers is the
+  // array injected by applyDisclaimerToWidgets (canvas) or pdf-html.ts
+  // (PDF). Falls back to a placeholder when nothing is configured.
+  disclaimer: { fontSize: 7, lineHeight: 1.3, align: 'left', disclaimers: [] },
   // Legacy monolithic infobox — kept in DEFS only so an old saved widget
   // dropped on the canvas before backward-compat conversion runs still has
   // sane defaults. New widgets should never use type='infobox'.

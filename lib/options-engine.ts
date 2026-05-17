@@ -354,14 +354,20 @@ export async function getGroupOptionsForDealer(
 }
 
 /**
- * Returns combined disclaimer text for a dealer's applicable group disclaimers.
- * Matches by state_code ('ALL' or exact match) and document_type ('all' or exact).
+ * Returns the list of group disclaimers applicable to a dealer, in render
+ * order: locked (corporate-managed) first, then unlocked, alphabetical within
+ * each group for stable ordering. Empty array when the dealer has no group,
+ * no active disclaimers, or none match the dealer's state + document type.
+ *
+ * The Disclaimer widget in the Builder stacks these vertically. Auto-bottom
+ * injection has been removed — disclaimers only print when a Disclaimer
+ * widget is placed on the template (typically by a group admin).
  */
-export async function getGroupDisclaimer(
+export async function getGroupDisclaimers(
   dealerTextId: string,
   dealerState: string | null,
   docType: string
-): Promise<string | null> {
+): Promise<Array<{ text: string; locked: boolean }>> {
   const admin = createAdminSupabaseClient();
 
   const { data: dealer } = await admin
@@ -370,7 +376,7 @@ export async function getGroupDisclaimer(
     .or(`dealer_id.eq.${dealerTextId},inventory_dealer_id.eq.${dealerTextId}`)
     .maybeSingle<{ group_id: string | null }>();
 
-  if (!dealer?.group_id) return null;
+  if (!dealer?.group_id) return [];
 
   const { data: rows } = await admin
     .from("group_disclaimers")
@@ -378,7 +384,7 @@ export async function getGroupDisclaimer(
     .eq("group_id", dealer.group_id)
     .eq("active", true);
 
-  if (!rows?.length) return null;
+  if (!rows?.length) return [];
 
   const matched = (rows as GroupDisclaimerRow[]).filter((r) => {
     const stateOk = r.state_code === "ALL" || (dealerState && r.state_code.toUpperCase() === dealerState.toUpperCase());
@@ -386,8 +392,27 @@ export async function getGroupDisclaimer(
     return stateOk && typeOk;
   });
 
-  if (!matched.length) return null;
-  return matched.map((r) => r.disclaimer_text).join(" ");
+  return matched
+    .map((r) => ({ text: r.disclaimer_text, locked: r.locked !== false }))
+    .sort((a, b) => {
+      if (a.locked !== b.locked) return a.locked ? -1 : 1;
+      return a.text.localeCompare(b.text);
+    });
+}
+
+/**
+ * Back-compat shim — returns the joined disclaimer text the old auto-bottom
+ * injection used to emit. Kept for any external caller that still wants a
+ * single string; new code should use getGroupDisclaimers().
+ */
+export async function getGroupDisclaimer(
+  dealerTextId: string,
+  dealerState: string | null,
+  docType: string
+): Promise<string | null> {
+  const rows = await getGroupDisclaimers(dealerTextId, dealerState, docType);
+  if (!rows.length) return null;
+  return rows.map((r) => r.text).join(" ");
 }
 
 // Re-export client-safe price helpers

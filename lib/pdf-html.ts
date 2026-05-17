@@ -52,7 +52,13 @@ export interface BuildPdfHtmlInput {
   bgUrl: string;
   vehicle?: VehicleRow;
   options?: AnyOption[];
-  disclaimer?: string;
+  /**
+   * Effective group disclaimers for this dealer + document_type. Locked
+   * (corporate-managed) entries come first. Injected into Disclaimer
+   * widgets at render time — auto-bottom injection was removed in favor
+   * of explicit widget placement (typically by group admins).
+   */
+  disclaimers?: Array<{ text: string; locked?: boolean }>;
   dealerLogoUrl?: string | null;
   dealer?: { name?: string | null; address?: string | null; city?: string | null; state?: string | null; zip?: string | null; phone?: string | null };
   customDims?: { widthIn: number; heightIn: number };
@@ -70,7 +76,7 @@ export async function buildPdfHtml({
   bgUrl,
   vehicle,
   options,
-  disclaimer,
+  disclaimers,
   dealerLogoUrl,
   dealer,
   customDims,
@@ -221,6 +227,13 @@ export async function buildPdfHtml({
       }
     }
 
+    // Disclaimer: stuff the resolved list into the widget so renderW renders
+    // identical output on canvas and in print. Auto-bottom injection is gone
+    // — disclaimers only print when a Disclaimer widget is placed.
+    if (w.type === 'disclaimer') {
+      d.disclaimers = disclaimers ?? [];
+    }
+
     // Infosheet features: inject AI features or DB options text if widget has no custom content.
     // Same pill-match logic as description — set d.aiMode to whatever source
     // ended up populating d.items.
@@ -268,10 +281,6 @@ export async function buildPdfHtml({
     })
     .join('\n');
 
-  const disclaimerHtml = disclaimer
-    ? `<div style="position:absolute;bottom:4px;left:6px;right:6px;z-index:20;font-size:7px;line-height:1.3;color:#666;font-family:-apple-system,Roboto,Arial,sans-serif;">${disclaimer.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`
-    : '';
-
   const rawHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -293,7 +302,6 @@ body { width: ${paper.w}px; height: ${paper.h}px; overflow: hidden; background: 
 <div class="paper">
   <div class="frame"><img src="${bgUrl}" alt=""></div>
   ${widgetHtml}
-  ${disclaimerHtml}
 </div>
 </body>
 </html>`;

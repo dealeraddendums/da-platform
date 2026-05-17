@@ -153,7 +153,7 @@ import {
   LAYOUT_INFOSHEET,
   makeWidget,
 } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimer, matchesRulesRow } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent } from "@/lib/ai-content";
 import QRCode from "qrcode";
@@ -303,7 +303,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    const disclaimer = await getGroupDisclaimer(textDealerId, dealer?.state ?? null, docType);
+    const disclaimers = await getGroupDisclaimers(textDealerId, dealer?.state ?? null, docType);
 
     // ── Vehicle data shaped for PDF renderer ──────────────────────────────────
     const vehicleData = {
@@ -688,7 +688,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       bgUrl,
       vehicle: vehicleData,
       options,
-      disclaimer: disclaimer ?? undefined,
+      disclaimers,
       dealerLogoUrl,
       dealer: dealer ? { name: dealer.name, address: dealer.address, city: dealer.city, state: dealer.state, zip: dealer.zip, phone: dealer.phone } : undefined,
       customDims: customPaperDims,

@@ -47,17 +47,67 @@ export async function GET(
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  const checked = await fetchAndAuthorize(claims, params.id);
-  if ("authError" in checked) return checked.authError;
-
   const admin = createAdminSupabaseClient();
-  const { data } = await admin
+
+  // First try the dealer's own templates table.
+  const { data: ownTpl } = await admin
     .from("templates")
     .select("*")
     .eq("id", params.id)
-    .single();
+    .maybeSingle();
 
-  return NextResponse.json({ data });
+  if (ownTpl) {
+    const checked = await fetchAndAuthorize(claims, params.id);
+    if ("authError" in checked) return checked.authError;
+    return NextResponse.json({ data: { ...ownTpl, source: "dealer" } });
+  }
+
+  // Fall through to group_templates if the dealer has a valid assignment.
+  // dealer-* roles must have a matching dealer_template_assignments row;
+  // group_admin / super_admin can read directly.
+  const { data: groupTpl } = await admin
+    .from("group_templates")
+    .select("*")
+    .eq("id", params.id)
+    .maybeSingle();
+  if (!groupTpl) {
+    return NextResponse.json({ error: "Template not found" }, { status: 404 });
+  }
+
+  if (claims.role === "dealer_admin" || claims.role === "dealer_user") {
+    if (!claims.dealer_id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const { data: assignment } = await admin
+      .from("dealer_template_assignments")
+      .select("dealer_editable, group_id")
+      .eq("dealer_id", claims.dealer_id)
+      .eq("template_id", params.id)
+      .maybeSingle<{ dealer_editable: boolean; group_id: string }>();
+    if (!assignment) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    return NextResponse.json({
+      data: {
+        ...groupTpl,
+        group_template_id: params.id,
+        group_id: assignment.group_id,
+        is_locked: assignment.dealer_editable !== true,
+        source: "group",
+      },
+    });
+  } else if (claims.role === "group_admin") {
+    if (groupTpl.group_id !== claims.group_id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  }
+  return NextResponse.json({
+    data: {
+      ...groupTpl,
+      group_template_id: params.id,
+      source: "group",
+    },
+  });
 }
 
 export async function PATCH(

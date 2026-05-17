@@ -14,7 +14,7 @@ export type WidgetType =
   | 'askbar' | 'dealer' | 'infobox' | 'headerbar' | 'customtext'
   | 'sigline' | 'description' | 'features' | 'barcode' | 'qrcode' | 'custom'
   | 'suggested_options' | 'suggested_price'
-  | 'bgimage' | 'vehiclephoto';
+  | 'bgimage' | 'vehiclephoto' | 'disclaimer';
 
 export interface OptionItem {
   name: string;
@@ -77,4 +77,11 @@ export interface SavedTemplate {
   template_json: Record<string, unknown>;
   is_active: boolean;
   updated_at: string;
+  /** Set when this row came from a group_template assignment. */
+  group_template_id?: string;
+  group_id?: string;
+  /** Locked group templates: dealer can load + print but cannot save. */
+  is_locked?: boolean;
+  /** 'dealer' (own row) | 'group' (assigned). Defaults to 'dealer'. */
+  source?: 'dealer' | 'group';
 }

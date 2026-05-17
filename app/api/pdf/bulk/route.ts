@@ -9,7 +9,7 @@ import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimer, matchesRulesRow } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent } from "@/lib/ai-content";
 import QRCode from "qrcode";
@@ -616,7 +616,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         console.log(`[BULK]   options_result source=${optionsSource} count=${options.length} names=[${options.map(o => o.option_name).join(", ")}]`);
 
-        const disclaimer = await getGroupDisclaimer(textDealerId, dealer?.state ?? null, docType);
+        const disclaimers = await getGroupDisclaimers(textDealerId, dealer?.state ?? null, docType);
 
         // ── Build widget layout ──────────────────────────────────────────────
         let widgets: Widget[];
@@ -793,7 +793,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const html = await buildPdfHtml({
           widgets, paperSize: effectivePaperSizeStr, fontScale, bgUrl,
           vehicle: vehicleData, options,
-          disclaimer: disclaimer ?? undefined,
+          disclaimers,
           dealerLogoUrl,
           dealer: dealer ? { name: dealer.name, address: dealer.address, city: dealer.city, state: dealer.state, zip: dealer.zip, phone: dealer.phone } : undefined,
           customDims: customPaperDims,

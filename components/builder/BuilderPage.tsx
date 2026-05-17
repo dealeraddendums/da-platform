@@ -29,6 +29,7 @@ const PALETTE_TILES = [
   { type: 'headerbar',         emoji: '⬛', label: 'Header bar',        hint: 'Full-width text',       group: 'structural' },
   { type: 'customtext',        emoji: 'T',  label: 'Custom text',       hint: 'Free content',          group: 'structural' },
   { type: 'sigline',           emoji: '✎',  label: 'Signature line',    hint: 'Buyer + date',          group: 'structural' },
+  { type: 'disclaimer',        emoji: '⚖️', label: 'Disclaimer',        hint: 'State or group disclaimer text', group: 'structural' },
   // Dynamic content — independent, multi-instance widgets that replaced the
   // monolithic Infobox. Drop as many as needed; mix and match freely.
   { type: 'bgimage',           emoji: '🖼️', label: 'Background Image',   hint: 'Full-width image',      group: 'dynamic' },
@@ -112,6 +113,25 @@ function ensureAskbar(ws: Record<string, Widget>, nid: number, ps: string): [Rec
 // Override all logo widgets with the canonical dealer logo.
 // logoUrl=null → imgUrl='' (shows "Upload logo in Settings" placeholder on canvas).
 // Canvas always shows the live dealer logo; PDF rendering overrides independently via pdf-html.ts.
+// Inject the resolved disclaimer list onto any Disclaimer widgets so canvas
+// preview matches what pdf-html.ts will render at print time.
+function applyDisclaimerToWidgets(
+  ws: Record<string, Widget>,
+  disclaimers: Array<{ text: string; locked?: boolean }>,
+): Record<string, Widget> {
+  const result: Record<string, Widget> = {};
+  let changed = false;
+  for (const [id, w] of Object.entries(ws)) {
+    if (w.type === 'disclaimer') {
+      result[id] = { ...w, d: { ...w.d, disclaimers } };
+      changed = true;
+    } else {
+      result[id] = w;
+    }
+  }
+  return changed ? result : ws;
+}
+
 function applyLogoToWidgets(ws: Record<string, Widget>, logoUrl: string | null): Record<string, Widget> {
   const result: Record<string, Widget> = {};
   let changed = false;
@@ -233,6 +253,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   // ID of the template currently loaded in the builder (for upsert-on-save logic)
   const [loadedTemplateId, setLoadedTemplateId] = useState<string | null>(null);
+  // When true, the loaded template came from a locked group_template
+  // assignment — Save must refuse so the dealer can't overwrite corporate
+  // content. Cleared when a fresh template is loaded or the canvas is reset.
+  const [loadedTemplateLocked, setLoadedTemplateLocked] = useState(false);
+  // Effective disclaimers for this dealer + current document_type, fetched
+  // once on mount and re-applied to Disclaimer widgets at load/save time so
+  // canvas preview matches print output.
+  const disclaimersRef = useRef<Array<{ text: string; locked: boolean }>>([]);
   const [customWidgets, setCustomWidgets] = useState<CustomWidgetDef[]>(DEFAULT_CUSTOM_WIDGETS);
   const [saveVtypes, setSaveVtypes] = useState<Set<string>>(new Set(['new']));
   const [saveTname, setSaveTname] = useState('');
@@ -330,6 +358,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     const id = 'w' + nid;
     const widget = makeWidget(type, id, x, y, w, h, isInfosheet);
     if (type === 'logo') widget.d = { ...widget.d, imgUrl: canonicalLogoRef.current ?? '' };
+    // Newly-dropped Disclaimer widgets should preview the real text immediately.
+    if (type === 'disclaimer') widget.d = { ...widget.d, disclaimers: disclaimersRef.current };
     setNid(n => n + 1);
     setWidgets(prev => {
       const next = { ...prev, [id]: widget };
@@ -541,6 +571,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     }
     // Always apply canonical dealer logo to logo widgets (works with or without a vehicle)
     ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
+    ws = applyDisclaimerToWidgets(ws, disclaimersRef.current);
     widgetsRef.current = ws;
     setWidgets(ws);
     setNid(nextNid);
@@ -550,6 +581,20 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     fetch('/api/settings').then(r => r.ok ? r.json() : null).then(data => {
       if (data) setNudge({ left: data.nudge_left || 0, right: data.nudge_right || 0, top: data.nudge_top || 0, bottom: data.nudge_bottom || 0 });
     }).catch(() => {});
+    // Load effective group disclaimers for this dealer once on mount. Cached
+    // on disclaimersRef and re-applied to Disclaimer widgets at every load /
+    // paper-switch path.
+    const dqs = vehicle?.dealer_id ? `?dealer_id=${encodeURIComponent(vehicle.dealer_id)}` : '';
+    fetch(`/api/disclaimers${dqs}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((j: { data?: Array<{ text: string; locked: boolean }> } | null) => {
+        if (!j?.data) return;
+        disclaimersRef.current = j.data;
+        // Backfill any disclaimer widgets that were placed before this resolved.
+        setWidgets(prev => applyDisclaimerToWidgets(prev, j.data!));
+        widgetsRef.current = applyDisclaimerToWidgets(widgetsRef.current, j.data);
+      })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -582,6 +627,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
           else if (dealerInfoRef.current) ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
           ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
+    ws = applyDisclaimerToWidgets(ws, disclaimersRef.current);
           setWidgets(ws);
           widgetsRef.current = ws;
           setNid(n);
@@ -591,6 +637,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (json?.paperSize) setPaperSize(json.paperSize);
         setTemplateName((data.name as string) || 'Template');
         setLoadedTemplateId(templateId);
+        setLoadedTemplateLocked(data.source === 'group' && data.is_locked !== false);
       })
       .catch(() => {});
   }, [templateId, groupId]);
@@ -616,7 +663,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       });
       if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
       else if (dealerInfoRef.current) ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
-      const wsWithLogo = applyLogoToWidgets(ws, canonicalLogoRef.current);
+      const wsWithLogo = applyDisclaimerToWidgets(applyLogoToWidgets(ws, canonicalLogoRef.current), disclaimersRef.current);
       widgetsRef.current = wsWithLogo;
       setWidgets(wsWithLogo);
       setNid(nextNid);
@@ -651,6 +698,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
       else if (dealerInfoRef.current) ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
       ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
+    ws = applyDisclaimerToWidgets(ws, disclaimersRef.current);
       widgetsRef.current = ws;
       setWidgets(ws);
       setNid(nextNid);
@@ -778,6 +826,10 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
 
   // ── Save template ──────────────────────────────────────────────────
   const saveTemplate = useCallback(async () => {
+    if (loadedTemplateLocked) {
+      showToast('Group templates cannot be saved — contact your group admin');
+      return;
+    }
     const name = saveTname.trim() || templateName;
     if (!name) return;
     const isDraft = saveVtypes.has('draft');
@@ -855,7 +907,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {
       showToast('Save failed — try again');
     }
-  }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, showToast, loadedTemplateId, savedTemplates, dealerId, vehicle?.dealer_id]);
+  }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, showToast, loadedTemplateId, loadedTemplateLocked, savedTemplates, dealerId, vehicle?.dealer_id]);
 
   // ── Load templates list ────────────────────────────────────────────
   const openTemplates = useCallback(async () => {
@@ -892,11 +944,13 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       const r = await fetch(url);
       if (!r.ok) { showToast('Failed to load template'); return; }
       const resp = await r.json();
-      const tmpl = resp.data as { template_json?: Record<string, unknown>; name?: string } | null;
+      const tmpl = resp.data as { template_json?: Record<string, unknown>; name?: string; is_locked?: boolean; source?: string } | null;
       if (!tmpl?.template_json || Object.keys(tmpl.template_json).length === 0) {
         showToast('This template has no saved layout. Please re-save it from the Builder.');
         return;
       }
+      const isLocked = tmpl.source === 'group' && tmpl.is_locked !== false;
+      setLoadedTemplateLocked(isLocked);
       const json = tmpl.template_json as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: string };
       if (!json.widgets || Object.keys(json.widgets).length === 0) {
         showToast('This template has no saved layout. Please re-save it from the Builder.');
@@ -912,6 +966,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
       else if (dealerInfoRef.current) ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
       ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
+    ws = applyDisclaimerToWidgets(ws, disclaimersRef.current);
       setWidgets(ws); widgetsRef.current = ws;
       setNid(n);
       if (json.bgUrl) { setBgUrl(json.bgUrl); setBgInputVal(json.bgUrl); }
@@ -1033,12 +1088,29 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
             </button>
           )}
           <button onClick={openTemplates} style={tbBtn}>All templates</button>
-          <button onClick={async () => {
-            setSaveTname(templateName);
-            setSaveDocType(paperSize === 'infosheet' ? 'infosheet' : 'addendum');
-            try { const r = await fetch('/api/templates'); if (r.ok) { const j = await r.json(); setSavedTemplates(j.data ?? []); } } catch {}
-            setShowSave(true);
-          }} style={{ ...tbBtn, background: '#1976d2', borderColor: '#1976d2' }}>Save template</button>
+          <button
+            onClick={async () => {
+              if (loadedTemplateLocked) {
+                showToast('Group templates cannot be saved — contact your group admin');
+                return;
+              }
+              setSaveTname(templateName);
+              setSaveDocType(paperSize === 'infosheet' ? 'infosheet' : 'addendum');
+              try { const r = await fetch('/api/templates'); if (r.ok) { const j = await r.json(); setSavedTemplates(j.data ?? []); } } catch {}
+              setShowSave(true);
+            }}
+            disabled={loadedTemplateLocked}
+            title={loadedTemplateLocked ? 'Group templates cannot be saved — contact your group admin' : undefined}
+            style={{
+              ...tbBtn,
+              background: loadedTemplateLocked ? 'rgba(255,255,255,0.08)' : '#1976d2',
+              borderColor: loadedTemplateLocked ? '#555' : '#1976d2',
+              cursor: loadedTemplateLocked ? 'not-allowed' : 'pointer',
+              opacity: loadedTemplateLocked ? 0.55 : 1,
+            }}
+          >
+            {loadedTemplateLocked ? '🔒 Locked' : 'Save template'}
+          </button>
         </div>
       </div>
 
@@ -1405,10 +1477,20 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
             ) : savedTemplates.map(t => {
               const isDefault = defaultTemplateIds.has(t.id);
               const isConfirming = deleteConfirmId === t.id;
+              const isGroupLocked = t.source === 'group' && t.is_locked !== false;
+              const isGroupEditable = t.source === 'group' && t.is_locked === false;
               return (
                 <div key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #e0e0e0', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>{t.name}</div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: '#333', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {t.name}
+                      {isGroupLocked && (
+                        <span title="Group template — load and print only; cannot save changes" style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 10, background: '#fff3e0', color: '#e65100', border: '1px solid #ffcc80' }}>🔒 Group</span>
+                      )}
+                      {isGroupEditable && (
+                        <span title="Group template assigned to you — editable copy" style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 10, background: '#e3f2fd', color: '#1565c0', border: '1px solid #bbdefb' }}>Group</span>
+                      )}
+                    </div>
                     <div style={{ fontSize: 11, color: '#78828c', marginTop: 2 }}>{t.document_type} · {t.vehicle_types?.join(', ')}</div>
                   </div>
                   {isConfirming ? (
@@ -1428,7 +1510,12 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                   ) : (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                       <button onClick={() => loadTemplate(t.id)} style={{ padding: '5px 12px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Load</button>
-                      {isDefault ? (
+                      {isGroupLocked ? (
+                        // Locked group templates: dealer never deletes — group admin manages.
+                        <span title="Locked group template — managed by your group admin" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 4, border: '1px solid #e0e0e0', background: '#f5f6f7', cursor: 'not-allowed', color: '#ccc', flexShrink: 0 }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        </span>
+                      ) : isDefault ? (
                         <span title="Cannot delete — assigned as a default template" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 4, border: '1px solid #e0e0e0', background: '#f5f6f7', cursor: 'not-allowed', color: '#ccc', flexShrink: 0 }}>
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
                         </span>

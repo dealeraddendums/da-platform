@@ -33,7 +33,11 @@ async function resolveDealerId(
 
 /**
  * GET /api/templates?dealer_id=xxx
- * Returns all templates for a dealer.
+ * Returns all templates for a dealer: their own rows from `templates` PLUS
+ * any group templates assigned via `dealer_template_assignments`. The
+ * group-assigned rows are returned with `group_template_id`, `group_id`,
+ * `is_locked` (= !dealer_editable), and `source: 'group'` so the Builder
+ * can render them with the 🔒 badge and refuse Save on the locked ones.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
@@ -44,17 +48,61 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { dealerId } = resolved;
 
   const admin = createAdminSupabaseClient();
-  const { data, error: fetchErr } = await admin
-    .from("templates")
-    .select("*")
-    .eq("dealer_id", dealerId)
-    .order("created_at", { ascending: false });
+  const [ownRes, asnRes] = await Promise.all([
+    admin
+      .from("templates")
+      .select("*")
+      .eq("dealer_id", dealerId)
+      .order("created_at", { ascending: false }),
+    admin
+      .from("dealer_template_assignments")
+      .select("template_id, dealer_editable, group_id, assigned_at, group_templates:template_id(*)")
+      .eq("dealer_id", dealerId),
+  ]);
 
-  if (fetchErr) {
-    return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+  if (ownRes.error) {
+    return NextResponse.json({ error: ownRes.error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ data: data ?? [] });
+  type Row = Record<string, unknown>;
+  const own = ((ownRes.data as Row[] | null) ?? []).map((t) => ({ ...t, source: "dealer" as const }));
+
+  // Convert assignment rows into list entries — copy the joined
+  // group_templates payload up to the top level so the Builder modal
+  // and loadTemplate code don't have to special-case nested data.
+  const assignmentRows = (asnRes.data as Array<Record<string, unknown>> | null) ?? [];
+  const assigned = assignmentRows
+    .map((row) => {
+      const tpl = row.group_templates as Record<string, unknown> | null;
+      if (!tpl) return null;
+      return {
+        // Use the group_template id as the row id so the existing
+        // load/delete flows just work. The dealer never has their own
+        // row for a locked group template, so this id is unambiguous.
+        id: tpl.id,
+        dealer_id: dealerId,
+        name: tpl.name,
+        document_type: tpl.document_type,
+        vehicle_types: tpl.vehicle_types,
+        template_json: tpl.template_json,
+        is_active: tpl.is_active,
+        created_at: tpl.created_at,
+        updated_at: tpl.updated_at,
+        group_template_id: tpl.id,
+        group_id: row.group_id,
+        is_locked: row.dealer_editable !== true,
+        source: "group" as const,
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+
+  // Drop assigned rows that the dealer already has a copy of (happens
+  // when an editable group template was assigned — they get an editable
+  // copy in their own library AND the assignment row).
+  const ownIds = new Set(own.map((t) => (t as Row).id as string));
+  const merged = [...own, ...assigned.filter((a) => !ownIds.has(a.id as string))];
+
+  return NextResponse.json({ data: merged });
 }
 
 /**
