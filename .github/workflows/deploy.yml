@@ -27,11 +27,27 @@ jobs:
             git reset --hard origin/main
             sudo rm -rf node_modules .next
             /usr/bin/npm install
-            if ! /usr/bin/npm run build; then
-              echo "Build failed — cleaning .next and retrying once"
+            # Next.js static export occasionally races on the .next/export →
+            # .next/server rename step (ENOENT / ENOTEMPTY). The same code
+            # builds cleanly on the next attempt. Retry up to 3 times with a
+            # short FS settle delay between attempts.
+            build_ok=0
+            for attempt in 1 2 3; do
+              if /usr/bin/npm run build; then
+                build_ok=1
+                break
+              fi
+              echo "Build attempt $attempt failed — cleaning .next and retrying"
               sudo rm -rf .next
-              /usr/bin/npm run build
+              sync
+              sleep 2
+            done
+            if [ "$build_ok" != "1" ]; then
+              echo "Build failed after 3 attempts" >&2
+              exit 1
             fi
-            pm2 restart da-platform || pm2 start ecosystem.config.js
+            # --update-env so newly-added env vars in .env.production take
+            # effect on pm2 restart without a manual reload.
+            pm2 restart da-platform --update-env || pm2 start ecosystem.config.js --update-env
             echo "Deploy complete"
           '
