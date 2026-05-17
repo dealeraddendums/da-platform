@@ -78,10 +78,20 @@ export async function GET(
     if (!claims.dealer_id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    // dealer_template_assignments.dealer_id is the dealers.id UUID — resolve
+    // it from the text code in claims before the lookup.
+    const { data: dealerRow } = await admin
+      .from("dealers")
+      .select("id")
+      .eq("dealer_id", claims.dealer_id)
+      .maybeSingle<{ id: string }>();
+    if (!dealerRow?.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const { data: assignment } = await admin
       .from("dealer_template_assignments")
       .select("dealer_editable, group_id")
-      .eq("dealer_id", claims.dealer_id)
+      .eq("dealer_id", dealerRow.id)
       .eq("template_id", params.id)
       .maybeSingle<{ dealer_editable: boolean; group_id: string }>();
     if (!assignment) {

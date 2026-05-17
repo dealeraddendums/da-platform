@@ -48,16 +48,32 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { dealerId } = resolved;
 
   const admin = createAdminSupabaseClient();
+
+  // Schema reminder:
+  //   templates.dealer_id                        → dealers.dealer_id (TEXT)
+  //   dealer_template_assignments.dealer_id      → dealers.id        (UUID)
+  // The dealer_id surfaced by claims / ?dealer_id is the TEXT code, so the
+  // assignments query needs the dealer's UUID. Skip the lookup if the dealer
+  // row can't be resolved — assignments simply return empty.
+  const { data: dealerRow } = await admin
+    .from("dealers")
+    .select("id")
+    .eq("dealer_id", dealerId)
+    .maybeSingle<{ id: string }>();
+  const dealerUuid = dealerRow?.id ?? null;
+
   const [ownRes, asnRes] = await Promise.all([
     admin
       .from("templates")
       .select("*")
       .eq("dealer_id", dealerId)
       .order("created_at", { ascending: false }),
-    admin
-      .from("dealer_template_assignments")
-      .select("template_id, dealer_editable, group_id, assigned_at, group_templates:template_id(*)")
-      .eq("dealer_id", dealerId),
+    dealerUuid
+      ? admin
+          .from("dealer_template_assignments")
+          .select("template_id, dealer_editable, group_id, assigned_at, group_templates:template_id(*)")
+          .eq("dealer_id", dealerUuid)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
   ]);
 
   if (ownRes.error) {

@@ -98,19 +98,37 @@ export async function POST(
     return NextResponse.json({ error: upsertErr.message }, { status: 500 });
   }
 
-  // If dealer_editable=true, copy template to each dealer's own template library
+  // If dealer_editable=true, copy template to each dealer's own template
+  // library. templates.dealer_id is the TEXT dealer code (FK to
+  // dealers.dealer_id), while the dealer_ids array carries UUIDs (FK to
+  // dealers.id) — resolve UUID → text first or the insert fails the FK.
   if (dealer_editable) {
-    const copies = dealer_ids.map((dealer_id) => ({
-      dealer_id,
-      name: tpl.name,
-      document_type: tpl.document_type,
-      vehicle_types: tpl.vehicle_types,
-      template_json: tpl.template_json,
-      is_active: true,
-    }));
+    const { data: dealerTextRows } = await admin
+      .from("dealers")
+      .select("id, dealer_id")
+      .in("id", dealer_ids);
+    const uuidToText = new Map<string, string>(
+      (dealerTextRows ?? []).map((d: { id: string; dealer_id: string }) => [d.id, d.dealer_id]),
+    );
+    const copies = dealer_ids
+      .map((uuid) => {
+        const textId = uuidToText.get(uuid);
+        if (!textId) return null;
+        return {
+          dealer_id: textId,
+          name: tpl.name,
+          document_type: tpl.document_type,
+          vehicle_types: tpl.vehicle_types,
+          template_json: tpl.template_json,
+          is_active: true,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
 
-    // Use insert (not upsert) — dealer gets their own copy to edit
-    await admin.from("templates").insert(copies);
+    if (copies.length > 0) {
+      // Use insert (not upsert) — dealer gets their own copy to edit
+      await admin.from("templates").insert(copies);
+    }
   }
 
   return NextResponse.json({ ok: true, assigned: dealer_ids.length });
