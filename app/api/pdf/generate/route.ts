@@ -412,11 +412,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           ?? (settings[`default_${docKey}_cpo`] as string | null);
 
         if (templateId) {
-          const { data: tmpl } = await admin
+          // The selected default may be a dealer template OR a group
+          // template — dealer_settings.default_* no longer FK-references
+          // a specific table (migration 065). Try templates first, then
+          // fall through to group_templates.
+          let tmpl: { template_json: Record<string, unknown> } | null = null;
+          const ownRes = await admin
             .from("templates")
             .select("template_json")
             .eq("id", templateId)
             .maybeSingle<{ template_json: Record<string, unknown> }>();
+          tmpl = ownRes.data;
+          if (!tmpl) {
+            const grpRes = await admin
+              .from("group_templates")
+              .select("template_json")
+              .eq("id", templateId)
+              .maybeSingle<{ template_json: Record<string, unknown> }>();
+            tmpl = grpRes.data;
+          }
 
           if (tmpl?.template_json) {
             const tj = tmpl.template_json as {

@@ -335,11 +335,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
           if (templateId) {
             if (!templateCache.has(templateId)) {
-              const { data: tmpl } = await admin
+              // Default may be either a dealer template or a group_template
+              // (migration 065 drops the FK). Try templates first, fall back
+              // to group_templates so a group-template default still prints.
+              let tmpl: { template_json: Record<string, unknown> } | null = null;
+              const ownRes = await admin
                 .from("templates")
                 .select("template_json")
                 .eq("id", templateId)
                 .maybeSingle<{ template_json: Record<string, unknown> }>();
+              tmpl = ownRes.data;
+              if (!tmpl) {
+                const grpRes = await admin
+                  .from("group_templates")
+                  .select("template_json")
+                  .eq("id", templateId)
+                  .maybeSingle<{ template_json: Record<string, unknown> }>();
+                tmpl = grpRes.data;
+              }
               if (tmpl?.template_json) {
                 const tj = tmpl.template_json as {
                   widgets?: Record<string, Widget>;
