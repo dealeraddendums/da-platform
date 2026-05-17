@@ -12,6 +12,13 @@ type Props = {
   groupId: string | null;
   initialSettings: DealerSettingsRow | null;
   initialLogoUrl?: string | null;
+  /**
+   * dealers.group_controls_templates for the resolved dealer. When true and
+   * the viewer is a dealer-role, the Default Templates dropdowns render as
+   * read-only summary lines with a "Template managed by your group admin"
+   * note. group_admin / super_admin always retain edit access.
+   */
+  templatesLocked?: boolean;
 };
 
 type DealerOption = { id: string; dealer_id: string; name: string };
@@ -61,10 +68,15 @@ const NON_DEALER = [
 
 type DocTab = "addendum" | "infosheet" | "buyers_guide";
 
-export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, groupId, initialSettings, initialLogoUrl }: Props) {
+export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, groupId, initialSettings, initialLogoUrl, templatesLocked = false }: Props) {
   const isReadOnly = role === "dealer_user" || role === "dealer_restricted";
   const isAdminPicker = role === "super_admin" || role === "group_admin";
   const canEdit = role === "dealer_admin" || isAdminPicker;
+  // Default Templates section becomes read-only when the dealer's group has
+  // taken over template management, but only for dealer roles. Admins still
+  // edit normally so they can flip the flag back / change assignments.
+  const isDealerRole = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";
+  const templatesAreLocked = templatesLocked && isDealerRole;
 
   const [dealerId, setDealerId] = useState<string | null>(fixedDealerId);
   const [dealerUuid, setDealerUuid] = useState<string | null>(fixedDealerUuid);
@@ -583,30 +595,43 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
           {/* Addendum / Infosheet tab content */}
           {!isReadOnly && docTab !== "buyers_guide" && (
             <>
+              {templatesAreLocked && (
+                <div className="mb-3 px-3 py-2 rounded" style={{ background: "#fff8e1", border: "1px solid #ffe082", color: "#7a5c00", fontSize: 12, lineHeight: 1.5 }}>
+                  🔒 Template managed by your group admin
+                </div>
+              )}
               {(["new", "used", "cpo"] as const).map((vtype) => {
                 const key = `default_${docTab === "addendum" ? "addendum" : "infosheet"}_${vtype}` as keyof typeof settings;
                 const label = vtype === "new" ? "New Vehicles" : vtype === "used" ? "Used Vehicles" : "CPO Vehicles";
                 const filtered = templates.filter((t) => t.document_type === docTab);
+                const selectedId = (settings[key] as string | null) ?? "";
+                const selectedName = filtered.find((t) => t.id === selectedId)?.name ?? null;
                 return (
                   <div key={vtype} className="flex items-center gap-3 mb-3">
                     <label className="text-sm w-28 flex-shrink-0" style={{ color: "var(--text-secondary)" }}>
                       {label}
                     </label>
-                    <select
-                      key={`${key}-${templates.length}`}
-                      className="input flex-1"
-                      value={(settings[key] as string | null) ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, [key]: e.target.value || null }))}
-                    >
-                      <option value="">— No default —</option>
-                      {filtered.map((t) => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
+                    {templatesAreLocked ? (
+                      <div className="input flex-1" style={{ display: "flex", alignItems: "center", background: "#fafafa", color: selectedName ? "#333" : "#999", cursor: "not-allowed" }}>
+                        {selectedName ?? "— No default —"}
+                      </div>
+                    ) : (
+                      <select
+                        key={`${key}-${templates.length}`}
+                        className="input flex-1"
+                        value={selectedId}
+                        onChange={(e) => setSettings((s) => ({ ...s, [key]: e.target.value || null }))}
+                      >
+                        <option value="">— No default —</option>
+                        {filtered.map((t) => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 );
               })}
-              {templates.filter((t) => t.document_type === docTab).length === 0 && (
+              {!templatesAreLocked && templates.filter((t) => t.document_type === docTab).length === 0 && (
                 <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
                   No {docTab} templates saved yet. Create them in the Builder.
                 </p>

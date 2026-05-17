@@ -489,6 +489,21 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                             TEST
                           </span>
                         )}
+                        {d.group_controls_templates && (
+                          <span
+                            className="text-xs font-semibold px-2 py-0.5"
+                            style={{
+                              background: "#fff8e1",
+                              color: "#e65100",
+                              border: "1px solid #ffe082",
+                              borderRadius: 20,
+                              flexShrink: 0,
+                            }}
+                            title="Group controls templates — Builder hidden and Default Templates read-only for dealer roles"
+                          >
+                            🔒 Group
+                          </span>
+                        )}
                         <Link
                           href={`/dealers/${d.id}`}
                           title="View dealer profile"

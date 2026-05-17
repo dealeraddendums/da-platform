@@ -225,6 +225,8 @@ export type DealerRow = {
   shipping_zip: string | null;
   shipping_country: string;
   shipping_phone: string | null;
+  /** When true, the dealer's group_admin manages templates. Builder hidden and Default Templates read-only for dealer roles. (Migration 066) */
+  group_controls_templates: boolean;
   created_at: string;
   updated_at: string;
 };

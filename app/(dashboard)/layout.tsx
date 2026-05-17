@@ -63,15 +63,17 @@ export default async function DashboardLayout({
     }
   }
 
-  // ── Dealer name (dealer roles) ─────────────────────────────────────────────
+  // ── Dealer name + template-lock flag (dealer roles) ───────────────────────
   let dealerName: string | null = null;
+  let templatesLocked = false;
   if (isDealerRole && profile?.dealer_id) {
     const { data: dealerData } = await admin
       .from("dealers")
-      .select("name")
+      .select("name, group_controls_templates")
       .eq("dealer_id", profile.dealer_id)
-      .maybeSingle<{ name: string }>();
+      .maybeSingle<{ name: string; group_controls_templates: boolean | null }>();
     dealerName = dealerData?.name ?? null;
+    templatesLocked = Boolean(dealerData?.group_controls_templates);
   }
 
   // ── Group context (group_admin) ────────────────────────────────────────────
@@ -122,7 +124,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar role={sidebarRole} />
+      <Sidebar role={sidebarRole} hideBuilder={isDealerRole && templatesLocked} />
       <div className="flex flex-col flex-1 overflow-hidden">
         <ImpersonationBanner />
         <BuilderBreadcrumbProvider>

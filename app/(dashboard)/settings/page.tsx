@@ -37,15 +37,17 @@ export default async function SettingsPage() {
   let initialSettings: DealerSettingsRow | null = null;
   let fixedDealerUuid: string | null = null;
   let initialLogoUrl: string | null = null;
+  let templatesLocked = false;
   if (dealerId) {
     const [{ data: s }, { data: dRow }] = await Promise.all([
       admin.from("dealer_settings").select("*").eq("dealer_id", dealerId).single(),
-      admin.from("dealers").select("id, logo_url").eq("dealer_id", dealerId).maybeSingle(),
+      admin.from("dealers").select("id, logo_url, group_controls_templates").eq("dealer_id", dealerId).maybeSingle(),
     ]);
     initialSettings = (s as DealerSettingsRow | null) ?? null;
-    const dealerRow = dRow as { id: string; logo_url: string | null } | null;
+    const dealerRow = dRow as { id: string; logo_url: string | null; group_controls_templates: boolean | null } | null;
     fixedDealerUuid = dealerRow?.id ?? null;
     initialLogoUrl = dealerRow?.logo_url ?? null;
+    templatesLocked = Boolean(dealerRow?.group_controls_templates);
   }
 
   return (
@@ -61,6 +63,7 @@ export default async function SettingsPage() {
         groupId={profile?.group_id ?? null}
         initialSettings={initialSettings}
         initialLogoUrl={initialLogoUrl}
+        templatesLocked={templatesLocked}
       />
     </div>
   );

@@ -335,11 +335,16 @@ const nav: NavEntry[] = [
   },
 ];
 
-export default function Sidebar({ role = "dealer_user" }: { role?: UserRole | "group_user" }) {
+export default function Sidebar({ role = "dealer_user", hideBuilder = false }: { role?: UserRole | "group_user"; hideBuilder?: boolean }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const visibleNav = nav.filter((entry) => entry.roles.includes(role as UserRole));
+  // hideBuilder is set when the dealer's group has taken over template
+  // management (dealers.group_controls_templates = true) — Builder is then
+  // off-limits for dealer roles. group_admin / super_admin always see it.
+  const visibleNav = nav
+    .filter((entry) => entry.roles.includes(role as UserRole))
+    .filter((entry) => !(hideBuilder && "href" in entry && entry.href === "/builder"));
 
   function getIsActive(item: NavItem): boolean {
     if (item.disabled) return false;

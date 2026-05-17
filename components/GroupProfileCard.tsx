@@ -536,6 +536,20 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
     setRemoving(null);
   }
 
+  // Optimistic toggle for the per-dealer "group controls templates" flag.
+  // Reverts the local row if the PATCH fails.
+  async function toggleControlsTemplates(dealerUuid: string, next: boolean) {
+    setDealers((rows) => rows.map((r) => (r.id === dealerUuid ? { ...r, group_controls_templates: next } : r)));
+    const res = await fetch(`/api/groups/${groupId}/dealers/${dealerUuid}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ group_controls_templates: next }),
+    });
+    if (!res.ok) {
+      setDealers((rows) => rows.map((r) => (r.id === dealerUuid ? { ...r, group_controls_templates: !next } : r)));
+    }
+  }
+
   return (
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
@@ -585,7 +599,7 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-              {["Dealer ID", "Name", "Status", "Location", ""].map((h) => (
+              {["Dealer ID", "Name", "Status", "Location", "Controls Templates", ""].map((h) => (
                 <th key={h} className="text-left px-4 py-2.5 font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   {h}
                 </th>
@@ -637,6 +651,30 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
                 </td>
                 <td className="px-4 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>
                   {[d.city, d.state].filter(Boolean).join(", ") || "—"}
+                </td>
+                <td className="px-4 py-3">
+                  {(isSuperAdmin || isGroupAdmin) ? (
+                    <button
+                      onClick={() => void toggleControlsTemplates(d.id, !d.group_controls_templates)}
+                      title={d.group_controls_templates ? "ON — dealer cannot access Builder or change Default Templates" : "OFF — dealer self-manages templates"}
+                      aria-pressed={d.group_controls_templates}
+                      style={{
+                        width: 36, height: 20, borderRadius: 10, padding: 0, border: "none",
+                        background: d.group_controls_templates ? "#1976d2" : "#e0e0e0",
+                        position: "relative", transition: "background 150ms", cursor: "pointer",
+                      }}
+                    >
+                      <span style={{
+                        position: "absolute", top: 2, left: d.group_controls_templates ? 18 : 2,
+                        width: 16, height: 16, borderRadius: "50%", background: "#fff",
+                        transition: "left 150ms",
+                      }} />
+                    </button>
+                  ) : (
+                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                      {d.group_controls_templates ? "Yes" : "No"}
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {(isSuperAdmin || isGroupAdmin) ? (
