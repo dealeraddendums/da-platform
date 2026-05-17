@@ -611,6 +611,7 @@ function DisclaimersTab({ groupId }: { groupId: string }) {
   const [newText, setNewText] = useState("");
   const [newState, setNewState] = useState("ALL");
   const [newDocType, setNewDocType] = useState<string>("all");
+  const [newLocked, setNewLocked] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editFields, setEditFields] = useState<Partial<GroupDisclaimerRow>>({});
@@ -637,7 +638,7 @@ function DisclaimersTab({ groupId }: { groupId: string }) {
     const res = await fetch(`/api/group-disclaimers/${groupId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ disclaimer_text: newText.trim(), state_code: newState.trim().toUpperCase() || "ALL", document_type: newDocType }),
+      body: JSON.stringify({ disclaimer_text: newText.trim(), state_code: newState.trim().toUpperCase() || "ALL", document_type: newDocType, locked: newLocked }),
     });
     if (res.ok) {
       const json = await res.json() as { data: GroupDisclaimerRow };
@@ -645,6 +646,7 @@ function DisclaimersTab({ groupId }: { groupId: string }) {
       setNewText("");
       setNewState("ALL");
       setNewDocType("all");
+      setNewLocked(true);
       setShowAddForm(false);
     } else {
       const json = await res.json() as { error?: string };
@@ -746,6 +748,15 @@ function DisclaimersTab({ groupId }: { groupId: string }) {
               onChange={(e) => setNewText(e.target.value)}
             />
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={newLocked}
+              onChange={(e) => setNewLocked(e.target.checked)}
+              style={{ width: 14, height: 14, cursor: "pointer" }}
+            />
+            <span>🔒 Locked — dealers cannot remove or edit this disclaimer</span>
+          </label>
           <div className="flex gap-2">
             <button type="submit" className="btn btn-primary text-xs" style={{ height: 32 }} disabled={saving}>
               {saving ? "Saving…" : "Save Disclaimer"}
@@ -792,6 +803,13 @@ function DisclaimersTab({ groupId }: { groupId: string }) {
                     </span>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
+                    <span
+                      className="text-sm"
+                      title={d.locked ? "Locked — dealers cannot edit or remove" : "Unlocked — dealers may opt out"}
+                      style={{ lineHeight: 1, cursor: "help" }}
+                    >
+                      {d.locked ? "🔒" : "🔓"}
+                    </span>
                     <button
                       className="text-xs font-semibold px-2 py-0.5 rounded-full"
                       style={{
@@ -805,7 +823,7 @@ function DisclaimersTab({ groupId }: { groupId: string }) {
                     </button>
                     {!isEditing && (
                       <>
-                        <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => { setEditingId(d.id); setEditFields({ disclaimer_text: d.disclaimer_text, state_code: d.state_code, document_type: d.document_type }); }}>Edit</button>
+                        <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => { setEditingId(d.id); setEditFields({ disclaimer_text: d.disclaimer_text, state_code: d.state_code, document_type: d.document_type, locked: d.locked }); }}>Edit</button>
                         <button className="text-xs" style={{ color: "var(--error)" }} onClick={() => void deleteDisclaimer(d.id)}>Delete</button>
                       </>
                     )}
@@ -851,6 +869,15 @@ function DisclaimersTab({ groupId }: { groupId: string }) {
                       value={editFields.disclaimer_text ?? ""}
                       onChange={(e) => setEditFields((f) => ({ ...f, disclaimer_text: e.target.value }))}
                     />
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={editFields.locked ?? true}
+                        onChange={(e) => setEditFields((f) => ({ ...f, locked: e.target.checked }))}
+                        style={{ width: 14, height: 14, cursor: "pointer" }}
+                      />
+                      <span>{editFields.locked ?? true ? "🔒" : "🔓"} Locked — dealers cannot remove or edit this disclaimer</span>
+                    </label>
                   </div>
                 ) : (
                   <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>

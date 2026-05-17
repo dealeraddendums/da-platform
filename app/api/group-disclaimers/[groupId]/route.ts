@@ -36,7 +36,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = await req.json() as { disclaimer_text?: string; state_code?: string; document_type?: string };
+  const body = await req.json() as { disclaimer_text?: string; state_code?: string; document_type?: string; locked?: boolean };
   if (!body.disclaimer_text?.trim()) {
     return NextResponse.json({ error: "disclaimer_text required" }, { status: 400 });
   }
@@ -49,6 +49,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       disclaimer_text: body.disclaimer_text.trim(),
       state_code: body.state_code?.toUpperCase().trim() ?? "ALL",
       document_type: body.document_type ?? "all",
+      locked: body.locked ?? true,
     })
     .select("*")
     .single();

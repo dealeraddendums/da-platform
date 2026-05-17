@@ -18,7 +18,7 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
   }
 
   const body = await req.json() as Record<string, unknown>;
-  const allowed = ["disclaimer_text", "state_code", "document_type", "active"];
+  const allowed = ["disclaimer_text", "state_code", "document_type", "active", "locked"];
   const patch = Object.fromEntries(Object.entries(body).filter(([k]) => allowed.includes(k)));
   if (patch.state_code) patch.state_code = (patch.state_code as string).toUpperCase().trim();
 

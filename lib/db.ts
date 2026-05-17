@@ -860,6 +860,7 @@ export type GroupDisclaimerRow = {
   document_type: string;
   disclaimer_text: string;
   active: boolean;
+  locked: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -870,6 +871,7 @@ type GroupDisclaimerInsert = {
   document_type?: string;
   disclaimer_text: string;
   active?: boolean;
+  locked?: boolean;
 };
 
 type GroupDisclaimerUpdate = {
@@ -877,6 +879,7 @@ type GroupDisclaimerUpdate = {
   document_type?: string;
   disclaimer_text?: string;
   active?: boolean;
+  locked?: boolean;
   updated_at?: string;
 };
 
