@@ -197,12 +197,14 @@ export async function DELETE(
   const admin = createAdminSupabaseClient();
 
   // Load the dealer first so we can verify is_test and grab the text dealer_id
-  // (needed for the non-FK-cascading dealer_vehicles delete).
+  // (needed for the non-FK-cascading dealer_vehicles delete). billing_customer_id
+  // + internal_id are read so we can archive the da-billing customer after the
+  // delete completes.
   const { data: dealer, error: loadErr } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, is_test")
+    .select("id, dealer_id, name, is_test, billing_customer_id, internal_id")
     .eq("id", params.id)
-    .maybeSingle<{ id: string; dealer_id: string; name: string; is_test: boolean }>();
+    .maybeSingle<{ id: string; dealer_id: string; name: string; is_test: boolean; billing_customer_id: string | null; internal_id: string | null }>();
 
   if (loadErr) return NextResponse.json({ error: loadErr.message }, { status: 500 });
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
@@ -270,6 +272,21 @@ export async function DELETE(
     .eq("id", dealer.id);
   if (dbError) {
     return NextResponse.json({ error: dbError.message }, { status: 500 });
+  }
+
+  // ── Archive in da-billing so the customer + invoice history are preserved ─
+  // Hard-delete in the platform → soft-archive in da-billing. Prefer
+  // billing_customer_id (platform-created dealers); fall back to internal_id
+  // (legacy migrated dealers). Fire-and-forget — never fail the dealer
+  // delete if archive call fails; the error lands in billing_sync_errors.
+  if (billingConfigured()) {
+    const customerKey = dealer.billing_customer_id ?? dealer.internal_id;
+    if (customerKey) {
+      fireAndForget(
+        () => archiveCustomer(customerKey),
+        { event: "billing.customer.archive", dealerId: dealer.id, payload: { customerKey, reason: "dealer_deleted" } },
+      );
+    }
   }
 
   // ── Audit log (best-effort — don't fail the response if it errors) ───────
