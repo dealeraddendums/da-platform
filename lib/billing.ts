@@ -237,3 +237,29 @@ export async function lookupPrice(productName: string): Promise<number | null> {
   const match = entries.find(e => e.name.toLowerCase() === productName.toLowerCase());
   return match ? match.price : null;
 }
+
+/**
+ * Map a DA Platform dealers.account_type to the da-billing subscription
+ * product name. Returns null for trial/free/inactive accounts that shouldn't
+ * have a recurring template created. da-billing is the canonical price
+ * book — adjust here only if a product label changes in da-billing's
+ * Settings → Pricing tab.
+ */
+export function subscriptionProductNameFor(accountType: string | null | undefined): string | null {
+  if (!accountType) return null;
+  const a = accountType.trim().toLowerCase();
+  if (a === "manual") return "Monthly Subscription Manual";
+  if (a === "automatic web" || a === "automatic_web") return "Monthly Subscription Automatic Web";
+  if (a === "automatic dms" || a === "automatic_dms") return "Monthly Subscription Automatic DMS";
+  // Trial / Free / Inactive / anything else → no template.
+  return null;
+}
+
+/**
+ * First-of-next-month ISO date string (YYYY-MM-DD) — used as the
+ * nextInvoiceDate for a fresh subscription template.
+ */
+export function firstOfNextMonthIso(now: Date = new Date()): string {
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return next.toISOString().slice(0, 10);
+}

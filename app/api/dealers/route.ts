@@ -3,7 +3,14 @@ import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerUpdate } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
-import { createCustomer, billingConfigured } from "@/lib/billing";
+import {
+  createCustomer,
+  createTemplate,
+  lookupPrice,
+  subscriptionProductNameFor,
+  firstOfNextMonthIso,
+  billingConfigured,
+} from "@/lib/billing";
 import { runSync } from "@/lib/billing-sync";
 
 interface NewBillingCustomerArgs {
@@ -11,6 +18,7 @@ interface NewBillingCustomerArgs {
   dealerUuid: string;
   name: string;
   company: string;
+  accountType: string | null;
   email?: string;
   address?: string;
   phone?: string;
@@ -18,16 +26,23 @@ interface NewBillingCustomerArgs {
 }
 
 /**
- * Event 1: create a da-billing customer for a newly-created dealer and
- * persist the returned UUID. Fire-and-forget — never blocks the API
- * response. Failures land in billing_sync_errors.
+ * Event 1: create a da-billing customer for a newly-created dealer, save
+ * the returned UUID, then create the recurring subscription template
+ * using the price looked up from da-billing's Pricing settings (so a
+ * single price change in da-billing applies to every dealer instantly).
+ * Trial / Free / Inactive account types skip the template step.
+ *
+ * Fire-and-forget — never blocks the API response. Failures land in
+ * billing_sync_errors with the specific event_type so super_admin can
+ * retry just the failing step.
  */
 async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promise<void> {
   if (!billingConfigured()) {
     console.warn("[dealers POST] BILLING_API_KEY not set — skipping da-billing customer create");
     return;
   }
-  const result = await runSync(
+  // Step A: create customer + persist UUID.
+  const customerResult = await runSync(
     async () => {
       const cust = await createCustomer({
         name: args.name,
@@ -51,9 +66,31 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
       dealerId: args.dealerUuid,
     },
   );
-  if (!result.ok) {
-    // Already logged by runSync; nothing else to do.
-  }
+  if (!customerResult.ok) return;
+
+  // Step B: create recurring template (skipped for trial/free/inactive).
+  const productName = subscriptionProductNameFor(args.accountType);
+  if (!productName) return;
+
+  await runSync(
+    async () => {
+      const price = await lookupPrice(productName);
+      if (price == null) {
+        throw new Error(`No da-billing price entry for "${productName}"`);
+      }
+      await createTemplate({
+        customerId: customerResult.data.id,
+        products: [{ name: productName, qty: 1, price }],
+        nextInvoiceDate: firstOfNextMonthIso(),
+        scheduleInterval: "monthly",
+      });
+    },
+    {
+      event: "billing.template.create",
+      payload: { dealerUuid: args.dealerUuid, customerId: customerResult.data.id, productName },
+      dealerId: args.dealerUuid,
+    },
+  );
 }
 
 // Strip HTML tags from dealer names
@@ -343,6 +380,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       dealerUuid: createdDealerId,
       name: ((rest.primary_contact as string | null) ?? name).trim(),
       company: name.trim(),
+      accountType: (createdDealer.account_type as string | null) ?? null,
       email: (rest.primary_contact_email as string | null) ?? undefined,
       address: (rest.address as string | null) ?? undefined,
       phone: (rest.phone as string | null) ?? undefined,
