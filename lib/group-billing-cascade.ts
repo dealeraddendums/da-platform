@@ -23,7 +23,7 @@ interface DealerSnap {
   id: string;                // dealers.id UUID
   name: string;
   billing_customer_id: string | null;
-  internal_id: string | null;
+  internal_id: string | null;  // da-billing _ID (stable, used to tag line items)
   subscription_billed_to: "dealer" | "group";
   labels_billed_to: "dealer" | "group";
   account_type: string | null;
@@ -92,14 +92,18 @@ export async function cascadeOnGroupAssign(args: {
   if (!groupCustomerId) return;
 
   // Add a subscription line item to the group's template tagged with
-  // cascadeFromDealer = dealer.id so we can remove it cleanly on un-assign.
+  // "{dealer.internal_id}::{dealer.name}" — same convention as the
+  // dealer's own subscription line and the existing label-order flow.
+  // da-billing's UI uses the internal_id portion to link the line to
+  // the dealer. Without internal_id we can't safely cascade — bail.
+  if (!dealer.internal_id) return;
   const subscriptionName = `Subscription — ${dealer.name}${dealer.account_type ? ` (${dealer.account_type})` : ""}`;
   await appendToTemplate(groupCustomerId, [
     {
       name: subscriptionName,
-      qty: 1,
-      price: 0, // price is the group admin's decision — left at 0 here, edit in da-billing
-      lineItemDescription: `cascadeFromDealer:${dealer.id}`,
+      quantity: 1,
+      price: 0, // group admin sets the actual price in da-billing
+      lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
     } as BillingProduct & { lineItemDescription: string },
   ]);
 
@@ -124,18 +128,27 @@ export async function cascadeOnGroupUnassign(args: {
   groupId: string;
 }): Promise<void> {
   const admin = createAdminSupabaseClient();
-  const { data: group } = await admin
-    .from("groups")
-    .select("id, name, billing_customer_id")
-    .eq("id", args.groupId)
-    .maybeSingle<GroupSnap>();
-  if (!group?.billing_customer_id) return;
+  const [{ data: dealer }, { data: group }] = await Promise.all([
+    admin
+      .from("dealers")
+      .select("internal_id")
+      .eq("id", args.dealerUuid)
+      .maybeSingle<{ internal_id: string | null }>(),
+    admin
+      .from("groups")
+      .select("id, name, billing_customer_id")
+      .eq("id", args.groupId)
+      .maybeSingle<GroupSnap>(),
+  ]);
+  if (!group?.billing_customer_id || !dealer?.internal_id) return;
 
   const current = await getTemplate(group.billing_customer_id);
   if (!current) return;
-  const tag = `cascadeFromDealer:${args.dealerUuid}`;
+  // Strip any line items tagged "<internal_id>::*" — same prefix used by
+  // cascadeOnGroupAssign and the label-order flow when labels_billed_to=group.
+  const prefix = `${dealer.internal_id}::`;
   const remaining = current.products.filter(
-    (p) => !(p as BillingProduct & { lineItemDescription?: string }).lineItemDescription?.includes(tag),
+    (p) => !(p as BillingProduct & { lineItemDescription?: string }).lineItemDescription?.startsWith(prefix),
   );
   if (remaining.length !== current.products.length) {
     await putTemplate(group.billing_customer_id, remaining);

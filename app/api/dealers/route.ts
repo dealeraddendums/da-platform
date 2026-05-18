@@ -16,8 +16,12 @@ import { runSync } from "@/lib/billing-sync";
 interface NewBillingCustomerArgs {
   adminClient: ReturnType<typeof createAdminSupabaseClient>;
   dealerUuid: string;
-  name: string;
-  company: string;
+  /** Dealer's internal_id (the auto-generated billing _ID timestamp). Used to tag the subscription line item via lineItemDescription. */
+  dealerInternalId: string;
+  /** Dealer name; used in lineItemDescription + as customer company. */
+  dealerName: string;
+  /** Primary contact name → da-billing customer `name`. */
+  contactName: string;
   accountType: string | null;
   email?: string;
   address?: string;
@@ -45,8 +49,8 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
   const customerResult = await runSync(
     async () => {
       const cust = await createCustomer({
-        name: args.name,
-        company: args.company,
+        name: args.contactName,
+        company: args.dealerName,
         email: args.email,
         address: args.address,
         phone: args.phone,
@@ -62,16 +66,19 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
     },
     {
       event: "billing.customer.create",
-      payload: { dealerUuid: args.dealerUuid, name: args.name, company: args.company },
+      payload: { dealerUuid: args.dealerUuid, contact: args.contactName, company: args.dealerName },
       dealerId: args.dealerUuid,
     },
   );
   if (!customerResult.ok) return;
 
   // Step B: create recurring template (skipped for trial/free/inactive).
-  // da-billing's /pricing endpoint is keyed by short id ("sub-manual" etc.)
-  // and templates take both a productId (for cascading price updates from
-  // da-billing's Settings → Pricing tab) and a friendly product name.
+  // da-billing's /pricing endpoint is keyed by short id ("sub-manual" etc.).
+  // Templates take productId (for the cascading price update from da-billing's
+  // Settings → Pricing tab), `quantity` (the UI form reads this, not `qty`),
+  // and lineItemDescription="<internal_id>::<dealer_name>" so the line is
+  // attributable to a specific dealer — same convention the existing label
+  // order flow already uses.
   const descriptor = subscriptionDescriptorFor(args.accountType);
   if (!descriptor) return;
 
@@ -83,7 +90,13 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
       }
       await createTemplate({
         customerId: customerResult.data.id,
-        products: [{ productId: descriptor.key, name: descriptor.name, qty: 1, price }],
+        products: [{
+          productId: descriptor.key,
+          name: descriptor.name,
+          quantity: 1,
+          price,
+          lineItemDescription: `${args.dealerInternalId}::${args.dealerName}`,
+        }],
         nextInvoiceDate: firstOfNextMonthIso(),
         scheduleInterval: "monthly",
       });
@@ -385,8 +398,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     void fireAndForgetCustomerCreate({
       adminClient: admin,
       dealerUuid: createdDealerId,
-      name: ((rest.primary_contact as string | null) ?? name).trim(),
-      company: name.trim(),
+      dealerInternalId: internalId,
+      dealerName: name.trim(),
+      contactName: ((rest.primary_contact as string | null) ?? name).trim(),
       accountType: (createdDealer.account_type as string | null) ?? null,
       email: (rest.primary_contact_email as string | null) ?? undefined,
       address: (rest.address as string | null) ?? undefined,
