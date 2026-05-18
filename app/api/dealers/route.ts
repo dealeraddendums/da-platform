@@ -7,7 +7,7 @@ import {
   createCustomer,
   createTemplate,
   lookupPrice,
-  subscriptionProductNameFor,
+  subscriptionDescriptorFor,
   firstOfNextMonthIso,
   billingConfigured,
 } from "@/lib/billing";
@@ -69,25 +69,32 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
   if (!customerResult.ok) return;
 
   // Step B: create recurring template (skipped for trial/free/inactive).
-  const productName = subscriptionProductNameFor(args.accountType);
-  if (!productName) return;
+  // da-billing's /pricing endpoint is keyed by short id ("sub-manual" etc.)
+  // and templates take both a productId (for cascading price updates from
+  // da-billing's Settings → Pricing tab) and a friendly product name.
+  const descriptor = subscriptionDescriptorFor(args.accountType);
+  if (!descriptor) return;
 
   await runSync(
     async () => {
-      const price = await lookupPrice(productName);
+      const price = await lookupPrice(descriptor.key);
       if (price == null) {
-        throw new Error(`No da-billing price entry for "${productName}"`);
+        throw new Error(`No da-billing price entry for "${descriptor.key}"`);
       }
       await createTemplate({
         customerId: customerResult.data.id,
-        products: [{ name: productName, qty: 1, price }],
+        products: [{ productId: descriptor.key, name: descriptor.name, qty: 1, price }],
         nextInvoiceDate: firstOfNextMonthIso(),
         scheduleInterval: "monthly",
       });
     },
     {
       event: "billing.template.create",
-      payload: { dealerUuid: args.dealerUuid, customerId: customerResult.data.id, productName },
+      payload: {
+        dealerUuid: args.dealerUuid,
+        customerId: customerResult.data.id,
+        productKey: descriptor.key,
+      },
       dealerId: args.dealerUuid,
     },
   );

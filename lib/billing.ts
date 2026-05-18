@@ -201,6 +201,12 @@ export interface BillingPriceEntry {
 let pricingCache: { fetchedAt: number; entries: BillingPriceEntry[] } | null = null;
 const PRICING_TTL_MS = 60 * 60 * 1000; // 1 hour
 
+/**
+ * Parse the /pricing response. Verified shape (2026-05-18):
+ *   { "pricing": { "sub-manual": 100, "sub-auto-web": 150, "sub-auto-dms": 200 } }
+ * Falls back to legacy array shapes ({data: [...]}, {products: [...]})
+ * just in case da-billing renames things later.
+ */
 export async function getPricing(): Promise<BillingPriceEntry[]> {
   const now = Date.now();
   if (pricingCache && now - pricingCache.fetchedAt < PRICING_TTL_MS) {
@@ -210,21 +216,33 @@ export async function getPricing(): Promise<BillingPriceEntry[]> {
   const text = await readBody(res);
   if (!res.ok) throw new BillingError(res.status, `getPricing ${res.status}`, text);
   try {
-    const parsed = JSON.parse(text);
-    // Be permissive about shape: array, { data: [...] }, { products: [...] }.
-    const list: unknown[] = Array.isArray(parsed)
-      ? parsed
-      : (parsed?.data ?? parsed?.products ?? []);
-    const entries = list
-      .map((r): BillingPriceEntry | null => {
-        const row = r as Record<string, unknown>;
-        const name = (row.name ?? row.productName ?? row.label) as string | undefined;
-        const priceRaw = row.price ?? row.amount ?? row.unitPrice;
-        const price = typeof priceRaw === "number" ? priceRaw : parseFloat(String(priceRaw ?? "NaN"));
-        if (!name || !Number.isFinite(price)) return null;
-        return { name, price };
-      })
-      .filter((x): x is BillingPriceEntry => x !== null);
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const map = (parsed?.pricing ?? null) as Record<string, unknown> | null;
+    let entries: BillingPriceEntry[] = [];
+    if (map && typeof map === "object" && !Array.isArray(map)) {
+      entries = Object.entries(map)
+        .map(([k, v]): BillingPriceEntry | null => {
+          const price = typeof v === "number" ? v : parseFloat(String(v ?? "NaN"));
+          if (!Number.isFinite(price)) return null;
+          return { name: k, price };
+        })
+        .filter((x): x is BillingPriceEntry => x !== null);
+    } else {
+      // Legacy array fallback.
+      const list: unknown[] = Array.isArray(parsed)
+        ? parsed
+        : (parsed?.data as unknown[] ?? parsed?.products as unknown[] ?? []);
+      entries = list
+        .map((r): BillingPriceEntry | null => {
+          const row = r as Record<string, unknown>;
+          const name = (row.name ?? row.productName ?? row.label ?? row.id) as string | undefined;
+          const priceRaw = row.price ?? row.amount ?? row.unitPrice;
+          const price = typeof priceRaw === "number" ? priceRaw : parseFloat(String(priceRaw ?? "NaN"));
+          if (!name || !Number.isFinite(price)) return null;
+          return { name, price };
+        })
+        .filter((x): x is BillingPriceEntry => x !== null);
+    }
     pricingCache = { fetchedAt: now, entries };
     return entries;
   } catch (err) {
@@ -232,32 +250,54 @@ export async function getPricing(): Promise<BillingPriceEntry[]> {
   }
 }
 
-export async function lookupPrice(productName: string): Promise<number | null> {
+export async function lookupPrice(productKey: string): Promise<number | null> {
   const entries = await getPricing();
-  const match = entries.find(e => e.name.toLowerCase() === productName.toLowerCase());
+  const match = entries.find(e => e.name.toLowerCase() === productKey.toLowerCase());
   return match ? match.price : null;
 }
 
 /**
- * Map a DA Platform dealers.account_type to the da-billing subscription
- * product name. Accepts both short forms ("Manual", "Automatic Web",
- * "automatic_dms") and full product names already in da-billing form
- * ("Monthly Subscription Manual") since both shapes appear in the
- * platform today. Returns null for trial / free / inactive / unknown so
- * the template-create step is skipped.
+ * Descriptor for the three monthly subscription tiers as exposed by
+ * da-billing. `key` is the lookup id used in /pricing and as the
+ * productId on template line items. `name` is the human-readable label
+ * shown in da-billing's UI + invoices.
  */
-export function subscriptionProductNameFor(accountType: string | null | undefined): string | null {
+export interface SubscriptionDescriptor {
+  key: "sub-manual" | "sub-auto-web" | "sub-auto-dms";
+  name: string;
+}
+
+const SUBSCRIPTION_TIERS: Record<string, SubscriptionDescriptor> = {
+  "sub-manual":   { key: "sub-manual",   name: "Monthly Subscription Manual" },
+  "sub-auto-web": { key: "sub-auto-web", name: "Monthly Subscription Automatic Web" },
+  "sub-auto-dms": { key: "sub-auto-dms", name: "Monthly Subscription Automatic DMS" },
+};
+
+/**
+ * Map a DA Platform dealers.account_type to the da-billing subscription
+ * descriptor. Accepts both short forms ("Manual"), snake_case
+ * ("automatic_dms"), and full product names ("Monthly Subscription
+ * Manual"). Returns null for trial / free / inactive / unknown so the
+ * template-create step is skipped.
+ */
+export function subscriptionDescriptorFor(accountType: string | null | undefined): SubscriptionDescriptor | null {
   if (!accountType) return null;
   const a = accountType.trim().toLowerCase();
-  // Full da-billing names (account_type stored as the product label).
-  if (a === "monthly subscription manual") return "Monthly Subscription Manual";
-  if (a === "monthly subscription automatic web") return "Monthly Subscription Automatic Web";
-  if (a === "monthly subscription automatic dms") return "Monthly Subscription Automatic DMS";
-  // Short forms.
-  if (a === "manual") return "Monthly Subscription Manual";
-  if (a === "automatic web" || a === "automatic_web") return "Monthly Subscription Automatic Web";
-  if (a === "automatic dms" || a === "automatic_dms") return "Monthly Subscription Automatic DMS";
-  // Trial / Free / Inactive / anything else → no template.
+  if (a === "manual" || a === "monthly subscription manual" || a === "sub-manual") {
+    return SUBSCRIPTION_TIERS["sub-manual"];
+  }
+  if (
+    a === "automatic web" || a === "automatic_web" ||
+    a === "monthly subscription automatic web" || a === "sub-auto-web"
+  ) {
+    return SUBSCRIPTION_TIERS["sub-auto-web"];
+  }
+  if (
+    a === "automatic dms" || a === "automatic_dms" ||
+    a === "monthly subscription automatic dms" || a === "sub-auto-dms"
+  ) {
+    return SUBSCRIPTION_TIERS["sub-auto-dms"];
+  }
   return null;
 }
 
