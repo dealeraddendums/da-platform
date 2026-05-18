@@ -57,12 +57,24 @@ function subscriptionLabel(accountType: string | null): string {
 
 const MIN_DATE = new Date("2015-01-01").getTime();
 
-function fmtCreated(legacyId: number | null | undefined): string {
-  if (!legacyId || legacyId <= 0) return "Very old";
-  const ms = legacyId * 1000;
-  if (ms < MIN_DATE || ms > Date.now()) return "Very old";
-  const d = new Date(ms);
-  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+function fmtCreated(legacyId: number | null | undefined, createdAt?: string | null): string {
+  // Legacy migrated dealers carry a Unix-seconds legacy_id from Aurora; that
+  // gives us the original onboard date. Platform-created dealers have
+  // legacy_id = null, so fall back to dealers.created_at for those.
+  if (legacyId && legacyId > 0) {
+    const ms = legacyId * 1000;
+    if (ms >= MIN_DATE && ms <= Date.now()) {
+      const d = new Date(ms);
+      return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+    }
+  }
+  if (createdAt) {
+    const d = new Date(createdAt);
+    if (!Number.isNaN(d.getTime())) {
+      return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+    }
+  }
+  return "Very old";
 }
 
 export default function DealerList({ role = "dealer_user" }: { role?: string }) {
@@ -535,7 +547,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                       {d.last_30_prints.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
-                      {fmtCreated(d.legacy_id)}
+                      {fmtCreated(d.legacy_id, d.created_at)}
                     </td>
                     {role === "super_admin" && (
                       <td className="px-4 py-3 text-center">
