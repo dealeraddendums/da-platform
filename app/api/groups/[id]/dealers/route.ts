@@ -3,6 +3,7 @@ import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 // requireSuperAdmin is used only for POST (assign dealer)
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
+import { fireGroupAssignCascade, fireGroupUnassignCascade } from "@/lib/group-billing-cascade";
 
 type Params = { params: { id: string } };
 
@@ -78,6 +79,11 @@ export async function POST(
     );
   }
 
+  // Event 3: cascade billing config to the group if the dealer is flagged
+  // subscription_billed_to='group'. Fire-and-forget; failures land in
+  // billing_sync_errors for super_admin review.
+  fireGroupAssignCascade(body.dealer_id, params.id);
+
   return NextResponse.json({ data: data as DealerRow });
 }
 
@@ -127,7 +133,11 @@ export async function DELETE(
 
   const { data, error: dbError } = await admin
     .from("dealers")
-    .update({ group_id: null })
+    // Reset billing-flow flags to defaults on the way out so re-assigning
+    // to a different group starts clean. Group_controls_templates is left
+    // alone — it's an admin-managed flag, not part of billing cascade.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .update({ group_id: null, subscription_billed_to: "dealer", labels_billed_to: "dealer" } as any)
     .eq("id", body.dealer_id)
     .select()
     .single();
@@ -138,6 +148,10 @@ export async function DELETE(
       { status: dbError ? 500 : 404 }
     );
   }
+
+  // Event 4: remove any cascadeFromDealer:<uuid> line items from the
+  // group's template. Fire-and-forget.
+  fireGroupUnassignCascade(body.dealer_id, params.id);
 
   return NextResponse.json({ data: data as DealerRow });
 }

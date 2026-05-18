@@ -3,6 +3,58 @@ import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerUpdate } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
+import { createCustomer, billingConfigured } from "@/lib/billing";
+import { runSync } from "@/lib/billing-sync";
+
+interface NewBillingCustomerArgs {
+  adminClient: ReturnType<typeof createAdminSupabaseClient>;
+  dealerUuid: string;
+  name: string;
+  company: string;
+  email?: string;
+  address?: string;
+  phone?: string;
+  state?: string;
+}
+
+/**
+ * Event 1: create a da-billing customer for a newly-created dealer and
+ * persist the returned UUID. Fire-and-forget — never blocks the API
+ * response. Failures land in billing_sync_errors.
+ */
+async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promise<void> {
+  if (!billingConfigured()) {
+    console.warn("[dealers POST] BILLING_API_KEY not set — skipping da-billing customer create");
+    return;
+  }
+  const result = await runSync(
+    async () => {
+      const cust = await createCustomer({
+        name: args.name,
+        company: args.company,
+        email: args.email,
+        address: args.address,
+        phone: args.phone,
+        state: args.state,
+        isGroup: false,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (args.adminClient as any)
+        .from("dealers")
+        .update({ billing_customer_id: cust.id })
+        .eq("id", args.dealerUuid);
+      return cust;
+    },
+    {
+      event: "billing.customer.create",
+      payload: { dealerUuid: args.dealerUuid, name: args.name, company: args.company },
+      dealerId: args.dealerUuid,
+    },
+  );
+  if (!result.ok) {
+    // Already logged by runSync; nothing else to do.
+  }
+}
 
 // Strip HTML tags from dealer names
 function sanitizeName(name: string | null | undefined): string {
@@ -275,6 +327,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Geocode the new dealer's address if coordinates are missing
   void geocodeDealer(admin, data as { id: string; lat: unknown; lng: unknown }, rest);
+
+  // Event 1: provision a da-billing customer for the new dealer (fire-and-forget).
+  // Skipped when the dealer was migrated from legacy (internal_id already set
+  // — those map to existing customer records that were created in FreshBooks
+  // and back-imported into da-billing under that ID). New platform-created
+  // dealers have null internal_id; we create the customer on demand and save
+  // the UUID in billing_customer_id.
+  const createdDealer = data as Record<string, unknown>;
+  const createdDealerId = createdDealer.id as string;
+  const hasLegacyBilling = Boolean(createdDealer.internal_id);
+  if (!hasLegacyBilling) {
+    void fireAndForgetCustomerCreate({
+      adminClient: admin,
+      dealerUuid: createdDealerId,
+      name: ((rest.primary_contact as string | null) ?? name).trim(),
+      company: name.trim(),
+      email: (rest.primary_contact_email as string | null) ?? undefined,
+      address: (rest.address as string | null) ?? undefined,
+      phone: (rest.phone as string | null) ?? undefined,
+      state: (rest.state as string | null) ?? undefined,
+    });
+  }
 
   if (username?.trim() && password?.trim()) {
     const rawUsername = username.trim();

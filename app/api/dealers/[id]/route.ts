@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
+import { archiveCustomer, unarchiveCustomer, billingConfigured } from "@/lib/billing";
+import { fireAndForget } from "@/lib/billing-sync";
 
 type Params = { params: { id: string } };
 
@@ -109,6 +111,22 @@ export async function PATCH(
   if (body.inventory_dealer_id !== undefined && claims.role === "super_admin") {
     patch.inventory_dealer_id = body.inventory_dealer_id;
   }
+  // Snapshot the active flag + billing customer id before update so we can
+  // detect transitions (true→false, false→true) and fire Event 5.
+  let prevActive: boolean | null = null;
+  let billingCustomerId: string | null = null;
+  let legacyBillingId: string | null = null;
+  if (typeof patch.active === "boolean") {
+    const { data: snap } = await admin
+      .from("dealers")
+      .select("active, billing_customer_id, internal_id")
+      .eq("id", params.id)
+      .maybeSingle<{ active: boolean; billing_customer_id: string | null; internal_id: string | null }>();
+    prevActive = snap?.active ?? null;
+    billingCustomerId = snap?.billing_customer_id ?? null;
+    legacyBillingId = snap?.internal_id ?? null;
+  }
+
   const { data, error: dbError } = await admin
     .from("dealers")
     .update(patch)
@@ -121,6 +139,31 @@ export async function PATCH(
       { error: dbError?.message ?? "Dealer not found" },
       { status: dbError ? 500 : 404 }
     );
+  }
+
+  // Event 5: archive/unarchive in da-billing on active flag transition.
+  // Prefer billing_customer_id (new platform dealers); fall back to
+  // internal_id (legacy migrated dealers). Skip if both are null.
+  if (
+    typeof patch.active === "boolean"
+    && prevActive !== null
+    && patch.active !== prevActive
+    && billingConfigured()
+  ) {
+    const customerKey = billingCustomerId ?? legacyBillingId;
+    if (customerKey) {
+      if (patch.active === false) {
+        fireAndForget(
+          () => archiveCustomer(customerKey),
+          { event: "billing.customer.archive", dealerId: params.id, payload: { customerKey } },
+        );
+      } else {
+        fireAndForget(
+          () => unarchiveCustomer(customerKey),
+          { event: "billing.customer.unarchive", dealerId: params.id, payload: { customerKey } },
+        );
+      }
+    }
   }
 
   return NextResponse.json({ data: data as DealerRow });

@@ -599,7 +599,7 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-              {["Dealer ID", "Name", "Status", "Location", "Controls Templates", ""].map((h) => (
+              {["Dealer ID", "Name", "Status", "Location", "Controls Templates", "Subscription", "Labels", ""].map((h) => (
                 <th key={h} className="text-left px-4 py-2.5 font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   {h}
                 </th>
@@ -675,6 +675,36 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
                       {d.group_controls_templates ? "Yes" : "No"}
                     </span>
                   )}
+                </td>
+                <td className="px-4 py-3">
+                  <BillingRoutingCell
+                    field="subscription_billed_to"
+                    value={d.subscription_billed_to}
+                    canEdit={isSuperAdmin || isGroupAdmin}
+                    onSave={async (v) => {
+                      await fetch(`/api/groups/${groupId}/dealers/${d.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ subscription_billed_to: v }),
+                      });
+                      setDealers((rs) => rs.map((r) => r.id === d.id ? { ...r, subscription_billed_to: v } : r));
+                    }}
+                  />
+                </td>
+                <td className="px-4 py-3">
+                  <BillingRoutingCell
+                    field="labels_billed_to"
+                    value={d.labels_billed_to}
+                    canEdit={isSuperAdmin || isGroupAdmin}
+                    onSave={async (v) => {
+                      await fetch(`/api/groups/${groupId}/dealers/${d.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ labels_billed_to: v }),
+                      });
+                      setDealers((rs) => rs.map((r) => r.id === d.id ? { ...r, labels_billed_to: v } : r));
+                    }}
+                  />
                 </td>
                 <td className="px-4 py-3 text-right">
                   {(isSuperAdmin || isGroupAdmin) ? (
@@ -948,5 +978,69 @@ function Field({ label, value, view, editing, onChange, type = "text", required,
           : (view || <span style={{ color: "var(--text-muted)" }}>—</span>)}
       </span>
     </div>
+  );
+}
+
+// ── Billing routing cell (Member Dealers table — Subscription/Labels) ────────
+
+function BillingRoutingCell({
+  value,
+  canEdit,
+  onSave,
+}: {
+  field: "subscription_billed_to" | "labels_billed_to";
+  value: "dealer" | "group";
+  canEdit: boolean;
+  onSave: (v: "dealer" | "group") => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  if (!canEdit) {
+    return (
+      <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+        {value === "group" ? "Group" : "Dealer"}
+      </span>
+    );
+  }
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        title="Click to change billing target"
+        style={{
+          fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 10,
+          background: value === "group" ? "#e3f2fd" : "#f5f6f7",
+          color: value === "group" ? "#1565c0" : "var(--text-secondary)",
+          border: `1px solid ${value === "group" ? "#bbdefb" : "#e0e0e0"}`,
+          cursor: "pointer", fontFamily: "inherit",
+        }}
+      >
+        {value === "group" ? "Group" : "Dealer"} ✎
+      </button>
+    );
+  }
+
+  return (
+    <select
+      autoFocus
+      defaultValue={value}
+      disabled={saving}
+      onBlur={() => setEditing(false)}
+      onChange={async (e) => {
+        const v = e.target.value as "dealer" | "group";
+        setSaving(true);
+        try { await onSave(v); }
+        finally { setSaving(false); setEditing(false); }
+      }}
+      style={{
+        padding: "4px 8px", height: 28, fontSize: 12,
+        border: "1px solid #1976d2", borderRadius: 4, background: "#fff",
+      }}
+    >
+      <option value="dealer">Dealer</option>
+      <option value="group">Group</option>
+    </select>
   );
 }

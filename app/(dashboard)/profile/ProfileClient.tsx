@@ -940,35 +940,133 @@ function OrderLabelsTab({
   );
 }
 
-// ── Billing Stub Tab ─────────────────────────────────────────────────────────
+// ── Billing / Orders Tab ─────────────────────────────────────────────────────
+
+interface LabelOrderRow {
+  id: string;
+  items: Array<{ sku: string; qty: number; price: number; shipping: string; productName: string }>;
+  ship_to: { city?: string; state?: string };
+  total_amount: number | null;
+  billed_to: "dealer" | "group" | null;
+  billing_status: string | null;
+  email_status: string | null;
+  xps_status: string | null;
+  xps_order_id: string | null;
+  xps_tracking_number: string | null;
+  created_at: string;
+}
+
+function StatusPill({ label, ok, warn }: { label: string; ok?: boolean; warn?: boolean }) {
+  const bg = ok ? "#e8f5e9" : warn ? "#fff8e1" : "#ffebee";
+  const color = ok ? "#2e7d32" : warn ? "#7a5c00" : "#c62828";
+  const border = ok ? "#c8e6c9" : warn ? "#ffe082" : "#ffcdd2";
+  return (
+    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: bg, color, border: `1px solid ${border}`, textTransform: "uppercase", letterSpacing: ".04em" }}>
+      {label}
+    </span>
+  );
+}
 
 function BillingTab() {
+  const [orders, setOrders] = useState<LabelOrderRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/orders/labels");
+        if (!res.ok) {
+          if (!cancelled) {
+            setError("Failed to load order history");
+            setLoading(false);
+          }
+          return;
+        }
+        const j = (await res.json()) as { data: LabelOrderRow[] };
+        if (!cancelled) {
+          setOrders(j.data ?? []);
+          setLoading(false);
+        }
+      } catch {
+        if (!cancelled) { setError("Failed to load order history"); setLoading(false); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div>
-      <div
-        style={{
-          border: "1px solid #2a2b3c",
-          borderRadius: 6,
-          padding: "28px 24px",
-          maxWidth: 480,
-          background: "#fff",
-        }}
-      >
-        <div
-          style={{
-            fontWeight: 600,
-            fontSize: 15,
-            color: "#2a2b3c",
-            marginBottom: 8,
-          }}
-        >
-          Invoices &amp; Billing
-        </div>
-        <p style={{ fontSize: 13, color: "#78828c", margin: 0 }}>
-          Full invoice history and billing management will be available in Phase 10.
-          Your billing status and invoices will appear here once the billing module launches.
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontWeight: 600, fontSize: 15, color: "#2a2b3c", marginBottom: 4 }}>Label Order History</div>
+        <p style={{ fontSize: 12, color: "#78828c", margin: 0 }}>
+          Recent label orders and shipment tracking. Order Labels in the tab above to create a new order.
         </p>
       </div>
+      {loading ? (
+        <div style={{ padding: 24, textAlign: "center", color: "#78828c", fontSize: 13 }}>Loading…</div>
+      ) : error ? (
+        <div style={{ padding: 12, background: "#ffebee", border: "1px solid #ffcdd2", color: "#c62828", borderRadius: 4, fontSize: 12 }}>{error}</div>
+      ) : orders.length === 0 ? (
+        <div style={{ padding: 24, textAlign: "center", color: "#78828c", fontSize: 13, border: "1px solid #e0e0e0", borderRadius: 6, background: "#fafafa" }}>
+          No label orders yet.
+        </div>
+      ) : (
+        <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden", background: "#fff" }}>
+          <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
+            <thead style={{ background: "#fafafa", borderBottom: "1px solid #e0e0e0" }}>
+              <tr>
+                {["Date", "Items", "Total", "Billed to", "Status", "Tracking"].map(h => (
+                  <th key={h} style={{ textAlign: "left", padding: "10px 12px", fontSize: 11, fontWeight: 700, color: "#78828c", textTransform: "uppercase", letterSpacing: ".04em" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((o, i) => {
+                const itemSummary = o.items
+                  .map(it => `${it.productName} × ${it.qty.toLocaleString()}`)
+                  .join(", ");
+                const shipped = o.xps_status === "shipped" || o.xps_status === "delivered";
+                return (
+                  <tr key={o.id} style={{ borderBottom: i < orders.length - 1 ? "1px solid #f0f0f0" : "none" }}>
+                    <td style={{ padding: "10px 12px", color: "#555", whiteSpace: "nowrap" }}>
+                      {new Date(o.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </td>
+                    <td style={{ padding: "10px 12px", color: "#333", maxWidth: 320 }}>{itemSummary}</td>
+                    <td style={{ padding: "10px 12px", color: "#333", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                      {o.total_amount != null ? `$${Number(o.total_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                    </td>
+                    <td style={{ padding: "10px 12px", color: "#555" }}>
+                      {o.billed_to === "group" ? "Group" : "Dealer"}
+                    </td>
+                    <td style={{ padding: "10px 12px" }}>
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        <StatusPill label={`Billing ${o.billing_status ?? "?"}`} ok={o.billing_status === "written"} warn={o.billing_status === "pending" || o.billing_status === "skipped"} />
+                        <StatusPill label={`Ship ${o.xps_status ?? "?"}`} ok={shipped} warn={o.xps_status === "pending" || o.xps_status === "created"} />
+                      </div>
+                    </td>
+                    <td style={{ padding: "10px 12px" }}>
+                      {o.xps_tracking_number ? (
+                        <a
+                          href={`https://www.google.com/search?q=${encodeURIComponent(o.xps_tracking_number)}+tracking`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: "#1976d2", fontFamily: "monospace", fontSize: 12 }}
+                        >
+                          {o.xps_tracking_number}
+                        </a>
+                      ) : (
+                        <span style={{ color: "#bbb", fontSize: 12 }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1078,7 +1176,7 @@ const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean }[] = [
   { id: "info", label: "Dealership Info", dealerOnly: true },
   { id: "shipping", label: "Shipping", dealerOnly: true },
   { id: "labels", label: "Order Labels", dealerOnly: true },
-  { id: "billing", label: "Invoices", dealerOnly: true },
+  { id: "billing", label: "Orders", dealerOnly: true },
   { id: "security", label: "Security" },
 ];
 

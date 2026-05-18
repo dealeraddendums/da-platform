@@ -101,6 +101,8 @@ export type GroupRow = {
   billing_date: string | null;
   hubspot_company_id: string | null;
   feed_supplier: string | null;
+  /** da-billing customer UUID for the group. Created on demand when a member dealer flips subscription_billed_to / labels_billed_to to "group". (Migration 067) */
+  billing_customer_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -227,6 +229,12 @@ export type DealerRow = {
   shipping_phone: string | null;
   /** When true, the dealer's group_admin manages templates. Builder hidden and Default Templates read-only for dealer roles. (Migration 066) */
   group_controls_templates: boolean;
+  /** da-billing customer UUID for platform-created dealers. Legacy migrated dealers use internal_id. (Migration 067) */
+  billing_customer_id: string | null;
+  /** Which template receives the monthly subscription line item. (Migration 067) */
+  subscription_billed_to: "dealer" | "group";
+  /** Which template receives label-order line items. (Migration 067) */
+  labels_billed_to: "dealer" | "group";
   created_at: string;
   updated_at: string;
 };

@@ -773,6 +773,11 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
         </div>
       </div>
 
+      {/* Billing — super_admin only */}
+      {isSuperAdmin && (
+        <BillingSection dealer={dealer} group={group} onChange={(patch) => setDealer((d) => ({ ...d, ...patch }))} />
+      )}
+
       {/* Dealer Logo */}
       {(canEdit || isSuperAdmin) && (
         <div className="card p-6 mb-4">
@@ -889,6 +894,97 @@ function Field({ label, value, view, editing, onChange, type = "text", required,
           ? <HubSpotEmail email={view} />
           : (view || <span style={{ color: "var(--text-muted)" }}>—</span>)}
       </span>
+    </div>
+  );
+}
+
+// ── Billing section (super_admin only) ───────────────────────────────────────
+
+function BillingSection({
+  dealer,
+  group,
+  onChange,
+}: {
+  dealer: DealerRow;
+  group: { id: string; name: string } | null;
+  onChange: (patch: Partial<Pick<DealerRow, "subscription_billed_to" | "labels_billed_to">>) => void;
+}) {
+  const [savingSub, setSavingSub] = useState(false);
+  const [savingLabels, setSavingLabels] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function patchField(field: "subscription_billed_to" | "labels_billed_to", value: "dealer" | "group") {
+    if (!group) return; // PATCH route is group-scoped
+    setError(null);
+    if (field === "subscription_billed_to") setSavingSub(true); else setSavingLabels(true);
+    const res = await fetch(`/api/groups/${group.id}/dealers/${dealer.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    });
+    if (field === "subscription_billed_to") setSavingSub(false); else setSavingLabels(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({})) as { error?: string };
+      setError(j.error ?? "Save failed");
+      return;
+    }
+    onChange({ [field]: value } as Partial<Pick<DealerRow, "subscription_billed_to" | "labels_billed_to">>);
+  }
+
+  const cellLabel: React.CSSProperties = { fontSize: 13, color: "var(--text-secondary)" };
+  const select: React.CSSProperties = { padding: "6px 10px", height: 32, border: "1px solid #e0e0e0", borderRadius: 6, background: "#fff", fontSize: 13 };
+
+  return (
+    <div className="card p-6 mb-4">
+      <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+        Billing
+      </p>
+
+      {error && (
+        <div className="mb-3" style={{ padding: "8px 12px", background: "#ffebee", color: "#c62828", borderRadius: 4, fontSize: 12 }}>{error}</div>
+      )}
+
+      <div className="space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <span style={cellLabel}>da-billing Customer ID</span>
+          <span className="text-sm font-mono font-medium text-right" style={{ color: "var(--text-primary)" }} title="da-billing customer UUID for this dealer (read-only — set by the billing integration on dealer creation)">
+            {dealer.billing_customer_id ?? <span style={{ color: "var(--text-muted)" }}>—</span>}
+          </span>
+        </div>
+
+        {group ? (
+          <>
+            <div className="flex items-center justify-between gap-4">
+              <span style={cellLabel}>Subscription billed to</span>
+              <select
+                style={select}
+                value={dealer.subscription_billed_to}
+                disabled={savingSub}
+                onChange={(e) => void patchField("subscription_billed_to", e.target.value as "dealer" | "group")}
+              >
+                <option value="dealer">Dealer</option>
+                <option value="group">Group ({group.name})</option>
+              </select>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span style={cellLabel}>Labels billed to</span>
+              <select
+                style={select}
+                value={dealer.labels_billed_to}
+                disabled={savingLabels}
+                onChange={(e) => void patchField("labels_billed_to", e.target.value as "dealer" | "group")}
+              >
+                <option value="dealer">Dealer</option>
+                <option value="group">Group ({group.name})</option>
+              </select>
+            </div>
+          </>
+        ) : (
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+            This dealer is not in a group, so all charges are billed to the dealer.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

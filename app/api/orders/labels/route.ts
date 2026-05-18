@@ -55,6 +55,50 @@ function formatDateUS(date: Date): string {
 
 const BILLING_BASE = 'https://billing.dealeraddendums.com/api/v1';
 
+/**
+ * GET /api/orders/labels
+ *
+ * Returns recent label_orders for the current dealer (or any dealer when
+ * called by super_admin/group_admin with ?dealer_id=<UUID>). Used by the
+ * Orders tab on /profile to display status + tracking links.
+ */
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const { claims, error } = await requireAuth();
+  if (error) return error;
+
+  const admin = createAdminSupabaseClient();
+  let dealerUuid: string | null = null;
+
+  if (claims.role === 'dealer_admin' || claims.role === 'dealer_user') {
+    if (!claims.dealer_id) {
+      return NextResponse.json({ error: 'No dealer assigned' }, { status: 403 });
+    }
+    const { data: drow } = await admin
+      .from('dealers')
+      .select('id')
+      .eq('dealer_id', claims.dealer_id)
+      .maybeSingle<{ id: string }>();
+    dealerUuid = drow?.id ?? null;
+  } else if (claims.role === 'super_admin' || claims.role === 'group_admin') {
+    const param = req.nextUrl.searchParams.get('dealer_id');
+    if (param) dealerUuid = param;
+  }
+
+  if (!dealerUuid) {
+    return NextResponse.json({ data: [] });
+  }
+
+  const { data, error: dbErr } = await admin
+    .from('label_orders')
+    .select('id, dealer_id, items, ship_to, total_amount, billed_to, group_id, billing_status, email_status, xps_status, xps_order_id, xps_tracking_number, created_at')
+    .eq('dealer_id', dealerUuid)
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
+  return NextResponse.json({ data: data ?? [] });
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
@@ -81,9 +125,37 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const today = new Date();
   const totalAmount = items.reduce((s, i) => s + i.price, 0);
 
-  // Write initial record
+  // Look up the dealer's labels-billing config so we can route the
+  // template update to the dealer's OR the group's da-billing customer.
+  // billed_to / group_id are persisted on the label_orders row for the
+  // Orders tab to display correctly.
+  const { data: dealerCfg } = await admin
+    .from('dealers')
+    .select('labels_billed_to, group_id, billing_customer_id, internal_id')
+    .eq('id', dealerId)
+    .maybeSingle<{ labels_billed_to: 'dealer' | 'group'; group_id: string | null; billing_customer_id: string | null; internal_id: string | null }>();
+  const labelsBilledTo: 'dealer' | 'group' = dealerCfg?.labels_billed_to === 'group' ? 'group' : 'dealer';
+  const billedToGroupId = labelsBilledTo === 'group' ? (dealerCfg?.group_id ?? null) : null;
+
+  // Resolve the billing customer key (the recipient of the template PUT).
+  let billingCustomerKey: string | null = null;
+  if (labelsBilledTo === 'group' && billedToGroupId) {
+    const { data: grp } = await admin
+      .from('groups')
+      .select('billing_customer_id')
+      .eq('id', billedToGroupId)
+      .maybeSingle<{ billing_customer_id: string | null }>();
+    billingCustomerKey = grp?.billing_customer_id ?? null;
+  } else {
+    billingCustomerKey = dealerCfg?.billing_customer_id ?? dealerCfg?.internal_id ?? internalDealerId;
+  }
+
+  // Write initial record. Cast around the registered Database type because
+  // migrations 067/068 added billed_to and group_id columns that aren't in
+  // the generated types yet.
   const { data: orderRow, error: insertErr } = await admin
     .from('label_orders')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .insert({
       dealer_id: dealerId,
       ordered_by: claims.sub,
@@ -93,7 +165,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       billing_status: 'pending',
       email_status: 'pending',
       xps_status: 'pending',
-    })
+      billed_to: labelsBilledTo,
+      group_id: billedToGroupId,
+    } as any)
     .select('id')
     .single();
 
@@ -114,20 +188,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     console.warn('[orders/labels] BILLING_API_KEY not set — skipping billing step');
     billingStatus = 'skipped';
     await admin.from('label_orders').update({ billing_status: 'skipped' }).eq('id', orderId);
+  } else if (!billingCustomerKey) {
+    console.warn('[orders/labels] no billing customer key resolved — skipping billing step');
+    billingStatus = 'skipped';
+    await admin.from('label_orders').update({ billing_status: 'skipped' }).eq('id', orderId);
   } else {
     try {
-      const tmplRes = await fetch(`${BILLING_BASE}/templates/customer/${internalDealerId}`, {
+      const tmplRes = await fetch(`${BILLING_BASE}/templates/customer/${billingCustomerKey}`, {
         headers: { 'X-API-Key': billingKey },
       });
 
       if (tmplRes.status === 404 || !tmplRes.ok) {
-        console.warn('[orders/labels] no billing template for dealer', internalDealerId);
+        console.warn('[orders/labels] no billing template for customer', billingCustomerKey);
         billingStatus = 'failed';
         await admin.from('label_orders').update({ billing_status: 'failed' }).eq('id', orderId);
       } else {
         const tmplData = await tmplRes.json() as { template?: { products?: unknown[] } | null };
         if (!tmplData.template) {
-          console.warn('[orders/labels] billing template is null for dealer', internalDealerId);
+          console.warn('[orders/labels] billing template is null for customer', billingCustomerKey);
           billingStatus = 'failed';
           await admin.from('label_orders').update({ billing_status: 'failed' }).eq('id', orderId);
         } else {
@@ -137,13 +215,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             quantity: 1,
             price: item.price,
             discount: 0,
+            // Tag the line with the dealer that ordered so group-level
+            // bills can be split per-dealer downstream.
             lineItemDescription: `${internalDealerId}::${dealerName}`,
             labelType: item.sku,
             labelQuantity: String(item.qty),
           }));
           const updatedProducts = [...existingProducts, ...newProducts];
 
-          const putRes = await fetch(`${BILLING_BASE}/templates/${internalDealerId}`, {
+          const putRes = await fetch(`${BILLING_BASE}/templates/${billingCustomerKey}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'X-API-Key': billingKey },
             body: JSON.stringify({ products: updatedProducts }),
