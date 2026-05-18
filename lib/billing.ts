@@ -250,6 +250,58 @@ export async function getPricing(): Promise<BillingPriceEntry[]> {
   }
 }
 
+// ── Invoices (for the dealer Billing tab) ───────────────────────────────────
+
+export interface BillingInvoice {
+  id: string;
+  invoiceNumber?: string | number;
+  date: string;
+  dueDate?: string;
+  total: number;
+  status: "pending" | "paid" | "overdue" | "void" | string;
+  items?: Array<{
+    description?: string;
+    productId?: string;
+    price?: number;
+    quantity?: number;
+    discount?: number;
+    lineItemDescription?: string;
+  }>;
+  paymentUrl?: string;
+}
+
+export interface ListInvoicesResult {
+  invoices: BillingInvoice[];
+  total: number;
+  outstandingAmount: number;
+}
+
+/**
+ * GET /invoices?customerId=<uuid> — returns invoices for one customer plus
+ * a computed outstandingAmount (sum of pending + overdue totals). The
+ * paymentUrl on each invoice points to the dealer-facing pay page.
+ */
+export async function listInvoices(customerId: string): Promise<ListInvoicesResult> {
+  const url = `${BASE}/invoices?customerId=${encodeURIComponent(customerId)}&pageSize=200`;
+  const res = await fetch(url, { headers: authHeaders() });
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `listInvoices ${res.status}`, text);
+  try {
+    const parsed = JSON.parse(text) as { invoices?: BillingInvoice[]; total?: number };
+    const invoices = parsed.invoices ?? [];
+    const outstandingAmount = invoices
+      .filter((inv) => inv.status === "pending" || inv.status === "overdue")
+      .reduce((sum, inv) => sum + (Number(inv.total) || 0), 0);
+    return {
+      invoices,
+      total: parsed.total ?? invoices.length,
+      outstandingAmount,
+    };
+  } catch (err) {
+    throw new BillingError(res.status, `listInvoices parse: ${(err as Error).message}`, text);
+  }
+}
+
 export async function lookupPrice(productKey: string): Promise<number | null> {
   const entries = await getPricing();
   const match = entries.find(e => e.name.toLowerCase() === productKey.toLowerCase());

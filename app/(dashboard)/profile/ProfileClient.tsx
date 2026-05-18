@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { DealerRow } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
 import type { LabelProduct } from "@/lib/label-products";
 import { LABEL_PRODUCTS } from "@/lib/label-products";
 
-type Tab = "info" | "shipping" | "labels" | "billing" | "security";
+type Tab = "info" | "shipping" | "labels" | "orders" | "billing" | "security";
 
 type Props = {
   dealer?: DealerRow | null;
@@ -940,7 +940,7 @@ function OrderLabelsTab({
   );
 }
 
-// ── Billing / Orders Tab ─────────────────────────────────────────────────────
+// ── Orders Tab (label order history) ─────────────────────────────────────────
 
 interface LabelOrderRow {
   id: string;
@@ -967,7 +967,7 @@ function StatusPill({ label, ok, warn }: { label: string; ok?: boolean; warn?: b
   );
 }
 
-function BillingTab() {
+function OrdersTab() {
   const [orders, setOrders] = useState<LabelOrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1069,6 +1069,281 @@ function BillingTab() {
       )}
     </div>
   );
+}
+
+// ── Billing Tab (subscription + invoices) ────────────────────────────────────
+
+interface BillingMeData {
+  dealer: { id: string; name: string; billing_customer_id: string | null; internal_id: string | null };
+  subscription: { productId: string | null; name: string | null; price: number | null; nextInvoiceDate: string | null } | null;
+  pricing: Array<{ name: string; price: number }>;
+  invoices: Array<{
+    id: string;
+    invoiceNumber?: string | number;
+    date: string;
+    dueDate?: string;
+    total: number;
+    status: string;
+    paymentUrl?: string;
+  }>;
+  outstandingAmount: number;
+  notes?: string;
+}
+
+const SUBSCRIPTION_TIERS: Array<{ key: string; productKey: string; name: string; description: string }> = [
+  { key: "manual",    productKey: "sub-manual",   name: "Monthly Subscription Manual",        description: "Manual data entry — addendums created one at a time" },
+  { key: "auto-web",  productKey: "sub-auto-web", name: "Monthly Subscription Automatic Web", description: "Automatic ingest from your website inventory feed" },
+  { key: "auto-dms",  productKey: "sub-auto-dms", name: "Monthly Subscription Automatic DMS", description: "Direct DMS integration — fastest sync" },
+];
+
+function money(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function BillingTab() {
+  const [data, setData] = useState<BillingMeData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [savingTier, setSavingTier] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const refresh = useCallbackFetch(setData, setLoading, setError);
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  async function changeTier(tier: { key: string; productKey: string; name: string }) {
+    setSavingTier(tier.key);
+    setToast(null);
+    try {
+      const res = await fetch("/api/billing/me/subscription", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier: tier.key }),
+      });
+      const j = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) {
+        setToast(j.error ?? "Plan change failed");
+        return;
+      }
+      setToast(`✓ Plan updated to ${tier.name}. Takes effect on the next invoice.`);
+      setChangeOpen(false);
+      await refresh();
+    } finally {
+      setSavingTier(null);
+    }
+  }
+
+  if (loading) {
+    return <div style={{ padding: 24, textAlign: "center", color: "#78828c", fontSize: 13 }}>Loading…</div>;
+  }
+  if (error || !data) {
+    return <div style={{ padding: 12, background: "#ffebee", border: "1px solid #ffcdd2", color: "#c62828", borderRadius: 4, fontSize: 12 }}>{error ?? "Failed to load billing"}</div>;
+  }
+
+  const sub = data.subscription;
+  const outstandingInvoices = data.invoices.filter((inv) => inv.status === "pending" || inv.status === "overdue");
+  const paidInvoices = data.invoices.filter((inv) => inv.status === "paid");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {data.notes && (
+        <div style={{ padding: "10px 14px", background: "#fff8e1", border: "1px solid #ffe082", color: "#7a5c00", borderRadius: 6, fontSize: 13 }}>
+          {data.notes}
+        </div>
+      )}
+
+      {toast && (
+        <div style={{ padding: "10px 14px", background: toast.startsWith("✓") ? "#e8f5e9" : "#ffebee", border: `1px solid ${toast.startsWith("✓") ? "#c8e6c9" : "#ffcdd2"}`, color: toast.startsWith("✓") ? "#2e7d32" : "#c62828", borderRadius: 6, fontSize: 13 }}>
+          {toast}
+        </div>
+      )}
+
+      {/* ── Current Subscription ─────────────────────────────────────────── */}
+      <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: 20, background: "#fff" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ fontWeight: 600, fontSize: 15, color: "#2a2b3c" }}>Current Subscription</div>
+          <button
+            onClick={() => setChangeOpen((v) => !v)}
+            style={{ padding: "6px 14px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+          >
+            {changeOpen ? "Cancel" : "Change Plan"}
+          </button>
+        </div>
+        {sub ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, fontSize: 13 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>Plan</div>
+              <div style={{ color: "#333" }}>{sub.name ?? "—"}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>Price</div>
+              <div style={{ color: "#333", fontFamily: "monospace" }}>{money(sub.price)}/month</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>Next Invoice</div>
+              <div style={{ color: "#333" }}>{sub.nextInvoiceDate ? new Date(sub.nextInvoiceDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}</div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: "#78828c" }}>No active subscription template.</div>
+        )}
+
+        {changeOpen && (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #f0f0f0" }}>
+            <div style={{ fontSize: 12, color: "#78828c", marginBottom: 10 }}>
+              Choose a new plan. The change takes effect on your next invoice — no proration for the current period.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {SUBSCRIPTION_TIERS.map((tier) => {
+                const priceEntry = data.pricing.find((p) => p.name.toLowerCase() === tier.productKey.toLowerCase());
+                const tierPrice = priceEntry?.price ?? null;
+                const isCurrent = sub?.productId === tier.productKey;
+                const isSaving = savingTier === tier.key;
+                return (
+                  <button
+                    key={tier.key}
+                    disabled={isCurrent || isSaving}
+                    onClick={() => void changeTier(tier)}
+                    style={{
+                      textAlign: "left",
+                      padding: "10px 14px",
+                      border: `1px solid ${isCurrent ? "#1976d2" : "#e0e0e0"}`,
+                      background: isCurrent ? "#e3f2fd" : "#fff",
+                      borderRadius: 6,
+                      cursor: isCurrent ? "default" : isSaving ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "#333" }}>
+                        {tier.name}
+                        {isCurrent && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#1565c0" }}>CURRENT</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#78828c", marginTop: 2 }}>{tier.description}</div>
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 13, color: "#333", whiteSpace: "nowrap" }}>
+                      {money(tierPrice)}/mo
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Outstanding Invoices ─────────────────────────────────────────── */}
+      {outstandingInvoices.length > 0 && (
+        <div style={{ border: "1px solid #ffcdd2", borderRadius: 6, padding: 20, background: "#fff" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontWeight: 600, fontSize: 15, color: "#c62828" }}>
+              Outstanding Balance: {money(data.outstandingAmount)}
+            </div>
+            <div style={{ fontSize: 11, color: "#c62828", textTransform: "uppercase", letterSpacing: ".05em" }}>
+              {outstandingInvoices.length} invoice{outstandingInvoices.length === 1 ? "" : "s"} due
+            </div>
+          </div>
+          <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #ffcdd2", textAlign: "left" }}>
+                {["Invoice #", "Date", "Due", "Amount", ""].map((h) => (
+                  <th key={h} style={{ padding: "6px 10px", fontSize: 11, fontWeight: 700, color: "#c62828", textTransform: "uppercase", letterSpacing: ".04em" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {outstandingInvoices.map((inv, i) => (
+                <tr key={inv.id} style={{ borderBottom: i < outstandingInvoices.length - 1 ? "1px solid #ffe6e6" : "none" }}>
+                  <td style={{ padding: "8px 10px", fontFamily: "monospace", fontSize: 12 }}>#{inv.invoiceNumber ?? inv.id.slice(0, 8)}</td>
+                  <td style={{ padding: "8px 10px", color: "#555" }}>{new Date(inv.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
+                  <td style={{ padding: "8px 10px", color: inv.status === "overdue" ? "#c62828" : "#555" }}>
+                    {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                  </td>
+                  <td style={{ padding: "8px 10px", fontFamily: "monospace", color: "#333" }}>{money(inv.total)}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                    {inv.paymentUrl && (
+                      <a
+                        href={inv.paymentUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ padding: "5px 14px", background: "#ffa500", color: "#fff", borderRadius: 4, fontSize: 12, fontWeight: 600, textDecoration: "none", display: "inline-block" }}
+                      >
+                        Pay
+                      </a>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── Invoice History ──────────────────────────────────────────────── */}
+      <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: 20, background: "#fff" }}>
+        <div style={{ fontWeight: 600, fontSize: 15, color: "#2a2b3c", marginBottom: 12 }}>
+          Invoice History
+        </div>
+        {paidInvoices.length === 0 ? (
+          <div style={{ fontSize: 13, color: "#78828c" }}>No paid invoices yet.</div>
+        ) : (
+          <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #e0e0e0", textAlign: "left" }}>
+                {["Invoice #", "Date", "Amount", "Status"].map((h) => (
+                  <th key={h} style={{ padding: "6px 10px", fontSize: 11, fontWeight: 700, color: "#78828c", textTransform: "uppercase", letterSpacing: ".04em" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {paidInvoices.map((inv, i) => (
+                <tr key={inv.id} style={{ borderBottom: i < paidInvoices.length - 1 ? "1px solid #f5f5f5" : "none" }}>
+                  <td style={{ padding: "8px 10px", fontFamily: "monospace", fontSize: 12 }}>#{inv.invoiceNumber ?? inv.id.slice(0, 8)}</td>
+                  <td style={{ padding: "8px 10px", color: "#555" }}>{new Date(inv.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
+                  <td style={{ padding: "8px 10px", fontFamily: "monospace", color: "#333" }}>{money(inv.total)}</td>
+                  <td style={{ padding: "8px 10px" }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", textTransform: "uppercase", letterSpacing: ".04em" }}>
+                      Paid
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function useCallbackFetch(
+  setData: (d: BillingMeData) => void,
+  setLoading: (b: boolean) => void,
+  setError: (s: string | null) => void,
+) {
+  return useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/billing/me");
+      if (!res.ok) {
+        setError("Failed to load billing");
+        setLoading(false);
+        return;
+      }
+      const j = (await res.json()) as BillingMeData;
+      setData(j);
+    } catch {
+      setError("Failed to load billing");
+    } finally {
+      setLoading(false);
+    }
+  }, [setData, setLoading, setError]);
 }
 
 // ── Shared field component ────────────────────────────────────────────────────
@@ -1176,7 +1451,8 @@ const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean }[] = [
   { id: "info", label: "Dealership Info", dealerOnly: true },
   { id: "shipping", label: "Shipping", dealerOnly: true },
   { id: "labels", label: "Order Labels", dealerOnly: true },
-  { id: "billing", label: "Orders", dealerOnly: true },
+  { id: "orders", label: "Orders", dealerOnly: true },
+  { id: "billing", label: "Billing", dealerOnly: true },
   { id: "security", label: "Security" },
 ];
 
@@ -1251,6 +1527,7 @@ export default function ProfileClient({ dealer, canEdit, userEmail, userName, us
             userName={userName}
           />
         )}
+        {tab === "orders" && <OrdersTab />}
         {tab === "billing" && <BillingTab />}
         {tab === "security" && (
           <SecurityTab userEmail={userEmail} userRole={userRole} memberSince={memberSince} />
