@@ -240,14 +240,20 @@ export async function lookupPrice(productName: string): Promise<number | null> {
 
 /**
  * Map a DA Platform dealers.account_type to the da-billing subscription
- * product name. Returns null for trial/free/inactive accounts that shouldn't
- * have a recurring template created. da-billing is the canonical price
- * book — adjust here only if a product label changes in da-billing's
- * Settings → Pricing tab.
+ * product name. Accepts both short forms ("Manual", "Automatic Web",
+ * "automatic_dms") and full product names already in da-billing form
+ * ("Monthly Subscription Manual") since both shapes appear in the
+ * platform today. Returns null for trial / free / inactive / unknown so
+ * the template-create step is skipped.
  */
 export function subscriptionProductNameFor(accountType: string | null | undefined): string | null {
   if (!accountType) return null;
   const a = accountType.trim().toLowerCase();
+  // Full da-billing names (account_type stored as the product label).
+  if (a === "monthly subscription manual") return "Monthly Subscription Manual";
+  if (a === "monthly subscription automatic web") return "Monthly Subscription Automatic Web";
+  if (a === "monthly subscription automatic dms") return "Monthly Subscription Automatic DMS";
+  // Short forms.
   if (a === "manual") return "Monthly Subscription Manual";
   if (a === "automatic web" || a === "automatic_web") return "Monthly Subscription Automatic Web";
   if (a === "automatic dms" || a === "automatic_dms") return "Monthly Subscription Automatic DMS";

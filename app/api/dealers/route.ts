@@ -366,14 +366,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   void geocodeDealer(admin, data as { id: string; lat: unknown; lng: unknown }, rest);
 
   // Event 1: provision a da-billing customer for the new dealer (fire-and-forget).
-  // Skipped when the dealer was migrated from legacy (internal_id already set
-  // — those map to existing customer records that were created in FreshBooks
-  // and back-imported into da-billing under that ID). New platform-created
-  // dealers have null internal_id; we create the customer on demand and save
-  // the UUID in billing_customer_id.
+  // Skipped only for dealers migrated from legacy Aurora (legacy_id is set
+  // for those, null for platform-created dealers — internal_id can't be the
+  // discriminator because this handler auto-generates one as a timestamp).
+  // Legacy dealers map to FreshBooks-imported customers in da-billing under
+  // internal_id, so we don't want to create a duplicate customer for them.
   const createdDealer = data as Record<string, unknown>;
   const createdDealerId = createdDealer.id as string;
-  const hasLegacyBilling = Boolean(createdDealer.internal_id);
+  const hasLegacyBilling = createdDealer.legacy_id != null;
   if (!hasLegacyBilling) {
     void fireAndForgetCustomerCreate({
       adminClient: admin,
