@@ -2,8 +2,91 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import type { DecodeResult } from "@/lib/vin-decoder";
+
+// ── File parsing helpers ────────────────────────────────────────────────────
+
+/**
+ * Minimal RFC-4180-ish CSV/TSV parser. Sniffs the delimiter (comma vs tab)
+ * from the first line. Returns an array of header-keyed objects matching
+ * the shape XLSX.utils.sheet_to_json produced.
+ */
+function parseDelimited(text: string): Record<string, string>[] {
+  const sample = text.slice(0, 4096);
+  const tabs = (sample.match(/\t/g) ?? []).length;
+  const commas = (sample.match(/,/g) ?? []).length;
+  const delim = tabs > commas ? "\t" : ",";
+
+  const rows: string[][] = [];
+  let cur: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else { field += c; }
+      continue;
+    }
+    if (c === '"') { inQuotes = true; continue; }
+    if (c === delim) { cur.push(field); field = ""; continue; }
+    if (c === "\n") { cur.push(field); rows.push(cur); cur = []; field = ""; continue; }
+    if (c === "\r") { continue; }
+    field += c;
+  }
+  if (field.length > 0 || cur.length > 0) { cur.push(field); rows.push(cur); }
+  if (rows.length === 0) return [];
+
+  const headers = rows[0].map(h => h.trim());
+  return rows.slice(1)
+    .filter(r => r.some(c => c.trim() !== ""))
+    .map(r => {
+      const o: Record<string, string> = {};
+      headers.forEach((h, i) => { o[h] = r[i] ?? ""; });
+      return o;
+    });
+}
+
+/**
+ * Read an .xlsx/.xls workbook via ExcelJS and reshape the first sheet into
+ * header-keyed rows (matches the previous XLSX.utils.sheet_to_json output).
+ */
+async function parseExcel(file: File): Promise<Record<string, unknown>[]> {
+  const buf = await file.arrayBuffer();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+  const ws = wb.worksheets[0];
+  if (!ws) return [];
+
+  const headers: string[] = [];
+  const headerRow = ws.getRow(1);
+  headerRow.eachCell({ includeEmpty: true }, (cell, col) => {
+    headers[col - 1] = String(cell.value ?? "").trim();
+  });
+
+  const rows: Record<string, unknown>[] = [];
+  ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const obj: Record<string, unknown> = {};
+    let hasAny = false;
+    row.eachCell({ includeEmpty: true }, (cell, col) => {
+      const key = headers[col - 1];
+      if (!key) return;
+      // ExcelJS returns numbers / dates / strings / null for cell.value
+      // and rich-text/formula objects for special cells. The downstream
+      // `safeStr(val)` coercion treats everything as String(val) so this
+      // matches the prior behavior.
+      const v = cell.value;
+      obj[key] = v == null ? "" : v;
+      if (v != null && v !== "") hasAny = true;
+    });
+    if (hasAny) rows.push(obj);
+  });
+  return rows;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -279,46 +362,44 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
 
   // ── File Import ─────────────────────────────────────────────────────────────
 
-  function parseFile(file: File) {
+  async function parseFile(file: File) {
     setImportFile(file);
     setImportDone(null);
     setImportError(null);
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = e.target?.result;
-        const wb = XLSX.read(data, { type: "binary" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const raw = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: "" });
-        if (!raw.length) {
-          setImportError("No data rows found in file");
-          return;
-        }
-        const headers = Object.keys(raw[0]);
-        setFileHeaders(headers);
-        setFileRows(raw);
+    try {
+      const lowerName = file.name.toLowerCase();
+      const isExcel = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw: Record<string, any>[] = isExcel
+        ? await parseExcel(file)
+        : parseDelimited(await file.text());
 
-        // Auto-map by header name similarity
-        const autoMap: Partial<Record<DAField, string>> = {};
-        for (const field of DA_IMPORT_FIELDS) {
-          const fLower = field.toLowerCase();
-          const match = headers.find((h) => h.toLowerCase().includes(fLower.split(" ")[0]));
-          if (match) autoMap[field] = match;
-        }
-        setMapping(autoMap as Record<DAField, string>);
-      } catch {
-        setImportError("Could not parse file. Make sure it is a valid Excel or CSV file.");
+      if (!raw.length) {
+        setImportError("No data rows found in file");
+        return;
       }
-    };
-    reader.readAsBinaryString(file);
+      const headers = Object.keys(raw[0]);
+      setFileHeaders(headers);
+      setFileRows(raw);
+
+      // Auto-map by header name similarity
+      const autoMap: Partial<Record<DAField, string>> = {};
+      for (const field of DA_IMPORT_FIELDS) {
+        const fLower = field.toLowerCase();
+        const match = headers.find((h) => h.toLowerCase().includes(fLower.split(" ")[0]));
+        if (match) autoMap[field] = match;
+      }
+      setMapping(autoMap as Record<DAField, string>);
+    } catch {
+      setImportError("Could not parse file. Make sure it is a valid Excel or CSV file.");
+    }
   }
 
   const handleFileDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
-    if (file) parseFile(file);
+    if (file) void parseFile(file);
   }, []);
 
   async function handleImport() {
@@ -530,7 +611,7 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
               dropRef={dropRef}
               fileInputRef={fileInputRef}
               onFileDrop={handleFileDrop}
-              onFileChange={(f) => parseFile(f)}
+              onFileChange={(f) => void parseFile(f)}
               onImport={handleImport}
               onClose={close}
             />

@@ -1,3 +1,8 @@
+// EasyCron registration (must be added manually after deploy):
+//   Schedule: 0 2 1 * *    (monthly, 02:00 UTC on the 1st)
+//   URL:      POST https://app.dealeraddendums.com/api/cron/sync-vehicle-reference
+//   Header:   x-cron-secret: <CRON_SECRET value from .env.production>
+
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { exec } from "child_process";

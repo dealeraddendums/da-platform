@@ -1,3 +1,8 @@
+// EasyCron registration (must be added manually after deploy):
+//   Schedule: 0 9 5 * *    (monthly, 09:00 UTC on the 5th)
+//   URL:      POST https://app.dealeraddendums.com/api/cron/chromedata-usage-report
+//   Header:   x-cron-secret: <CRON_SECRET value from .env.production>
+
 import { NextRequest, NextResponse } from "next/server";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { buildChromeDataReport } from "@/lib/chromedata-usage-report";

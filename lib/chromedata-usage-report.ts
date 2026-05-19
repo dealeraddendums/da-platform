@@ -6,7 +6,7 @@
 // the ChromeData billing template (Contract #9310). Used by both the
 // monthly cron job and the manual-trigger button on the Reports page.
 
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { createAdminSupabaseClient } from "@/lib/db";
 
 const CONTRACT_NUMBER = "9310";
@@ -246,8 +246,8 @@ export async function buildChromeDataReport(monthOverride?: string | null): Prom
     }))
     .sort((a, b) => a.dealer_name.localeCompare(b.dealer_name));
 
-  // ── 7. Build the .xlsx using SheetJS ─────────────────────────────────────
-  const xlsxBuffer = renderXlsx(m, finalRows);
+  // ── 7. Build the .xlsx ───────────────────────────────────────────────────
+  const xlsxBuffer = await renderXlsx(m, finalRows);
   const filename = `ChromeData_Usage_${m.month.replace("-", "_")}.xlsx`;
   return { ...m, rows: finalRows, xlsxBuffer, filename };
 }
@@ -273,42 +273,38 @@ export async function buildChromeDataReport(monthOverride?: string | null): Prom
  * (matches the existing template where IDs like 269, 1616 are right-aligned
  * integers). Falls back to a string for MP-style codes.
  */
-function renderXlsx(m: { monthStart: string; monthLabel: string }, rows: DealerReportRow[]): Buffer {
-  // Excel rows are 1-based; this array is 0-based, so index 0 = row 1.
-  const aoa: Array<Array<string | number | Date | null>> = [];
-  aoa.push([]);                                                  // row 1: blank
-  aoa.push([]);                                                  // row 2: blank
-  aoa.push(["DealerAddendums Inc"]);                             // row 3
-  aoa.push([`Contract # ${CONTRACT_NUMBER}`]);                   // row 4
-  aoa.push(["Please send to billing@chromedata.com, no later than the 10th of the month"]); // row 5
-  aoa.push([]);                                                  // row 6: blank
-  aoa.push(["Month Reporting:", new Date(m.monthStart + "T00:00:00Z")]); // row 7
-  aoa.push(["Location TOTAL:", rows.length]);                    // row 8
-  aoa.push([]);                                                  // row 9: blank
-  aoa.push(["Template Name", "Dealer ID", "Dealership Name"]);   // row 10: header
+async function renderXlsx(m: { monthStart: string; monthLabel: string }, rows: DealerReportRow[]): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Sheet1");
+
+  // Rows are 1-based in ExcelJS. addRow advances by 1 each call.
+  ws.addRow([]);                                                                       // row 1: blank
+  ws.addRow([]);                                                                       // row 2: blank
+  ws.addRow(["DealerAddendums Inc"]);                                                  // row 3
+  ws.addRow([`Contract # ${CONTRACT_NUMBER}`]);                                        // row 4
+  ws.addRow(["Please send to billing@chromedata.com, no later than the 10th of the month"]); // row 5
+  ws.addRow([]);                                                                       // row 6: blank
+  ws.addRow(["Month Reporting:", new Date(m.monthStart + "T00:00:00Z")]);              // row 7
+  ws.addRow(["Location TOTAL:", rows.length]);                                         // row 8
+  ws.addRow([]);                                                                       // row 9: blank
+  ws.addRow(["Template Name", "Dealer ID", "Dealership Name"]);                        // row 10: header
   for (const r of rows) {
-    // ChromeData's sample has Dealer ID as a right-aligned integer when
-    // it's purely numeric; preserve that. MP-style codes stay as strings.
+    // ChromeData's sample has Dealer ID as a right-aligned integer when it
+    // is purely numeric; preserve that. MP-style codes stay as strings.
     const idValue: string | number = /^\d+$/.test(r.internal_id) ? Number(r.internal_id) : r.internal_id;
-    aoa.push([r.template_name, idValue, r.dealer_name]);
+    ws.addRow([r.template_name, idValue, r.dealer_name]);
   }
 
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [
-    { wch: 40 }, // Template Name
-    { wch: 12 }, // Dealer ID
-    { wch: 40 }, // Dealership Name
+  ws.columns = [
+    { width: 40 }, // Template Name
+    { width: 12 }, // Dealer ID
+    { width: 40 }, // Dealership Name
   ];
-  // Format the Month Reporting cell as a date (mmm-yy matches the sample
-  // where serial 45689 → Feb 2025). SheetJS picks up the number format
-  // from the cell's `z` property.
-  if (ws["B7"]) {
-    (ws["B7"] as { z?: string }).z = "mmm-yy";
-  }
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+  // Format the Month Reporting date cell (B7) as "mmm-yy" — matches the
+  // ChromeData sample where Feb 2025 displays as "Feb-25".
+  ws.getCell("B7").numFmt = "mmm-yy";
 
-  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
-  return Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
 }
