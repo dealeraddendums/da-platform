@@ -1,32 +1,25 @@
 // Server-only client for Cerberus FTP Server 12.8 SOAP API.
 //
-// Wire shape matched byte-for-byte against PHP SoapClient (WSDL-mode)
-// running on the legacy hub at hub.dealeraddendums.com/request/ftp_api.php,
-// which has been talking to this Cerberus instance in production for years.
+// Calls a local PHP proxy (proxy.php) co-located on the DA Platform EC2,
+// served by nginx at http://localhost/cerberus-proxy/proxy.php. The proxy
+// uses PHP SoapClient in WSDL-mode — the exact wire shape Cerberus
+// expects, proven against the legacy hub for years.
 //
-// Key wire rules (do not deviate without re-checking the WSDL):
+// Why a proxy and not a direct Node SOAP client: PHP SoapClient handles
+// the dual-namespace WSDL (ns1=common, ns2=service), the User payload
+// attribute serialization, and the gSOAP server quirks with no
+// hand-rolled XML. The proxy is a 60-line script — easier to keep
+// correct than a Node port of the WSDL wire rules.
 //
-//   • POST to /wsdl/Cerberus.wsdl?wsdl (NOT /service/cerberusftpservice).
-//   • NO HTTP Basic auth header. Credentials are body-only.
-//   • SOAP 1.1 envelope (text/xml).
-//   • Two namespaces:
-//       ns1 = http://cerberusllc.com/common
-//             (credentials, User payload, root, permissions — all shared types)
-//       ns2 = http://cerberusllc.com/service/cerberusftpservice
-//             (the *Request element + operation-specific top-level params)
-//   • SOAPAction: "<service-ns>/<OpName>"
-//   • Wrapper element is <ns2:{OpName}Request> (matches the WSDL xsd:element
-//     name, not the wsdl:operation name).
+// All FTP user management requests therefore terminate at localhost; no
+// network hop outside this EC2 except the SOAP call the proxy itself
+// makes to Cerberus (34.193.4.78:10001).
 
-const ENDPOINT = process.env.CERBERUS_SOAP_ENDPOINT
-  ?? "http://34.193.4.78:10001/wsdl/Cerberus.wsdl?wsdl";
-const NS_SVC = "http://cerberusllc.com/service/cerberusftpservice";
-const NS_COMMON = "http://cerberusllc.com/common";
+const PROXY_URL = process.env.CERBERUS_PROXY_URL
+  ?? "http://localhost/cerberus-proxy/proxy.php";
 
 export function cerberusConfigured(): boolean {
-  return Boolean(
-    process.env.CERBERUS_ADMIN_USER && process.env.CERBERUS_ADMIN_PASSWORD,
-  );
+  return Boolean(process.env.CERBERUS_PROXY_SECRET);
 }
 
 export class CerberusError extends Error {
@@ -41,93 +34,45 @@ export class CerberusError extends Error {
   }
 }
 
-function xmlEscape(s: string | number | boolean | null | undefined): string {
-  if (s == null) return "";
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ProxyJson = Record<string, any>;
 
-function credentialsXml(): string {
-  const user = xmlEscape(process.env.CERBERUS_ADMIN_USER ?? "");
-  const password = xmlEscape(process.env.CERBERUS_ADMIN_PASSWORD ?? "");
-  return `<ns1:credentials><ns1:user>${user}</ns1:user><ns1:password>${password}</ns1:password></ns1:credentials>`;
-}
-
-async function soapCall(operation: string, innerXml: string, timeoutMs = 15000): Promise<string> {
+async function callProxy(params: Record<string, string>, timeoutMs = 20000): Promise<ProxyJson> {
   if (!cerberusConfigured()) {
-    throw new Error("CERBERUS_ADMIN_USER / CERBERUS_ADMIN_PASSWORD not set");
+    throw new Error("CERBERUS_PROXY_SECRET not set");
   }
-  const envelope =
-    `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<SOAP-ENV:Envelope` +
-      ` xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"` +
-      ` xmlns:ns1="${NS_COMMON}"` +
-      ` xmlns:ns2="${NS_SVC}">` +
-      `<SOAP-ENV:Body>` +
-        `<ns2:${operation}Request>${credentialsXml()}${innerXml}</ns2:${operation}Request>` +
-      `</SOAP-ENV:Body>` +
-    `</SOAP-ENV:Envelope>`;
-
-  const headers: Record<string, string> = {
-    "Content-Type": "text/xml; charset=utf-8",
-    SOAPAction: `"${NS_SVC}/${operation}"`,
-  };
-
+  const body = new URLSearchParams(params).toString();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
-    res = await fetch(ENDPOINT, {
+    res = await fetch(PROXY_URL, {
       method: "POST",
-      headers,
-      body: envelope,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Secret": process.env.CERBERUS_PROXY_SECRET ?? "",
+      },
+      body,
       signal: controller.signal,
     });
   } finally {
     clearTimeout(timeout);
   }
 
-  const body = await res.text();
+  const text = await res.text();
   if (!res.ok) {
-    throw new CerberusError(res.status, `Cerberus HTTP ${res.status}`, body);
+    throw new CerberusError(res.status, `Cerberus proxy HTTP ${res.status}`, text);
   }
-  const faultMatch = body.match(/<faultstring[^>]*>([\s\S]*?)<\/faultstring>/i)
-    ?? body.match(/<SOAP-ENV:Text[^>]*>([\s\S]*?)<\/SOAP-ENV:Text>/i);
-  if (faultMatch) {
-    throw new CerberusError(res.status, `Cerberus SOAP fault: ${faultMatch[1]}`, body, faultMatch[1]);
+  let json: ProxyJson;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new CerberusError(res.status, "Cerberus proxy returned non-JSON", text);
   }
-  return body;
-}
-
-// ── XML-to-value helpers (Cerberus uses simple tagged XML in responses) ─────
-
-function extractAll(xml: string, tag: string): string[] {
-  const out: string[] = [];
-  const re = new RegExp(`<(?:[a-zA-Z0-9]+:)?${tag}\\b[^>]*>([\\s\\S]*?)</(?:[a-zA-Z0-9]+:)?${tag}>`, "g");
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml)) !== null) {
-    out.push(unxml(m[1]));
+  if (json && typeof json.error === "string") {
+    throw new CerberusError(res.status, `Cerberus: ${json.error}`, text, json.error);
   }
-  return out;
-}
-
-function extractFirst(xml: string, tag: string): string | null {
-  const m = xml.match(new RegExp(`<(?:[a-zA-Z0-9]+:)?${tag}\\b[^>]*>([\\s\\S]*?)</(?:[a-zA-Z0-9]+:)?${tag}>`));
-  return m ? unxml(m[1]) : null;
-}
-
-function unxml(s: string): string {
-  return s
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&")
-    .trim();
+  return json;
 }
 
 // ── Operations ───────────────────────────────────────────────────────────────
@@ -138,47 +83,65 @@ export interface CerberusOpResult {
 }
 
 export async function getUserList(): Promise<string[]> {
-  const body = await soapCall("GetUserList", "");
-  return extractAll(body, "UserList");
+  const json = await callProxy({ action: "GetUserList" });
+  const list = json.UserList;
+  if (Array.isArray(list)) return list as string[];
+  if (typeof list === "string") return [list];
+  return [];
 }
 
 export async function getUserInformation(userName: string): Promise<{
-  raw: string;
+  raw: ProxyJson;
   result: boolean;
   message: string | null;
   rootPath: string | null;
   protocols: string[];
 }> {
-  const inner = `<ns2:userName>${xmlEscape(userName)}</ns2:userName>`;
-  const body = await soapCall("GetUserInformation", inner);
-  return {
-    raw: body,
-    result: extractFirst(body, "result") === "true",
-    message: extractFirst(body, "message"),
-    rootPath: extractFirst(body, "path"),
-    protocols: extractAll(body, "protocol"),
-  };
+  const json = await callProxy({ action: "GetUserInformation", userName });
+
+  // Cerberus replies with a UserInformation object (when found) plus a
+  // top-level `result`/`message`. Older proxies returned them flat.
+  const info = json.UserInformation ?? json;
+  const result = (json.result ?? info.result) === true || (json.result ?? info.result) === "true";
+  const message = (json.message ?? info.message) ?? null;
+
+  // Pull the first root's path if available.
+  let rootPath: string | null = null;
+  const rootList = info.rootList;
+  if (rootList) {
+    const root = Array.isArray(rootList.root) ? rootList.root[0] : rootList.root;
+    if (root) rootPath = root.path ?? null;
+  }
+
+  // Protocol list lives under loginRestrictions/protocols or similar — best-
+  // effort extraction (gSOAP shape varies). Empty if absent.
+  const protocols: string[] = [];
+  const lr = info.loginRestrictions;
+  if (lr && lr.protocol) {
+    const arr = Array.isArray(lr.protocol) ? lr.protocol : [lr.protocol];
+    for (const p of arr) protocols.push(typeof p === "string" ? p : String(p));
+  }
+
+  return { raw: json, result, message, rootPath, protocols };
 }
 
 export async function deleteUser(userName: string): Promise<CerberusOpResult> {
-  const body = await soapCall("DeleteUser", `<ns2:name>${xmlEscape(userName)}</ns2:name>`);
+  const json = await callProxy({ action: "DeleteUser", name: userName });
   return {
-    ok: extractFirst(body, "result") === "true",
-    message: extractFirst(body, "message"),
+    ok: json.result === true || json.result === "true",
+    message: json.message ?? null,
   };
 }
 
 export async function changePassword(userName: string, newPassword: string): Promise<CerberusOpResult> {
-  // Matches PHP wire — no sendEmailNotification element.
-  const inner =
-    `<ns2:userName>${xmlEscape(userName)}</ns2:userName>` +
-    `<ns2:oldPassword></ns2:oldPassword>` +
-    `<ns2:newPassword>${xmlEscape(newPassword)}</ns2:newPassword>` +
-    `<ns2:adminPasswordReset>true</ns2:adminPasswordReset>`;
-  const body = await soapCall("ChangePassword", inner);
+  const json = await callProxy({
+    action: "ChangePassword",
+    userName,
+    newPassword,
+  });
   return {
-    ok: extractFirst(body, "result") === "true",
-    message: extractFirst(body, "message"),
+    ok: json.result === true || json.result === "true",
+    message: json.message ?? null,
   };
 }
 
@@ -190,46 +153,50 @@ export interface AddUserInput {
 }
 
 /**
- * AddUser. Wire shape mirrors PHP SoapClient's serialization exactly:
- * the User name and the password/isSimpleDirectoryMode children are emitted
- * as XML attributes (not child elements), the User payload sits in ns1
- * (common), and saveToDisk / createNonExistentDirectories sit at the top
- * level in ns2.
+ * Add an FTP user. The proxy expects `userData` as a JSON string of the
+ * SOAP request payload (minus credentials, which the proxy injects).
+ * Shape mirrors the legacy hub's ftp_api.php `add_user` action.
  */
 export async function addUser(input: AddUserInput): Promise<CerberusOpResult> {
   const folder = (input.folderName ?? input.username).trim();
   const path = `C:/ftproot/${folder}`;
-  const inner =
-    `<ns2:User ns1:name="${xmlEscape(input.username)}">` +
-      `<ns1:password ns1:value="${xmlEscape(input.password)}" ns1:type="plain"/>` +
-      `<ns1:isSimpleDirectoryMode ns1:value="true" ns1:priority="user"/>` +
-      `<ns1:groupList/>` +
-      `<ns1:rootList>` +
-        `<ns1:root>` +
-          `<ns1:name>${xmlEscape(folder)}</ns1:name>` +
-          `<ns1:path>${xmlEscape(path)}</ns1:path>` +
-          `<ns1:permissions>` +
-            `<ns1:allowListFile>true</ns1:allowListFile>` +
-            `<ns1:allowListDir>true</ns1:allowListDir>` +
-            `<ns1:allowDownload>true</ns1:allowDownload>` +
-            `<ns1:allowUpload>true</ns1:allowUpload>` +
-            `<ns1:allowRename>true</ns1:allowRename>` +
-            `<ns1:allowDelete>true</ns1:allowDelete>` +
-            `<ns1:allowDirectoryCreation>true</ns1:allowDirectoryCreation>` +
-            `<ns1:allowDisplayHidden>false</ns1:allowDisplayHidden>` +
-            `<ns1:allowZip>false</ns1:allowZip>` +
-            `<ns1:allowUnzip>false</ns1:allowUnzip>` +
-            `<ns1:allowShare>false</ns1:allowShare>` +
-            `<ns1:allowShareUpload>false</ns1:allowShareUpload>` +
-          `</ns1:permissions>` +
-        `</ns1:root>` +
-      `</ns1:rootList>` +
-    `</ns2:User>` +
-    `<ns2:saveToDisk>true</ns2:saveToDisk>` +
-    `<ns2:createNonExistentDirectories>true</ns2:createNonExistentDirectories>`;
-  const body = await soapCall("AddUser", inner);
+  const userData = {
+    User: {
+      name: input.username,
+      groupList: { name: "test" },
+      rootList: {
+        root: {
+          name: folder,
+          path,
+          permissions: {
+            allowListFile: true,
+            allowListDir: true,
+            allowDownload: true,
+            allowUpload: true,
+            allowRename: true,
+            allowDelete: true,
+            allowDirectoryCreation: true,
+            allowDisplayHidden: false,
+            allowZip: false,
+            allowUnzip: false,
+            allowShare: false,
+            allowShareUpload: false,
+          },
+        },
+      },
+      password: { value: input.password, type: "plain" },
+      isSimpleDirectoryMode: { value: true, priority: "user" },
+    },
+    saveToDisk: true,
+    createNonExistentDirectories: true,
+  };
+
+  const json = await callProxy({
+    action: "AddUser",
+    userData: JSON.stringify(userData),
+  });
   return {
-    ok: extractFirst(body, "result") === "true",
-    message: extractFirst(body, "message"),
+    ok: json.result === true || json.result === "true",
+    message: json.message ?? null,
   };
 }
