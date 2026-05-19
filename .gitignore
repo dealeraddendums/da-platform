@@ -15,3 +15,6 @@
 *.pem
 .vercel
 tsconfig.tsbuildinfo
+
+# Claude Code session state — not part of the repo
+.claude/
