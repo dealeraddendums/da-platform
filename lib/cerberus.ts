@@ -154,13 +154,20 @@ export interface FtpFile {
   isDir: boolean;
 }
 
+function ftpCreds(): { ftp_user: string; ftp_pass: string } {
+  return {
+    ftp_user: process.env.CERBERUS_FTP_USER ?? "",
+    ftp_pass: process.env.CERBERUS_FTP_PASS ?? "",
+  };
+}
+
 export async function listFiles(username: string, path: string): Promise<FtpFile[]> {
-  const json = await callProxy({ action: "list_files", username, path });
+  const json = await callProxy({ action: "list_files", username, path, ...ftpCreds() });
   return Array.isArray(json.files) ? (json.files as FtpFile[]) : [];
 }
 
 export async function deleteFile(username: string, path: string, filename: string): Promise<boolean> {
-  const json = await callProxy({ action: "delete_file", username, path, filename });
+  const json = await callProxy({ action: "delete_file", username, path, filename, ...ftpCreds() });
   return json.result === true;
 }
 
@@ -175,10 +182,13 @@ export async function uploadFile(
   filename: string,
 ): Promise<boolean> {
   if (!cerberusConfigured()) throw new Error("CERBERUS_PROXY_SECRET not set");
+  const { ftp_user, ftp_pass } = ftpCreds();
   const form = new FormData();
   form.append("action", "upload_file");
   form.append("username", username);
   form.append("path", path);
+  form.append("ftp_user", ftp_user);
+  form.append("ftp_pass", ftp_pass);
   form.append("file", file, filename);
 
   const res = await fetch(PROXY_URL, {
@@ -206,7 +216,7 @@ export async function downloadFileResponse(
 ): Promise<Response> {
   if (!cerberusConfigured()) throw new Error("CERBERUS_PROXY_SECRET not set");
   const body = new URLSearchParams({
-    action: "download_file", username, path, filename,
+    action: "download_file", username, path, filename, ...ftpCreds(),
   }).toString();
   return fetch(PROXY_URL, {
     method: "POST",
