@@ -27,7 +27,7 @@ export default async function EtlServerPage() {
       </div>
       <div style={{ flex: 1, padding: "0 24px 24px" }}>
         <iframe
-          src="https://feeds.dealeraddendums.com/jobs"
+          src="https://etl2.dealeraddendums.com/jobs"
           style={{ width: "100%", height: "100%", border: "none", borderRadius: 6, background: "#fff" }}
           title="ETL Server — Feed Processing Jobs"
         />
@@ -37,9 +37,9 @@ export default async function EtlServerPage() {
             style={{ textAlign: "center", color: "var(--text-muted)", marginTop: 16 }}
           >
             Unable to load ETL Server. Visit{" "}
-            <a href="https://feeds.dealeraddendums.com/jobs" target="_blank" rel="noreferrer"
+            <a href="https://etl2.dealeraddendums.com/jobs" target="_blank" rel="noreferrer"
               style={{ color: "var(--blue)" }}>
-              feeds.dealeraddendums.com/jobs
+              etl2.dealeraddendums.com/jobs
             </a>{" "}
             directly.
           </div>
