@@ -1,33 +1,31 @@
 // Server-only client for Cerberus FTP Server 12.8 SOAP API.
 //
-// Uses raw SOAP 1.1 envelopes — same wire shape as the legacy
-// hub.dealeraddendums.com/ftp.php PHP SoapClient. No `soap` npm package
-// required: we avoid runtime WSDL fetches (which fail because Cerberus's
-// /wsdl/Cerberus.wsdl returns an HTML notice in 12.8+).
+// Wire shape matched byte-for-byte against PHP SoapClient (WSDL-mode)
+// running on the legacy hub at hub.dealeraddendums.com/request/ftp_api.php,
+// which has been talking to this Cerberus instance in production for years.
 //
-// The PHP code uses:
-//   - SOAP 1.1 envelope (`http://schemas.xmlsoap.org/soap/envelope/`)
-//   - Content-Type: text/xml
-//   - Body element <GetUserListRequest> etc (the WSDL <xsd:element> name,
-//     not the operation name)
-//   - Credentials wrapped in <credentials><user/><password/></credentials>
-//     inside the request body
-//   - No HTTP Basic Auth header — credentials are body-only
+// Key wire rules (do not deviate without re-checking the WSDL):
 //
-// Endpoint: http://34.193.4.78:10001/service/cerberusftpservice
-// (Could also POST to /wsdl/Cerberus.wsdl?wsdl — the PHP uses that path
-//  via the `location` option but the actual SOAP service handler responds
-//  on either path.)
+//   • POST to /wsdl/Cerberus.wsdl?wsdl (NOT /service/cerberusftpservice).
+//   • NO HTTP Basic auth header. Credentials are body-only.
+//   • SOAP 1.1 envelope (text/xml).
+//   • Two namespaces:
+//       ns1 = http://cerberusllc.com/common
+//             (credentials, User payload, root, permissions — all shared types)
+//       ns2 = http://cerberusllc.com/service/cerberusftpservice
+//             (the *Request element + operation-specific top-level params)
+//   • SOAPAction: "<service-ns>/<OpName>"
+//   • Wrapper element is <ns2:{OpName}Request> (matches the WSDL xsd:element
+//     name, not the wsdl:operation name).
 
 const ENDPOINT = process.env.CERBERUS_SOAP_ENDPOINT
-  ?? "http://34.193.4.78:10001/service/cerberusftpservice";
-const TNS = "http://cerberusllc.com/service/cerberusftpservice";
+  ?? "http://34.193.4.78:10001/wsdl/Cerberus.wsdl?wsdl";
+const NS_SVC = "http://cerberusllc.com/service/cerberusftpservice";
+const NS_COMMON = "http://cerberusllc.com/common";
 
 export function cerberusConfigured(): boolean {
   return Boolean(
-    process.env.CERBERUS_SOAP_ENDPOINT
-      && process.env.CERBERUS_ADMIN_USER
-      && process.env.CERBERUS_ADMIN_PASSWORD,
+    process.env.CERBERUS_ADMIN_USER && process.env.CERBERUS_ADMIN_PASSWORD,
   );
 }
 
@@ -56,72 +54,39 @@ function xmlEscape(s: string | number | boolean | null | undefined): string {
 function credentialsXml(): string {
   const user = xmlEscape(process.env.CERBERUS_ADMIN_USER ?? "");
   const password = xmlEscape(process.env.CERBERUS_ADMIN_PASSWORD ?? "");
-  return `<tns:credentials><tns:user>${user}</tns:user><tns:password>${password}</tns:password></tns:credentials>`;
+  return `<ns1:credentials><ns1:user>${user}</ns1:user><ns1:password>${password}</ns1:password></ns1:credentials>`;
 }
 
-function basicAuthHeader(): string {
-  const user = process.env.CERBERUS_ADMIN_USER ?? "";
-  const password = process.env.CERBERUS_ADMIN_PASSWORD ?? "";
-  return "Basic " + Buffer.from(`${user}:${password}`).toString("base64");
-}
-
-/**
- * Send a SOAP envelope to the Cerberus endpoint with the **two-step
- * Basic-auth handshake** PHP's SoapClient uses:
- *
- *   1. POST without Authorization header.
- *   2. If the server returns 401 with `WWW-Authenticate: Basic …`, retry
- *      the exact same request with `Authorization: Basic <base64>`.
- *
- * Cerberus 12.8's gSOAP server requires the challenge-response sequence
- * — preemptively sending the Authorization header on the first request
- * fails with 401, but waiting for the challenge first and replaying with
- * credentials succeeds. (Verified by comparing PHP SoapClient traffic on
- * the legacy hub.)
- *
- * Returns the raw response body. Throws CerberusError on HTTP non-2xx or
- * SOAP Fault.
- */
 async function soapCall(operation: string, innerXml: string, timeoutMs = 15000): Promise<string> {
   if (!cerberusConfigured()) {
-    throw new Error("CERBERUS_* env vars not set");
+    throw new Error("CERBERUS_ADMIN_USER / CERBERUS_ADMIN_PASSWORD not set");
   }
-  const envelope = `<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tns="${TNS}">
-  <soap:Body>
-    <tns:${operation}Request>${credentialsXml()}${innerXml}</tns:${operation}Request>
-  </soap:Body>
-</soap:Envelope>`;
+  const envelope =
+    `<?xml version="1.0" encoding="UTF-8"?>` +
+    `<SOAP-ENV:Envelope` +
+      ` xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"` +
+      ` xmlns:ns1="${NS_COMMON}"` +
+      ` xmlns:ns2="${NS_SVC}">` +
+      `<SOAP-ENV:Body>` +
+        `<ns2:${operation}Request>${credentialsXml()}${innerXml}</ns2:${operation}Request>` +
+      `</SOAP-ENV:Body>` +
+    `</SOAP-ENV:Envelope>`;
 
-  const baseHeaders: Record<string, string> = {
+  const headers: Record<string, string> = {
     "Content-Type": "text/xml; charset=utf-8",
-    SOAPAction: `"${TNS}/${operation}"`,
+    SOAPAction: `"${NS_SVC}/${operation}"`,
   };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
-    // Step 1: unauthenticated request — server replies with the
-    // WWW-Authenticate challenge.
     res = await fetch(ENDPOINT, {
       method: "POST",
-      headers: baseHeaders,
+      headers,
       body: envelope,
       signal: controller.signal,
     });
-
-    // Step 2: replay with Basic credentials on 401. We don't gate on the
-    // WWW-Authenticate header content — Cerberus consistently challenges
-    // Basic, and a single retry matches PHP SoapClient's behavior.
-    if (res.status === 401) {
-      res = await fetch(ENDPOINT, {
-        method: "POST",
-        headers: { ...baseHeaders, Authorization: basicAuthHeader() },
-        body: envelope,
-        signal: controller.signal,
-      });
-    }
   } finally {
     clearTimeout(timeout);
   }
@@ -184,7 +149,7 @@ export async function getUserInformation(userName: string): Promise<{
   rootPath: string | null;
   protocols: string[];
 }> {
-  const inner = `<tns:userName>${xmlEscape(userName)}</tns:userName>`;
+  const inner = `<ns2:userName>${xmlEscape(userName)}</ns2:userName>`;
   const body = await soapCall("GetUserInformation", inner);
   return {
     raw: body,
@@ -196,7 +161,7 @@ export async function getUserInformation(userName: string): Promise<{
 }
 
 export async function deleteUser(userName: string): Promise<CerberusOpResult> {
-  const body = await soapCall("DeleteUser", `<tns:name>${xmlEscape(userName)}</tns:name>`);
+  const body = await soapCall("DeleteUser", `<ns2:name>${xmlEscape(userName)}</ns2:name>`);
   return {
     ok: extractFirst(body, "result") === "true",
     message: extractFirst(body, "message"),
@@ -204,12 +169,12 @@ export async function deleteUser(userName: string): Promise<CerberusOpResult> {
 }
 
 export async function changePassword(userName: string, newPassword: string): Promise<CerberusOpResult> {
+  // Matches PHP wire — no sendEmailNotification element.
   const inner =
-    `<tns:userName>${xmlEscape(userName)}</tns:userName>` +
-    `<tns:oldPassword></tns:oldPassword>` +
-    `<tns:newPassword>${xmlEscape(newPassword)}</tns:newPassword>` +
-    `<tns:adminPasswordReset>true</tns:adminPasswordReset>` +
-    `<tns:sendEmailNotification>false</tns:sendEmailNotification>`;
+    `<ns2:userName>${xmlEscape(userName)}</ns2:userName>` +
+    `<ns2:oldPassword></ns2:oldPassword>` +
+    `<ns2:newPassword>${xmlEscape(newPassword)}</ns2:newPassword>` +
+    `<ns2:adminPasswordReset>true</ns2:adminPasswordReset>`;
   const body = await soapCall("ChangePassword", inner);
   return {
     ok: extractFirst(body, "result") === "true",
@@ -225,52 +190,43 @@ export interface AddUserInput {
 }
 
 /**
- * Add (or overwrite — Cerberus AddUser is upsert-style) an FTP user.
- * Mirrors the EXACT payload shape from the legacy PHP code:
- *   - <User><name/>, <groupList><name>test</name></groupList>
- *   - <rootList><root><name/><path/><permissions>...</permissions></root></rootList>
- *   - <password><value/><type>plain</type></password>
- *   - <isSimpleDirectoryMode><value>true</value><priority>user</priority></isSimpleDirectoryMode>
- *   - saveToDisk=true, createNonExistentDirectories=true
+ * AddUser. Wire shape mirrors PHP SoapClient's serialization exactly:
+ * the User name and the password/isSimpleDirectoryMode children are emitted
+ * as XML attributes (not child elements), the User payload sits in ns1
+ * (common), and saveToDisk / createNonExistentDirectories sit at the top
+ * level in ns2.
  */
 export async function addUser(input: AddUserInput): Promise<CerberusOpResult> {
   const folder = (input.folderName ?? input.username).trim();
   const path = `C:/ftproot/${folder}`;
   const inner =
-    `<tns:User>` +
-      `<tns:name>${xmlEscape(input.username)}</tns:name>` +
-      `<tns:groupList><tns:name>test</tns:name></tns:groupList>` +
-      `<tns:rootList>` +
-        `<tns:root>` +
-          `<tns:name>${xmlEscape(folder)}</tns:name>` +
-          `<tns:path>${xmlEscape(path)}</tns:path>` +
-          `<tns:permissions>` +
-            `<tns:allowListFile>true</tns:allowListFile>` +
-            `<tns:allowListDir>true</tns:allowListDir>` +
-            `<tns:allowDownload>true</tns:allowDownload>` +
-            `<tns:allowUpload>true</tns:allowUpload>` +
-            `<tns:allowRename>true</tns:allowRename>` +
-            `<tns:allowDelete>true</tns:allowDelete>` +
-            `<tns:allowDirectoryCreation>true</tns:allowDirectoryCreation>` +
-            `<tns:allowDisplayHidden>false</tns:allowDisplayHidden>` +
-            `<tns:allowZip>false</tns:allowZip>` +
-            `<tns:allowUnzip>false</tns:allowUnzip>` +
-            `<tns:allowShare>false</tns:allowShare>` +
-            `<tns:allowShareUpload>false</tns:allowShareUpload>` +
-          `</tns:permissions>` +
-        `</tns:root>` +
-      `</tns:rootList>` +
-      `<tns:password>` +
-        `<tns:value>${xmlEscape(input.password)}</tns:value>` +
-        `<tns:type>plain</tns:type>` +
-      `</tns:password>` +
-      `<tns:isSimpleDirectoryMode>` +
-        `<tns:value>true</tns:value>` +
-        `<tns:priority>user</tns:priority>` +
-      `</tns:isSimpleDirectoryMode>` +
-    `</tns:User>` +
-    `<tns:saveToDisk>true</tns:saveToDisk>` +
-    `<tns:createNonExistentDirectories>true</tns:createNonExistentDirectories>`;
+    `<ns2:User ns1:name="${xmlEscape(input.username)}">` +
+      `<ns1:password ns1:value="${xmlEscape(input.password)}" ns1:type="plain"/>` +
+      `<ns1:isSimpleDirectoryMode ns1:value="true" ns1:priority="user"/>` +
+      `<ns1:groupList/>` +
+      `<ns1:rootList>` +
+        `<ns1:root>` +
+          `<ns1:name>${xmlEscape(folder)}</ns1:name>` +
+          `<ns1:path>${xmlEscape(path)}</ns1:path>` +
+          `<ns1:permissions>` +
+            `<ns1:allowListFile>true</ns1:allowListFile>` +
+            `<ns1:allowListDir>true</ns1:allowListDir>` +
+            `<ns1:allowDownload>true</ns1:allowDownload>` +
+            `<ns1:allowUpload>true</ns1:allowUpload>` +
+            `<ns1:allowRename>true</ns1:allowRename>` +
+            `<ns1:allowDelete>true</ns1:allowDelete>` +
+            `<ns1:allowDirectoryCreation>true</ns1:allowDirectoryCreation>` +
+            `<ns1:allowDisplayHidden>false</ns1:allowDisplayHidden>` +
+            `<ns1:allowZip>false</ns1:allowZip>` +
+            `<ns1:allowUnzip>false</ns1:allowUnzip>` +
+            `<ns1:allowShare>false</ns1:allowShare>` +
+            `<ns1:allowShareUpload>false</ns1:allowShareUpload>` +
+          `</ns1:permissions>` +
+        `</ns1:root>` +
+      `</ns1:rootList>` +
+    `</ns2:User>` +
+    `<ns2:saveToDisk>true</ns2:saveToDisk>` +
+    `<ns2:createNonExistentDirectories>true</ns2:createNonExistentDirectories>`;
   const body = await soapCall("AddUser", inner);
   return {
     ok: extractFirst(body, "result") === "true",
