@@ -252,6 +252,33 @@ async function loadExistingVehicleIds(dealerTextId, vins) {
   return map;
 }
 
+/**
+ * Build a stock_number → vin map for everything currently in this dealer's
+ * dealer_vehicles. dealer_vehicles UNIQUE is on (dealer_id, stock_number),
+ * not (dealer_id, vin) — so we need to detect cases where the Aurora
+ * stock_number is already held by a different VIN (recycled stock numbers
+ * after a sale) and swap to VIN-as-stock for those rows before insert.
+ */
+async function loadStockToVinMap(dealerTextId) {
+  const map = new Map();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb
+      .from("dealer_vehicles")
+      .select("vin, stock_number")
+      .eq("dealer_id", dealerTextId)
+      .range(from, from + 999);
+    if (error) throw new Error(`stock_number lookup: ${error.message}`);
+    const rows = data ?? [];
+    for (const r of rows) {
+      if (r.stock_number) {
+        map.set(r.stock_number, (r.vin ?? "").toUpperCase());
+      }
+    }
+    if (rows.length < 1000) break;
+  }
+  return map;
+}
+
 async function processDealer(dealer, index, total) {
   // Aurora dealer_inventory.DEALER_ID matches Supabase dealers.dealer_id
   // (verified 2026-05-11). internal_id is the Unix-timestamp billing ID.
@@ -268,41 +295,54 @@ async function processDealer(dealer, index, total) {
     auroraVehicles.map(r => (r.VIN_NUMBER ?? "").toString().trim().toUpperCase()).filter(Boolean)
   ));
 
-  // VIN → vehicle_uuid for already-existing rows so we can map addendum
-  // line items even when ON CONFLICT DO NOTHING means we didn't insert
-  // a new dealer_vehicles row this run.
+  // VIN → vehicle_uuid for already-existing rows. Used both to skip
+  // already-present manual vehicles and to map their UUIDs onto incoming
+  // addendum line items below.
   const existingByVin = await loadExistingVehicleIds(dealerTextId, auroraVins);
+  // dealer_vehicles UNIQUE is (dealer_id, stock_number) — we need this map
+  // to spot recycled stock numbers and swap to VIN-as-stock before insert.
+  const takenStock = await loadStockToVinMap(dealerTextId);
 
-  // Build insert payload — skip any VIN that already exists for this dealer
-  // since dealer_vehicles upsert with ignoreDuplicates would silently
-  // drop them anyway. Doing the filter here saves the round-trip.
+  // Build insert payload — skip any VIN that already exists (never
+  // overwrite manual entries; they may have been edited in the new
+  // platform). Then resolve stock_number collisions for net-new rows.
   const toInsert = [];
+  let alreadyExisted = 0;
   for (const r of auroraVehicles) {
     const mapped = mapVehicleFromAurora(r, dealerTextId);
     if (!mapped.vin) continue;
-    if (existingByVin.has(mapped.vin.toUpperCase())) continue;
-    // Make sure stock_number doesn't collide if it's already taken (rare
-    // for net-new manual imports; fall back to VIN-as-stock).
-    if (!mapped.stock_number) mapped.stock_number = mapped.vin.toUpperCase();
+    const vinKey = mapped.vin.toUpperCase();
+    if (existingByVin.has(vinKey)) { alreadyExisted++; continue; }
+
+    // Stock-number collision handling (matches backfill-sold-vehicles):
+    //   1. Aurora has no stock_number → use VIN
+    //   2. Aurora's stock_number is held by a DIFFERENT VIN already → use VIN
+    //   3. Otherwise keep Aurora's stock_number
+    const auroraStock = mapped.stock_number?.toString().trim() ?? "";
+    const takenBy = auroraStock ? takenStock.get(auroraStock) : "";
+    const stockConflict = takenBy && takenBy !== vinKey;
+    if (!auroraStock || stockConflict) {
+      mapped.stock_number = vinKey;
+    }
+    // Reserve in-memory so two Aurora rows in the same batch with the same
+    // stock_number don't both pass the conflict check.
+    takenStock.set(mapped.stock_number, vinKey);
     toInsert.push(mapped);
   }
 
   if (DRY_RUN) {
-    log(`[${index}/${total}] ${dealer.name} (${auroraDealerId}) — DRY: ${auroraVehicles.length} aurora, ${toInsert.length} to insert`);
+    log(`[${index}/${total}] ${dealer.name} (${auroraDealerId}) — DRY: ${auroraVehicles.length} aurora, ${toInsert.length} to insert, ${alreadyExisted} already exist`);
     return { vehicles: auroraVehicles.length, addendums: 0 };
   }
 
   // ── Insert net-new manual vehicles in batches ──────────────────────────────
+  // We pre-filtered against existing VINs, so a plain insert is correct —
+  // the dealer_id+stock_number unique constraint is the only collision risk
+  // and we already swapped stock_number → VIN above when it would collide.
   let insertedCount = 0;
   for (let i = 0; i < toInsert.length; i += VEHICLE_BATCH) {
     const batch = toInsert.slice(i, i + VEHICLE_BATCH);
-    // ON CONFLICT (dealer_id, vin) DO NOTHING via ignoreDuplicates.
-    // Supabase's PostgREST upsert maps to ON CONFLICT — the unique
-    // constraint on (dealer_id, vin) must exist for this to work.
-    const { data, error } = await sb
-      .from("dealer_vehicles")
-      .upsert(batch, { onConflict: "dealer_id,vin", ignoreDuplicates: true })
-      .select("id, vin");
+    const { data, error } = await sb.from("dealer_vehicles").insert(batch).select("id, vin");
     if (error) {
       console.error(`[insert vehicle batch] dealer=${auroraDealerId} batch=${i} error=${error.message}`);
       continue;
