@@ -59,9 +59,28 @@ function credentialsXml(): string {
   return `<tns:credentials><tns:user>${user}</tns:user><tns:password>${password}</tns:password></tns:credentials>`;
 }
 
+function basicAuthHeader(): string {
+  const user = process.env.CERBERUS_ADMIN_USER ?? "";
+  const password = process.env.CERBERUS_ADMIN_PASSWORD ?? "";
+  return "Basic " + Buffer.from(`${user}:${password}`).toString("base64");
+}
+
 /**
- * Send a SOAP envelope to the Cerberus endpoint. Returns the raw response
- * body. Throws CerberusError on HTTP non-2xx or SOAP Fault.
+ * Send a SOAP envelope to the Cerberus endpoint with the **two-step
+ * Basic-auth handshake** PHP's SoapClient uses:
+ *
+ *   1. POST without Authorization header.
+ *   2. If the server returns 401 with `WWW-Authenticate: Basic …`, retry
+ *      the exact same request with `Authorization: Basic <base64>`.
+ *
+ * Cerberus 12.8's gSOAP server requires the challenge-response sequence
+ * — preemptively sending the Authorization header on the first request
+ * fails with 401, but waiting for the challenge first and replaying with
+ * credentials succeeds. (Verified by comparing PHP SoapClient traffic on
+ * the legacy hub.)
+ *
+ * Returns the raw response body. Throws CerberusError on HTTP non-2xx or
+ * SOAP Fault.
  */
 async function soapCall(operation: string, innerXml: string, timeoutMs = 15000): Promise<string> {
   if (!cerberusConfigured()) {
@@ -74,19 +93,35 @@ async function soapCall(operation: string, innerXml: string, timeoutMs = 15000):
   </soap:Body>
 </soap:Envelope>`;
 
+  const baseHeaders: Record<string, string> = {
+    "Content-Type": "text/xml; charset=utf-8",
+    SOAPAction: `"${TNS}/${operation}"`,
+  };
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
+    // Step 1: unauthenticated request — server replies with the
+    // WWW-Authenticate challenge.
     res = await fetch(ENDPOINT, {
       method: "POST",
-      headers: {
-        "Content-Type": "text/xml; charset=utf-8",
-        SOAPAction: `"${TNS}/${operation}"`,
-      },
+      headers: baseHeaders,
       body: envelope,
       signal: controller.signal,
     });
+
+    // Step 2: replay with Basic credentials on 401. We don't gate on the
+    // WWW-Authenticate header content — Cerberus consistently challenges
+    // Basic, and a single retry matches PHP SoapClient's behavior.
+    if (res.status === 401) {
+      res = await fetch(ENDPOINT, {
+        method: "POST",
+        headers: { ...baseHeaders, Authorization: basicAuthHeader() },
+        body: envelope,
+        signal: controller.signal,
+      });
+    }
   } finally {
     clearTimeout(timeout);
   }
