@@ -28,6 +28,7 @@ export default function FtpServerPage() {
   const [pwRow, setPwRow] = useState<FtpUserRow | null>(null);
   const [noteRow, setNoteRow] = useState<FtpUserRow | null>(null);
   const [deleteRow, setDeleteRow] = useState<FtpUserRow | null>(null);
+  const [viewRow, setViewRow] = useState<FtpUserRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,14 +142,12 @@ export default function FtpServerPage() {
                       )}
                     </td>
                     <td className="px-4 py-2.5">
-                      <a
-                        href={`https://hub.dealeraddendums.com/ftp.php?view=${encodeURIComponent(r.username)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ padding: "4px 12px", fontSize: 11, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, textDecoration: "none", cursor: "pointer" }}
+                      <button
+                        onClick={() => setViewRow(r)}
+                        style={{ padding: "4px 12px", fontSize: 11, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}
                       >
                         View
-                      </a>
+                      </button>
                     </td>
                     <td className="px-4 py-2.5">
                       <button
@@ -241,6 +240,13 @@ export default function FtpServerPage() {
             setDeleteRow(null);
             flash(`✓ FTP user "${deleteRow.username}" deleted`);
           }}
+        />
+      )}
+      {viewRow && (
+        <FileBrowserModal
+          row={viewRow}
+          onClose={() => setViewRow(null)}
+          onFlash={flash}
         />
       )}
     </div>
@@ -484,13 +490,14 @@ function DeleteModal({ row, onClose, onDeleted }: { row: FtpUserRow; onClose: ()
 
 // ── Generic modal wrapper ────────────────────────────────────────────────────
 
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+function Modal({ title, children, onClose, width }: { title: string; children: React.ReactNode; onClose: () => void; width?: number }) {
+  const cssWidth = `min(${width ?? 560}px, 96vw)`;
   return (
     <div
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
     >
-      <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, width: "min(560px, 96vw)", padding: 24 }}>
+      <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, width: cssWidth, padding: 24 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0, color: "var(--text-primary)" }}>{title}</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, color: "var(--text-muted)", cursor: "pointer", lineHeight: 1 }}>×</button>
@@ -498,5 +505,256 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
         {children}
       </div>
     </div>
+  );
+}
+
+// ── File Browser Modal ───────────────────────────────────────────────────────
+
+interface FtpFile {
+  name: string;
+  size: number;
+  date: string;
+  isDir: boolean;
+}
+
+function fmtSize(bytes: number): string {
+  if (bytes === 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function joinPath(base: string, seg: string): string {
+  const cleanBase = base === "/" ? "" : base.replace(/\/+$/, "");
+  return `${cleanBase}/${seg}`;
+}
+
+function parentPath(p: string): string {
+  if (p === "/" || p === "") return "/";
+  const trimmed = p.replace(/\/+$/, "");
+  const idx = trimmed.lastIndexOf("/");
+  if (idx <= 0) return "/";
+  return trimmed.slice(0, idx) || "/";
+}
+
+function FileBrowserModal({ row, onClose, onFlash }: {
+  row: FtpUserRow;
+  onClose: () => void;
+  onFlash: (msg: string) => void;
+}) {
+  const [path, setPath] = useState("/");
+  const [files, setFiles] = useState<FtpFile[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async (p: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/ftp/files/${encodeURIComponent(row.username)}?path=${encodeURIComponent(p)}`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string };
+        setError(j.error ?? `Failed (${res.status})`);
+        setFiles([]);
+        return;
+      }
+      const j = await res.json() as { files: FtpFile[] };
+      // Folders first, then files; alphabetical.
+      const sorted = [...(j.files ?? [])].sort((a, b) => {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      setFiles(sorted);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [row.username]);
+
+  useEffect(() => { void load(path); }, [path, load]);
+
+  function openFolder(name: string) {
+    setPath(joinPath(path, name));
+  }
+
+  async function download(name: string) {
+    const url = `/api/admin/ftp/download/${encodeURIComponent(row.username)}?path=${encodeURIComponent(path)}&file=${encodeURIComponent(name)}`;
+    // Trigger native download via hidden anchor.
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  async function remove(name: string) {
+    if (!confirm(`Delete "${name}" from ${row.username}'s FTP folder?`)) return;
+    setBusy(name);
+    try {
+      const res = await fetch(
+        `/api/admin/ftp/files/${encodeURIComponent(row.username)}?path=${encodeURIComponent(path)}&file=${encodeURIComponent(name)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string };
+        setError(j.error ?? `Delete failed (${res.status})`);
+        return;
+      }
+      onFlash(`✓ Deleted "${name}"`);
+      await load(path);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function upload(file: File) {
+    setBusy(`upload:${file.name}`);
+    try {
+      const form = new FormData();
+      form.append("path", path);
+      form.append("file", file, file.name);
+      const res = await fetch(
+        `/api/admin/ftp/files/${encodeURIComponent(row.username)}`,
+        { method: "POST", body: form },
+      );
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string };
+        setError(j.error ?? `Upload failed (${res.status})`);
+        return;
+      }
+      onFlash(`✓ Uploaded "${file.name}"`);
+      await load(path);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";  // allow re-uploading the same name
+    if (f) void upload(f);
+  }
+
+  const inSubfolder = path !== "/";
+
+  return (
+    <Modal title={`Files — ${row.username}`} onClose={onClose} width={900}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12 }}>
+        <div style={{ fontSize: 12, color: "#78828c", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          C:\ftproot\{row.username}{path === "/" ? "" : path.replace(/\//g, "\\")}
+        </div>
+        <label
+          style={{ padding: "6px 14px", fontSize: 12, fontWeight: 600, background: "#4caf50", color: "#fff", border: "none", borderRadius: 4, cursor: busy?.startsWith("upload:") ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+        >
+          {busy?.startsWith("upload:") ? "Uploading…" : "Upload File"}
+          <input
+            type="file"
+            onChange={onPickFile}
+            disabled={busy !== null}
+            style={{ display: "none" }}
+          />
+        </label>
+      </div>
+
+      {error && (
+        <div style={{ marginBottom: 12, padding: "8px 12px", background: "#ffebee", color: "#c62828", borderRadius: 4, fontSize: 12 }}>
+          {error}
+        </div>
+      )}
+
+      <div style={{ border: "1px solid #e0e0e0", borderRadius: 4, maxHeight: "60vh", overflow: "auto" }}>
+        {loading ? (
+          <div style={{ padding: 24, textAlign: "center", fontSize: 13, color: "#78828c" }}>Loading…</div>
+        ) : (
+          <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "#f7f8fa", borderBottom: "1px solid #e0e0e0", position: "sticky", top: 0 }}>
+                <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase" }}>Name</th>
+                <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase", width: 110 }}>Size</th>
+                <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase", width: 150 }}>Date</th>
+                <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase", width: 180 }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {inSubfolder && (
+                <tr style={{ borderBottom: "1px solid #f0f0f0", cursor: "pointer" }} onClick={() => setPath(parentPath(path))}>
+                  <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#1976d2" }}>📁 ..</td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", color: "#78828c", fontSize: 12 }}>—</td>
+                  <td style={{ padding: "8px 12px", color: "#78828c", fontSize: 12 }}>—</td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", color: "#78828c", fontSize: 12 }}>Up one level</td>
+                </tr>
+              )}
+              {!loading && files.length === 0 && !inSubfolder && (
+                <tr>
+                  <td colSpan={4} style={{ padding: 24, textAlign: "center", fontSize: 13, color: "#78828c" }}>
+                    No files in this folder.
+                  </td>
+                </tr>
+              )}
+              {files.map((f) => (
+                <tr key={f.name} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                  <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#333" }}>
+                    {f.isDir ? (
+                      <button
+                        onClick={() => openFolder(f.name)}
+                        style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "#1976d2", cursor: "pointer", textAlign: "left" }}
+                      >
+                        📁 {f.name}
+                      </button>
+                    ) : (
+                      <span>📄 {f.name}</span>
+                    )}
+                  </td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", color: "#666", fontSize: 12 }}>
+                    {f.isDir ? "—" : fmtSize(f.size)}
+                  </td>
+                  <td style={{ padding: "8px 12px", color: "#666", fontSize: 12 }}>{f.date}</td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
+                    {f.isDir ? (
+                      <button
+                        onClick={() => openFolder(f.name)}
+                        style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}
+                      >
+                        Open
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => void download(f.name)}
+                          style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", marginRight: 6 }}
+                        >
+                          Download
+                        </button>
+                        <button
+                          onClick={() => void remove(f.name)}
+                          disabled={busy === f.name}
+                          style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#ff5252", color: "#fff", border: "none", borderRadius: 4, cursor: busy === f.name ? "wait" : "pointer", fontFamily: "inherit", opacity: busy === f.name ? 0.6 : 1 }}
+                        >
+                          {busy === f.name ? "…" : "Delete"}
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
+        <div style={{ fontSize: 11, color: "#78828c" }}>
+          {!loading && files.length > 0 && `${files.length} item${files.length === 1 ? "" : "s"}`}
+        </div>
+        <button className="btn btn-secondary" onClick={onClose}>Close</button>
+      </div>
+    </Modal>
   );
 }

@@ -145,6 +145,79 @@ export async function changePassword(userName: string, newPassword: string): Pro
   };
 }
 
+// ── FTP file operations ─────────────────────────────────────────────────────
+
+export interface FtpFile {
+  name: string;
+  size: number;
+  date: string;
+  isDir: boolean;
+}
+
+export async function listFiles(username: string, path: string): Promise<FtpFile[]> {
+  const json = await callProxy({ action: "list_files", username, path });
+  return Array.isArray(json.files) ? (json.files as FtpFile[]) : [];
+}
+
+export async function deleteFile(username: string, path: string, filename: string): Promise<boolean> {
+  const json = await callProxy({ action: "delete_file", username, path, filename });
+  return json.result === true;
+}
+
+/**
+ * Streams an uploaded file to the proxy via multipart/form-data. Caller
+ * provides the file as a Blob/File and a display filename.
+ */
+export async function uploadFile(
+  username: string,
+  path: string,
+  file: Blob,
+  filename: string,
+): Promise<boolean> {
+  if (!cerberusConfigured()) throw new Error("CERBERUS_PROXY_SECRET not set");
+  const form = new FormData();
+  form.append("action", "upload_file");
+  form.append("username", username);
+  form.append("path", path);
+  form.append("file", file, filename);
+
+  const res = await fetch(PROXY_URL, {
+    method: "POST",
+    headers: { "X-Proxy-Secret": process.env.CERBERUS_PROXY_SECRET ?? "" },
+    body: form,
+  });
+  const text = await res.text();
+  if (!res.ok) throw new CerberusError(res.status, `Upload HTTP ${res.status}`, text);
+  let json: ProxyJson;
+  try { json = JSON.parse(text); } catch { throw new CerberusError(res.status, "Upload returned non-JSON", text); }
+  if (typeof json.error === "string") throw new CerberusError(res.status, json.error, text, json.error);
+  return json.result === true;
+}
+
+/**
+ * Returns the raw proxy Response for a file download. The Route Handler
+ * is expected to stream `res.body` through to the browser along with the
+ * relevant Content-Type / Content-Disposition / Content-Length headers.
+ */
+export async function downloadFileResponse(
+  username: string,
+  path: string,
+  filename: string,
+): Promise<Response> {
+  if (!cerberusConfigured()) throw new Error("CERBERUS_PROXY_SECRET not set");
+  const body = new URLSearchParams({
+    action: "download_file", username, path, filename,
+  }).toString();
+  return fetch(PROXY_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Proxy-Secret": process.env.CERBERUS_PROXY_SECRET ?? "",
+    },
+    body,
+  });
+}
+
 export interface AddUserInput {
   username: string;
   password: string;
