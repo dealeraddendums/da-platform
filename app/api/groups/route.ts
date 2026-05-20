@@ -106,8 +106,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const groupInternalId = internal_id?.trim() || Date.now().toString();
 
+  // Default billing address fields to the physical address fields when
+  // they aren't explicitly supplied. Most groups use the same address
+  // for both, so saving the operator from re-typing avoids the empty-
+  // address da-billing rejection we saw on first launch. Contact/email/
+  // phone are intentionally not defaulted — they're entered separately.
+  const billingDefaults: Record<string, string | null | undefined> = {};
+  if (rest.billing_address == null && rest.address != null) billingDefaults.billing_address = rest.address;
+  if (rest.billing_city    == null && rest.city    != null) billingDefaults.billing_city    = rest.city;
+  if (rest.billing_state   == null && rest.state   != null) billingDefaults.billing_state   = rest.state;
+  if (rest.billing_zip     == null && rest.zip     != null) billingDefaults.billing_zip     = rest.zip;
+  if (rest.billing_country == null) billingDefaults.billing_country = rest.country ?? "US";
+
   const admin = createAdminSupabaseClient();
-  const insertPayload = { name: name.trim(), internal_id: groupInternalId, ...rest };
+  const insertPayload = { name: name.trim(), internal_id: groupInternalId, ...rest, ...billingDefaults };
   let { data, error: dbError } = await admin.from("groups").insert(insertPayload).select().single();
 
   // If new columns don't exist yet (migration pending), retry with only base columns
@@ -155,11 +167,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // groups whose customer create silently failed. The lazy create path in
   // group-billing-cascade.ts is still the safety net for older groups.
   if (billingConfigured() && !group.billing_customer_id) {
-    const contactName  = ((rest.billing_contact as string | undefined) ?? (rest.primary_contact as string | undefined)) || group.name;
-    const contactEmail = ((rest.billing_email as string | undefined) ?? (rest.primary_contact_email as string | undefined)) || undefined;
-    const contactPhone = (rest.billing_phone as string | undefined) || undefined;
-    const addr         = (rest.billing_address as string | undefined) || undefined;
-    const stateField   = (rest.billing_state as string | undefined) || undefined;
+    // Pull from the final group row so we see the billing_* defaults we
+    // just injected from the physical address fields.
+    const contactName  = (group.billing_contact ?? group.primary_contact) || group.name;
+    const contactEmail = (group.billing_email   ?? group.primary_contact_email) || undefined;
+    const contactPhone = group.billing_phone   || undefined;
+    const addr         = group.billing_address || undefined;
+    const stateField   = group.billing_state   || undefined;
 
     fireAndForget(async () => {
       const created = await createCustomer({

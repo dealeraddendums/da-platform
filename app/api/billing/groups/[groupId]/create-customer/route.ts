@@ -58,7 +58,8 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       "id, name, billing_customer_id, " +
       "primary_contact, primary_contact_email, " +
       "billing_contact, billing_email, billing_phone, " +
-      "billing_address, billing_city, billing_state, billing_zip, billing_country"
+      "billing_address, billing_city, billing_state, billing_zip, billing_country, " +
+      "address, city, state, zip, country"
     )
     .eq("id", params.groupId)
     .maybeSingle<{
@@ -75,6 +76,11 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       billing_state: string | null;
       billing_zip: string | null;
       billing_country: string | null;
+      address: string | null;
+      city: string | null;
+      state: string | null;
+      zip: string | null;
+      country: string | null;
     }>();
   if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
@@ -82,16 +88,22 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     return NextResponse.json({ ok: true, billing_customer_id: group.billing_customer_id, created: false });
   }
 
-  // Resolve each field: explicit POST body wins, then billing_* column,
-  // then primary_contact* fallback for the name/email pair only.
-  const name    = body.name?.trim()    || group.billing_contact      || group.primary_contact      || group.name;
-  const email   = body.email?.trim()   || group.billing_email        || group.primary_contact_email || undefined;
-  const phone   = body.phone?.trim()   || group.billing_phone        || undefined;
-  const address = body.address?.trim() || group.billing_address      || undefined;
-  const city    = body.city?.trim()    || group.billing_city         || undefined;
-  const stateF  = body.state?.trim()   || group.billing_state        || undefined;
-  const zip     = body.zip?.trim()     || group.billing_zip          || undefined;
-  const country = body.country?.trim() || group.billing_country      || undefined;
+  // Resolve each field with this fallback order:
+  //   1. explicit POST body (form override)
+  //   2. billing_* column (canonical billing copy)
+  //   3. physical address column (groups whose billing == physical, never
+  //      mirrored)
+  //   4. primary_contact* for name/email
+  //   5. group.name / undefined
+  // country also defaults to "US" as a last resort.
+  const name    = body.name?.trim()    || group.billing_contact || group.primary_contact      || group.name;
+  const email   = body.email?.trim()   || group.billing_email   || group.primary_contact_email || undefined;
+  const phone   = body.phone?.trim()   || group.billing_phone   || undefined;
+  const address = body.address?.trim() || group.billing_address || group.address || undefined;
+  const city    = body.city?.trim()    || group.billing_city    || group.city    || undefined;
+  const stateF  = body.state?.trim()   || group.billing_state   || group.state   || undefined;
+  const zip     = body.zip?.trim()     || group.billing_zip     || group.zip     || undefined;
+  const country = body.country?.trim() || group.billing_country || group.country || "US";
 
   try {
     const created = await createCustomer({

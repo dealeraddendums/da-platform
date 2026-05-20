@@ -44,6 +44,11 @@ interface GroupBillingFields {
   billing_country: string | null;
   primary_contact: string | null;
   primary_contact_email: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  country: string | null;
 }
 
 async function loadGroup(groupId: string): Promise<GroupBillingFields | null> {
@@ -54,7 +59,8 @@ async function loadGroup(groupId: string): Promise<GroupBillingFields | null> {
       "id, name, billing_customer_id, " +
       "billing_contact, billing_email, billing_phone, " +
       "billing_address, billing_city, billing_state, billing_zip, billing_country, " +
-      "primary_contact, primary_contact_email",
+      "primary_contact, primary_contact_email, " +
+      "address, city, state, zip, country",
     )
     .eq("id", groupId)
     .maybeSingle<GroupBillingFields>();
@@ -74,19 +80,21 @@ interface GroupBillingDefaults {
 
 /**
  * Pre-fill values for the "no customer yet" form. Prefers billing_*
- * fields, falls back to primary_contact* for name/email so the form
- * isn't empty when only the contact pair is populated.
+ * fields; falls back to primary_contact* for name/email and to the
+ * physical address columns (address/city/state/zip/country) for the
+ * postal block so groups whose billing == physical address aren't
+ * empty when billing_* columns were never set.
  */
 function defaultsFor(group: GroupBillingFields): GroupBillingDefaults {
   return {
     name:    group.billing_contact ?? group.primary_contact ?? null,
     email:   group.billing_email   ?? group.primary_contact_email ?? null,
     phone:   group.billing_phone   ?? null,
-    address: group.billing_address ?? null,
-    city:    group.billing_city    ?? null,
-    state:   group.billing_state   ?? null,
-    zip:     group.billing_zip     ?? null,
-    country: group.billing_country ?? null,
+    address: group.billing_address ?? group.address ?? null,
+    city:    group.billing_city    ?? group.city    ?? null,
+    state:   group.billing_state   ?? group.state   ?? null,
+    zip:     group.billing_zip     ?? group.zip     ?? null,
+    country: group.billing_country ?? group.country ?? "US",
   };
 }
 
