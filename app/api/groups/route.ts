@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow, GroupUpdate } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { createCustomer, billingConfigured } from "@/lib/billing";
+import { fireAndForget } from "@/lib/billing-sync";
 
 type SortableCol = "name" | "active" | "account_type" | "dealer_count" | "created_at" | "billing_contact";
 const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "billing_contact", "created_at"]);
@@ -149,33 +150,43 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // Eager billing customer creation. Non-blocking: failures are logged
-  // but never fail the group creation. The lazy create path in
-  // group-billing-cascade.ts is still the safety net.
+  // Eager billing customer creation. Non-blocking via fireAndForget, which
+  // writes any failure to billing_sync_errors so super_admin can spot
+  // groups whose customer create silently failed. The lazy create path in
+  // group-billing-cascade.ts is still the safety net for older groups.
   if (billingConfigured() && !group.billing_customer_id) {
-    void (async () => {
-      try {
-        const created = await createCustomer({
-          name: (rest.primary_contact as string | undefined) ?? group.name,
-          company: group.name,
-          email: ((rest.billing_email as string | undefined) ?? (rest.primary_contact_email as string | undefined)) ?? undefined,
-          phone: (rest.billing_phone as string | undefined) ?? undefined,
-          address: (rest.billing_address as string | undefined) ?? undefined,
-          state: (rest.billing_state as string | undefined) ?? undefined,
-          isGroup: true,
-        });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (admin as any)
-          .from("groups")
-          .update({ billing_customer_id: created.id })
-          .eq("id", group.id);
-      } catch (err) {
-        console.error(
-          "[groups/POST] billing customer create failed (non-fatal):",
-          err instanceof Error ? err.message : err,
-        );
+    const contactName  = ((rest.billing_contact as string | undefined) ?? (rest.primary_contact as string | undefined)) || group.name;
+    const contactEmail = ((rest.billing_email as string | undefined) ?? (rest.primary_contact_email as string | undefined)) || undefined;
+    const contactPhone = (rest.billing_phone as string | undefined) || undefined;
+    const addr         = (rest.billing_address as string | undefined) || undefined;
+    const stateField   = (rest.billing_state as string | undefined) || undefined;
+
+    fireAndForget(async () => {
+      const created = await createCustomer({
+        name: contactName,
+        company: group.name,
+        email: contactEmail,
+        phone: contactPhone,
+        address: addr,
+        state: stateField,
+        isGroup: true,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: updateErr } = await (admin as any)
+        .from("groups")
+        .update({ billing_customer_id: created.id })
+        .eq("id", group.id);
+      if (updateErr) {
+        // Throw so runSync writes the error to billing_sync_errors — the
+        // da-billing side succeeded but the Supabase write didn't, so the
+        // group now has an orphan customer record. Surface it.
+        throw new Error(`groups update failed: ${updateErr.message} (billing customer ${created.id})`);
       }
-    })();
+    }, {
+      event: "billing.customer.create",
+      groupId: group.id,
+      payload: { groupName: group.name, contactEmail, contactPhone, addr, stateField },
+    });
   }
 
   // Get creator's display name for internal notification

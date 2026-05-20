@@ -8,18 +8,38 @@ export const runtime = "nodejs";
 
 type Params = { params: { groupId: string } };
 
+interface CreateBody {
+  name?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
+}
+
 /**
  * POST /api/billing/groups/[groupId]/create-customer
  *
- * Manual fallback for groups that were created before the eager-create
- * path landed in /api/groups POST. Creates a da-billing customer with
- * isGroup=true, stores the returned id in groups.billing_customer_id, and
- * returns the customer record.
+ * Manual fallback for groups that don't yet have a billing_customer_id —
+ * either because they were created before the eager-create path landed
+ * or because the eager-create call to da-billing failed (failures are
+ * recorded in billing_sync_errors).
  *
- * No-op (returns the existing customer id) if billing_customer_id is
- * already set.
+ * Behavior:
+ *  - Reads `billing_contact`, `billing_email`, `billing_phone`,
+ *    `billing_address`, `billing_city`, `billing_state`, `billing_zip`,
+ *    `billing_country` from the Supabase group row as defaults.
+ *  - Optional JSON body fields override the Supabase values one-for-one,
+ *    so the Billing tab can pass an in-flight edit through without first
+ *    saving it to the group.
+ *  - Creates the da-billing customer with isGroup=true, stores the
+ *    returned id in groups.billing_customer_id, and marks every prior
+ *    `billing.customer.create` error row for this group as resolved.
+ *  - No-ops (returns the existing id) if billing_customer_id is already set.
  */
-export async function POST(_req: NextRequest, { params }: Params): Promise<NextResponse> {
+export async function POST(req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error || !claims) return error ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (claims.role !== "super_admin" && !(claims.role === "group_admin" && claims.group_id === params.groupId)) {
@@ -27,10 +47,19 @@ export async function POST(_req: NextRequest, { params }: Params): Promise<NextR
   }
   if (!billingConfigured()) return NextResponse.json({ error: "Billing not configured" }, { status: 500 });
 
+  let body: CreateBody = {};
+  try { body = (await req.json().catch(() => ({}))) as CreateBody; }
+  catch { body = {}; }
+
   const admin = createAdminSupabaseClient();
   const { data: group } = await admin
     .from("groups")
-    .select("id, name, billing_customer_id, primary_contact, primary_contact_email, billing_email, billing_phone, billing_address, billing_state")
+    .select(
+      "id, name, billing_customer_id, " +
+      "primary_contact, primary_contact_email, " +
+      "billing_contact, billing_email, billing_phone, " +
+      "billing_address, billing_city, billing_state, billing_zip, billing_country"
+    )
     .eq("id", params.groupId)
     .maybeSingle<{
       id: string;
@@ -38,10 +67,14 @@ export async function POST(_req: NextRequest, { params }: Params): Promise<NextR
       billing_customer_id: string | null;
       primary_contact: string | null;
       primary_contact_email: string | null;
+      billing_contact: string | null;
       billing_email: string | null;
       billing_phone: string | null;
       billing_address: string | null;
+      billing_city: string | null;
       billing_state: string | null;
+      billing_zip: string | null;
+      billing_country: string | null;
     }>();
   if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
@@ -49,20 +82,44 @@ export async function POST(_req: NextRequest, { params }: Params): Promise<NextR
     return NextResponse.json({ ok: true, billing_customer_id: group.billing_customer_id, created: false });
   }
 
+  // Resolve each field: explicit POST body wins, then billing_* column,
+  // then primary_contact* fallback for the name/email pair only.
+  const name    = body.name?.trim()    || group.billing_contact      || group.primary_contact      || group.name;
+  const email   = body.email?.trim()   || group.billing_email        || group.primary_contact_email || undefined;
+  const phone   = body.phone?.trim()   || group.billing_phone        || undefined;
+  const address = body.address?.trim() || group.billing_address      || undefined;
+  const city    = body.city?.trim()    || group.billing_city         || undefined;
+  const stateF  = body.state?.trim()   || group.billing_state        || undefined;
+  const zip     = body.zip?.trim()     || group.billing_zip          || undefined;
+  const country = body.country?.trim() || group.billing_country      || undefined;
+
   try {
     const created = await createCustomer({
-      name: group.primary_contact ?? group.name,
+      name,
       company: group.name,
-      email: group.billing_email ?? group.primary_contact_email ?? undefined,
-      phone: group.billing_phone ?? undefined,
-      address: group.billing_address ?? undefined,
-      state: group.billing_state ?? undefined,
+      email,
+      phone,
+      address,
+      state: stateF,
       isGroup: true,
     });
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error: updateErr } = await (admin as any)
       .from("groups")
-      .update({ billing_customer_id: created.id })
+      .update({
+        billing_customer_id: created.id,
+        // Backfill the Supabase billing_* columns from whatever the user
+        // supplied so future edits start from the same source of truth.
+        ...(body.name    !== undefined ? { billing_contact: name } : {}),
+        ...(body.email   !== undefined ? { billing_email: email } : {}),
+        ...(body.phone   !== undefined ? { billing_phone: phone } : {}),
+        ...(body.address !== undefined ? { billing_address: address } : {}),
+        ...(body.city    !== undefined ? { billing_city: city } : {}),
+        ...(body.state   !== undefined ? { billing_state: stateF } : {}),
+        ...(body.zip     !== undefined ? { billing_zip: zip } : {}),
+        ...(body.country !== undefined ? { billing_country: country } : {}),
+      })
       .eq("id", group.id);
     if (updateErr) {
       return NextResponse.json(
@@ -70,11 +127,37 @@ export async function POST(_req: NextRequest, { params }: Params): Promise<NextR
         { status: 500 },
       );
     }
+
+    // Clear any prior failure rows for this group so the dashboard reflects
+    // the recovered state. Best-effort — log and continue if it fails.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any)
+        .from("billing_sync_errors")
+        .update({ resolved: true, last_retry_at: new Date().toISOString() })
+        .eq("group_id", group.id)
+        .eq("event_type", "billing.customer.create")
+        .eq("resolved", false);
+    } catch (resolveErr) {
+      console.warn("[create-customer] failed to mark prior errors resolved:", resolveErr instanceof Error ? resolveErr.message : resolveErr);
+    }
+
     return NextResponse.json({ ok: true, billing_customer_id: created.id, created: true });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 502 },
-    );
+    // Persist the failure so the dashboard surfaces it — same shape as
+    // the eager fireAndForget path.
+    const message = err instanceof Error ? err.message : String(err);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any).from("billing_sync_errors").insert({
+        event_type: "billing.customer.create",
+        payload: { groupName: group.name, name, email, phone, address, city, stateF, zip, country },
+        error_message: message,
+        group_id: group.id,
+      });
+    } catch (logErr) {
+      console.error("[create-customer] failed to log error:", logErr instanceof Error ? logErr.message : logErr);
+    }
+    return NextResponse.json({ error: message }, { status: 502 });
   }
 }

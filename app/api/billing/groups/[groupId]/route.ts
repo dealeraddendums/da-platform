@@ -30,17 +30,64 @@ async function authorize(groupId: string): Promise<
   return { ok: false, res: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
 }
 
-async function loadGroup(groupId: string): Promise<
-  | { id: string; name: string; billing_customer_id: string | null }
-  | null
-> {
+interface GroupBillingFields {
+  id: string;
+  name: string;
+  billing_customer_id: string | null;
+  billing_contact: string | null;
+  billing_email: string | null;
+  billing_phone: string | null;
+  billing_address: string | null;
+  billing_city: string | null;
+  billing_state: string | null;
+  billing_zip: string | null;
+  billing_country: string | null;
+  primary_contact: string | null;
+  primary_contact_email: string | null;
+}
+
+async function loadGroup(groupId: string): Promise<GroupBillingFields | null> {
   const admin = createAdminSupabaseClient();
   const { data } = await admin
     .from("groups")
-    .select("id, name, billing_customer_id")
+    .select(
+      "id, name, billing_customer_id, " +
+      "billing_contact, billing_email, billing_phone, " +
+      "billing_address, billing_city, billing_state, billing_zip, billing_country, " +
+      "primary_contact, primary_contact_email",
+    )
     .eq("id", groupId)
-    .maybeSingle<{ id: string; name: string; billing_customer_id: string | null }>();
+    .maybeSingle<GroupBillingFields>();
   return data ?? null;
+}
+
+interface GroupBillingDefaults {
+  name:    string | null;
+  email:   string | null;
+  phone:   string | null;
+  address: string | null;
+  city:    string | null;
+  state:   string | null;
+  zip:     string | null;
+  country: string | null;
+}
+
+/**
+ * Pre-fill values for the "no customer yet" form. Prefers billing_*
+ * fields, falls back to primary_contact* for name/email so the form
+ * isn't empty when only the contact pair is populated.
+ */
+function defaultsFor(group: GroupBillingFields): GroupBillingDefaults {
+  return {
+    name:    group.billing_contact ?? group.primary_contact ?? null,
+    email:   group.billing_email   ?? group.primary_contact_email ?? null,
+    phone:   group.billing_phone   ?? null,
+    address: group.billing_address ?? null,
+    city:    group.billing_city    ?? null,
+    state:   group.billing_state   ?? null,
+    zip:     group.billing_zip     ?? null,
+    country: group.billing_country ?? null,
+  };
 }
 
 interface GetResponse {
@@ -48,6 +95,9 @@ interface GetResponse {
   customer: BillingCustomerDetail | null;
   invoices: BillingInvoice[];
   outstandingAmount: number;
+  /** Supabase-side billing contact fields, used to pre-fill the
+   *  "Create Billing Account" form when customer is null. */
+  defaults: GroupBillingDefaults;
 }
 
 /**
@@ -64,8 +114,21 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
   const group = await loadGroup(params.groupId);
   if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
+  const defaults = defaultsFor(group);
+  const summaryGroup = {
+    id: group.id,
+    name: group.name,
+    billing_customer_id: group.billing_customer_id,
+  };
+
   if (!group.billing_customer_id) {
-    const payload: GetResponse = { group, customer: null, invoices: [], outstandingAmount: 0 };
+    const payload: GetResponse = {
+      group: summaryGroup,
+      customer: null,
+      invoices: [],
+      outstandingAmount: 0,
+      defaults,
+    };
     return NextResponse.json(payload);
   }
 
@@ -75,10 +138,11 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
       listInvoices(group.billing_customer_id),
     ]);
     const payload: GetResponse = {
-      group,
+      group: summaryGroup,
       customer,
       invoices: invoiceResult.invoices,
       outstandingAmount: invoiceResult.outstandingAmount,
+      defaults,
     };
     return NextResponse.json(payload);
   } catch (err) {

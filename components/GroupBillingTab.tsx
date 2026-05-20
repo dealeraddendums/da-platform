@@ -32,11 +32,23 @@ interface BillingInvoice {
   paymentUrl?: string;
 }
 
+interface GroupBillingDefaults {
+  name:    string | null;
+  email:   string | null;
+  phone:   string | null;
+  address: string | null;
+  city:    string | null;
+  state:   string | null;
+  zip:     string | null;
+  country: string | null;
+}
+
 interface GroupBillingData {
   group: { id: string; name: string; billing_customer_id: string | null };
   customer: BillingCustomerDetail | null;
   invoices: BillingInvoice[];
   outstandingAmount: number;
+  defaults: GroupBillingDefaults;
 }
 
 function money(n: number | null | undefined): string {
@@ -82,11 +94,15 @@ export default function GroupBillingTab({ groupId }: { groupId: string }) {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  async function createCustomer() {
+  async function createCustomerWith(payload: Record<string, string>) {
     setCreating(true);
     setToast(null);
     try {
-      const res = await fetch(`/api/billing/groups/${encodeURIComponent(groupId)}/create-customer`, { method: "POST" });
+      const res = await fetch(`/api/billing/groups/${encodeURIComponent(groupId)}/create-customer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
       const j = await res.json().catch(() => ({})) as { error?: string };
       if (!res.ok) {
         setToast(j.error ?? `Failed (${res.status})`);
@@ -126,40 +142,13 @@ export default function GroupBillingTab({ groupId }: { groupId: string }) {
         </div>
       )}
 
-      {/* ── No customer warning ──────────────────────────────────────────── */}
+      {/* ── No customer warning + pre-populated create form ─────────────── */}
       {!data.group.billing_customer_id && (
-        <div style={{
-          padding: 20,
-          background: "#fff8e1",
-          border: "1px solid #ffe082",
-          borderRadius: 6,
-        }}>
-          <div style={{ fontWeight: 600, fontSize: 15, color: "#7a5c00", marginBottom: 6 }}>
-            Billing account not set up
-          </div>
-          <div style={{ fontSize: 13, color: "#7a5c00", marginBottom: 14, lineHeight: 1.5 }}>
-            This group does not have a da-billing customer record yet. Create one to
-            view contact details, outstanding invoices, and payment history.
-          </div>
-          <button
-            onClick={() => void createCustomer()}
-            disabled={creating}
-            style={{
-              padding: "8px 16px",
-              background: "#1976d2",
-              color: "#fff",
-              border: "none",
-              borderRadius: 4,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: creating ? "wait" : "pointer",
-              fontFamily: "inherit",
-              opacity: creating ? 0.6 : 1,
-            }}
-          >
-            {creating ? "Creating…" : "Create Billing Account"}
-          </button>
-        </div>
+        <CreateCustomerCard
+          defaults={data.defaults}
+          creating={creating}
+          onSubmit={(values) => void createCustomerWith(values)}
+        />
       )}
 
       {/* ── Billing Contact ──────────────────────────────────────────────── */}
@@ -396,6 +385,108 @@ function Input({
           fontFamily: "inherit",
         }}
       />
+    </div>
+  );
+}
+
+// ── Create-customer card (shown when billing_customer_id is null) ────────────
+
+function CreateCustomerCard({
+  defaults,
+  creating,
+  onSubmit,
+}: {
+  defaults: GroupBillingDefaults;
+  creating: boolean;
+  onSubmit: (values: Record<string, string>) => void;
+}) {
+  const [draft, setDraft] = useState({
+    name:    defaults.name    ?? "",
+    email:   defaults.email   ?? "",
+    phone:   defaults.phone   ?? "",
+    address: defaults.address ?? "",
+    city:    defaults.city    ?? "",
+    state:   defaults.state   ?? "",
+    zip:     defaults.zip     ?? "",
+    country: defaults.country ?? "",
+  });
+
+  // Re-sync when the parent reloads with updated defaults.
+  useEffect(() => {
+    setDraft({
+      name:    defaults.name    ?? "",
+      email:   defaults.email   ?? "",
+      phone:   defaults.phone   ?? "",
+      address: defaults.address ?? "",
+      city:    defaults.city    ?? "",
+      state:   defaults.state   ?? "",
+      zip:     defaults.zip     ?? "",
+      country: defaults.country ?? "",
+    });
+  }, [defaults]);
+
+  const hasAnyContact = Boolean(
+    defaults.name || defaults.email || defaults.phone || defaults.address,
+  );
+
+  function submit() {
+    // Only send fields the user actually populated — empty strings get
+    // dropped so the server's "billing_* column → primary_contact → group
+    // name" fallback chain still runs.
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(draft)) {
+      const t = v.trim();
+      if (t) out[k] = t;
+    }
+    onSubmit(out);
+  }
+
+  return (
+    <div style={{
+      padding: 20,
+      background: "#fff8e1",
+      border: "1px solid #ffe082",
+      borderRadius: 6,
+    }}>
+      <div style={{ fontWeight: 600, fontSize: 15, color: "#7a5c00", marginBottom: 6 }}>
+        Billing account not set up
+      </div>
+      <div style={{ fontSize: 13, color: "#7a5c00", marginBottom: 14, lineHeight: 1.5 }}>
+        This group does not have a da-billing customer record yet.
+        {hasAnyContact
+          ? " The fields below are pre-filled from the group's billing contact in Supabase — review, edit if needed, then click Create."
+          : " Fill in the contact details below to create one."}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontSize: 13, marginBottom: 14 }}>
+        <Input label="Contact Name" value={draft.name}    onChange={v => setDraft(d => ({ ...d, name: v }))} />
+        <Input label="Email"        value={draft.email}   onChange={v => setDraft(d => ({ ...d, email: v }))} type="email" />
+        <Input label="Phone"        value={draft.phone}   onChange={v => setDraft(d => ({ ...d, phone: v }))} />
+        <Input label="Address"      value={draft.address} onChange={v => setDraft(d => ({ ...d, address: v }))} />
+        <Input label="City"         value={draft.city}    onChange={v => setDraft(d => ({ ...d, city: v }))} />
+        <Input label="State"        value={draft.state}   onChange={v => setDraft(d => ({ ...d, state: v }))} />
+        <Input label="ZIP"          value={draft.zip}     onChange={v => setDraft(d => ({ ...d, zip: v }))} />
+        <Input label="Country"      value={draft.country} onChange={v => setDraft(d => ({ ...d, country: v }))} />
+      </div>
+
+      <button
+        onClick={submit}
+        disabled={creating}
+        style={{
+          padding: "8px 16px",
+          background: "#1976d2",
+          color: "#fff",
+          border: "none",
+          borderRadius: 4,
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: creating ? "wait" : "pointer",
+          fontFamily: "inherit",
+          opacity: creating ? 0.6 : 1,
+        }}
+      >
+        {creating ? "Creating…" : "Create Billing Account"}
+      </button>
     </div>
   );
 }
