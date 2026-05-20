@@ -31,6 +31,7 @@
     "@tiptap/react": "^3.23.1",
     "@tiptap/starter-kit": "^3.23.1",
     "@types/sharp": "^0.31.1",
+    "box-node-sdk": "^10.10.0",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "mapbox-gl": "^3.23.0",

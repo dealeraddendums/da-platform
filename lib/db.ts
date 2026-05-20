@@ -103,6 +103,8 @@ export type GroupRow = {
   feed_supplier: string | null;
   /** da-billing customer UUID for the group. Created on demand when a member dealer flips subscription_billed_to / labels_billed_to to "group". (Migration 067) */
   billing_customer_id: string | null;
+  /** Box.com folder id created on group save. (Migration 072) */
+  box_folder_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -239,6 +241,8 @@ export type DealerRow = {
   subscription_billed_to: "dealer" | "group";
   /** Which template receives label-order line items. (Migration 067) */
   labels_billed_to: "dealer" | "group";
+  /** Box.com folder id created on dealer save. (Migration 072) */
+  box_folder_id: string | null;
   created_at: string;
   updated_at: string;
 };

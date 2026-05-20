@@ -5,6 +5,7 @@ import type { GroupRow, GroupUpdate } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { createCustomer, billingConfigured } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
+import { createGroupFolder, boxConfigured } from "@/lib/box";
 
 type SortableCol = "name" | "active" | "account_type" | "dealer_count" | "created_at" | "billing_contact";
 const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "billing_contact", "created_at"]);
@@ -160,6 +161,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       phone: ((rest as Record<string, unknown>).phone as string | undefined) ?? null,
       role: "group_admin" as const,
       group_id: group.id,
+    });
+  }
+
+  // Provision a Box.com folder for the group (fire-and-forget). Stores
+  // the returned id in groups.box_folder_id so the group detail page
+  // and future doc flows can deep-link without re-resolving by name.
+  if (boxConfigured()) {
+    fireAndForget(async () => {
+      const folderId = await createGroupFolder(group.name);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: updateErr } = await (admin as any)
+        .from("groups")
+        .update({ box_folder_id: folderId })
+        .eq("id", group.id)
+        .is("box_folder_id", null);
+      if (updateErr) throw new Error(`groups update failed: ${updateErr.message} (folder ${folderId})`);
+    }, {
+      event: "box.folder.create",
+      groupId: group.id,
+      payload: { groupName: group.name, entity: "group" },
     });
   }
 

@@ -12,7 +12,8 @@ export type BillingSyncEvent =
   | "billing.customer.archive"
   | "billing.customer.unarchive"
   | "xps.order.create"
-  | "xps.shipment.poll";
+  | "xps.shipment.poll"
+  | "box.folder.create";
 
 export interface RunSyncOptions {
   event: BillingSyncEvent;

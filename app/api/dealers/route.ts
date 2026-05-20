@@ -12,8 +12,9 @@ import {
   billingConfigured,
   type BillingProduct,
 } from "@/lib/billing";
-import { runSync } from "@/lib/billing-sync";
+import { runSync, fireAndForget } from "@/lib/billing-sync";
 import { fireGroupAssignCascade } from "@/lib/group-billing-cascade";
+import { createDealerFolder, boxConfigured } from "@/lib/box";
 
 interface NewBillingCustomerArgs {
   adminClient: ReturnType<typeof createAdminSupabaseClient>;
@@ -441,6 +442,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const createdDealerGroupId = createdDealer.group_id as string | null;
   const subscriptionBilledTo = (createdDealer.subscription_billed_to as string | null) ?? "dealer";
   const hasLegacyBilling = createdDealer.legacy_id != null;
+
+  // Provision a Box.com folder for the dealer (fire-and-forget). Stores
+  // the returned id in dealers.box_folder_id so the dealer detail page
+  // and future doc flows can deep-link without re-resolving by name.
+  if (boxConfigured()) {
+    fireAndForget(async () => {
+      const folderId = await createDealerFolder(name.trim());
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: updateErr } = await (admin as any)
+        .from("dealers")
+        .update({ box_folder_id: folderId })
+        .eq("id", createdDealerId)
+        .is("box_folder_id", null);
+      if (updateErr) throw new Error(`dealers update failed: ${updateErr.message} (folder ${folderId})`);
+    }, {
+      event: "box.folder.create",
+      dealerId: createdDealerId,
+      payload: { dealerName: name.trim(), entity: "dealer" },
+    });
+  }
 
   if (!hasLegacyBilling) {
     if (subscriptionBilledTo === "group" && createdDealerGroupId) {

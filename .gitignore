@@ -18,3 +18,7 @@ tsconfig.tsbuildinfo
 
 # Claude Code session state — not part of the repo
 .claude/
+
+# Box JWT app config (server-only, never in git)
+box-config.json
+box-private-key.pem
