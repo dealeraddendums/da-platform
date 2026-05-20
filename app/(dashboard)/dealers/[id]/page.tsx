@@ -19,9 +19,9 @@ export default async function DealerPage({ params }: Props) {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("role, dealer_id")
+    .select("role, dealer_id, group_id")
     .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null }>();
+    .single<{ role: string; dealer_id: string | null; group_id: string | null }>();
 
   const role = profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
@@ -29,6 +29,7 @@ export default async function DealerPage({ params }: Props) {
 
   const isSuperAdmin = role === "super_admin";
   const isDealerAdmin = role === "dealer_admin";
+  const isGroupAdmin = role === "group_admin";
 
   const { data: rawDealer } = await admin
     .from("dealers")
@@ -63,7 +64,7 @@ export default async function DealerPage({ params }: Props) {
           </Link>
         </nav>
       )}
-      <DealerProfileCard dealer={dealer} group={group} canEdit={canEdit} isSuperAdmin={isSuperAdmin} hubspotCompanyId={hubspotCompanyId} />
+      <DealerProfileCard dealer={dealer} group={group} canEdit={canEdit} isSuperAdmin={isSuperAdmin} isGroupAdmin={isGroupAdmin && group?.id === profile?.group_id} hubspotCompanyId={hubspotCompanyId} />
     </div>
   );
 }

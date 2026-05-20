@@ -177,6 +177,10 @@ export type DealerRow = {
   internal_id: string | null;
   /** Inventory supplier-assigned ID. Used to match vehicles in dealer_vehicles. */
   inventory_dealer_id: string | null;
+  /** Inventory feed vendor (e.g. "CDK", "Tekion", "vAuto"). Free-form text. */
+  inventory_provider: string | null;
+  /** True iff the inventory_provider is a DMS-tier vendor (drives dms-setup billing). */
+  inventory_provider_is_dms: boolean;
   legacy_id: number | null;
   name: string;
   active: boolean;
@@ -244,6 +248,8 @@ type DealerInsert = {
   name: string;
   internal_id?: string | null;
   inventory_dealer_id?: string | null;
+  inventory_provider?: string | null;
+  inventory_provider_is_dms?: boolean;
   legacy_id?: number | null;
   active?: boolean;
   is_test?: boolean;
@@ -298,8 +304,11 @@ type DealerInsert = {
 
 export type DealerUpdate = {
   name?: string;
-  /** inventory_dealer_id can be updated by super_admin when feed goes live. internal_id must never be updated. */
+  /** inventory_dealer_id can be updated by super_admin and group_admin
+   *  (latter only on dealers in their group). internal_id must never be updated. */
   inventory_dealer_id?: string | null;
+  inventory_provider?: string | null;
+  inventory_provider_is_dms?: boolean;
   active?: boolean;
   is_test?: boolean;
   account_type?: string;

@@ -599,7 +599,7 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-              {["Dealer ID", "Name", "Status", "Location", "Controls Templates", "Subscription", "Labels", ""].map((h) => (
+              {["Dealer ID", "Name", "Inventory Dealer ID", "Status", "Location", "Controls Templates", "Subscription", "Labels", ""].map((h) => (
                 <th key={h} className="text-left px-4 py-2.5 font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   {h}
                 </th>
@@ -642,6 +642,25 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
                   {impersonateError?.dealerId === d.dealer_id && (
                     <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{impersonateError.message}</p>
                   )}
+                </td>
+                <td className="px-4 py-3">
+                  <InventoryDealerIdCell
+                    value={d.inventory_dealer_id ?? ""}
+                    canEdit={isSuperAdmin || isGroupAdmin}
+                    onSave={async (v) => {
+                      const next = v.trim();
+                      const res = await fetch(`/api/dealers/${d.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ inventory_dealer_id: next || null }),
+                      });
+                      if (!res.ok) {
+                        const j = (await res.json()) as { error?: string };
+                        throw new Error(j.error ?? "Failed to update");
+                      }
+                      setDealers((rs) => rs.map((r) => r.id === d.id ? { ...r, inventory_dealer_id: next || null } : r));
+                    }}
+                  />
                 </td>
                 <td className="px-4 py-3">
                   <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
@@ -1042,5 +1061,98 @@ function BillingRoutingCell({
       <option value="dealer">Dealer</option>
       <option value="group">Group</option>
     </select>
+  );
+}
+
+// ── InventoryDealerIdCell ────────────────────────────────────────────────────
+//
+// Inline-edit pill for dealers.inventory_dealer_id in the Member Dealers
+// table. Mirrors BillingRoutingCell's pattern: click pill → edit, Enter
+// or blur to save, Escape to cancel. Save is immediate (no confirmation)
+// per spec — flashes a brief "✓ Saved" indicator on success.
+
+function InventoryDealerIdCell({
+  value,
+  canEdit,
+  onSave,
+}: {
+  value: string;
+  canEdit: boolean;
+  onSave: (v: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  if (!canEdit) {
+    return (
+      <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
+        {value || "—"}
+      </span>
+    );
+  }
+
+  async function commit(next: string) {
+    if (next === value) { setEditing(false); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(next);
+      setEditing(false);
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <button
+          onClick={() => { setDraft(value); setEditing(true); setError(null); }}
+          title="Click to edit Inventory Dealer ID"
+          style={{
+            fontSize: 11, fontWeight: 500, padding: "3px 8px", borderRadius: 4,
+            background: "#f5f6f7", color: "var(--text-secondary)",
+            border: "1px solid #e0e0e0",
+            cursor: "pointer", fontFamily: "monospace",
+          }}
+        >
+          {value || "—"} ✎
+        </button>
+        {savedFlash && (
+          <span className="text-xs" style={{ color: "#2e7d32" }}>✓</span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <input
+        autoFocus
+        defaultValue={value}
+        disabled={saving}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void commit(draft.trim())}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void commit((e.target as HTMLInputElement).value.trim());
+          if (e.key === "Escape") { setEditing(false); setError(null); }
+        }}
+        style={{
+          padding: "4px 8px", height: 28, fontSize: 12, width: 140,
+          border: "1px solid #1976d2", borderRadius: 4, background: "#fff",
+          fontFamily: "monospace",
+        }}
+      />
+      {error && (
+        <span className="text-xs" style={{ color: "var(--error)" }}>{error}</span>
+      )}
+    </div>
   );
 }

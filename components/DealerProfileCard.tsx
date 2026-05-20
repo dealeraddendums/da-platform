@@ -8,12 +8,17 @@ import { HubSpotEmail } from "@/components/HubSpotEmail";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
 import { PageHeader } from "@/components/PageHeader";
 import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
+import { DMS_PROVIDERS, OTHER_PROVIDERS, isDmsProvider } from "@/lib/inventory-providers";
 
 type Props = {
   dealer: DealerRow;
   group: { id: string; name: string } | null;
   canEdit: boolean;
   isSuperAdmin: boolean;
+  /** True when the viewer is a group_admin of this dealer's group.
+   *  Used to expose the inventory_provider / inventory_dealer_id pencil
+   *  edits without granting access to the full Edit Profile flow. */
+  isGroupAdmin?: boolean;
   hubspotCompanyId?: number | null;
 };
 
@@ -77,7 +82,8 @@ function dealerToForm(d: DealerRow): FormData {
   };
 }
 
-export default function DealerProfileCard({ dealer: initialDealer, group, canEdit, isSuperAdmin, hubspotCompanyId }: Props) {
+export default function DealerProfileCard({ dealer: initialDealer, group, canEdit, isSuperAdmin, isGroupAdmin = false, hubspotCompanyId }: Props) {
+  const canEditInventory = isSuperAdmin || isGroupAdmin;
   const router = useRouter();
   const [dealer, setDealer] = useState(initialDealer);
   const [logoUrl, setLogoUrl] = useState<string | null>(initialDealer.logo_url ?? null);
@@ -103,6 +109,13 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
   const [invIdError, setInvIdError] = useState<string | null>(null);
   const [invIdWarning, setInvIdWarning] = useState<{ vehicleCount: number; newId: string } | null>(null);
   const [invIdSuccess, setInvIdSuccess] = useState<string | null>(null);
+
+  // Inventory Provider inline edit state
+  const [invProvEditing, setInvProvEditing] = useState(false);
+  const [invProvValue, setInvProvValue] = useState(initialDealer.inventory_provider ?? "");
+  const [invProvSaving, setInvProvSaving] = useState(false);
+  const [invProvError, setInvProvError] = useState<string | null>(null);
+  const [invProvSuccess, setInvProvSuccess] = useState<string | null>(null);
 
   function startEdit() {
     setForm(dealerToForm(dealer));
@@ -233,6 +246,27 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
     setInvIdSaving(true);
     setInvIdError(null);
     try {
+      // super_admin uses the two-phase warning route (vehicle count
+      // preview → confirm). group_admin doesn't get the warning per
+      // spec — immediate save via plain PATCH.
+      if (isGroupAdmin && !isSuperAdmin) {
+        const res = await fetch(`/api/dealers/${dealer.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inventory_dealer_id: newId }),
+        });
+        if (!res.ok) {
+          const j = (await res.json()) as { error?: string };
+          setInvIdError(j.error ?? "Failed to update");
+          return;
+        }
+        const { data } = (await res.json()) as { data: DealerRow };
+        setDealer(data);
+        setInvIdEditing(false);
+        setInvIdSuccess("✓ Inventory Dealer ID updated");
+        setTimeout(() => setInvIdSuccess(null), 4000);
+        return;
+      }
       const res = await fetch(`/api/dealers/${dealer.id}/inventory-dealer-id`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -247,6 +281,35 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
       setInvIdWarning({ vehicleCount: vehicle_count, newId });
     } finally {
       setInvIdSaving(false);
+    }
+  }
+
+  async function handleInvProvSave() {
+    const newProvider = invProvValue.trim();
+    if (newProvider === (dealer.inventory_provider ?? "")) { setInvProvEditing(false); return; }
+    setInvProvSaving(true);
+    setInvProvError(null);
+    try {
+      const res = await fetch(`/api/dealers/${dealer.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inventory_provider: newProvider || null,
+          inventory_provider_is_dms: isDmsProvider(newProvider),
+        }),
+      });
+      if (!res.ok) {
+        const j = (await res.json()) as { error?: string };
+        setInvProvError(j.error ?? "Failed to update");
+        return;
+      }
+      const { data } = (await res.json()) as { data: DealerRow };
+      setDealer(data);
+      setInvProvEditing(false);
+      setInvProvSuccess("✓ Inventory Provider updated");
+      setTimeout(() => setInvProvSuccess(null), 4000);
+    } finally {
+      setInvProvSaving(false);
     }
   }
 
@@ -556,7 +619,8 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
               </span>
             </div>
 
-            {/* Inventory Dealer ID — inline edit for super_admin only */}
+            {/* Inventory Dealer ID — inline edit for super_admin (with
+                vehicle-count warning) or group_admin (immediate save). */}
             {invIdEditing ? (
               <div>
                 <label className="label">
@@ -616,7 +680,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                   >
                     {dealer.inventory_dealer_id ?? <span style={{ color: "var(--text-muted)" }}>—</span>}
                   </span>
-                  {isSuperAdmin && !editing && (
+                  {canEditInventory && !editing && (
                     <button
                       onClick={() => { setInvIdValue(dealer.inventory_dealer_id ?? ""); setInvIdEditing(true); setInvIdError(null); }}
                       title="Edit Inventory Dealer ID"
@@ -630,6 +694,93 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                   )}
                 </div>
               </div>
+            )}
+
+            {/* Inventory Provider — inline edit, both super_admin + group_admin. */}
+            {invProvEditing ? (
+              <div>
+                <label className="label">
+                  Inventory Provider
+                  <span
+                    className="ml-1 text-xs font-normal"
+                    style={{ color: "var(--text-muted)", textTransform: "none", letterSpacing: 0 }}
+                  >
+                    (inventory-feed vendor)
+                  </span>
+                </label>
+                <select
+                  className="input"
+                  value={invProvValue}
+                  onChange={(e) => setInvProvValue(e.target.value)}
+                  autoFocus
+                >
+                  <option value="">— None —</option>
+                  <optgroup label="DMS Providers">
+                    {DMS_PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+                  </optgroup>
+                  <optgroup label="All Other Providers">
+                    {OTHER_PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+                  </optgroup>
+                </select>
+                {invProvError && (
+                  <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{invProvError}</p>
+                )}
+                <div className="flex gap-2 mt-2">
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: 13 }}
+                    onClick={() => void handleInvProvSave()}
+                    disabled={invProvSaving}
+                  >
+                    {invProvSaving ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: 13 }}
+                    onClick={() => { setInvProvEditing(false); setInvProvError(null); setInvProvValue(dealer.inventory_provider ?? ""); }}
+                    disabled={invProvSaving}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Inventory Provider</span>
+                  {dealer.inventory_provider_is_dms && (
+                    <span
+                      className="ml-1 text-xs font-medium px-1.5 py-0.5 rounded"
+                      style={{ background: "#fff3e0", color: "#e65100", verticalAlign: "middle" }}
+                    >
+                      DMS
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="text-sm font-medium text-right"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    {dealer.inventory_provider ?? <span style={{ color: "var(--text-muted)" }}>—</span>}
+                  </span>
+                  {canEditInventory && !editing && (
+                    <button
+                      onClick={() => { setInvProvValue(dealer.inventory_provider ?? ""); setInvProvEditing(true); setInvProvError(null); }}
+                      title="Edit Inventory Provider"
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "var(--text-muted)", display: "flex", alignItems: "center" }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+            {invProvSuccess && (
+              <p className="text-xs" style={{ color: "var(--success, #2e7d32)" }}>{invProvSuccess}</p>
             )}
 
             {/* DA Group */}

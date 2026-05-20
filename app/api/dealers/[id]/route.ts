@@ -55,7 +55,7 @@ export async function PATCH(
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  if (claims.role === "dealer_user" || claims.role === "group_admin") {
+  if (claims.role === "dealer_user") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -67,6 +67,29 @@ export async function PATCH(
   }
 
   const admin = createAdminSupabaseClient();
+
+  // group_admin gets a narrow whitelist — inventory_provider /
+  // inventory_provider_is_dms / inventory_dealer_id only, and only on
+  // dealers in their group. Reject anything outside that whitelist up
+  // front so the 403 reason is explicit (the whitelist below would
+  // silently drop unknown fields otherwise).
+  if (claims.role === "group_admin") {
+    const allowed = new Set(["inventory_provider", "inventory_provider_is_dms", "inventory_dealer_id"]);
+    const submitted = Object.keys(body).filter(k => (body as Record<string, unknown>)[k] !== undefined);
+    const extras = submitted.filter(k => !allowed.has(k));
+    if (extras.length > 0) {
+      return NextResponse.json({ error: `group_admin cannot edit: ${extras.join(", ")}` }, { status: 403 });
+    }
+    const { data: existing } = await admin
+      .from("dealers")
+      .select("group_id")
+      .eq("id", params.id)
+      .single();
+    const row = existing as { group_id: string | null } | null;
+    if (!row || row.group_id !== claims.group_id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  }
 
   // For dealer_admin, verify they own this dealer before patching
   if (claims.role === "dealer_admin") {
@@ -107,9 +130,17 @@ export async function PATCH(
   if (body.shipping_zip !== undefined) patch.shipping_zip = body.shipping_zip;
   if (body.shipping_country !== undefined) patch.shipping_country = body.shipping_country;
   if (body.shipping_phone !== undefined) patch.shipping_phone = body.shipping_phone;
-  // inventory_dealer_id: super_admin only (updated when feed goes live). internal_id is never updated.
-  if (body.inventory_dealer_id !== undefined && claims.role === "super_admin") {
+  // inventory_dealer_id / inventory_provider / inventory_provider_is_dms:
+  // super_admin can edit anywhere; group_admin gated above to own group.
+  // internal_id is never updated.
+  if (body.inventory_dealer_id !== undefined && (claims.role === "super_admin" || claims.role === "group_admin")) {
     patch.inventory_dealer_id = body.inventory_dealer_id;
+  }
+  if (body.inventory_provider !== undefined && (claims.role === "super_admin" || claims.role === "group_admin")) {
+    patch.inventory_provider = body.inventory_provider;
+  }
+  if (body.inventory_provider_is_dms !== undefined && (claims.role === "super_admin" || claims.role === "group_admin")) {
+    patch.inventory_provider_is_dms = body.inventory_provider_is_dms;
   }
   // Snapshot the active flag + billing customer id before update so we can
   // detect transitions (true→false, false→true) and fire Event 5.
