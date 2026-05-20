@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
 import DealerProfileCard from "@/components/DealerProfileCard";
 import DealerBillingTab from "@/components/DealerBillingTab";
+import DealerUsersTab from "@/components/DealerUsersTab";
 import DealerDetailTabs from "@/components/DealerDetailTabs";
 
 type Props = { params: { id: string } };
@@ -76,6 +77,9 @@ export default async function DealerPage({ params }: Props) {
             isGroupAdmin={isGroupAdmin && group?.id === profile?.group_id}
             hubspotCompanyId={hubspotCompanyId}
           />
+        }
+        users={
+          <DealerUsersTab dealerId={dealer.id} dealerName={dealer.name} viewerRole={role} />
         }
         billing={
           <DealerBillingTab dealerId={dealer.id} viewerRole={role} />

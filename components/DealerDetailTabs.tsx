@@ -11,19 +11,22 @@
 
 import { useState, type ReactNode } from "react";
 
-type TabKey = "profile" | "billing";
+type TabKey = "profile" | "users" | "billing";
 
 export default function DealerDetailTabs({
   profile,
+  users,
   billing,
 }: {
   profile: ReactNode;
+  users: ReactNode;
   billing: ReactNode;
 }) {
   const [tab, setTab] = useState<TabKey>("profile");
 
   const tabs: { key: TabKey; label: string }[] = [
     { key: "profile", label: "Profile" },
+    { key: "users",   label: "Users" },
     { key: "billing", label: "Billing" },
   ];
 
@@ -65,6 +68,7 @@ export default function DealerDetailTabs({
       </div>
 
       {tab === "profile" && profile}
+      {tab === "users"   && users}
       {tab === "billing" && billing}
     </div>
   );
