@@ -10,8 +10,10 @@ import {
   subscriptionDescriptorFor,
   firstOfNextMonthIso,
   billingConfigured,
+  type BillingProduct,
 } from "@/lib/billing";
 import { runSync } from "@/lib/billing-sync";
+import { fireGroupAssignCascade } from "@/lib/group-billing-cascade";
 
 interface NewBillingCustomerArgs {
   adminClient: ReturnType<typeof createAdminSupabaseClient>;
@@ -88,18 +90,42 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
       if (price == null) {
         throw new Error(`No da-billing price entry for "${descriptor.key}"`);
       }
+      // Build the template's product list. Subscription line first; if
+      // the dealer is on sub-auto-dms, append the one-time DMS Setup
+      // Charge tagged with "<internal_id>::dms-setup" so it can be
+      // detected and removed in lockstep with the dealer if needed.
+      const products: BillingProduct[] = [{
+        productId: descriptor.key,
+        name: descriptor.name,
+        quantity: 1,
+        price,
+        lineItemDescription: `${args.dealerInternalId}::${args.dealerName}`,
+      }];
+      if (descriptor.key === "sub-auto-dms") {
+        const setupPrice = (await lookupPrice("dms-setup")) ?? 0;
+        products.push({
+          productId: "dms-setup",
+          name: "One Time DMS Setup Charge",
+          quantity: 1,
+          price: setupPrice,
+          lineItemDescription: `${args.dealerInternalId}::dms-setup`,
+        });
+      }
       await createTemplate({
         customerId: customerResult.data.id,
-        products: [{
-          productId: descriptor.key,
-          name: descriptor.name,
-          quantity: 1,
-          price,
-          lineItemDescription: `${args.dealerInternalId}::${args.dealerName}`,
-        }],
+        products,
         nextInvoiceDate: firstOfNextMonthIso(),
         scheduleInterval: "monthly",
       });
+      // Mirror customer_id into dealers.template_id by convention —
+      // da-billing's template API is keyed by customerId, not by a
+      // separate template id, so this is the "template exists" flag.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (args.adminClient as any)
+        .from("dealers")
+        .update({ template_id: customerResult.data.id })
+        .eq("id", args.dealerUuid)
+        .is("template_id", null);
     },
     {
       event: "billing.template.create",
@@ -385,28 +411,43 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Geocode the new dealer's address if coordinates are missing
   void geocodeDealer(admin, data as { id: string; lat: unknown; lng: unknown }, rest);
 
-  // Event 1: provision a da-billing customer for the new dealer (fire-and-forget).
-  // Skipped only for dealers migrated from legacy Aurora (legacy_id is set
-  // for those, null for platform-created dealers — internal_id can't be the
-  // discriminator because this handler auto-generates one as a timestamp).
-  // Legacy dealers map to FreshBooks-imported customers in da-billing under
-  // internal_id, so we don't want to create a duplicate customer for them.
+  // Event 1: provision billing for the new dealer (fire-and-forget).
+  // Branch on subscription_billed_to:
+  //   - 'group' (+ group_id present): append a line item to the group's
+  //     da-billing template via cascadeOnGroupAssign. No standalone
+  //     dealer customer/template is created — the group owns billing.
+  //   - 'dealer' (default): create a standalone da-billing customer
+  //     and recurring template for the dealer.
+  // Skipped entirely for dealers migrated from legacy Aurora (legacy_id is
+  // set for those, null for platform-created dealers). Legacy dealers map
+  // to FreshBooks-imported customers in da-billing under internal_id, so
+  // we don't want to create a duplicate customer for them.
   const createdDealer = data as Record<string, unknown>;
   const createdDealerId = createdDealer.id as string;
+  const createdDealerGroupId = createdDealer.group_id as string | null;
+  const subscriptionBilledTo = (createdDealer.subscription_billed_to as string | null) ?? "dealer";
   const hasLegacyBilling = createdDealer.legacy_id != null;
+
   if (!hasLegacyBilling) {
-    void fireAndForgetCustomerCreate({
-      adminClient: admin,
-      dealerUuid: createdDealerId,
-      dealerInternalId: internalId,
-      dealerName: name.trim(),
-      contactName: ((rest.primary_contact as string | null) ?? name).trim(),
-      accountType: (createdDealer.account_type as string | null) ?? null,
-      email: (rest.primary_contact_email as string | null) ?? undefined,
-      address: (rest.address as string | null) ?? undefined,
-      phone: (rest.phone as string | null) ?? undefined,
-      state: (rest.state as string | null) ?? undefined,
-    });
+    if (subscriptionBilledTo === "group" && createdDealerGroupId) {
+      // Group owns the subscription line. Cascade adds a tagged line
+      // item to the group's template (creating the template + customer
+      // if needed) using the dealer's account_type as productId.
+      fireGroupAssignCascade(createdDealerId, createdDealerGroupId);
+    } else {
+      void fireAndForgetCustomerCreate({
+        adminClient: admin,
+        dealerUuid: createdDealerId,
+        dealerInternalId: internalId,
+        dealerName: name.trim(),
+        contactName: ((rest.primary_contact as string | null) ?? name).trim(),
+        accountType: (createdDealer.account_type as string | null) ?? null,
+        email: (rest.primary_contact_email as string | null) ?? undefined,
+        address: (rest.address as string | null) ?? undefined,
+        phone: (rest.phone as string | null) ?? undefined,
+        state: (rest.state as string | null) ?? undefined,
+      });
+    }
   }
 
   if (username?.trim() && password?.trim()) {

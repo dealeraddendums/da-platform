@@ -38,15 +38,29 @@ const inputStyle: React.CSSProperties = {
 
 // ── New Dealer Form ──────────────────────────────────────────────────────────
 
+const SUBSCRIPTION_OPTIONS: { id: "sub-manual" | "sub-auto-web" | "sub-auto-dms"; label: string }[] = [
+  { id: "sub-manual",   label: "Monthly Subscription Manual" },
+  { id: "sub-auto-web", label: "Monthly Subscription Automatic Web" },
+  { id: "sub-auto-dms", label: "Monthly Subscription Automatic DMS" },
+];
+
+type BillingTarget = "dealer" | "group";
+
 type NewDealerFields = {
   name: string; address: string; city: string; state: string; zip: string;
   phone: string; primary_contact: string; primary_contact_email: string;
+  account_type: "sub-manual" | "sub-auto-web" | "sub-auto-dms";
+  subscription_billed_to: BillingTarget;
+  labels_billed_to: BillingTarget;
 };
 
 function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => void; onCancel: () => void }) {
   const [fields, setFields] = useState<NewDealerFields>({
     name: "", address: "", city: "", state: "", zip: "",
     phone: "", primary_contact: "", primary_contact_email: "",
+    account_type: "sub-manual",
+    subscription_billed_to: "dealer",
+    labels_billed_to: "dealer",
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -73,6 +87,9 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
         phone: fields.phone.trim() || null,
         primary_contact: fields.primary_contact.trim() || null,
         primary_contact_email: fields.primary_contact_email.trim() || null,
+        account_type: fields.account_type,
+        subscription_billed_to: fields.subscription_billed_to,
+        labels_billed_to: fields.labels_billed_to,
       }),
     });
     const json = (await res.json()) as { data?: { id: string }; error?: string };
@@ -121,6 +138,30 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
           <div>
             <label style={labelStyle}>Contact Email</label>
             <input style={inputStyle} type="email" value={fields.primary_contact_email} onChange={set("primary_contact_email")} placeholder="jane@dealer.com" />
+          </div>
+
+          {/* Subscription + billing routing — all three required for group-added dealers. */}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle}>Subscription Type *</label>
+            <select style={inputStyle} value={fields.account_type} onChange={set("account_type")} required>
+              {SUBSCRIPTION_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Subscription Billed To *</label>
+            <select style={inputStyle} value={fields.subscription_billed_to} onChange={set("subscription_billed_to")} required>
+              <option value="dealer">Dealer</option>
+              <option value="group">Group</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Labels Billed To *</label>
+            <select style={inputStyle} value={fields.labels_billed_to} onChange={set("labels_billed_to")} required>
+              <option value="dealer">Dealer</option>
+              <option value="group">Group</option>
+            </select>
           </div>
         </div>
         {err && <p style={{ color: "#ff5252", fontSize: 13, marginBottom: 12 }}>{err}</p>}

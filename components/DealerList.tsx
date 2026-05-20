@@ -43,7 +43,12 @@ const PER_PAGE = 25;
 
 type SortCol = "name" | "group_name" | "active" | "account_type" | "lifetime_prints" | "last_30_prints" | "created_at";
 
+// Display labels for every account_type form we've ever written to the
+// DB: legacy full names (pre-migration) and current product-id values.
 const SUBSCRIPTION_LABELS: Record<string, string> = {
+  "sub-manual":                          "Manual",
+  "sub-auto-web":                        "Auto Web",
+  "sub-auto-dms":                        "Auto DMS",
   "Monthly Subscription Manual":         "Manual",
   "Monthly Subscription Automatic Web":  "Auto Web",
   "Monthly Subscription Automatic DMS":  "Auto DMS",
@@ -646,11 +651,15 @@ const AUTO_MAKES = [
   "Porsche","Ram","Rolls-Royce","Subaru","Tesla","Toyota","Volkswagen","Volvo","Other",
 ];
 
+// Values are the da-billing product IDs (sub-manual / sub-auto-web /
+// sub-auto-dms) so account_type is consistent with the productId stored
+// on da-billing template line items. Trial is platform-only — descriptors
+// return null for it, which makes the template-create step a no-op.
 const ACCOUNT_TYPES: { label: string; value: string }[] = [
-  { label: "Trial",    value: "Trial" },
-  { label: "Manual",   value: "Monthly Subscription Manual" },
-  { label: "Auto Web", value: "Monthly Subscription Automatic Web" },
-  { label: "Auto DMS", value: "Monthly Subscription Automatic DMS" },
+  { label: "Trial",                                  value: "Trial" },
+  { label: "Monthly Subscription Manual",            value: "sub-manual" },
+  { label: "Monthly Subscription Automatic Web",     value: "sub-auto-web" },
+  { label: "Monthly Subscription Automatic DMS",     value: "sub-auto-dms" },
 ];
 
 type NewDealerFormProps = {
@@ -665,7 +674,7 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
   const [fields, setFields] = useState({
     name: "",
     dealer_id: String(Date.now()),
-    account_type: "Monthly Subscription Manual",
+    account_type: "sub-manual",
     franchise: "",
     dealer_group: "",
     primary_contact: "",

@@ -16,6 +16,8 @@ import {
   createCustomer,
   getTemplate,
   putTemplate,
+  lookupPrice,
+  subscriptionDescriptorFor,
   type BillingProduct,
 } from "@/lib/billing";
 
@@ -97,15 +99,51 @@ export async function cascadeOnGroupAssign(args: {
   // da-billing's UI uses the internal_id portion to link the line to
   // the dealer. Without internal_id we can't safely cascade — bail.
   if (!dealer.internal_id) return;
-  const subscriptionName = `Subscription — ${dealer.name}${dealer.account_type ? ` (${dealer.account_type})` : ""}`;
-  await appendToTemplate(groupCustomerId, [
+
+  // Resolve productId + price from da-billing's Pricing settings so the
+  // group template line carries the same identifiers the dealer-side
+  // path uses. da-billing owns canonical pricing; we just echo it back.
+  const descriptor = subscriptionDescriptorFor(dealer.account_type);
+  const price = descriptor ? (await lookupPrice(descriptor.key)) ?? 0 : 0;
+
+  const subscriptionName = descriptor
+    ? `${descriptor.name} — ${dealer.name}`
+    : `Subscription — ${dealer.name}${dealer.account_type ? ` (${dealer.account_type})` : ""}`;
+  const newLines: (BillingProduct & { lineItemDescription: string })[] = [
     {
+      productId: descriptor?.key,
       name: subscriptionName,
       quantity: 1,
-      price: 0, // group admin sets the actual price in da-billing
+      price,
       lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
-    } as BillingProduct & { lineItemDescription: string },
-  ]);
+    },
+  ];
+  // sub-auto-dms triggers a one-time DMS Setup Charge alongside the
+  // recurring subscription line. Tagged with "<internal_id>::dms-setup"
+  // so unassign cleanup (which strips by internal_id prefix) sweeps it.
+  if (descriptor?.key === "sub-auto-dms") {
+    const setupPrice = (await lookupPrice("dms-setup")) ?? 0;
+    newLines.push({
+      productId: "dms-setup",
+      name: "One Time DMS Setup Charge",
+      quantity: 1,
+      price: setupPrice,
+      lineItemDescription: `${dealer.internal_id}::dms-setup`,
+    });
+  }
+  await appendToTemplate(groupCustomerId, newLines);
+
+  // Mirror the group's billing_customer_id into groups.template_id so the
+  // platform has a single column to check for "this group has an active
+  // template" without round-tripping to da-billing. da-billing's template
+  // API is keyed by customerId (GET /templates/customer/:customerId), so
+  // we use the customer id as the template id by convention.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin as any)
+    .from("groups")
+    .update({ template_id: groupCustomerId })
+    .eq("id", group.id)
+    .is("template_id", null);
 
   // Zero out the dealer's own template subscription line(s) by replacing
   // the products array with an empty list. The group now owns billing.

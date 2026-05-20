@@ -125,6 +125,26 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     merged = [newSubLine, ...nonSub];
   }
 
+  // When the new tier is sub-auto-dms, ensure a one-time DMS Setup Charge
+  // is present. Skip if the dealer already has one — detect by productId
+  // OR by the "<internal_id>::dms-setup" tag so re-runs never double-bill.
+  if (descriptor.key === "sub-auto-dms") {
+    const hasSetup = merged.some(p =>
+      p.productId === "dms-setup"
+      || (p as BillingProduct & { lineItemDescription?: string }).lineItemDescription === `${dealer.internal_id}::dms-setup`
+    );
+    if (!hasSetup) {
+      const setupPrice = (await lookupPrice("dms-setup")) ?? 0;
+      merged.push({
+        productId: "dms-setup",
+        name: "One Time DMS Setup Charge",
+        quantity: 1,
+        price: setupPrice,
+        lineItemDescription: `${dealer.internal_id}::dms-setup`,
+      } as BillingProduct & { lineItemDescription: string });
+    }
+  }
+
   await putTemplate(customerKey, merged);
 
   return NextResponse.json({
