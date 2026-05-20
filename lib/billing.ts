@@ -75,6 +75,73 @@ export async function createCustomer(input: BillingCustomerInput): Promise<Billi
   }
 }
 
+/**
+ * Fetch a single customer from da-billing. Includes contact fields the
+ * Billing tab needs (name, email, phone, address, etc.). Returns null
+ * when the customer is not found.
+ */
+export interface BillingCustomerDetail extends BillingCustomerResponse {
+  phone?: string | null;
+  address?: string | null;
+  state?: string | null;
+  city?: string | null;
+  zip?: string | null;
+  country?: string | null;
+  isGroup?: boolean | null;
+}
+
+export async function getCustomer(customerId: string): Promise<BillingCustomerDetail | null> {
+  const res = await fetch(`${BASE}/customers/${encodeURIComponent(customerId)}`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+  if (res.status === 404) return null;
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `getCustomer ${res.status}`, text);
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    return (parsed.customer ?? parsed) as BillingCustomerDetail;
+  } catch (err) {
+    throw new BillingError(res.status, `getCustomer parse: ${(err as Error).message}`, text);
+  }
+}
+
+/**
+ * Update contact fields on a da-billing customer. Only fields explicitly
+ * passed are forwarded — partial update semantics. Returns the updated
+ * customer record from da-billing.
+ */
+export interface BillingCustomerUpdate {
+  name?: string;
+  company?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
+}
+
+export async function updateCustomer(
+  customerId: string,
+  fields: BillingCustomerUpdate,
+): Promise<BillingCustomerDetail> {
+  const res = await fetch(`${BASE}/customers/${encodeURIComponent(customerId)}`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(fields),
+  });
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `updateCustomer ${res.status}`, text);
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    return (parsed.customer ?? parsed) as BillingCustomerDetail;
+  } catch (err) {
+    throw new BillingError(res.status, `updateCustomer parse: ${(err as Error).message}`, text);
+  }
+}
+
 export async function archiveCustomer(customerId: string): Promise<void> {
   const res = await fetch(`${BASE}/customers/${encodeURIComponent(customerId)}/archive`, {
     method: "POST",

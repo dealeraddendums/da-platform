@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { GroupOptionRow, GroupDisclaimerRow, GroupTemplateRow } from "@/lib/db";
 import CorporateProductModal from "@/components/CorporateProductModal";
 import AssignProductModal from "@/components/AssignProductModal";
+import GroupBillingTab from "@/components/GroupBillingTab";
 import { decodeHtmlEntities } from "@/lib/format";
 
 type Props = {
@@ -12,13 +13,14 @@ type Props = {
   isSuperAdmin?: boolean;
 };
 
-type Tab = "users" | "options" | "disclaimers" | "templates";
+type Tab = "users" | "billing" | "options" | "disclaimers" | "templates";
 
 export default function GroupOptionsPanel({ groupId, isSuperAdmin = false }: Props) {
   const [tab, setTab] = useState<Tab>("users");
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "users", label: "Users" },
+    { id: "billing", label: "Billing" },
     { id: "options", label: "Corporate Products" },
     { id: "disclaimers", label: "Disclaimers" },
     { id: "templates", label: "Templates" },
@@ -48,6 +50,7 @@ export default function GroupOptionsPanel({ groupId, isSuperAdmin = false }: Pro
 
       <div className="mt-4">
         {tab === "users" && <UsersTab groupId={groupId} isSuperAdmin={isSuperAdmin} />}
+        {tab === "billing" && <GroupBillingTab groupId={groupId} />}
         {tab === "options" && <OptionsTab groupId={groupId} />}
         {tab === "disclaimers" && <DisclaimersTab groupId={groupId} />}
         {tab === "templates" && <TemplatesTab groupId={groupId} />}

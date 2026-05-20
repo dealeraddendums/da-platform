@@ -3,6 +3,7 @@ import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow, GroupUpdate } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
+import { createCustomer, billingConfigured } from "@/lib/billing";
 
 type SortableCol = "name" | "active" | "account_type" | "dealer_count" | "created_at" | "billing_contact";
 const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "billing_contact", "created_at"]);
@@ -146,6 +147,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       role: "group_admin" as const,
       group_id: group.id,
     });
+  }
+
+  // Eager billing customer creation. Non-blocking: failures are logged
+  // but never fail the group creation. The lazy create path in
+  // group-billing-cascade.ts is still the safety net.
+  if (billingConfigured() && !group.billing_customer_id) {
+    void (async () => {
+      try {
+        const created = await createCustomer({
+          name: (rest.primary_contact as string | undefined) ?? group.name,
+          company: group.name,
+          email: ((rest.billing_email as string | undefined) ?? (rest.primary_contact_email as string | undefined)) ?? undefined,
+          phone: (rest.billing_phone as string | undefined) ?? undefined,
+          address: (rest.billing_address as string | undefined) ?? undefined,
+          state: (rest.billing_state as string | undefined) ?? undefined,
+          isGroup: true,
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any)
+          .from("groups")
+          .update({ billing_customer_id: created.id })
+          .eq("id", group.id);
+      } catch (err) {
+        console.error(
+          "[groups/POST] billing customer create failed (non-fatal):",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    })();
   }
 
   // Get creator's display name for internal notification
