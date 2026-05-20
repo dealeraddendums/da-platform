@@ -157,6 +157,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       id: authUser.user.id,
       email: authEmail,
       full_name: (rest.primary_contact as string | undefined) ?? null,
+      phone: ((rest as Record<string, unknown>).phone as string | undefined) ?? null,
       role: "group_admin" as const,
       group_id: group.id,
     });
