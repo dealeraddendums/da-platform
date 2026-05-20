@@ -47,17 +47,19 @@ type SortCol = "name" | "group_name" | "active" | "account_type" | "lifetime_pri
 // DB: legacy full names (pre-migration) and current product-id values.
 const SUBSCRIPTION_LABELS: Record<string, string> = {
   "sub-manual":                          "Manual",
-  "sub-auto-web":                        "Auto Web",
-  "sub-auto-dms":                        "Auto DMS",
+  "sub-auto-web":                        "Automatic Web",
+  "sub-auto-dms":                        "Automatic DMS",
   "Monthly Subscription Manual":         "Manual",
-  "Monthly Subscription Automatic Web":  "Auto Web",
-  "Monthly Subscription Automatic DMS":  "Auto DMS",
+  "Monthly Subscription Automatic Web":  "Automatic Web",
+  "Monthly Subscription Automatic DMS":  "Automatic DMS",
   "Trial":                               "Trial",
 };
 
+// Anything else (null, "Free", legacy strings we don't recognise) collapses
+// to "Free" — the documented spec for unrecognised values.
 function subscriptionLabel(accountType: string | null): string {
-  if (!accountType) return "—";
-  return SUBSCRIPTION_LABELS[accountType] ?? accountType;
+  if (!accountType) return "Free";
+  return SUBSCRIPTION_LABELS[accountType] ?? "Free";
 }
 
 const MIN_DATE = new Date("2015-01-01").getTime();

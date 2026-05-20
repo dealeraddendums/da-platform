@@ -206,9 +206,16 @@ async function geocodeDealer(
 }
 
 type SortableCol = "name" | "active" | "account_type" | "created_at" | "lifetime_prints" | "last_30_prints" | "group_name";
-// Use legacy_id for "created" sort — sequential int, more reliable than created_at
+// Sort the "created" column by the real created_at timestamp. The
+// previous remap to legacy_id was a perf optimisation (sequential int,
+// indexed) that silently broke for platform-created dealers — legacy_id
+// is null for those, which (with the default nullsFirst:false ordering)
+// pushed every platform-native dealer to the bottom of the list and
+// off the first page. Surfaced as "group dealers missing from the
+// list" because most group dealers were created on the new platform.
+// Both Aurora-migrated and platform-native dealers have created_at.
 const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "created_at"]);
-const DB_SORT_COL_MAP: Partial<Record<SortableCol, string>> = { created_at: "legacy_id" };
+const DB_SORT_COL_MAP: Partial<Record<SortableCol, string>> = {};
 
 /**
  * GET /api/dealers
@@ -258,10 +265,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const sortDir = searchParams.get("sort_dir") === "asc" ? true : false; // ascending = true
   const legacyIdGte = searchParams.get("legacy_id_gte");
 
+  // Convert the legacy_id_gte query param (Unix seconds, sent by the UI's
+  // date-range filter) to a created_at ISO threshold so platform-created
+  // dealers (legacy_id NULL) aren't excluded from results.
+  const createdSinceIso = legacyIdGte
+    ? new Date(parseInt(legacyIdGte, 10) * 1000).toISOString()
+    : null;
+
   if (atRisk) {
     let allQuery = admin.from("dealers").select("*, groups(name)").eq("active", true).limit(2500);
     if (q) allQuery = allQuery.or(`name.ilike.%${q}%,dealer_id.ilike.%${q}%`);
-    if (legacyIdGte) allQuery = allQuery.gte("legacy_id", parseInt(legacyIdGte, 10));
+    if (createdSinceIso) allQuery = allQuery.gte("created_at", createdSinceIso);
     const { data: allDealers, error: allErr } = await allQuery;
     if (allErr) return NextResponse.json({ error: allErr.message }, { status: 500 });
 
@@ -299,7 +313,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (q) query = query.or(`name.ilike.%${q}%,dealer_id.ilike.%${q}%,city.ilike.%${q}%,primary_contact.ilike.%${q}%`);
   if (active === "true") query = query.eq("active", true);
   else if (active === "false") query = query.eq("active", false);
-  if (legacyIdGte) query = query.gte("legacy_id", parseInt(legacyIdGte, 10));
+  if (createdSinceIso) query = query.gte("created_at", createdSinceIso);
 
   // Apply DB-level ordering; "created_at" sorts by legacy_id (sequential int)
   const dbSortCol = DB_SORT_COLS.has(sortCol)
