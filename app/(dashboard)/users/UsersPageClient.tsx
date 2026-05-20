@@ -877,7 +877,15 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
 
       {/* Tabs — super_admin only (not in ghost mode or scoped contexts) */}
       {viewerRole === "super_admin" && !isGhostMode && !dealerMode && !groupMode && (
-        <div style={{ display: "flex", gap: 0, marginBottom: 16, borderBottom: "2px solid #e0e0e0", flexWrap: "wrap" }}>
+        <div style={{
+          display: "flex",
+          gap: 0,
+          marginBottom: 16,
+          background: "#fff",
+          padding: "0 4px",
+          borderBottom: "2px solid #e0e0e0",
+          flexWrap: "wrap",
+        }}>
           {SUPER_ADMIN_TABS.map(tab => (
             <button
               key={tab.value}
@@ -885,11 +893,11 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
               style={{
                 padding: "8px 16px",
                 fontSize: 13,
-                fontWeight: 500,
+                fontWeight: superAdminTab === tab.value ? 600 : 500,
                 background: "none",
                 border: "none",
-                borderBottom: superAdminTab === tab.value ? "2px solid #1976d2" : "2px solid transparent",
-                color: superAdminTab === tab.value ? "#1976d2" : "#78828c",
+                borderBottom: superAdminTab === tab.value ? "2px solid #ffa500" : "2px solid transparent",
+                color: "#333",
                 cursor: "pointer",
                 marginBottom: -2,
                 whiteSpace: "nowrap",
