@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import ChunkErrorReloader from "@/components/ChunkErrorReloader";
 
 export const metadata: Metadata = {
   title: "DA Platform",
@@ -21,7 +22,10 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <ChunkErrorReloader />
+        {children}
+      </body>
     </html>
   );
 }
