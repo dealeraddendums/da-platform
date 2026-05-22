@@ -858,7 +858,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                   <span className="text-sm" style={{ color: "var(--text-secondary)", flexShrink: 0 }}>DA Group</span>
                   <span className="text-sm font-medium text-right">
                     {group
-                      ? <Link href={`/groups/${group.id}`} style={{ color: "var(--blue)" }}>{group.name}</Link>
+                      ? <Link href={`/groups/${group.id}`} style={{ color: "var(--blue)" }}>{decodeHtmlEntities(group.name)}</Link>
                       : <span style={{ color: "var(--text-muted)" }}>None</span>
                     }
                   </span>

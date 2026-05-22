@@ -23,8 +23,11 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <ChunkErrorReloader />
         {children}
+        {/* Mounts last so its (null-returning) Client Component boundary
+            sits after the route segment's children in React's tree, not
+            before — keeping the route children's hydration index stable. */}
+        <ChunkErrorReloader />
       </body>
     </html>
   );
