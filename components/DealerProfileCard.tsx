@@ -19,6 +19,10 @@ type Props = {
    *  Used to expose the inventory_provider / inventory_dealer_id pencil
    *  edits without granting access to the full Edit Profile flow. */
   isGroupAdmin?: boolean;
+  /** Active groups for the DA Group dropdown. Server-fetched + passed in
+   *  so the client doesn't need to call /api/groups. Only populated
+   *  for super_admin viewers. */
+  availableGroups?: { id: string; name: string }[];
   hubspotCompanyId?: number | null;
 };
 
@@ -65,6 +69,9 @@ type FormData = {
   zip: string;
   country: string;
   makes: string; // comma-separated in the form
+  group_id: string;             // "" = None
+  subscription_billed_to: "dealer" | "group";
+  labels_billed_to: "dealer" | "group";
 };
 
 function dealerToForm(d: DealerRow): FormData {
@@ -79,10 +86,13 @@ function dealerToForm(d: DealerRow): FormData {
     zip: d.zip ?? "",
     country: d.country,
     makes: (d.makes ?? []).join(", "),
+    group_id: d.group_id ?? "",
+    subscription_billed_to: d.subscription_billed_to ?? "dealer",
+    labels_billed_to: d.labels_billed_to ?? "dealer",
   };
 }
 
-export default function DealerProfileCard({ dealer: initialDealer, group, canEdit, isSuperAdmin, isGroupAdmin = false, hubspotCompanyId }: Props) {
+export default function DealerProfileCard({ dealer: initialDealer, group, canEdit, isSuperAdmin, isGroupAdmin = false, availableGroups = [], hubspotCompanyId }: Props) {
   const canEditInventory = isSuperAdmin || isGroupAdmin;
   const router = useRouter();
   const [dealer, setDealer] = useState(initialDealer);
@@ -152,6 +162,16 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
         .map((s) => s.trim())
         .filter(Boolean),
     };
+
+    // Super-admin group assignment. Only sent when the dealer is currently
+    // ungrouped AND the user picked a group — re-assignment / removal of
+    // existing groups is out of scope. The PATCH route fires the
+    // super-admin cascade on the null → UUID transition.
+    if (isSuperAdmin && !dealer.group_id && form.group_id) {
+      patch.group_id = form.group_id;
+      patch.subscription_billed_to = form.subscription_billed_to;
+      patch.labels_billed_to = form.labels_billed_to;
+    }
 
     const res = await fetch(`/api/dealers/${dealer.id}`, {
       method: "PATCH",
@@ -783,16 +803,86 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
               <p className="text-xs" style={{ color: "var(--success, #2e7d32)" }}>{invProvSuccess}</p>
             )}
 
-            {/* DA Group */}
-            <div className="flex items-start justify-between gap-4">
-              <span className="text-sm" style={{ color: "var(--text-secondary)", flexShrink: 0 }}>DA Group</span>
-              <span className="text-sm font-medium text-right">
-                {group
-                  ? <Link href={`/groups/${group.id}`} style={{ color: "var(--blue)" }}>{group.name}</Link>
-                  : <span style={{ color: "var(--text-muted)" }}>None</span>
-                }
-              </span>
-            </div>
+            {/* DA Group — super_admin can assign an ungrouped dealer into
+                a group inline. Re-assignment / removal of existing groups
+                is out of scope; if the dealer already has a group the
+                field stays read-only. */}
+            {editing && isSuperAdmin && !dealer.group_id ? (
+              <>
+                <div>
+                  <label className="label">DA Group</label>
+                  <select
+                    className="input"
+                    value={form.group_id}
+                    onChange={(e) => setForm((f) => ({ ...f, group_id: e.target.value }))}
+                  >
+                    <option value="">— None —</option>
+                    {availableGroups.map((g) => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                    Assigning a group will route billing per the choices below.
+                  </p>
+                </div>
+                {form.group_id && (
+                  <>
+                    <div>
+                      <label className="label">Subscription Billed To</label>
+                      <select
+                        className="input"
+                        value={form.subscription_billed_to}
+                        onChange={(e) => setForm((f) => ({ ...f, subscription_billed_to: e.target.value as "dealer" | "group" }))}
+                      >
+                        <option value="dealer">Dealer</option>
+                        <option value="group">Group</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Labels Billed To</label>
+                      <select
+                        className="input"
+                        value={form.labels_billed_to}
+                        onChange={(e) => setForm((f) => ({ ...f, labels_billed_to: e.target.value as "dealer" | "group" }))}
+                      >
+                        <option value="dealer">Dealer</option>
+                        <option value="group">Group</option>
+                      </select>
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-4">
+                  <span className="text-sm" style={{ color: "var(--text-secondary)", flexShrink: 0 }}>DA Group</span>
+                  <span className="text-sm font-medium text-right">
+                    {group
+                      ? <Link href={`/groups/${group.id}`} style={{ color: "var(--blue)" }}>{group.name}</Link>
+                      : <span style={{ color: "var(--text-muted)" }}>None</span>
+                    }
+                  </span>
+                </div>
+                {/* When the dealer already has a group, show the billing
+                    routing as read-only context. */}
+                {dealer.group_id && (
+                  <>
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-sm" style={{ color: "var(--text-secondary)", flexShrink: 0 }}>Subscription Billed To</span>
+                      <span className="text-sm font-medium text-right" style={{ color: "var(--text-primary)" }}>
+                        {dealer.subscription_billed_to === "group" ? "Group" : "Dealer"}
+                      </span>
+                    </div>
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-sm" style={{ color: "var(--text-secondary)", flexShrink: 0 }}>Labels Billed To</span>
+                      <span className="text-sm font-medium text-right" style={{ color: "var(--text-primary)" }}>
+                        {dealer.labels_billed_to === "group" ? "Group" : "Dealer"}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
 
             {/* Test Account flag — super_admin only. Setting this enables the
                 red Delete Dealer button in the action bar. */}

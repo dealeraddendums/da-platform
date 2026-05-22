@@ -58,6 +58,19 @@ export default async function DealerPage({ params }: Props) {
     ? parseInt(dealer.hubspot_company_id, 10) || null
     : null;
 
+  // Active groups list for the super_admin DA Group dropdown. Only
+  // fetched when actually needed — the role gate matches the UI's
+  // dropdown visibility.
+  let availableGroups: { id: string; name: string }[] = [];
+  if (isSuperAdmin) {
+    const { data: groupRows } = await admin
+      .from("groups")
+      .select("id, name")
+      .eq("active", true)
+      .order("name", { ascending: true });
+    availableGroups = (groupRows ?? []) as { id: string; name: string }[];
+  }
+
   return (
     <div>
       {isSuperAdmin && (
@@ -75,6 +88,7 @@ export default async function DealerPage({ params }: Props) {
             canEdit={canEdit}
             isSuperAdmin={isSuperAdmin}
             isGroupAdmin={isGroupAdmin && group?.id === profile?.group_id}
+            availableGroups={availableGroups}
             hubspotCompanyId={hubspotCompanyId}
           />
         }

@@ -13,6 +13,7 @@
 import { createAdminSupabaseClient } from "@/lib/db";
 import {
   appendToTemplate,
+  archiveCustomer,
   createCustomer,
   getTemplate,
   putTemplate,
@@ -20,6 +21,7 @@ import {
   subscriptionDescriptorFor,
   type BillingProduct,
 } from "@/lib/billing";
+import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 
 interface DealerSnap {
   id: string;                // dealers.id UUID
@@ -210,6 +212,149 @@ export function fireGroupUnassignCascade(dealerUuid: string, groupId: string): v
     groupId,
     event: "group.unassign",
   });
+}
+
+// ── Super-admin "move existing standalone dealer into a group" cascade ──────
+//
+// Called from PATCH /api/dealers/[id] when group_id transitions from null
+// to a group UUID. Handles three scenarios driven by the dealer's
+// subscription_billed_to + labels_billed_to flags (already updated in the
+// row by the time we run):
+//
+//   A — sub=group, labels=dealer:
+//       Strip sub-* lines from the dealer's standalone template (keep
+//       labels lines); append the sub line to the group template
+//       tagged "<internal_id>::<name>"; set dealers.template_id to the
+//       group customer id by convention.
+//
+//   B — sub=group, labels=group:
+//       Archive the dealer's standalone da-billing customer; append
+//       both sub + labels lines (productId "labels") to the group
+//       template; null out dealers.billing_customer_id; set
+//       dealers.template_id to the group customer id.
+//
+//   C — sub=dealer:
+//       No billing changes. Returns immediately.
+//
+// In all three, fires fireGroupDiscountSync(groupId) at the end so the
+// group's auto-discount tier recalculates against the new active count.
+
+interface SuperAdminAssignDealer {
+  id: string;
+  name: string;
+  internal_id: string | null;
+  billing_customer_id: string | null;
+  template_id: string | null;
+  subscription_billed_to: "dealer" | "group";
+  labels_billed_to: "dealer" | "group";
+  account_type: string | null;
+}
+
+export async function cascadeSuperAdminGroupAssign(args: {
+  dealerUuid: string;
+  groupId: string;
+}): Promise<void> {
+  const admin = createAdminSupabaseClient();
+  const [{ data: dealer }, { data: group }] = await Promise.all([
+    admin
+      .from("dealers")
+      .select("id, name, internal_id, billing_customer_id, template_id, subscription_billed_to, labels_billed_to, account_type")
+      .eq("id", args.dealerUuid)
+      .maybeSingle<SuperAdminAssignDealer>(),
+    admin
+      .from("groups")
+      .select("id, name, billing_customer_id")
+      .eq("id", args.groupId)
+      .maybeSingle<GroupSnap>(),
+  ]);
+  if (!dealer || !group) return;
+
+  // Scenario C: subscription stays on the dealer's standalone customer.
+  // Nothing to change in da-billing. Still need to refresh the discount.
+  if (dealer.subscription_billed_to !== "group") {
+    fireGroupDiscountSync(group.id);
+    return;
+  }
+
+  // Both Scenario A and B need the group to have a billing customer.
+  if (!group.billing_customer_id) {
+    console.warn(
+      `[cascadeSuperAdminGroupAssign] group ${group.id} (${group.name}) has no billing_customer_id — skipping billing cascade. The group needs to be re-saved or have its customer created via /api/billing/groups/[id]/create-customer first.`,
+    );
+    fireGroupDiscountSync(group.id);
+    return;
+  }
+  if (!dealer.internal_id) {
+    console.warn(`[cascadeSuperAdminGroupAssign] dealer ${dealer.id} missing internal_id — cannot tag line items`);
+    fireGroupDiscountSync(group.id);
+    return;
+  }
+
+  const descriptor = subscriptionDescriptorFor(dealer.account_type);
+  const subPrice = descriptor ? ((await lookupPrice(descriptor.key)) ?? 0) : 0;
+  const subName  = descriptor ? `${descriptor.name} — ${dealer.name}` : `Subscription — ${dealer.name}`;
+  const subLine: BillingProduct & { lineItemDescription: string } = {
+    productId: descriptor?.key,
+    name: subName,
+    quantity: 1,
+    price: subPrice,
+    lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
+  };
+
+  if (dealer.labels_billed_to === "dealer") {
+    // Scenario A — keep dealer customer (still receives label orders),
+    // strip only sub-* lines from its template; sub moves to group.
+    const dealerKey = dealer.billing_customer_id ?? dealer.internal_id;
+    if (dealerKey) {
+      const current = await getTemplate(dealerKey);
+      if (current) {
+        const nonSub = current.products.filter(p => !p.productId?.startsWith?.("sub-"));
+        if (nonSub.length !== current.products.length) {
+          await putTemplate(dealerKey, nonSub);
+        }
+      }
+    }
+    await appendToTemplate(group.billing_customer_id, [subLine]);
+    // template_id mirrors the customer key by platform convention.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any)
+      .from("dealers")
+      .update({ template_id: group.billing_customer_id })
+      .eq("id", dealer.id);
+  } else {
+    // Scenario B — archive dealer customer entirely; sub + labels both
+    // route to the group template.
+    if (dealer.billing_customer_id) {
+      await archiveCustomer(dealer.billing_customer_id);
+    }
+    const labelsLine: BillingProduct & { lineItemDescription: string } = {
+      productId: "labels",
+      name: `Labels — ${dealer.name}`,
+      quantity: 1,
+      price: 0,  // da-billing owns the price for labels; this is a placeholder marker line
+      lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
+    };
+    await appendToTemplate(group.billing_customer_id, [subLine, labelsLine]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any)
+      .from("dealers")
+      .update({
+        billing_customer_id: null,
+        template_id: group.billing_customer_id,
+      })
+      .eq("id", dealer.id);
+  }
+
+  // Group active-dealer count grew — recompute auto-discount tier.
+  fireGroupDiscountSync(group.id);
+}
+
+export function fireSuperAdminGroupAssignCascade(dealerUuid: string, groupId: string): void {
+  fireAndForgetWrap(
+    () => cascadeSuperAdminGroupAssign({ dealerUuid, groupId }),
+    "billing.template.upsert",
+    { dealerUuid, groupId, event: "super-admin.group.assign" },
+  );
 }
 
 // Local fire-and-forget wrapper (avoids circular imports vs lib/billing-sync).

@@ -5,6 +5,7 @@ import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { archiveCustomer, unarchiveCustomer, billingConfigured } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
 import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
+import { fireSuperAdminGroupAssignCascade } from "@/lib/group-billing-cascade";
 
 type Params = { params: { id: string } };
 
@@ -111,6 +112,14 @@ export async function PATCH(
   if (body.active !== undefined && claims.role === "super_admin") patch.active = body.active;
   if (body.is_test !== undefined && claims.role === "super_admin") patch.is_test = body.is_test;
   if (body.group_id !== undefined && claims.role === "super_admin") patch.group_id = body.group_id;
+  // subscription_billed_to / labels_billed_to — super_admin only, used
+  // by the group-assign cascade below to route billing.
+  if (body.subscription_billed_to !== undefined && claims.role === "super_admin") {
+    patch.subscription_billed_to = body.subscription_billed_to;
+  }
+  if (body.labels_billed_to !== undefined && claims.role === "super_admin") {
+    patch.labels_billed_to = body.labels_billed_to;
+  }
   if (body.primary_contact !== undefined) patch.primary_contact = body.primary_contact;
   if (body.primary_contact_email !== undefined) patch.primary_contact_email = body.primary_contact_email;
   if (body.phone !== undefined) patch.phone = body.phone;
@@ -143,15 +152,17 @@ export async function PATCH(
   if (body.inventory_provider_is_dms !== undefined && (claims.role === "super_admin" || claims.role === "group_admin")) {
     patch.inventory_provider_is_dms = body.inventory_provider_is_dms;
   }
-  // Snapshot the active flag + billing customer id before update so we can
-  // detect transitions (true→false, false→true) and fire Event 5 + the
-  // group discount sync (only when active→false and the dealer is in a
-  // group, since group active-count just changed).
+  // Snapshot the active flag + billing customer id + group_id before
+  // update so we can detect transitions (true→false, false→true) for
+  // Event 5 / discount sync, and null→UUID on group_id for the
+  // super-admin group-assign cascade.
   let prevActive: boolean | null = null;
   let billingCustomerId: string | null = null;
   let legacyBillingId: string | null = null;
   let dealerGroupId: string | null = null;
-  if (typeof patch.active === "boolean") {
+  let prevGroupId: string | null = null;
+  // Snapshot runs whenever active OR group_id is being touched.
+  if (typeof patch.active === "boolean" || patch.group_id !== undefined) {
     const { data: snap } = await admin
       .from("dealers")
       .select("active, billing_customer_id, internal_id, group_id")
@@ -161,6 +172,7 @@ export async function PATCH(
     billingCustomerId = snap?.billing_customer_id ?? null;
     legacyBillingId = snap?.internal_id ?? null;
     dealerGroupId = snap?.group_id ?? null;
+    prevGroupId = snap?.group_id ?? null;
   }
 
   const { data, error: dbError } = await admin
@@ -215,6 +227,20 @@ export async function PATCH(
     && dealerGroupId
   ) {
     fireGroupDiscountSync(dealerGroupId);
+  }
+
+  // Super-admin group assignment: when group_id transitions from null
+  // to a non-null UUID, fire the cascade. The cascade also fires its
+  // own fireGroupDiscountSync at the end so we don't double-sync here.
+  // Re-assignment (UUID → different UUID) and removal are out of scope
+  // per spec, so we only act on the null → UUID edge.
+  if (
+    patch.group_id !== undefined
+    && patch.group_id !== null
+    && prevGroupId === null
+    && claims.role === "super_admin"
+  ) {
+    fireSuperAdminGroupAssignCascade(params.id, patch.group_id);
   }
 
   return NextResponse.json({ data: data as DealerRow });
