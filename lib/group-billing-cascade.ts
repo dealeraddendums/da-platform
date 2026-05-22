@@ -147,6 +147,35 @@ export async function cascadeOnGroupAssign(args: {
       lineItemDescription: `${dealer.internal_id}::dms-setup`,
     });
   }
+  // ── Step 1: clean the dealer's standalone template FIRST. ────────────
+  // da-billing enforces a cross-template uniqueness check on the
+  // line-item internal_id tag, so leaving the dealer's own sub-* line in
+  // place while we try to append the same tag to the group template
+  // produces a 400. Strip sub-* from the dealer template (or delete it
+  // entirely if nothing meaningful is left) before touching the group.
+  const dealerKey = dealerCustomerKey(dealer);
+  if (dealerKey) {
+    const current = await getTemplate(dealerKey);
+    if (current) {
+      const nonSub = current.products.filter(p => !isSubscriptionProduct(p));
+      // After stripping all sub-* lines there is by definition no
+      // subscription left, so empty-or-sub-less collapse into the same
+      // outcome: the dealer template is no longer a valid da-billing
+      // template, delete it.
+      if (nonSub.length === 0 || !nonSub.some(isSubscriptionProduct)) {
+        await deleteTemplate(dealerKey);
+        console.log(
+          `[cascadeOnGroupAssign] deleted dealer ${dealer.id} (${dealer.name}) standalone template — group now owns subscription`,
+        );
+      } else if (nonSub.length !== current.products.length) {
+        await putTemplate(dealerKey, nonSub);
+      }
+    }
+  }
+
+  // ── Step 2: append the dealer's subscription line to the group
+  //           template. Safe to do now that the dealer template no
+  //           longer holds the same internal_id::name line. ───────────
   await appendToTemplate(groupCustomerId, newLines);
 
   // Mirror the group's billing_customer_id into groups.template_id so the
@@ -160,32 +189,6 @@ export async function cascadeOnGroupAssign(args: {
     .update({ template_id: groupCustomerId })
     .eq("id", group.id)
     .is("template_id", null);
-
-  // Zero out the dealer's own template subscription line(s). The group
-  // now owns billing. da-billing rejects an empty products array (Rule 1)
-  // and a products array with no subscription (Rule 2), so we filter
-  // sub-* lines only and skip the PUT entirely if the result violates
-  // either rule. That leaves the old subscription on the dealer template
-  // — flagged here so it can be cleaned up manually (e.g. by archiving
-  // the dealer customer if labels also moved to group).
-  const dealerKey = dealerCustomerKey(dealer);
-  if (dealerKey) {
-    const current = await getTemplate(dealerKey);
-    if (current) {
-      const nonSub = current.products.filter(p => !isSubscriptionProduct(p));
-      if (nonSub.length === 0) {
-        console.warn(
-          `[cascadeOnGroupAssign] dealer ${dealer.id} (${dealer.name}) template would be empty after stripping sub-* lines — skipping putTemplate, manual cleanup needed (consider archiving the dealer customer).`,
-        );
-      } else if (!nonSub.some(isSubscriptionProduct)) {
-        console.warn(
-          `[cascadeOnGroupAssign] dealer ${dealer.id} (${dealer.name}) template would have no subscription after stripping sub-* lines — skipping putTemplate, manual cleanup needed.`,
-        );
-      } else if (nonSub.length !== current.products.length) {
-        await putTemplate(dealerKey, nonSub);
-      }
-    }
-  }
 }
 
 /**
