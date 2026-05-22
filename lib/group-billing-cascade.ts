@@ -25,8 +25,10 @@ import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 
 // DA Platform never sets prices on line items. We pass productId
 // (and a human-readable name) and let da-billing resolve the canonical
-// price from its Pricing config when the template is processed.
-// `price: 0` here is the placeholder da-billing overwrites.
+// price from its Pricing config when the template is processed. The
+// price field is omitted entirely (BillingProduct.price is optional);
+// da-billing substitutes the canonical price for any line that arrives
+// without one.
 
 // da-billing rejects PUT /templates/:customerId when:
 //   (1) the products array is empty ("At least one product is required")
@@ -131,7 +133,6 @@ export async function cascadeOnGroupAssign(args: {
       productId: descriptor.key,
       name: subscriptionName,
       quantity: 1,
-      price: 0,
       lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
     },
   ];
@@ -143,7 +144,6 @@ export async function cascadeOnGroupAssign(args: {
       productId: "dms-setup",
       name: "One Time DMS Setup Charge",
       quantity: 1,
-      price: 0,
       lineItemDescription: `${dealer.internal_id}::dms-setup`,
     });
   }
@@ -356,7 +356,6 @@ export async function cascadeSuperAdminGroupAssign(args: {
     productId: descriptor.key,
     name: subName,
     quantity: 1,
-    price: 0,
     lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
   };
 
@@ -403,7 +402,6 @@ export async function cascadeSuperAdminGroupAssign(args: {
       productId: "labels",
       name: `Labels — ${dealer.name}`,
       quantity: 1,
-      price: 0,  // da-billing owns the price for labels; this is a placeholder marker line
       lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
     };
     await appendToTemplate(group.billing_customer_id, [subLine, labelsLine]);

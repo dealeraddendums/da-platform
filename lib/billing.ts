@@ -165,7 +165,10 @@ export interface BillingProduct {
   name?: string;
   qty?: number;
   quantity?: number;
-  price: number;
+  /** Optional — DA Platform omits this field entirely; da-billing
+   *  resolves the canonical price from its Pricing config based on
+   *  productId at template save time. */
+  price?: number;
   discount?: number;
   lineItemDescription?: string;
   // Label-order shape (used by /api/orders/labels):
