@@ -20,6 +20,15 @@ const nextConfig = {
     NEXT_PUBLIC_APP_VERSION: pkg.version,
     NEXT_PUBLIC_BUILD_NUMBER: buildNumber,
   },
+  // box-node-sdk has to be loaded at runtime, not bundled by webpack —
+  // its CJS class-with-static-methods export pattern (getPreconfiguredInstance)
+  // gets mangled by Next's minifier into "t(...).getPreconfiguredInstance
+  // is not a function". Marking it external keeps Next's server bundle
+  // resolving the package via node_modules at runtime, where the class
+  // survives intact.
+  experimental: {
+    serverComponentsExternalPackages: ["box-node-sdk"],
+  },
 };
 
 export default nextConfig;
