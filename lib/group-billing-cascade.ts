@@ -27,6 +27,15 @@ import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 // price from its Pricing config when the template is processed.
 // `price: 0` here is the placeholder da-billing overwrites.
 
+// da-billing rejects PUT /templates/:customerId when:
+//   (1) the products array is empty ("At least one product is required")
+//   (2) no product whose productId starts with "sub-" is present
+//       ("Template must include at least one subscription")
+// Guard every putTemplate / appendToTemplate call against both.
+function isSubscriptionProduct(p: BillingProduct): boolean {
+  return Boolean(p.productId && p.productId.startsWith("sub-"));
+}
+
 interface DealerSnap {
   id: string;                // dealers.id UUID
   name: string;
@@ -108,13 +117,17 @@ export async function cascadeOnGroupAssign(args: {
 
   // Resolve productId + display name only. Price is owned by da-billing.
   const descriptor = subscriptionDescriptorFor(dealer.account_type);
+  if (!descriptor) {
+    console.warn(
+      `[cascadeOnGroupAssign] dealer ${dealer.id} (${dealer.name}) account_type "${dealer.account_type ?? "null"}" did not resolve to a subscription descriptor — skipping appendToTemplate for group ${group.id}. da-billing requires a "sub-*" productId on every template.`,
+    );
+    return;
+  }
 
-  const subscriptionName = descriptor
-    ? `${descriptor.name} — ${dealer.name}`
-    : `Subscription — ${dealer.name}${dealer.account_type ? ` (${dealer.account_type})` : ""}`;
+  const subscriptionName = `${descriptor.name} — ${dealer.name}`;
   const newLines: (BillingProduct & { lineItemDescription: string })[] = [
     {
-      productId: descriptor?.key,
+      productId: descriptor.key,
       name: subscriptionName,
       quantity: 1,
       price: 0,
@@ -124,7 +137,7 @@ export async function cascadeOnGroupAssign(args: {
   // sub-auto-dms triggers a one-time DMS Setup Charge alongside the
   // recurring subscription line. Tagged with "<internal_id>::dms-setup"
   // so unassign cleanup (which strips by internal_id prefix) sweeps it.
-  if (descriptor?.key === "sub-auto-dms") {
+  if (descriptor.key === "sub-auto-dms") {
     newLines.push({
       productId: "dms-setup",
       name: "One Time DMS Setup Charge",
@@ -147,12 +160,30 @@ export async function cascadeOnGroupAssign(args: {
     .eq("id", group.id)
     .is("template_id", null);
 
-  // Zero out the dealer's own template subscription line(s) by replacing
-  // the products array with an empty list. The group now owns billing.
+  // Zero out the dealer's own template subscription line(s). The group
+  // now owns billing. da-billing rejects an empty products array (Rule 1)
+  // and a products array with no subscription (Rule 2), so we filter
+  // sub-* lines only and skip the PUT entirely if the result violates
+  // either rule. That leaves the old subscription on the dealer template
+  // — flagged here so it can be cleaned up manually (e.g. by archiving
+  // the dealer customer if labels also moved to group).
   const dealerKey = dealerCustomerKey(dealer);
   if (dealerKey) {
     const current = await getTemplate(dealerKey);
-    if (current) await putTemplate(dealerKey, []);
+    if (current) {
+      const nonSub = current.products.filter(p => !isSubscriptionProduct(p));
+      if (nonSub.length === 0) {
+        console.warn(
+          `[cascadeOnGroupAssign] dealer ${dealer.id} (${dealer.name}) template would be empty after stripping sub-* lines — skipping putTemplate, manual cleanup needed (consider archiving the dealer customer).`,
+        );
+      } else if (!nonSub.some(isSubscriptionProduct)) {
+        console.warn(
+          `[cascadeOnGroupAssign] dealer ${dealer.id} (${dealer.name}) template would have no subscription after stripping sub-* lines — skipping putTemplate, manual cleanup needed.`,
+        );
+      } else if (nonSub.length !== current.products.length) {
+        await putTemplate(dealerKey, nonSub);
+      }
+    }
   }
 }
 
@@ -190,9 +221,26 @@ export async function cascadeOnGroupUnassign(args: {
   const remaining = current.products.filter(
     (p) => !(p as BillingProduct & { lineItemDescription?: string }).lineItemDescription?.startsWith(prefix),
   );
-  if (remaining.length !== current.products.length) {
-    await putTemplate(group.billing_customer_id, remaining);
+  if (remaining.length === current.products.length) return; // nothing to remove
+
+  // da-billing rejects PUT /templates/:id with an empty products array
+  // or with no subscription line. If removing this dealer would violate
+  // either rule the group template needs manual cleanup (typically: add
+  // another dealer's subscription, or archive the group customer). Skip
+  // the PUT so the cascade doesn't 400.
+  if (remaining.length === 0) {
+    console.warn(
+      `[cascadeOnGroupUnassign] group ${group.id} (${group.name}) template would be empty after removing dealer ${dealer.internal_id} — skipping putTemplate, manual cleanup needed.`,
+    );
+    return;
   }
+  if (!remaining.some(isSubscriptionProduct)) {
+    console.warn(
+      `[cascadeOnGroupUnassign] group template would have no subscription after removing dealer ${dealer.internal_id} — skipping putTemplate, manual cleanup needed.`,
+    );
+    return;
+  }
+  await putTemplate(group.billing_customer_id, remaining);
 }
 
 /**
@@ -291,10 +339,22 @@ export async function cascadeSuperAdminGroupAssign(args: {
   }
 
   // Resolve productId + display name only. da-billing owns the price.
+  // descriptor must resolve to a valid sub-* productId — otherwise the
+  // appendToTemplate call below would emit a line with undefined
+  // productId and da-billing would 400 ("Template must include at
+  // least one subscription"). Bail with a console warning instead.
   const descriptor = subscriptionDescriptorFor(dealer.account_type);
-  const subName  = descriptor ? `${descriptor.name} — ${dealer.name}` : `Subscription — ${dealer.name}`;
+  if (!descriptor) {
+    console.warn(
+      `[cascadeSuperAdminGroupAssign] dealer ${dealer.id} (${dealer.name}) account_type "${dealer.account_type ?? "null"}" did not resolve to a subscription descriptor — skipping group template update for group ${group.id}. da-billing requires a "sub-*" productId on every template.`,
+    );
+    fireGroupDiscountSync(group.id);
+    return;
+  }
+
+  const subName = `${descriptor.name} — ${dealer.name}`;
   const subLine: BillingProduct & { lineItemDescription: string } = {
-    productId: descriptor?.key,
+    productId: descriptor.key,
     name: subName,
     quantity: 1,
     price: 0,
@@ -304,12 +364,25 @@ export async function cascadeSuperAdminGroupAssign(args: {
   if (dealer.labels_billed_to === "dealer") {
     // Scenario A — keep dealer customer (still receives label orders),
     // strip only sub-* lines from its template; sub moves to group.
+    // Same Rule 1+2 guard as cascadeOnGroupAssign: if stripping sub-*
+    // would leave an empty array or no subscription, skip the PUT and
+    // flag for manual cleanup.
     const dealerKey = dealer.billing_customer_id ?? dealer.internal_id;
     if (dealerKey) {
       const current = await getTemplate(dealerKey);
       if (current) {
-        const nonSub = current.products.filter(p => !p.productId?.startsWith?.("sub-"));
-        if (nonSub.length !== current.products.length) {
+        const nonSub = current.products.filter(p => !isSubscriptionProduct(p));
+        if (nonSub.length === current.products.length) {
+          // no sub-* lines to strip, nothing to do
+        } else if (nonSub.length === 0) {
+          console.warn(
+            `[cascadeSuperAdminGroupAssign] dealer ${dealer.id} (${dealer.name}) template would be empty after stripping sub-* lines — skipping putTemplate, manual cleanup needed.`,
+          );
+        } else if (!nonSub.some(isSubscriptionProduct)) {
+          console.warn(
+            `[cascadeSuperAdminGroupAssign] dealer ${dealer.id} (${dealer.name}) template would have no subscription after stripping sub-* lines — skipping putTemplate, manual cleanup needed.`,
+          );
+        } else {
           await putTemplate(dealerKey, nonSub);
         }
       }
