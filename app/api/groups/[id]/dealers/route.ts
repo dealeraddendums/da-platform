@@ -4,6 +4,7 @@ import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
 import { fireGroupAssignCascade, fireGroupUnassignCascade } from "@/lib/group-billing-cascade";
+import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 
 type Params = { params: { id: string } };
 
@@ -84,6 +85,11 @@ export async function POST(
   // billing_sync_errors for super_admin review.
   fireGroupAssignCascade(body.dealer_id, params.id);
 
+  // Group active-dealer count just changed — recompute the
+  // subscriptionDiscount tier (0 / 10 / 20 / 30%) and PUT to da-billing
+  // unless the customer is discountLocked. Fire-and-forget.
+  fireGroupDiscountSync(params.id);
+
   return NextResponse.json({ data: data as DealerRow });
 }
 
@@ -152,6 +158,9 @@ export async function DELETE(
   // Event 4: remove any cascadeFromDealer:<uuid> line items from the
   // group's template. Fire-and-forget.
   fireGroupUnassignCascade(body.dealer_id, params.id);
+
+  // Active member-dealer count shrank — sync subscriptionDiscount tier.
+  fireGroupDiscountSync(params.id);
 
   return NextResponse.json({ data: data as DealerRow });
 }

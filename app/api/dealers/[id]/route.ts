@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { archiveCustomer, unarchiveCustomer, billingConfigured } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
+import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 
 type Params = { params: { id: string } };
 
@@ -143,19 +144,23 @@ export async function PATCH(
     patch.inventory_provider_is_dms = body.inventory_provider_is_dms;
   }
   // Snapshot the active flag + billing customer id before update so we can
-  // detect transitions (true→false, false→true) and fire Event 5.
+  // detect transitions (true→false, false→true) and fire Event 5 + the
+  // group discount sync (only when active→false and the dealer is in a
+  // group, since group active-count just changed).
   let prevActive: boolean | null = null;
   let billingCustomerId: string | null = null;
   let legacyBillingId: string | null = null;
+  let dealerGroupId: string | null = null;
   if (typeof patch.active === "boolean") {
     const { data: snap } = await admin
       .from("dealers")
-      .select("active, billing_customer_id, internal_id")
+      .select("active, billing_customer_id, internal_id, group_id")
       .eq("id", params.id)
-      .maybeSingle<{ active: boolean; billing_customer_id: string | null; internal_id: string | null }>();
+      .maybeSingle<{ active: boolean; billing_customer_id: string | null; internal_id: string | null; group_id: string | null }>();
     prevActive = snap?.active ?? null;
     billingCustomerId = snap?.billing_customer_id ?? null;
     legacyBillingId = snap?.internal_id ?? null;
+    dealerGroupId = snap?.group_id ?? null;
   }
 
   const { data, error: dbError } = await admin
@@ -195,6 +200,21 @@ export async function PATCH(
         );
       }
     }
+  }
+
+  // Group discount sync: when a dealer is deactivated AND was in a
+  // group, the group's active-dealer count just dropped, which may
+  // bump the auto-discount tier down. Fire-and-forget. (We don't sync
+  // on activate because re-activating an already-grouped dealer hits
+  // the same tier — but to keep symmetry the helper is cheap to call,
+  // so we fire on any active flip while in a group.)
+  if (
+    typeof patch.active === "boolean"
+    && prevActive !== null
+    && patch.active !== prevActive
+    && dealerGroupId
+  ) {
+    fireGroupDiscountSync(dealerGroupId);
   }
 
   return NextResponse.json({ data: data as DealerRow });
