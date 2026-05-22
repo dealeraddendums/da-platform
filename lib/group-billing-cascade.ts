@@ -17,11 +17,15 @@ import {
   createCustomer,
   getTemplate,
   putTemplate,
-  lookupPrice,
   subscriptionDescriptorFor,
   type BillingProduct,
 } from "@/lib/billing";
 import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
+
+// DA Platform never sets prices on line items. We pass productId
+// (and a human-readable name) and let da-billing resolve the canonical
+// price from its Pricing config when the template is processed.
+// `price: 0` here is the placeholder da-billing overwrites.
 
 interface DealerSnap {
   id: string;                // dealers.id UUID
@@ -102,11 +106,8 @@ export async function cascadeOnGroupAssign(args: {
   // the dealer. Without internal_id we can't safely cascade — bail.
   if (!dealer.internal_id) return;
 
-  // Resolve productId + price from da-billing's Pricing settings so the
-  // group template line carries the same identifiers the dealer-side
-  // path uses. da-billing owns canonical pricing; we just echo it back.
+  // Resolve productId + display name only. Price is owned by da-billing.
   const descriptor = subscriptionDescriptorFor(dealer.account_type);
-  const price = descriptor ? (await lookupPrice(descriptor.key)) ?? 0 : 0;
 
   const subscriptionName = descriptor
     ? `${descriptor.name} — ${dealer.name}`
@@ -116,7 +117,7 @@ export async function cascadeOnGroupAssign(args: {
       productId: descriptor?.key,
       name: subscriptionName,
       quantity: 1,
-      price,
+      price: 0,
       lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
     },
   ];
@@ -124,12 +125,11 @@ export async function cascadeOnGroupAssign(args: {
   // recurring subscription line. Tagged with "<internal_id>::dms-setup"
   // so unassign cleanup (which strips by internal_id prefix) sweeps it.
   if (descriptor?.key === "sub-auto-dms") {
-    const setupPrice = (await lookupPrice("dms-setup")) ?? 0;
     newLines.push({
       productId: "dms-setup",
       name: "One Time DMS Setup Charge",
       quantity: 1,
-      price: setupPrice,
+      price: 0,
       lineItemDescription: `${dealer.internal_id}::dms-setup`,
     });
   }
@@ -290,14 +290,14 @@ export async function cascadeSuperAdminGroupAssign(args: {
     return;
   }
 
+  // Resolve productId + display name only. da-billing owns the price.
   const descriptor = subscriptionDescriptorFor(dealer.account_type);
-  const subPrice = descriptor ? ((await lookupPrice(descriptor.key)) ?? 0) : 0;
   const subName  = descriptor ? `${descriptor.name} — ${dealer.name}` : `Subscription — ${dealer.name}`;
   const subLine: BillingProduct & { lineItemDescription: string } = {
     productId: descriptor?.key,
     name: subName,
     quantity: 1,
-    price: subPrice,
+    price: 0,
     lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
   };
 
