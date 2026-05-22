@@ -15,6 +15,7 @@ import {
   appendToTemplate,
   archiveCustomer,
   createCustomer,
+  deleteTemplate,
   getTemplate,
   putTemplate,
   subscriptionDescriptorFor,
@@ -224,19 +225,14 @@ export async function cascadeOnGroupUnassign(args: {
   if (remaining.length === current.products.length) return; // nothing to remove
 
   // da-billing rejects PUT /templates/:id with an empty products array
-  // or with no subscription line. If removing this dealer would violate
-  // either rule the group template needs manual cleanup (typically: add
-  // another dealer's subscription, or archive the group customer). Skip
-  // the PUT so the cascade doesn't 400.
-  if (remaining.length === 0) {
-    console.warn(
-      `[cascadeOnGroupUnassign] group ${group.id} (${group.name}) template would be empty after removing dealer ${dealer.internal_id} — skipping putTemplate, manual cleanup needed.`,
-    );
-    return;
-  }
-  if (!remaining.some(isSubscriptionProduct)) {
-    console.warn(
-      `[cascadeOnGroupUnassign] group template would have no subscription after removing dealer ${dealer.internal_id} — skipping putTemplate, manual cleanup needed.`,
+  // or with no subscription line. When removing this dealer's lines
+  // would violate either rule, the group has effectively no active
+  // billing left — delete the template entirely. A group with no
+  // dealers shouldn't hold a billing template.
+  if (remaining.length === 0 || !remaining.some(isSubscriptionProduct)) {
+    await deleteTemplate(group.billing_customer_id);
+    console.log(
+      `[cascadeOnGroupUnassign] deleted empty group template for group ${group.id} after removing last dealer`,
     );
     return;
   }

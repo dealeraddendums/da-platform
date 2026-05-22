@@ -258,6 +258,22 @@ export async function appendToTemplate(customerId: string, products: BillingProd
   await putTemplate(customerId, [...current.products, ...products]);
 }
 
+/**
+ * DELETE /templates/:customerId — remove the customer's recurring
+ * template entirely. Used when a group's last subscription line is
+ * removed (cascadeOnGroupUnassign) since da-billing rejects empty
+ * or sub-less templates on PUT. A 404 is treated as success (the
+ * template is already gone).
+ */
+export async function deleteTemplate(customerId: string): Promise<void> {
+  const res = await fetch(`${BASE}/templates/${encodeURIComponent(customerId)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (res.status === 404) return;
+  if (!res.ok) throw new BillingError(res.status, `deleteTemplate ${res.status}`, await readBody(res));
+}
+
 // ── Pricing lookup (Part 7) ─────────────────────────────────────────────────
 
 export interface BillingPriceEntry {
