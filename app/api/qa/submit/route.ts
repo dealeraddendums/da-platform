@@ -11,8 +11,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     result?: string;
     notes?: string;
     tips?: string;
+    tested_as_role?: string;
   };
-  const { test_item_id, result, notes, tips } = body;
+  const { test_item_id, result, notes, tips, tested_as_role } = body;
 
   if (!test_item_id || !result || !["pass", "fail", "suggestion"].includes(result)) {
     return NextResponse.json({ error: "test_item_id and result (pass|fail|suggestion) are required" }, { status: 400 });
@@ -40,6 +41,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       notes: notes?.trim() || null,
       tips: tips?.trim() || null,
       area: item.area,
+      tested_as_role: tested_as_role?.trim() || null,
     })
     .select("id")
     .single();

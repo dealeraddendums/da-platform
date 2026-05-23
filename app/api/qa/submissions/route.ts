@@ -18,7 +18,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient();
   let query = (admin as any)
     .from("qa_submissions")
-    .select("id, test_item_id, tester_id, tester_name, result, notes, tips, area, resolved, developer_notes, created_at")
+    .select("id, test_item_id, tester_id, tester_name, tested_as_role, result, notes, tips, area, resolved, developer_notes, created_at")
     .order("created_at", { ascending: false });
 
   if (area) query = query.eq("area", area);
@@ -31,6 +31,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     test_item_id: string;
     tester_id: string | null;
     tester_name: string | null;
+    tested_as_role: string | null;
     result: "pass" | "fail" | "suggestion";
     notes: string | null;
     tips: string | null;
