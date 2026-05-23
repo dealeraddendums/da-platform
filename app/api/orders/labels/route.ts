@@ -500,8 +500,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           phone: process.env.XPS_SENDER_PHONE ?? '',
         },
         receiver: {
-          name: shipTo.name,
-          company: shipTo.company || shipTo.attention || '',
+          // XPS expects "name" = person, "company" = business.
+          // shipTo.name is the dealership name (collected from the
+          // dealer record), so it belongs in company. The receiver
+          // person is the attention contact when one was entered in
+          // the order form, otherwise the dealer's primary_contact.
+          name: shipTo.attention || dealerCfg?.primary_contact || '',
+          company: shipTo.name,
           address1: shipTo.address1,
           address2: shipTo.address2 || '',
           city: shipTo.city,
