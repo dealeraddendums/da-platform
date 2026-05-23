@@ -269,9 +269,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           productId: 'labels',
           quantity: 1,
           discount: 0,
-          // Tag the line with the dealer that ordered so group-level
-          // bills can be split per-dealer downstream.
-          lineItemDescription: `${internalDealerId}::${dealerName}`,
+          // Tag the line with dealer + SKU so each label type is a
+          // distinct entry. da-billing's within-template duplicate
+          // check fires when two lines share productId AND
+          // lineItemDescription, so appending the SKU keeps each
+          // label-type line unique. The dealer-prefix portion stays
+          // first so the dedup filter above (startsWith
+          // "${internalDealerId}::") still sweeps all of this
+          // dealer's prior labels lines on re-order.
+          lineItemDescription: `${internalDealerId}::${dealerName}::${item.sku}`,
           labelType: item.sku,
           labelQuantity: String(item.qty),
         }));
