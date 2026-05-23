@@ -166,11 +166,14 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
     // Super-admin group assignment. Only sent when the dealer is currently
     // ungrouped AND the user picked a group — re-assignment / removal of
     // existing groups is out of scope. The PATCH route fires the
-    // super-admin cascade on the null → UUID transition.
+    // super-admin cascade on the null → UUID transition. Matches the
+    // "+ Add Dealer" defaults on the group detail page: routing flips
+    // to group/group and group_controls_templates is set to true.
     if (isSuperAdmin && !dealer.group_id && form.group_id) {
       patch.group_id = form.group_id;
       patch.subscription_billed_to = form.subscription_billed_to;
       patch.labels_billed_to = form.labels_billed_to;
+      patch.group_controls_templates = true;
     }
 
     const res = await fetch(`/api/dealers/${dealer.id}`, {
@@ -814,7 +817,20 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                   <select
                     className="input"
                     value={form.group_id}
-                    onChange={(e) => setForm((f) => ({ ...f, group_id: e.target.value }))}
+                    onChange={(e) => {
+                      const newGroupId = e.target.value;
+                      // Picking a group from "None" → default routing to
+                      // group/group (matches the "+ Add Dealer" flow on
+                      // the group detail page). User can still override
+                      // before saving. Clearing back to "None" resets to
+                      // dealer/dealer.
+                      setForm((f) => ({
+                        ...f,
+                        group_id: newGroupId,
+                        subscription_billed_to: newGroupId ? "group" : "dealer",
+                        labels_billed_to:       newGroupId ? "group" : "dealer",
+                      }));
+                    }}
                   >
                     <option value="">— None —</option>
                     {availableGroups.map((g) => (

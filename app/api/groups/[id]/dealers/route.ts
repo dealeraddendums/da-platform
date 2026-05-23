@@ -54,7 +54,12 @@ export async function POST(
   const { error } = await requireSuperAdmin();
   if (error) return error;
 
-  let body: { dealer_id?: string };
+  let body: {
+    dealer_id?: string;
+    subscription_billed_to?: "dealer" | "group";
+    labels_billed_to?: "dealer" | "group";
+    group_controls_templates?: boolean;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -65,10 +70,24 @@ export async function POST(
     return NextResponse.json({ error: "dealer_id is required" }, { status: 400 });
   }
 
+  // Defaults when a dealer is added to a group via the "+ Add Dealer"
+  // flow on the group detail page or the DA Group dropdown on the
+  // dealer profile page. Both default to group-billed + group-controls-
+  // templates ON; the caller can override via the request body.
+  const subscription_billed_to: "dealer" | "group" = body.subscription_billed_to ?? "group";
+  const labels_billed_to:       "dealer" | "group" = body.labels_billed_to       ?? "group";
+  const group_controls_templates: boolean          = body.group_controls_templates ?? true;
+
   const admin = createAdminSupabaseClient();
   const { data, error: dbError } = await admin
     .from("dealers")
-    .update({ group_id: params.id })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .update({
+      group_id: params.id,
+      subscription_billed_to,
+      labels_billed_to,
+      group_controls_templates,
+    } as any)
     .eq("id", body.dealer_id)
     .select()
     .single();

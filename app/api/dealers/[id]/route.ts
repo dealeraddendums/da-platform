@@ -112,13 +112,18 @@ export async function PATCH(
   if (body.active !== undefined && claims.role === "super_admin") patch.active = body.active;
   if (body.is_test !== undefined && claims.role === "super_admin") patch.is_test = body.is_test;
   if (body.group_id !== undefined && claims.role === "super_admin") patch.group_id = body.group_id;
-  // subscription_billed_to / labels_billed_to — super_admin only, used
-  // by the group-assign cascade below to route billing.
+  // subscription_billed_to / labels_billed_to / group_controls_templates —
+  // super_admin only. The first two route billing for the cascade below;
+  // group_controls_templates flags whether the group owns this dealer's
+  // template configuration. Defaults to true on group assignment.
   if (body.subscription_billed_to !== undefined && claims.role === "super_admin") {
     patch.subscription_billed_to = body.subscription_billed_to;
   }
   if (body.labels_billed_to !== undefined && claims.role === "super_admin") {
     patch.labels_billed_to = body.labels_billed_to;
+  }
+  if (body.group_controls_templates !== undefined && claims.role === "super_admin") {
+    patch.group_controls_templates = body.group_controls_templates;
   }
   if (body.primary_contact !== undefined) patch.primary_contact = body.primary_contact;
   if (body.primary_contact_email !== undefined) patch.primary_contact_email = body.primary_contact_email;
