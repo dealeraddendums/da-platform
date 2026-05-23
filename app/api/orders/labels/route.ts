@@ -250,6 +250,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // DA Platform never sends price on template line items — da-billing
         // resolves the canonical price from labelType + labelQuantity at
         // invoice time.
+        //
+        // Dedup: strip any prior labels line for this dealer before
+        // appending. Match on productId === 'labels' AND
+        // lineItemDescription starting with "<internal_id>::" so a
+        // re-order REPLACES the previous template entry instead of
+        // duplicating it. Group templates can carry label lines for
+        // many dealers — the prefix check keeps us scoped to the
+        // ordering dealer only.
+        const dealerPrefix = `${internalDealerId}::`;
+        const filteredExisting = (templateAvailable.existing as Array<Record<string, unknown>>).filter(p => {
+          const isLabels = p.productId === 'labels';
+          const desc = typeof p.lineItemDescription === 'string' ? p.lineItemDescription : '';
+          const tagsThisDealer = desc.startsWith(dealerPrefix);
+          return !(isLabels && tagsThisDealer);
+        });
         const newProducts = items.map(item => ({
           productId: 'labels',
           quantity: 1,
@@ -260,7 +275,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           labelType: item.sku,
           labelQuantity: String(item.qty),
         }));
-        const updatedProducts = [...templateAvailable.existing, ...newProducts];
+        const updatedProducts = [...filteredExisting, ...newProducts];
         const putRes = await fetch(`${BILLING_BASE}/templates/${billingCustomerKey}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', 'X-API-Key': billingKey },
