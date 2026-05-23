@@ -125,19 +125,44 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const today = new Date();
   const totalAmount = items.reduce((s, i) => s + i.price, 0);
 
-  // Look up the dealer's labels-billing config so we can route the
-  // template update to the dealer's OR the group's da-billing customer.
-  // billed_to / group_id are persisted on the label_orders row for the
-  // Orders tab to display correctly.
+  // Look up the dealer's labels-billing config so we can route to the
+  // correct customer + decide between a template append and a one-time
+  // invoice. billed_to / group_id are persisted on the label_orders row
+  // for the Orders tab.
   const { data: dealerCfg } = await admin
     .from('dealers')
-    .select('labels_billed_to, group_id, billing_customer_id, internal_id')
+    .select('name, primary_contact, primary_contact_email, labels_billed_to, group_id, billing_customer_id, internal_id')
     .eq('id', dealerId)
-    .maybeSingle<{ labels_billed_to: 'dealer' | 'group'; group_id: string | null; billing_customer_id: string | null; internal_id: string | null }>();
+    .maybeSingle<{
+      name: string;
+      primary_contact: string | null;
+      primary_contact_email: string | null;
+      labels_billed_to: 'dealer' | 'group';
+      group_id: string | null;
+      billing_customer_id: string | null;
+      internal_id: string | null;
+    }>();
   const labelsBilledTo: 'dealer' | 'group' = dealerCfg?.labels_billed_to === 'group' ? 'group' : 'dealer';
   const billedToGroupId = labelsBilledTo === 'group' ? (dealerCfg?.group_id ?? null) : null;
 
-  // Resolve the billing customer key (the recipient of the template PUT).
+  // ── Case 4: Free/Trial dealer — labels billed to dealer, no group,
+  //           no billing_customer_id → reject the order BEFORE we insert
+  //           it. These dealers aren't entitled to labels.
+  if (
+    labelsBilledTo === 'dealer'
+    && !dealerCfg?.billing_customer_id
+    && !dealerCfg?.group_id
+  ) {
+    return NextResponse.json(
+      {
+        error: 'Label orders are not available on your current plan. Please contact DealerAddendums to upgrade.',
+      },
+      { status: 403 },
+    );
+  }
+
+  // Resolve the billing customer key (the recipient of the template PUT
+  // OR the invoice POST below).
   let billingCustomerKey: string | null = null;
   if (labelsBilledTo === 'group' && billedToGroupId) {
     const { data: grp } = await admin
@@ -147,7 +172,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .maybeSingle<{ billing_customer_id: string | null }>();
     billingCustomerKey = grp?.billing_customer_id ?? null;
   } else {
-    billingCustomerKey = dealerCfg?.billing_customer_id ?? dealerCfg?.internal_id ?? internalDealerId;
+    billingCustomerKey = dealerCfg?.billing_customer_id ?? null;
   }
 
   // Write initial record. Cast around the registered Database type because
@@ -182,63 +207,139 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let emailStatus: 'sent' | 'failed' = 'failed';
   let xpsStatus: 'created' | 'failed' = 'failed';
 
-  // ── Step 1: da-billing template update ───────────────────────────────────────
+  // ── Step 1: da-billing routing ───────────────────────────────────────────────
+  // Three cases left after the Case 4 early reject above:
+  //   1. labels_billed_to=group  → append to group template
+  //   2. labels_billed_to=dealer + active template → append to dealer template
+  //   3. labels_billed_to=dealer + group but no template (subscription
+  //      moved to group) → one-time invoice to the dealer
+  //
+  // Cases 1+2 share the template-append flow. Case 3 falls through when
+  // the GET /templates/customer/:id call returns 404 AND the dealer is
+  // in a group.
   const billingKey = process.env.BILLING_API_KEY;
   if (!billingKey) {
     console.warn('[orders/labels] BILLING_API_KEY not set — skipping billing step');
     billingStatus = 'skipped';
     await admin.from('label_orders').update({ billing_status: 'skipped' }).eq('id', orderId);
-  } else if (!billingCustomerKey) {
-    console.warn('[orders/labels] no billing customer key resolved — skipping billing step');
-    billingStatus = 'skipped';
-    await admin.from('label_orders').update({ billing_status: 'skipped' }).eq('id', orderId);
   } else {
     try {
-      const tmplRes = await fetch(`${BILLING_BASE}/templates/customer/${billingCustomerKey}`, {
-        headers: { 'X-API-Key': billingKey },
-      });
+      // Template-append flow (Cases 1 + 2). Always try this first if we
+      // have a customer key. Case 3 detection happens when the GET
+      // returns 404 below.
+      const templateAvailable = await (async (): Promise<{ ok: true; existing: unknown[] } | { ok: false; status: number }> => {
+        if (!billingCustomerKey) return { ok: false, status: 404 };
+        const res = await fetch(`${BILLING_BASE}/templates/customer/${billingCustomerKey}`, {
+          headers: { 'X-API-Key': billingKey },
+        });
+        if (res.status === 404) return { ok: false, status: 404 };
+        if (!res.ok) return { ok: false, status: res.status };
+        const tmplData = await res.json() as { template?: { products?: unknown[] } | null };
+        if (!tmplData.template) return { ok: false, status: 404 };
+        return { ok: true, existing: tmplData.template.products ?? [] };
+      })();
 
-      if (tmplRes.status === 404 || !tmplRes.ok) {
-        console.warn('[orders/labels] no billing template for customer', billingCustomerKey);
-        billingStatus = 'failed';
-        await admin.from('label_orders').update({ billing_status: 'failed' }).eq('id', orderId);
-      } else {
-        const tmplData = await tmplRes.json() as { template?: { products?: unknown[] } | null };
-        if (!tmplData.template) {
-          console.warn('[orders/labels] billing template is null for customer', billingCustomerKey);
+      if (templateAvailable.ok) {
+        // Case 1 + 2: append labels line items to the existing template.
+        // DA Platform never sends price on template line items — da-billing
+        // resolves the canonical price from labelType + labelQuantity at
+        // invoice time.
+        const newProducts = items.map(item => ({
+          productId: 'labels',
+          quantity: 1,
+          discount: 0,
+          // Tag the line with the dealer that ordered so group-level
+          // bills can be split per-dealer downstream.
+          lineItemDescription: `${internalDealerId}::${dealerName}`,
+          labelType: item.sku,
+          labelQuantity: String(item.qty),
+        }));
+        const updatedProducts = [...templateAvailable.existing, ...newProducts];
+        const putRes = await fetch(`${BILLING_BASE}/templates/${billingCustomerKey}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'X-API-Key': billingKey },
+          body: JSON.stringify({ products: updatedProducts }),
+        });
+        if (putRes.ok) {
+          billingStatus = 'written';
+          await admin.from('label_orders').update({ billing_status: 'written' }).eq('id', orderId);
+        } else {
+          const errText = await putRes.text().catch(() => '');
+          console.error('[orders/labels] billing PUT failed:', putRes.status, errText);
           billingStatus = 'failed';
           await admin.from('label_orders').update({ billing_status: 'failed' }).eq('id', orderId);
-        } else {
-          const existingProducts: unknown[] = tmplData.template.products ?? [];
-          const newProducts = items.map(item => ({
-            productId: 'label-order',
-            quantity: 1,
-            price: item.price,
-            discount: 0,
-            // Tag the line with the dealer that ordered so group-level
-            // bills can be split per-dealer downstream.
-            lineItemDescription: `${internalDealerId}::${dealerName}`,
-            labelType: item.sku,
-            labelQuantity: String(item.qty),
-          }));
-          const updatedProducts = [...existingProducts, ...newProducts];
-
-          const putRes = await fetch(`${BILLING_BASE}/templates/${billingCustomerKey}`, {
-            method: 'PUT',
+        }
+      } else if (
+        labelsBilledTo === 'dealer'
+        && dealerCfg?.group_id
+        && templateAvailable.status === 404
+      ) {
+        // Case 3: dealer is in a group but has no active template (their
+        // subscription moved to the group template). Generate a one-time
+        // invoice to the dealer.
+        let invoiceCustomerId = dealerCfg.billing_customer_id;
+        if (!invoiceCustomerId) {
+          // Create a minimal customer record first.
+          const createRes = await fetch(`${BILLING_BASE}/customers`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-API-Key': billingKey },
-            body: JSON.stringify({ products: updatedProducts }),
+            body: JSON.stringify({
+              name: dealerCfg.primary_contact ?? dealerCfg.name,
+              company: dealerCfg.name,
+              email: dealerCfg.primary_contact_email ?? '',
+              isGroup: false,
+            }),
           });
+          if (!createRes.ok) {
+            const errText = await createRes.text().catch(() => '');
+            console.error('[orders/labels] one-time invoice customer create failed:', createRes.status, errText);
+            billingStatus = 'failed';
+            await admin.from('label_orders').update({ billing_status: 'failed' }).eq('id', orderId);
+          } else {
+            const created = await createRes.json() as { customer?: { id?: string }; id?: string };
+            invoiceCustomerId = created.customer?.id ?? created.id ?? null;
+            if (invoiceCustomerId) {
+              await admin.from('dealers').update({ billing_customer_id: invoiceCustomerId }).eq('id', dealerId);
+            }
+          }
+        }
 
-          if (putRes.ok) {
+        if (invoiceCustomerId) {
+          const invoiceItems = items.map(item => ({
+            description: `Labels — ${item.productName} x${item.qty} (${dealerName})`,
+            quantity: 1,
+            // One-time invoice: price IS the line amount (da-billing
+            // computes subtotal as quantity * price). The recurring-
+            // template "no price" rule doesn't apply here because
+            // there's no template at invoice time.
+            price: item.price,
+          }));
+          const invRes = await fetch(`${BILLING_BASE}/invoices`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-API-Key': billingKey },
+            body: JSON.stringify({
+              customerId: invoiceCustomerId,
+              items: invoiceItems,
+              notes: `One-time label order — dealer subscription is billed through group.`,
+            }),
+          });
+          if (invRes.ok) {
             billingStatus = 'written';
             await admin.from('label_orders').update({ billing_status: 'written' }).eq('id', orderId);
           } else {
-            const errText = await putRes.text().catch(() => '');
-            console.error('[orders/labels] billing PUT failed:', putRes.status, errText);
+            const errText = await invRes.text().catch(() => '');
+            console.error('[orders/labels] one-time invoice POST failed:', invRes.status, errText);
             billingStatus = 'failed';
             await admin.from('label_orders').update({ billing_status: 'failed' }).eq('id', orderId);
           }
         }
+      } else {
+        // Template missing, but not the Case-3 group+dealer fallback.
+        // Most likely a misconfigured customer key. Mark failed for
+        // super_admin review.
+        console.warn('[orders/labels] no billing template for customer', billingCustomerKey, 'and no Case 3 fallback');
+        billingStatus = 'failed';
+        await admin.from('label_orders').update({ billing_status: 'failed' }).eq('id', orderId);
       }
     } catch (err) {
       console.error('[orders/labels] billing step threw:', err instanceof Error ? err.message : err);

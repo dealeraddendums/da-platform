@@ -262,6 +262,7 @@ type DealerInsert = {
   subscription_billed_to?: "dealer" | "group";
   labels_billed_to?: "dealer" | "group";
   group_controls_templates?: boolean;
+  billing_customer_id?: string | null;
   dealer_group_legacy?: string | null;
   billing_id?: string | null;
   template_id?: string | null;
@@ -323,6 +324,7 @@ export type DealerUpdate = {
   subscription_billed_to?: "dealer" | "group";
   labels_billed_to?: "dealer" | "group";
   group_controls_templates?: boolean;
+  billing_customer_id?: string | null;
   dealer_group_legacy?: string | null;
   billing_id?: string | null;
   template_id?: string | null;
