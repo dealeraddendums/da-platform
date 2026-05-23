@@ -10,6 +10,7 @@ type Submission = {
   test_item_id: string;
   tester_id: string | null;
   tester_name: string | null;
+  tested_as_role: string | null;
   result: "pass" | "fail" | "suggestion";
   notes: string | null;
   tips: string | null;
@@ -18,6 +19,23 @@ type Submission = {
   developer_notes: string | null;
   created_at: string;
   test_title: string;
+};
+
+type EnvEntity = {
+  id: string;
+  entity_type: "dealer" | "group" | "user";
+  entity_id: string;
+  role: string | null;
+  email: string | null;
+  display_name: string | null;
+  created_at: string;
+};
+
+type EnvStatus = {
+  provisioned: boolean;
+  counts: { dealer: number; group: number; user: number };
+  entities: EnvEntity[];
+  expected: { group: number; dealer: number; user: number };
 };
 
 type TestItem = {
@@ -107,6 +125,8 @@ function statCard(label: string, value: number | string, color: string) {
 export default function QADashboardPage() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [allTestItems, setAllTestItems] = useState<TestItem[]>([]);
+  const [env, setEnv] = useState<EnvStatus | null>(null);
+  const [envBusy, setEnvBusy] = useState<"setup" | "teardown" | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -118,11 +138,13 @@ export default function QADashboardPage() {
   const [devNotesDraft, setDevNotesDraft] = useState<Record<string, string>>({});
 
   const load = async () => {
-    const [subsRes, catalogRes] = await Promise.all([
+    const [subsRes, catalogRes, envRes] = await Promise.all([
       fetch("/api/qa/submissions").then(r => r.json()),
       fetch("/api/qa/progress").then(r => r.json()).catch(() => ({ items: [] })),
+      fetch("/api/qa/environment").then(r => r.ok ? r.json() : null).catch(() => null),
     ]);
     setSubmissions(subsRes.submissions ?? []);
+    setEnv(envRes ?? null);
     // Aggregate tester tips per test item from the submissions stream.
     const aggMap = new Map<string, Array<{ tester_name: string | null; tip: string }>>();
     for (const s of (subsRes.submissions ?? []) as Submission[]) {
@@ -242,6 +264,39 @@ export default function QADashboardPage() {
   const publishedCount = allTestItems.filter(i => i.faq_visible).length;
   const tipsItems = allTestItems.filter(i => i.tester_tips.length > 0);
 
+  const setupEnvironment = async () => {
+    if (envBusy) return;
+    setEnvBusy("setup");
+    try {
+      const res = await fetch("/api/qa/setup-environment", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(`Setup failed: ${data.error ?? res.status}`);
+        return;
+      }
+      await load();
+    } finally {
+      setEnvBusy(null);
+    }
+  };
+
+  const teardownEnvironment = async () => {
+    if (envBusy) return;
+    if (!confirm("Tear down the QA test environment? This will delete all QA test dealers, groups, and user accounts (test_account = true only).")) return;
+    setEnvBusy("teardown");
+    try {
+      const res = await fetch("/api/qa/environment", { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(`Teardown failed: ${data.error ?? res.status}`);
+        return;
+      }
+      await load();
+    } finally {
+      setEnvBusy(null);
+    }
+  };
+
   return (
     <div style={{ padding: 24, maxWidth: 1200, margin: "0 auto" }}>
       <PageHeader title="QA Dashboard" subtitle="Tester progress, issues, and Help Center publishing" />
@@ -252,6 +307,83 @@ export default function QADashboardPage() {
 
       {!loading && (
         <>
+          <section style={{ marginBottom: 24 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#fff", margin: "0 0 12px" }}>QA Test Environment</h2>
+            <div style={card()}>
+              {!env || !env.provisioned ? (
+                <>
+                  <div style={{ marginBottom: 12, color: "#55595c", fontSize: 14 }}>
+                    No QA test environment is provisioned. Setting up creates: <strong>1 group</strong>,
+                    {" "}<strong>2 dealers</strong> (QA Test Dealer A standalone, QA Test Dealer B in group),
+                    {" "}and <strong>4 user accounts</strong> (dealer_admin, dealer_user, dealer_restricted,
+                    {" "}group_admin) all with password <code style={{ background: "#f5f6f7", padding: "2px 6px", borderRadius: 4 }}>QATest2026!</code>.
+                  </div>
+                  {env && (env.counts.group > 0 || env.counts.dealer > 0 || env.counts.user > 0) && (
+                    <div style={{ marginBottom: 12, fontSize: 13, color: "#bf360c" }}>
+                      Partial environment detected: {env.counts.group} group, {env.counts.dealer} dealers, {env.counts.user} users.
+                      Tear down and re-setup to get a clean slate.
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={setupEnvironment}
+                      disabled={!!envBusy}
+                      style={btnPrimary("#1976d2")}
+                    >
+                      {envBusy === "setup" ? "Setting up…" : "Set Up QA Test Environment"}
+                    </button>
+                    {env && (env.counts.group > 0 || env.counts.dealer > 0 || env.counts.user > 0) && (
+                      <button
+                        type="button"
+                        onClick={teardownEnvironment}
+                        disabled={!!envBusy}
+                        style={btnPrimary("#ff5252")}
+                      >
+                        {envBusy === "teardown" ? "Tearing down…" : "Tear Down"}
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ color: "#2e7d32", fontWeight: 600, fontSize: 14 }}>
+                      ✓ Provisioned: {env.counts.group} group, {env.counts.dealer} dealers, {env.counts.user} users.
+                      Password for all test accounts: <code style={{ background: "#f5f6f7", padding: "2px 6px", borderRadius: 4 }}>QATest2026!</code>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={teardownEnvironment}
+                      disabled={!!envBusy}
+                      style={btnSecondary()}
+                    >
+                      {envBusy === "teardown" ? "Tearing down…" : "Tear Down Environment"}
+                    </button>
+                  </div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 8 }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid #e0e0e0" }}>
+                        <th style={th()}>Type</th>
+                        <th style={th()}>Name</th>
+                        <th style={th()}>Email / Role</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {env.entities.map(e => (
+                        <tr key={e.id} style={{ borderBottom: "1px solid #f5f6f7" }}>
+                          <td style={td()}><span style={{ textTransform: "capitalize", fontWeight: 600 }}>{e.entity_type}</span></td>
+                          <td style={td()}>{e.display_name ?? e.entity_id}</td>
+                          <td style={td()}>{e.email ?? e.role ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </div>
+          </section>
+
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
             {statCard("Total Test Items", totalItems, "#2a2b3c")}
             {statCard("Passed", stats.passed, "#2e7d32")}
@@ -335,7 +467,23 @@ export default function QADashboardPage() {
                     </span>
                   </div>
                   <div style={{ fontSize: 15, fontWeight: 600, color: "#2a2b3c", marginBottom: 4 }}>{s.test_title}</div>
-                  <div style={{ fontSize: 13, color: "#55595c", marginBottom: 8 }}>by {s.tester_name ?? "unknown"}</div>
+                  <div style={{ fontSize: 13, color: "#55595c", marginBottom: 8 }}>
+                    by {s.tester_name ?? "unknown"}
+                    {s.tested_as_role && (
+                      <span style={{
+                        display: "inline-block",
+                        marginLeft: 8,
+                        padding: "2px 8px",
+                        borderRadius: 20,
+                        background: "#eceff1",
+                        color: "#455a64",
+                        fontSize: 11,
+                        fontWeight: 600,
+                      }}>
+                        as {s.tested_as_role.replace(/_/g, " ")}
+                      </span>
+                    )}
+                  </div>
                   {s.notes && (
                     <div style={{ fontSize: 14, color: "#333", marginBottom: 8, whiteSpace: "pre-wrap" }}>{s.notes}</div>
                   )}
