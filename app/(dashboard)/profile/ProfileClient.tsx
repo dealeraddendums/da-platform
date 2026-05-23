@@ -586,11 +586,26 @@ function OrderLabelsTab({
     message: string;
   } | null>(null);
 
+  // Clear any stale orderResult from a previous interaction. Initial
+  // useState(null) is enough on a hard navigation, but soft navigation
+  // within /profile (e.g. tab switching back to labels after seeing an
+  // error) keeps OrderLabelsTab's parent component mounted and state
+  // alive. This effect resets the result every time the labels tab
+  // re-mounts so the old error/success card doesn't reappear.
+  useEffect(() => {
+    setOrderResult(null);
+  }, []);
+
   const setShip = (k: keyof typeof shipForm) =>
-    (e: React.ChangeEvent<HTMLInputElement>) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
       setShipForm(prev => ({ ...prev, [k]: e.target.value }));
+      // Any change to the order parameters dismisses the previous result.
+      setOrderResult(null);
+    };
 
   function toggleOption(product: LabelProduct, optionIdx: number) {
+    // Clear the previous result the moment the user starts a new order.
+    setOrderResult(null);
     setCart(prev => {
       const existing = prev.find(c => c.product.sku === product.sku);
       if (existing) {
