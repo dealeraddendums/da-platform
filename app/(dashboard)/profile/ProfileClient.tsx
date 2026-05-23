@@ -1461,12 +1461,23 @@ export default function ProfileClient({ dealer, canEdit, userEmail, userName, us
   const hasDealer = !!dealer;
   const visibleTabs = ALL_TABS.filter(t => !t.dealerOnly || hasDealer);
 
-  const [tab, setTab] = useState<Tab>(() => {
+  // Reading searchParams inside a useState initializer causes a
+  // hydration mismatch (React #425/#418/#423) because useSearchParams()
+  // returns null on the server when the component isn't in a Suspense
+  // boundary, but resolves to the real params during the first client
+  // render. Initialize with a static default and sync from
+  // searchParams in a useEffect after mount — both passes (SSR + first
+  // client render) then produce the same tree.
+  const [tab, setTab] = useState<Tab>(hasDealer ? "info" : "security");
+
+  useEffect(() => {
     const t = searchParams.get("tab");
-    if (t === "security") return "security";
-    if (!hasDealer) return "security";
-    return (t === "labels" || t === "info" || t === "shipping" || t === "billing") ? t as Tab : "info";
-  });
+    if (t === "security") { setTab("security"); return; }
+    if (!hasDealer) return;
+    if (t === "labels" || t === "info" || t === "shipping" || t === "billing" || t === "orders") {
+      setTab(t as Tab);
+    }
+  }, [searchParams, hasDealer]);
 
   const title = "My Profile";
 
