@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
+import { LABEL_PRODUCTS } from "@/lib/label-products";
+
+const SKU_TO_NAME: Record<string, string> = Object.fromEntries(
+  LABEL_PRODUCTS.map(p => [p.sku, p.name])
+);
 
 interface OrderItem {
   sku: string;
@@ -278,7 +283,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           // "${internalDealerId}::") still sweeps all of this
           // dealer's prior labels lines on re-order.
           lineItemDescription: `${internalDealerId}::${dealerName}::${item.sku}`,
-          labelType: item.sku,
+          labelType: SKU_TO_NAME[item.sku] ?? item.sku,
           labelQuantity: String(item.qty),
         }));
         const updatedProducts = [...filteredExisting, ...newProducts];
