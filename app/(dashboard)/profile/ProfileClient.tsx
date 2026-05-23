@@ -663,9 +663,30 @@ function OrderLabelsTab({
           orderedByEmail: userEmail,
         }),
       });
-      const data = await res.json() as { success: boolean; orderId?: string; message: string };
-      setOrderResult(data);
-      if (data.success) setCart([]);
+      // 2xx responses carry { success, orderId?, message }; non-2xx
+      // carry { error } per the route's reject paths (e.g. Free/Trial
+      // 403, validation 400). Normalize both shapes into the
+      // success+message structure orderResult expects so the red box
+      // doesn't render with just the ✕ icon and no text.
+      const data = await res.json().catch(() => ({})) as Partial<{
+        success: boolean;
+        orderId: string;
+        message: string;
+        error: string;
+      }>;
+      if (res.ok) {
+        setOrderResult({
+          success: data.success ?? true,
+          orderId: data.orderId,
+          message: data.message ?? "Order placed.",
+        });
+        if (data.success) setCart([]);
+      } else {
+        setOrderResult({
+          success: false,
+          message: data.error ?? data.message ?? `Order failed (${res.status})`,
+        });
+      }
     } catch {
       setOrderResult({ success: false, message: "Network error — please try again." });
     } finally {
@@ -673,9 +694,48 @@ function OrderLabelsTab({
     }
   }
 
+  // Free / Trial dealers without a group can't place orders — the
+  // server would 403 them via the Case 4 reject. Block the UI before
+  // they try so they get a clear path forward rather than a generic
+  // error in the order result box.
+  const accountType = dealer.account_type ?? null;
+  const isFreeOrTrial =
+    !accountType
+    || accountType === "Free"
+    || accountType === "Trial";
+  const noSubscriptionAccess = isFreeOrTrial && !dealer.group_id;
+
   return (
     <div>
-      {!canEdit && (
+      {noSubscriptionAccess && (
+        <div
+          style={{
+            background: "#fff8e1",
+            border: "1px solid #ffa500",
+            borderRadius: 6,
+            padding: "14px 18px",
+            marginBottom: 20,
+            fontSize: 14,
+            color: "#5a4500",
+            lineHeight: 1.6,
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4, color: "#7a5c00" }}>
+            Label orders require an active subscription
+          </div>
+          Please contact DealerAddendums at{" "}
+          <a href="mailto:support@dealeraddendums.com" style={{ color: "#1976d2", textDecoration: "none" }}>
+            support@dealeraddendums.com
+          </a>{" "}
+          or call{" "}
+          <a href="tel:+18014159435" style={{ color: "#1976d2", textDecoration: "none" }}>
+            801-415-9435
+          </a>{" "}
+          to upgrade your account.
+        </div>
+      )}
+
+      {!canEdit && !noSubscriptionAccess && (
         <div
           style={{
             background: "#fff8e1",
@@ -847,8 +907,10 @@ function OrderLabelsTab({
         )}
       </div>
 
-      {/* Order summary + place order */}
-      {canEdit && (
+      {/* Order summary + place order — hidden for Free/Trial dealers
+          without a group so they can't submit an order that the server
+          would 403. */}
+      {canEdit && !noSubscriptionAccess && (
         <div
           style={{
             background: "#fff",
