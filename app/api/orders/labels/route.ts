@@ -103,9 +103,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  // dealer_admin only
-  if (claims.role !== 'dealer_admin' && claims.role !== 'super_admin') {
-    return NextResponse.json({ error: 'Forbidden — dealer_admin required' }, { status: 403 });
+  // Roles that can place a label order. Mirrors the Order Supplies
+  // sidebar entry (dealer_admin / dealer_user / dealer_restricted) plus
+  // super_admin / group_admin so impersonation works — when a
+  // super_admin ghosts into a dealer the JWT carries the impersonated
+  // role, which may be any of the three dealer tiers OR group_admin if
+  // they entered through a group context.
+  const ALLOWED_ROLES = new Set(['dealer_admin', 'dealer_user', 'dealer_restricted', 'super_admin', 'group_admin']);
+  if (!ALLOWED_ROLES.has(claims.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   let body: OrderBody;
