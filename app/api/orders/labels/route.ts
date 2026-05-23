@@ -2,11 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
-import { LABEL_PRODUCTS } from "@/lib/label-products";
 
-const SKU_TO_NAME: Record<string, string> = Object.fromEntries(
-  LABEL_PRODUCTS.map(p => [p.sku, p.name])
-);
+// DA Platform SKU -> da-billing labelType slug. da-billing's price
+// resolver keys off these slugs (size + finish), not our SKUs or the
+// product display names. Keep in sync with da-billing's label price
+// table.
+const SKU_TO_LABEL_TYPE: Record<string, string> = {
+  '8300-1': '4.25x11-standard',
+  '9300-1': '4.25x11-waterproof',
+  '8300-3': '3.125x11-standard',
+  '9300-3': '3.125x11-waterproof',
+  '8300':   '8.5x11-standard',
+  '9300':   '8.5x11-waterproof',
+};
 
 interface OrderItem {
   sku: string;
@@ -283,7 +291,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           // "${internalDealerId}::") still sweeps all of this
           // dealer's prior labels lines on re-order.
           lineItemDescription: `${internalDealerId}::${dealerName}::${item.sku}`,
-          labelType: SKU_TO_NAME[item.sku] ?? item.sku,
+          labelType: SKU_TO_LABEL_TYPE[item.sku] ?? item.sku,
           labelQuantity: String(item.qty),
         }));
         const updatedProducts = [...filteredExisting, ...newProducts];

@@ -333,6 +333,27 @@ Simple CRUD — DEALER_NAME, DEALER_ID only.
 - Stored in `label_orders` Supabase table
 - Daily tracking sync: `POST /api/cron/sync-xps-tracking` → `0 10 * * *`
 
+#### SKU → labelType mapping (DA Platform → da-billing)
+
+When `/api/orders/labels` appends a line item to the dealer's da-billing
+template, it sends a `labelType` slug — **not** the SKU or display name.
+da-billing's price resolver keys off these size+finish slugs. The
+mapping lives at the top of `app/api/orders/labels/route.ts` as
+`SKU_TO_LABEL_TYPE`. Keep in sync with da-billing's label price table.
+
+| DA Platform SKU | Display name | labelType (da-billing) |
+|---|---|---|
+| `8300-1` | Regular Addendums | `4.25x11-standard` |
+| `9300-1` | Regular Addendums — Waterproof | `4.25x11-waterproof` |
+| `8300-3` | Narrow Addendums | `3.125x11-standard` |
+| `9300-3` | Narrow Addendums — Waterproof | `3.125x11-waterproof` |
+| `8300` | Full Sheet Labels | `8.5x11-standard` |
+| `9300` | Full Sheet Labels — Waterproof | `8.5x11-waterproof` |
+
+If da-billing ever receives a SKU verbatim (e.g. `8300-1`) the price
+resolver will not match and the line will be billed at $0. Always
+route through `SKU_TO_LABEL_TYPE`.
+
 ## Migration Status
 
 Current highest migration: **070** (`ftp_users` notes table)
