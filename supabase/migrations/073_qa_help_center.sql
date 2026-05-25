@@ -11,6 +11,11 @@
 --   /qa/test        tester interface (role-filtered)
 --   /help           dealer Help Center (only faq_visible items)
 --   /api/cron/qa-summary  daily Mandrill summary to allan@
+--
+-- Seed string literals use dollar-quoting ($$...$$ and $j$...$j$) so
+-- natural apostrophes in the body do not need any escape sequence.
+-- This sidesteps a Supabase SQL Editor pre-parser bug that mishandles
+-- two-consecutive-apostrophes escapes inside single-quoted strings.
 
 CREATE TABLE IF NOT EXISTS public.qa_test_items (
   id            text PRIMARY KEY,
@@ -50,162 +55,151 @@ CREATE INDEX IF NOT EXISTS qa_submissions_result_idx   ON public.qa_submissions 
 CREATE INDEX IF NOT EXISTS qa_submissions_resolved_idx ON public.qa_submissions (resolved);
 CREATE INDEX IF NOT EXISTS qa_submissions_created_idx  ON public.qa_submissions (created_at DESC);
 
--- Seed: 29 test cases. Safe to re-run.
-
 INSERT INTO public.qa_test_items (id, area, title, role_required, description, steps, sort_order) VALUES
 
--- Dealer Management
 ('dealer-create','Dealer Management','Create a new standalone dealer','any',
- 'Verify a new dealer can be created with all required fields',
- '["Navigate to Dealers → click + New Dealer","Fill in all fields: Dealer Name, Address, Contact info","Set Subscription Type (select Monthly Subscription Manual)","Leave Subscription Billed To and Labels Billed To as Dealer","Click Save New Dealer","Verify dealer appears in the Dealers list with correct subscription shown","Click into the dealer and verify all saved fields are correct"]'::jsonb,
+ $$Verify a new dealer can be created with all required fields$$,
+ $j$["Navigate to Dealers → click + New Dealer","Fill in all fields: Dealer Name, Address, Contact info","Set Subscription Type (select Monthly Subscription Manual)","Leave Subscription Billed To and Labels Billed To as Dealer","Click Save New Dealer","Verify dealer appears in the Dealers list with correct subscription shown","Click into the dealer and verify all saved fields are correct"]$j$::jsonb,
  10),
 
 ('dealer-edit','Dealer Management','Edit dealer profile','super_admin',
- 'Verify dealer profile fields can be edited and saved',
- '["Click any dealer in the list","Click Edit Profile","Change the dealer name","Click Save Changes","Verify the updated name appears in the page header and dealer list"]'::jsonb,
+ $$Verify dealer profile fields can be edited and saved$$,
+ $j$["Click any dealer in the list","Click Edit Profile","Change the dealer name","Click Save Changes","Verify the updated name appears in the page header and dealer list"]$j$::jsonb,
  20),
 
 ('dealer-group-assign','Dealer Management','Assign standalone dealer to a group','super_admin',
- 'Verify a standalone dealer can be assigned to a group with billing cascade',
- '["Find a dealer with no group shown (shows — in Group column)","Click the dealer → click Edit Profile","Change DA Group dropdown to an existing group","Set Subscription Billed To = Group","Set Labels Billed To = Group","Click Save Changes","Verify group name now appears on the dealer profile","Go to da-billing and verify a line item was added to the group''s template"]'::jsonb,
+ $$Verify a standalone dealer can be assigned to a group with billing cascade$$,
+ $j$["Find a dealer with no group shown (shows — in Group column)","Click the dealer → click Edit Profile","Change DA Group dropdown to an existing group","Set Subscription Billed To = Group","Set Labels Billed To = Group","Click Save Changes","Verify group name now appears on the dealer profile","Go to da-billing and verify a line item was added to the group's template"]$j$::jsonb,
  30),
 
 ('dealer-remove-group','Dealer Management','Remove dealer from group','super_admin',
- 'Verify a dealer can be removed from a group with billing cleanup',
- '["Find a dealer that belongs to a group","Click View to open the dealer detail page","Click Remove from Group button","Read the confirmation dialog carefully and confirm","Verify the dealer no longer shows a group","Verify da-billing group template no longer has this dealer''s line item"]'::jsonb,
+ $$Verify a dealer can be removed from a group with billing cleanup$$,
+ $j$["Find a dealer that belongs to a group","Click View to open the dealer detail page","Click Remove from Group button","Read the confirmation dialog carefully and confirm","Verify the dealer no longer shows a group","Verify da-billing group template no longer has this dealer's line item"]$j$::jsonb,
  40),
 
 ('dealer-inventory','Dealer Management','Set inventory provider and dealer ID','any',
- 'Verify inventory provider and dealer ID fields save correctly',
- '["Click any dealer → click Edit Profile","Set Inventory Provider to CDK (a DMS provider — should show DMS badge)","Set Inventory Dealer ID to a test value like TEST-12345","Save Changes","Verify Inventory Provider shows CDK with orange DMS badge","Verify Inventory Dealer ID shows the value you entered"]'::jsonb,
+ $$Verify inventory provider and dealer ID fields save correctly$$,
+ $j$["Click any dealer → click Edit Profile","Set Inventory Provider to CDK (a DMS provider — should show DMS badge)","Set Inventory Dealer ID to a test value like TEST-12345","Save Changes","Verify Inventory Provider shows CDK with orange DMS badge","Verify Inventory Dealer ID shows the value you entered"]$j$::jsonb,
  50),
 
--- Group Management
 ('group-create','Group Management','Create a new group','super_admin',
- 'Verify a new group can be created and a da-billing customer is auto-created',
- '["Navigate to Groups → click + New Group","Fill in Group Name, Contact Name, Contact Email, Phone","Fill in Address, City, State, Zip","Fill in Billing Contact, Billing Email, Billing Phone","Click Save New Group","Verify group appears in the Groups list","Click into the group → click Billing tab","Verify billing contact info is shown","Log into billing.dealeraddendums.com and verify a customer record was created"]'::jsonb,
+ $$Verify a new group can be created and a da-billing customer is auto-created$$,
+ $j$["Navigate to Groups → click + New Group","Fill in Group Name, Contact Name, Contact Email, Phone","Fill in Address, City, State, Zip","Fill in Billing Contact, Billing Email, Billing Phone","Click Save New Group","Verify group appears in the Groups list","Click into the group → click Billing tab","Verify billing contact info is shown","Log into billing.dealeraddendums.com and verify a customer record was created"]$j$::jsonb,
  60),
 
 ('group-billing-tab','Group Management','View group billing tab','super_admin',
- 'Verify the group billing tab shows correct template and discount info',
- '["Click any group that has at least one dealer","Click the Billing tab","Verify billing contact name, email, phone are shown","Verify the Recurring Invoice Template section shows the correct dealers","Verify subscription amounts match each dealer''s subscription type","Verify the Subscription Discount % matches the dealer count tier (0-1 dealers = 0%, 2-10 = 10%, 11-30 = 20%, 30+ = 30%)"]'::jsonb,
+ $$Verify the group billing tab shows correct template and discount info$$,
+ $j$["Click any group that has at least one dealer","Click the Billing tab","Verify billing contact name, email, phone are shown","Verify the Recurring Invoice Template section shows the correct dealers","Verify subscription amounts match each dealer's subscription type","Verify the Subscription Discount % matches the dealer count tier (0-1 dealers = 0%, 2-10 = 10%, 11-30 = 20%, 30+ = 30%)"]$j$::jsonb,
  70),
 
 ('group-add-dealer','Group Management','Add dealer to group via group page','super_admin',
- 'Verify a dealer can be added to a group from the group detail page',
- '["Open any group detail page","Click + Add Dealer in the Member Dealers section","Search for a standalone dealer by name","Set Subscription Billed To = Group","Set Labels Billed To = Group","Confirm","Verify dealer appears in the Member Dealers table","Click Billing tab and verify template updated with new dealer line item"]'::jsonb,
+ $$Verify a dealer can be added to a group from the group detail page$$,
+ $j$["Open any group detail page","Click + Add Dealer in the Member Dealers section","Search for a standalone dealer by name","Set Subscription Billed To = Group","Set Labels Billed To = Group","Confirm","Verify dealer appears in the Member Dealers table","Click Billing tab and verify template updated with new dealer line item"]$j$::jsonb,
  80),
 
 ('group-discount','Group Management','Verify auto discount tiers','super_admin',
- 'Verify group discount updates automatically when dealer count crosses a tier',
- '["Find a group with exactly 1 dealer","Click Billing tab — note current discount (should be 0%)","Add a second dealer to the group","Click Billing tab again — discount should now show 10%","Log into billing.dealeraddendums.com → find the group customer","Verify subscriptionDiscount = 10 on the customer record"]'::jsonb,
+ $$Verify group discount updates automatically when dealer count crosses a tier$$,
+ $j$["Find a group with exactly 1 dealer","Click Billing tab — note current discount (should be 0%)","Add a second dealer to the group","Click Billing tab again — discount should now show 10%","Log into billing.dealeraddendums.com → find the group customer","Verify subscriptionDiscount = 10 on the customer record"]$j$::jsonb,
  90),
 
--- User Management
 ('user-invite','User Management','Invite a new dealer user','dealer_admin',
- 'Verify a dealer admin can invite a new user and they can log in',
- '["Go to any dealer → click Users tab","Click + Invite User","Enter an email address and select role Dealer User","Click Send Invite","Check the email inbox for the invitation email","Click the invite link → set a password","Verify the new user can log in and sees the correct dealer dashboard"]'::jsonb,
+ $$Verify a dealer admin can invite a new user and they can log in$$,
+ $j$["Go to any dealer → click Users tab","Click + Invite User","Enter an email address and select role Dealer User","Click Send Invite","Check the email inbox for the invitation email","Click the invite link → set a password","Verify the new user can log in and sees the correct dealer dashboard"]$j$::jsonb,
  100),
 
 ('user-impersonate','User Management','Impersonate a dealer','super_admin',
- 'Verify Super Admin can impersonate a dealer and exit correctly',
- '["Go to any dealer → click Users tab","Click Impersonate next to any user","Verify orange banner appears at top: ''Viewing as [Dealer Name]''","Navigate to a few pages and verify dealer-scoped view","Click Exit on the banner","Verify you are returned to Super Admin view with no orange banner"]'::jsonb,
+ $$Verify Super Admin can impersonate a dealer and exit correctly$$,
+ $j$["Go to any dealer → click Users tab","Click Impersonate next to any user","Verify orange banner appears at top: 'Viewing as [Dealer Name]'","Navigate to a few pages and verify dealer-scoped view","Click Exit on the banner","Verify you are returned to Super Admin view with no orange banner"]$j$::jsonb,
  110),
 
 ('user-roles','User Management','Verify role-based navigation','any',
- 'Verify each role sees the correct navigation items',
- '["Log in as a Dealer Admin — verify nav shows: Dashboard, Products, Builder, Users, My Profile, Print Settings, Order Supplies","Log in as a Dealer User — verify same nav minus Users","Log in as a Group Admin — verify nav shows group-scoped items: Dashboard, Dealers, My Group, My Profile, Builder","Verify no role can access pages above their permission level"]'::jsonb,
+ $$Verify each role sees the correct navigation items$$,
+ $j$["Log in as a Dealer Admin — verify nav shows: Dashboard, Products, Builder, Users, My Profile, Print Settings, Order Supplies","Log in as a Dealer User — verify same nav minus Users","Log in as a Group Admin — verify nav shows group-scoped items: Dashboard, Dealers, My Group, My Profile, Builder","Verify no role can access pages above their permission level"]$j$::jsonb,
  120),
 
--- Billing — Subscriptions
 ('billing-group-template','Billing — Subscriptions','Verify group billing template in da-billing','super_admin',
- 'Verify group template has correct line items for all member dealers',
- '["Log into billing.dealeraddendums.com","Go to Templates → find a group template","Click Edit Template","Verify each member dealer has a subscription line item","Verify line item description format: {numbers}::{Dealer Name}","Verify subscription type matches what was set on the dealer (Manual=$100, Automatic Web=$150, Automatic DMS=$200)","Verify group discount % is shown on the customer record"]'::jsonb,
+ $$Verify group template has correct line items for all member dealers$$,
+ $j$["Log into billing.dealeraddendums.com","Go to Templates → find a group template","Click Edit Template","Verify each member dealer has a subscription line item","Verify line item description format: {numbers}::{Dealer Name}","Verify subscription type matches what was set on the dealer (Manual=$100, Automatic Web=$150, Automatic DMS=$200)","Verify group discount % is shown on the customer record"]$j$::jsonb,
  130),
 
 ('billing-dealer-template','Billing — Subscriptions','Verify standalone dealer billing template','super_admin',
- 'Verify standalone dealer has their own billing template',
- '["Log into billing.dealeraddendums.com","Go to Templates → find a standalone dealer template (not a group)","Verify one subscription line item exists","Verify price matches the dealer''s subscription type","Verify line item description format: {internal_id}::{Dealer Name}"]'::jsonb,
+ $$Verify standalone dealer has their own billing template$$,
+ $j$["Log into billing.dealeraddendums.com","Go to Templates → find a standalone dealer template (not a group)","Verify one subscription line item exists","Verify price matches the dealer's subscription type","Verify line item description format: {internal_id}::{Dealer Name}"]$j$::jsonb,
  140),
 
 ('billing-discount-locked','Billing — Subscriptions','Verify locked discount not overwritten','super_admin',
- 'Verify locked discounts are respected by auto-discount logic',
- '["Log into billing.dealeraddendums.com","Find any group customer → click Edit Customer","Set a custom Subscription Discount (e.g. 15%)","Check the ''Lock discount'' checkbox → Save","Go to DA Platform → add or remove a dealer from that group","Return to billing.dealeraddendums.com → verify discount is still 15%","It should NOT have changed to the auto-calculated tier value"]'::jsonb,
+ $$Verify locked discounts are respected by auto-discount logic$$,
+ $j$["Log into billing.dealeraddendums.com","Find any group customer → click Edit Customer","Set a custom Subscription Discount (e.g. 15%)","Check the 'Lock discount' checkbox → Save","Go to DA Platform → add or remove a dealer from that group","Return to billing.dealeraddendums.com → verify discount is still 15%","It should NOT have changed to the auto-calculated tier value"]$j$::jsonb,
  150),
 
--- Billing — Label Orders
 ('labels-group-billed','Billing — Label Orders','Order labels billed to group','dealer_admin',
- 'Verify label orders from group-billed dealers route to group template',
- '["Log in as a dealer with Labels Billed To = Group","Go to Order Supplies","Select 250 Regular Addendums (Standard)","Verify Ship To address is correct — click Edit address if needed","Click Place Order","Verify green ''Order placed successfully'' message","Log into billing.dealeraddendums.com → find the group template","Verify a Labels line item was added with correct label type and price"]'::jsonb,
+ $$Verify label orders from group-billed dealers route to group template$$,
+ $j$["Log in as a dealer with Labels Billed To = Group","Go to Order Supplies","Select 250 Regular Addendums (Standard)","Verify Ship To address is correct — click Edit address if needed","Click Place Order","Verify green 'Order placed successfully' message","Log into billing.dealeraddendums.com → find the group template","Verify a Labels line item was added with correct label type and price"]$j$::jsonb,
  160),
 
 ('labels-dealer-billed','Billing — Label Orders','Order labels billed to dealer','dealer_admin',
- 'Verify label orders from dealer-billed dealers route to dealer template',
- '["Log in as a dealer with Labels Billed To = Dealer","Go to Order Supplies","Select 500 Narrow Addendums (Standard)","Click Place Order","Verify green ''Order placed successfully'' message","Log into billing.dealeraddendums.com → find the dealer''s own template","Verify a Labels line item was added with correct label type and price"]'::jsonb,
+ $$Verify label orders from dealer-billed dealers route to dealer template$$,
+ $j$["Log in as a dealer with Labels Billed To = Dealer","Go to Order Supplies","Select 500 Narrow Addendums (Standard)","Click Place Order","Verify green 'Order placed successfully' message","Log into billing.dealeraddendums.com → find the dealer's own template","Verify a Labels line item was added with correct label type and price"]$j$::jsonb,
  170),
 
 ('labels-free-blocked','Billing — Label Orders','Free dealer cannot order labels','dealer_admin',
- 'Verify Free/Trial dealers see upgrade message instead of order form',
- '["Log in as or impersonate a dealer with account_type = Free or Trial","Go to Order Supplies","Verify a yellow notice appears: ''Label orders require an active subscription''","Verify the Place Order button is NOT visible","Verify support contact info (support@dealeraddendums.com, 801-415-9435) is shown"]'::jsonb,
+ $$Verify Free/Trial dealers see upgrade message instead of order form$$,
+ $j$["Log in as or impersonate a dealer with account_type = Free or Trial","Go to Order Supplies","Verify a yellow notice appears: 'Label orders require an active subscription'","Verify the Place Order button is NOT visible","Verify support contact info (support@dealeraddendums.com, 801-415-9435) is shown"]$j$::jsonb,
  180),
 
 ('labels-xps','Billing — Label Orders','Verify XPS shipping order created','super_admin',
- 'Verify XPS Shipper receives correct order details',
- '["After placing any successful label order","Log into XPS Shipper portal (xpsshipper.com)","Find the order (search by DA- prefix order ID)","Verify Sender: DealerAddendums, 277 E 4600 S, Murray UT 84107","Verify Receiver Company = Dealer Name","Verify Receiver Name = primary contact name","Verify correct address and phone number"]'::jsonb,
+ $$Verify XPS Shipper receives correct order details$$,
+ $j$["After placing any successful label order","Log into XPS Shipper portal (xpsshipper.com)","Find the order (search by DA- prefix order ID)","Verify Sender: DealerAddendums, 277 E 4600 S, Murray UT 84107","Verify Receiver Company = Dealer Name","Verify Receiver Name = primary contact name","Verify correct address and phone number"]$j$::jsonb,
  190),
 
--- Addendum Builder
 ('builder-template','Addendum Builder','Create an addendum template','dealer_admin',
- 'Verify the template builder saves a new template correctly',
- '["Go to Builder","Click + New Template (or select an existing one to modify)","Add at least 2 widgets to the canvas","Adjust font size on one widget","Click Save Template","Verify success message","Reload the page and verify template is still there with your changes"]'::jsonb,
+ $$Verify the template builder saves a new template correctly$$,
+ $j$["Go to Builder","Click + New Template (or select an existing one to modify)","Add at least 2 widgets to the canvas","Adjust font size on one widget","Click Save Template","Verify success message","Reload the page and verify template is still there with your changes"]$j$::jsonb,
  200),
 
 ('builder-print','Addendum Builder','Print an addendum from inventory','dealer_admin',
- 'Verify the full print flow from inventory to PDF',
- '["Go to Inventory (Vehicles)","Click any vehicle","Click Print Now","Verify the pre-print screen shows: VIN, Year, Make, Model","Verify auto-applied products are listed","Click Print / Generate PDF","Verify PDF opens or downloads","Return to inventory and verify vehicle shows as printed"]'::jsonb,
+ $$Verify the full print flow from inventory to PDF$$,
+ $j$["Go to Inventory (Vehicles)","Click any vehicle","Click Print Now","Verify the pre-print screen shows: VIN, Year, Make, Model","Verify auto-applied products are listed","Click Print / Generate PDF","Verify PDF opens or downloads","Return to inventory and verify vehicle shows as printed"]$j$::jsonb,
  210),
 
 ('builder-queue','Addendum Builder','Add vehicle to print queue','dealer_admin',
- 'Verify the print queue works correctly',
- '["Go to Inventory → click any unprinted vehicle","On the pre-print screen click Print Later (or Add to Queue)","Verify vehicle shows queued status in inventory list","Go to another vehicle → print it from the queue","Verify queued vehicle is removed from queue after printing"]'::jsonb,
+ $$Verify the print queue works correctly$$,
+ $j$["Go to Inventory → click any unprinted vehicle","On the pre-print screen click Print Later (or Add to Queue)","Verify vehicle shows queued status in inventory list","Go to another vehicle → print it from the queue","Verify queued vehicle is removed from queue after printing"]$j$::jsonb,
  220),
 
--- Buyers Guide and Infosheet
-('buyers-guide-print','Buyer''s Guide & Infosheet','Print a Buyer''s Guide','dealer_admin',
- 'Verify Buyer''s Guide PDF generates correctly',
- '["Go to Inventory → click any vehicle","Click the Buyer''s Guide button","Verify the correct FTC form loads (AS-IS or warranty based on dealer settings)","Click Print","Verify PDF generates and opens","Verify dealer name and address appear on the form"]'::jsonb,
+('buyers-guide-print',$$Buyer's Guide & Infosheet$$,$$Print a Buyer's Guide$$,'dealer_admin',
+ $$Verify Buyer's Guide PDF generates correctly$$,
+ $j$["Go to Inventory → click any vehicle","Click the Buyer's Guide button","Verify the correct FTC form loads (AS-IS or warranty based on dealer settings)","Click Print","Verify PDF generates and opens","Verify dealer name and address appear on the form"]$j$::jsonb,
  230),
 
-('infosheet-print','Buyer''s Guide & Infosheet','Print an Infosheet','dealer_admin',
- 'Verify Infosheet PDF generates correctly',
- '["Go to Inventory → click any vehicle","Click the Infosheet button","Verify infosheet template loads with vehicle info","Click Print","Verify PDF generates and opens correctly"]'::jsonb,
+('infosheet-print',$$Buyer's Guide & Infosheet$$,'Print an Infosheet','dealer_admin',
+ $$Verify Infosheet PDF generates correctly$$,
+ $j$["Go to Inventory → click any vehicle","Click the Infosheet button","Verify infosheet template loads with vehicle info","Click Print","Verify PDF generates and opens correctly"]$j$::jsonb,
  240),
 
--- Settings & Profile
-('settings-logo','Settings & Profile','Upload dealer logo','dealer_admin',
- 'Verify logo upload saves and appears on addendum templates',
- '["Go to Settings","Find the Logo section","Upload a PNG or JPG logo file","Save settings","Go to Builder and verify the logo appears on the addendum template preview"]'::jsonb,
+('settings-logo',$$Settings & Profile$$,'Upload dealer logo','dealer_admin',
+ $$Verify logo upload saves and appears on addendum templates$$,
+ $j$["Go to Settings","Find the Logo section","Upload a PNG or JPG logo file","Save settings","Go to Builder and verify the logo appears on the addendum template preview"]$j$::jsonb,
  250),
 
-('profile-shipping','Settings & Profile','Update shipping address','dealer_admin',
- 'Verify shipping address updates reflect on label order page',
- '["Go to My Profile → click Shipping tab","Update the shipping address fields","Save","Go to Order Supplies","Verify the Ship To section shows the updated address"]'::jsonb,
+('profile-shipping',$$Settings & Profile$$,'Update shipping address','dealer_admin',
+ $$Verify shipping address updates reflect on label order page$$,
+ $j$["Go to My Profile → click Shipping tab","Update the shipping address fields","Save","Go to Order Supplies","Verify the Ship To section shows the updated address"]$j$::jsonb,
  260),
 
-('profile-security','Settings & Profile','Add a passkey','any',
- 'Verify passkey registration and login works',
- '["Go to My Profile → click Security tab","Click Add Passkey","Follow your browser or device prompts (Face ID, Touch ID, or Windows Hello)","Verify passkey appears in the list","Sign out","On the login page, use passkey login instead of password","Verify you are logged in successfully"]'::jsonb,
+('profile-security',$$Settings & Profile$$,'Add a passkey','any',
+ $$Verify passkey registration and login works$$,
+ $j$["Go to My Profile → click Security tab","Click Add Passkey","Follow your browser or device prompts (Face ID, Touch ID, or Windows Hello)","Verify passkey appears in the list","Sign out","On the login page, use passkey login instead of password","Verify you are logged in successfully"]$j$::jsonb,
  270),
 
--- Box.com Integration
 ('box-dealer-folder','Box.com Integration','Verify Box folder created for new dealer','super_admin',
- 'Verify Box.com folder is auto-created when a dealer is created',
- '["Create a new test dealer (or use a recently created one)","Log into box.com","Navigate to the Dealers folder","Verify a folder exists with the dealer''s name","Return to DA Platform → check the dealer''s box_folder_id in Supabase (Table Editor → dealers → find dealer → verify box_folder_id is not null)"]'::jsonb,
+ $$Verify Box.com folder is auto-created when a dealer is created$$,
+ $j$["Create a new test dealer (or use a recently created one)","Log into box.com","Navigate to the Dealers folder","Verify a folder exists with the dealer's name","Return to DA Platform → check the dealer's box_folder_id in Supabase (Table Editor → dealers → find dealer → verify box_folder_id is not null)"]$j$::jsonb,
  280),
 
 ('box-group-folder','Box.com Integration','Verify Box folder created for new group','super_admin',
- 'Verify Box.com folder is auto-created when a group is created',
- '["Create a new test group","Log into box.com","Navigate to the Groups folder","Verify a folder exists with the group''s name"]'::jsonb,
+ $$Verify Box.com folder is auto-created when a group is created$$,
+ $j$["Create a new test group","Log into box.com","Navigate to the Groups folder","Verify a folder exists with the group's name"]$j$::jsonb,
  290)
 
 ON CONFLICT (id) DO NOTHING;
