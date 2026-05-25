@@ -41,7 +41,7 @@ CREATE INDEX IF NOT EXISTS groups_test_account_idx   ON public.groups   (test_ac
 CREATE INDEX IF NOT EXISTS profiles_test_account_idx ON public.profiles (test_account) WHERE test_account = true;
 
 -- 4. Refresh seeded test items ---------------------------------------------
--- UPSERT pattern: 073's seed used ON CONFLICT DO NOTHING. Here we
+-- UPSERT pattern: the 073 seed used ON CONFLICT DO NOTHING. Here we
 -- explicitly DO UPDATE so the rewritten content (which references the
 -- auto-provisioned QA Test entities and credentials) replaces the
 -- original copy. test_item_id values are stable so qa_submissions FKs

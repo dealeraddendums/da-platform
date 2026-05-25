@@ -170,7 +170,7 @@ INSERT INTO public.qa_test_items (id, area, title, role_required, description, s
  '["Go to Inventory → click any unprinted vehicle","On the pre-print screen click Print Later (or Add to Queue)","Verify vehicle shows queued status in inventory list","Go to another vehicle → print it from the queue","Verify queued vehicle is removed from queue after printing"]'::jsonb,
  220),
 
--- Buyer's Guide & Infosheet
+-- Buyers Guide and Infosheet
 ('buyers-guide-print','Buyer''s Guide & Infosheet','Print a Buyer''s Guide','dealer_admin',
  'Verify Buyer''s Guide PDF generates correctly',
  '["Go to Inventory → click any vehicle","Click the Buyer''s Guide button","Verify the correct FTC form loads (AS-IS or warranty based on dealer settings)","Click Print","Verify PDF generates and opens","Verify dealer name and address appear on the form"]'::jsonb,
