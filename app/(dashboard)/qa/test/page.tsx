@@ -25,7 +25,7 @@ type TestItem = {
   last_submission: LastSubmission | null;
 };
 
-type RoleKey = "all" | "super_admin" | "group_admin" | "dealer_admin" | "dealer_user" | "dealer_restricted";
+type RoleKey = "all" | "super_admin" | "group_admin" | "dealer_admin" | "dealer_user";
 
 const ROLES: { key: RoleKey; label: string; email: string | null; needsSwitch: boolean }[] = [
   { key: "all",                label: "All",               email: null,                                            needsSwitch: false },
@@ -33,7 +33,6 @@ const ROLES: { key: RoleKey; label: string; email: string | null; needsSwitch: b
   { key: "group_admin",        label: "Group Admin",       email: "qa-group-admin@test.dealeraddendums.com",       needsSwitch: true  },
   { key: "dealer_admin",       label: "Dealer Admin",      email: "qa-dealer-admin@test.dealeraddendums.com",      needsSwitch: true  },
   { key: "dealer_user",        label: "Dealer User",       email: "qa-dealer-user@test.dealeraddendums.com",       needsSwitch: true  },
-  { key: "dealer_restricted",  label: "Dealer Restricted", email: "qa-dealer-restricted@test.dealeraddendums.com", needsSwitch: true  },
 ];
 
 const QA_PASSWORD = "QATest2026!";
@@ -64,7 +63,6 @@ function roleBadge(role: string) {
     group_admin: "Group Admin",
     dealer_admin: "Dealer Admin",
     dealer_user: "Dealer User",
-    dealer_restricted: "Dealer Restricted",
   };
   return (
     <span style={pill("#eceff1", "#455a64")}>

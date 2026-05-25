@@ -215,7 +215,10 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
   const users = [
     { email: "qa-dealer-admin@test.dealeraddendums.com",       role: "dealer_admin",      dealer_id: dealerA.entity_id, group_id: null,    full_name: "QA Dealer Admin" },
     { email: "qa-dealer-user@test.dealeraddendums.com",        role: "dealer_user",       dealer_id: dealerA.entity_id, group_id: null,    full_name: "QA Dealer User" },
-    { email: "qa-dealer-restricted@test.dealeraddendums.com",  role: "dealer_restricted", dealer_id: dealerA.entity_id, group_id: null,    full_name: "QA Dealer Restricted" },
+    // Second dealer_user account (was dealer_restricted before -- that role
+    // is not allowed by profiles.role's check constraint, so we provision
+    // a second dealer_user instead and distinguish it by display name).
+    { email: "qa-dealer-restricted@test.dealeraddendums.com",  role: "dealer_user",       dealer_id: dealerA.entity_id, group_id: null,    full_name: "QA Dealer User 2" },
     { email: "qa-group-admin@test.dealeraddendums.com",        role: "group_admin",       dealer_id: null,              group_id: groupId, full_name: "QA Group Admin" },
   ];
 

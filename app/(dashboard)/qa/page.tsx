@@ -315,7 +315,7 @@ export default function QADashboardPage() {
                   <div style={{ marginBottom: 12, color: "#55595c", fontSize: 14 }}>
                     No QA test environment is provisioned. Setting up creates: <strong>1 group</strong>,
                     {" "}<strong>2 dealers</strong> (QA Test Dealer A standalone, QA Test Dealer B in group),
-                    {" "}and <strong>4 user accounts</strong> (dealer_admin, dealer_user, dealer_restricted,
+                    {" "}and <strong>4 user accounts</strong> (dealer_admin, dealer_user, a second dealer_user,
                     {" "}group_admin) all with password <code style={{ background: "#f5f6f7", padding: "2px 6px", borderRadius: 4 }}>QATest2026!</code>.
                   </div>
                   {env && (env.counts.group > 0 || env.counts.dealer > 0 || env.counts.user > 0) && (
