@@ -138,9 +138,13 @@ export default function QADashboardPage() {
   const [devNotesDraft, setDevNotesDraft] = useState<Record<string, string>>({});
 
   const load = async () => {
+    // Catalog comes from /api/qa/test-items (full set, super_admin only),
+    // NOT /api/qa/progress -- the latter is role-filtered and would only
+    // surface tests the current user can run, which underreports the
+    // Total Test Items count and hides items from the Tips section.
     const [subsRes, catalogRes, envRes] = await Promise.all([
       fetch("/api/qa/submissions").then(r => r.json()),
-      fetch("/api/qa/progress").then(r => r.json()).catch(() => ({ items: [] })),
+      fetch("/api/qa/test-items").then(r => r.json()).catch(() => ({ items: [] })),
       fetch("/api/qa/environment").then(r => r.ok ? r.json() : null).catch(() => null),
     ]);
     setSubmissions(subsRes.submissions ?? []);
