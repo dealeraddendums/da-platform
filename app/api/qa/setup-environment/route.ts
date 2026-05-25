@@ -48,8 +48,11 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
       .from("groups")
       .insert({
         name: groupName,
-        contact_name: "QA Test Contact",
-        contact_email: "qa-group@test.dealeraddendums.com",
+        // Schema: groups uses primary_contact / primary_contact_email,
+        // not contact_name / contact_email (which the first cut of this
+        // route assumed).
+        primary_contact: "QA Test Contact",
+        primary_contact_email: "qa-group@test.dealeraddendums.com",
         phone: "8014159435",
         address: "277 E 4600 S",
         city: "Murray",
