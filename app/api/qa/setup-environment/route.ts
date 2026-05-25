@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerProfile } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { billingConfigured, createCustomer, createTemplate } from "@/lib/billing";
+import { boxConfigured, createDealerFolder, createGroupFolder } from "@/lib/box";
+import { fireAndForget } from "@/lib/billing-sync";
 
 // All QA-provisioned entities use this fixed password so the /qa/test
 // page can display credentials inline. Testers never type the password
@@ -31,11 +34,13 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
   const groupName = "QA Test Group";
   const existingGroupResp = await (admin as any)
     .from("groups")
-    .select("id, name")
+    .select("id, name, billing_customer_id, box_folder_id")
     .eq("test_account", true)
     .eq("name", groupName)
     .maybeSingle();
   let groupId: string | null = existingGroupResp.data?.id ?? null;
+  let groupBillingCustomerId: string | null = existingGroupResp.data?.billing_customer_id ?? null;
+  let groupBoxFolderId: string | null = existingGroupResp.data?.box_folder_id ?? null;
   let groupCreated = false;
 
   if (!groupId) {
@@ -55,17 +60,60 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
         billing_phone: "8014159435",
         test_account: true,
       })
-      .select("id")
+      .select("id, billing_customer_id, box_folder_id")
       .single();
     if (groupInsertResp.error) {
       console.error("[qa/setup-environment] group insert failed:", groupInsertResp.error);
       return NextResponse.json({ error: `Group create failed: ${groupInsertResp.error.message}` }, { status: 500 });
     }
     groupId = groupInsertResp.data.id as string;
+    groupBillingCustomerId = groupInsertResp.data.billing_customer_id ?? null;
+    groupBoxFolderId = groupInsertResp.data.box_folder_id ?? null;
     groupCreated = true;
   }
   out.push({ entity_type: "group", entity_id: groupId!, role: null, email: null, display_name: groupName, created: groupCreated });
   await recordEnv(admin, "group", groupId!, null, null, groupName);
+
+  // Group side effects (fire-and-forget): da-billing customer + Box folder.
+  // Run on every setup pass when the corresponding column is null so we
+  // re-attempt wiring that failed on a prior run.
+  if (billingConfigured() && !groupBillingCustomerId) {
+    fireAndForget(async () => {
+      const created = await createCustomer({
+        name: "QA Test Billing",
+        company: groupName,
+        email: "qa-billing@test.dealeraddendums.com",
+        phone: "8014159435",
+        address: "277 E 4600 S",
+        state: "UT",
+        isGroup: true,
+      });
+      const { error: updateErr } = await (admin as any)
+        .from("groups")
+        .update({ billing_customer_id: created.id })
+        .eq("id", groupId!);
+      if (updateErr) throw new Error(`groups update failed: ${updateErr.message} (billing customer ${created.id})`);
+    }, {
+      event: "billing.customer.create",
+      groupId: groupId!,
+      payload: { groupName, qa: true },
+    });
+  }
+  if (boxConfigured() && !groupBoxFolderId) {
+    fireAndForget(async () => {
+      const folderId = await createGroupFolder(groupName);
+      const { error: updateErr } = await (admin as any)
+        .from("groups")
+        .update({ box_folder_id: folderId })
+        .eq("id", groupId!)
+        .is("box_folder_id", null);
+      if (updateErr) throw new Error(`groups update failed: ${updateErr.message} (folder ${folderId})`);
+    }, {
+      event: "box.folder.create",
+      groupId: groupId!,
+      payload: { groupName, entity: "group", qa: true },
+    });
+  }
 
   // ---- 2. QA Test Dealer A (standalone, sub-manual, billed to self) -------
   const dealerA = await provisionDealer(admin, {
@@ -76,7 +124,60 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
     subscription_billed_to: "dealer",
     labels_billed_to: "dealer",
   });
-  out.push({ entity_type: "dealer", ...dealerA });
+  out.push({ entity_type: "dealer", entity_id: dealerA.entity_id, role: null, email: null, display_name: dealerA.display_name, created: dealerA.created });
+
+  // Dealer A side effects: billing customer + template (sub-manual line),
+  // and Box folder. Standalone billing so the customer + template are
+  // mandatory for the seeded billing tests to pass.
+  if (billingConfigured() && !dealerA.billing_customer_id) {
+    fireAndForget(async () => {
+      const created = await createCustomer({
+        name: "QA Test Contact",
+        company: dealerA.display_name,
+        email: "qa-contact@test.dealeraddendums.com",
+        phone: "8014159435",
+        address: "277 E 4600 S",
+        state: "UT",
+        isGroup: false,
+      });
+      const { error: updateErr } = await (admin as any)
+        .from("dealers")
+        .update({ billing_customer_id: created.id })
+        .eq("id", dealerA.entity_id);
+      if (updateErr) throw new Error(`dealers update failed: ${updateErr.message} (billing customer ${created.id})`);
+
+      // Recurring template with one sub-manual line item. DA Platform
+      // never sends price -- da-billing resolves the canonical $100
+      // from pricing.getPriceForProduct("sub-manual") at save time.
+      await createTemplate({
+        customerId: created.id,
+        products: [{
+          productId: "sub-manual",
+          quantity: 1,
+          lineItemDescription: `${dealerA.internal_id}::${dealerA.display_name}`,
+        }],
+      });
+    }, {
+      event: "billing.customer.create",
+      dealerId: dealerA.entity_id,
+      payload: { dealerName: dealerA.display_name, accountType: "sub-manual", qa: true },
+    });
+  }
+  if (boxConfigured() && !dealerA.box_folder_id) {
+    fireAndForget(async () => {
+      const folderId = await createDealerFolder(dealerA.display_name);
+      const { error: updateErr } = await (admin as any)
+        .from("dealers")
+        .update({ box_folder_id: folderId })
+        .eq("id", dealerA.entity_id)
+        .is("box_folder_id", null);
+      if (updateErr) throw new Error(`dealers update failed: ${updateErr.message} (folder ${folderId})`);
+    }, {
+      event: "box.folder.create",
+      dealerId: dealerA.entity_id,
+      payload: { dealerName: dealerA.display_name, entity: "dealer", qa: true },
+    });
+  }
 
   // ---- 3. QA Test Dealer B (in group, sub-auto-web, billed to group) ------
   const dealerB = await provisionDealer(admin, {
@@ -87,7 +188,25 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
     subscription_billed_to: "group",
     labels_billed_to: "group",
   });
-  out.push({ entity_type: "dealer", ...dealerB });
+  out.push({ entity_type: "dealer", entity_id: dealerB.entity_id, role: null, email: null, display_name: dealerB.display_name, created: dealerB.created });
+
+  // Dealer B side effects: Box folder only. Subscription lives on the
+  // group's template so no per-dealer billing customer is created.
+  if (boxConfigured() && !dealerB.box_folder_id) {
+    fireAndForget(async () => {
+      const folderId = await createDealerFolder(dealerB.display_name);
+      const { error: updateErr } = await (admin as any)
+        .from("dealers")
+        .update({ box_folder_id: folderId })
+        .eq("id", dealerB.entity_id)
+        .is("box_folder_id", null);
+      if (updateErr) throw new Error(`dealers update failed: ${updateErr.message} (folder ${folderId})`);
+    }, {
+      event: "box.folder.create",
+      dealerId: dealerB.entity_id,
+      payload: { dealerName: dealerB.display_name, entity: "dealer", qa: true },
+    });
+  }
 
   // ---- 4. Test user accounts ----------------------------------------------
   const users = [
@@ -107,6 +226,15 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
 
 // ---- helpers --------------------------------------------------------------
 
+type DealerProvisioned = {
+  entity_id: string;
+  display_name: string;
+  internal_id: string;
+  billing_customer_id: string | null;
+  box_folder_id: string | null;
+  created: boolean;
+};
+
 async function provisionDealer(
   admin: any,
   cfg: {
@@ -117,17 +245,24 @@ async function provisionDealer(
     subscription_billed_to: "dealer" | "group";
     labels_billed_to: "dealer" | "group";
   },
-): Promise<{ entity_id: string; role: string | null; email: string | null; display_name: string; created: boolean }> {
+): Promise<DealerProvisioned> {
   const existing = await admin
     .from("dealers")
-    .select("id, name")
+    .select("id, name, internal_id, billing_customer_id, box_folder_id")
     .eq("test_account", true)
     .eq("name", cfg.name)
     .maybeSingle();
 
   if (existing.data?.id) {
     await recordEnv(admin, "dealer", existing.data.id, null, null, cfg.name);
-    return { entity_id: existing.data.id, role: null, email: null, display_name: cfg.name, created: false };
+    return {
+      entity_id: existing.data.id,
+      display_name: cfg.name,
+      internal_id: String(existing.data.internal_id ?? ""),
+      billing_customer_id: existing.data.billing_customer_id ?? null,
+      box_folder_id: existing.data.box_folder_id ?? null,
+      created: false,
+    };
   }
 
   const internalId = String(Math.floor(Math.random() * 9_000_000) + 1_000_000);
@@ -160,7 +295,7 @@ async function provisionDealer(
       shipping_country: "US",
       shipping_phone: "8014159435",
     })
-    .select("id")
+    .select("id, internal_id, billing_customer_id, box_folder_id")
     .single();
 
   if (insertResp.error) {
@@ -168,7 +303,14 @@ async function provisionDealer(
   }
   const dealerId = insertResp.data.id as string;
   await recordEnv(admin, "dealer", dealerId, null, null, cfg.name);
-  return { entity_id: dealerId, role: null, email: null, display_name: cfg.name, created: true };
+  return {
+    entity_id: dealerId,
+    display_name: cfg.name,
+    internal_id: String(insertResp.data.internal_id ?? internalId),
+    billing_customer_id: insertResp.data.billing_customer_id ?? null,
+    box_folder_id: insertResp.data.box_folder_id ?? null,
+    created: true,
+  };
 }
 
 async function provisionUser(
@@ -196,8 +338,7 @@ async function provisionUser(
   });
   if (authErr) {
     // Idempotency: if the user already exists in auth but we lost the env row,
-    // try to recover by listing users -- in practice Allan would just teardown
-    // and retry. Surface the error for visibility.
+    // Allan would teardown and retry. Surface the error for visibility.
     throw new Error(`Auth user create failed (${cfg.email}): ${authErr.message}`);
   }
 
