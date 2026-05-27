@@ -6,20 +6,23 @@ const BASE = process.env.BILLING_API_BASE ?? "https://billing.dealeraddendums.co
 
 // Customer-facing da-billing URL (Pay button target). da-billing returns
 // paymentUrl values bound to its own runtime host — on the production
-// server it serves itself as http://localhost:3009 — so we rewrite the
-// origin to the public domain before exposing URLs to the browser.
-const BILLING_PUBLIC_URL = process.env.BILLING_PUBLIC_URL ?? "https://billing.dealeraddendums.com";
+// server it serves itself as http://localhost:3009 — so we rebuild the
+// URL against the public domain before exposing it to the browser.
+// Trailing slash is stripped so concatenation never produces a double slash.
+const BILLING_PUBLIC_URL = (process.env.BILLING_PUBLIC_URL ?? "https://billing.dealeraddendums.com").replace(/\/+$/, "");
 
-function publicPaymentUrl(raw: string | undefined, invoiceId: string): string | undefined {
-  if (!raw) return `${BILLING_PUBLIC_URL}/?invoice=${encodeURIComponent(invoiceId)}`;
+function publicPaymentUrl(raw: string | undefined, invoiceId: string): string {
+  const fallback = `${BILLING_PUBLIC_URL}/?invoice=${encodeURIComponent(invoiceId)}`;
+  if (!raw) return fallback;
   try {
+    // Preserve only the path + query + hash from the upstream URL. Mutating
+    // u.host (WHATWG URL) leaves the existing :3009 port in place when the
+    // replacement value has no port, so we rebuild from scratch.
     const u = new URL(raw);
-    const pub = new URL(BILLING_PUBLIC_URL);
-    u.protocol = pub.protocol;
-    u.host = pub.host;
-    return u.toString();
+    const path = u.pathname === "/" && !u.search && !u.hash ? "/" : `${u.pathname}${u.search}${u.hash}`;
+    return `${BILLING_PUBLIC_URL}${path}`;
   } catch {
-    return `${BILLING_PUBLIC_URL}/?invoice=${encodeURIComponent(invoiceId)}`;
+    return fallback;
   }
 }
 
