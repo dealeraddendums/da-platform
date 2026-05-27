@@ -548,11 +548,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // ── Normalize dealer-specific widget data ─────────────────────────────
     // Saved templates (especially group templates shared across dealers) carry
-    // whatever logo URL and dealer text were on the canvas at save time. Those
-    // values are wrong as soon as a different dealer prints the same template.
-    // Override the logo and dealer-text widgets with this dealer's live values
-    // unconditionally — same overrides the default-layout path already
-    // applies inline.
+    // whatever logo URL and dealer text were on the canvas at save time. The
+    // dealer-address widget always reflects the current dealer's address.
+    // Logo widgets fall back to dealer.logo_url ONLY when the saved widget
+    // doesn't already point at a specific image chosen from the "Choose Logo
+    // Image" library — a picked image must survive print, otherwise the
+    // template stops matching what the canvas shows.
     const dealerLogoForWidget = dealer?.logo_url ?? null;
     const dealerLines = [
       dealer?.name,
@@ -562,8 +563,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     ].filter(Boolean) as string[];
     widgets = widgets.map(w => {
       if (w.type === "logo") {
-        // null → blank tile (intentional "no logo"); a truthy URL renders the
-        // image. Either way we drop any prior dealer's logo.
+        const existing = typeof w.d.imgUrl === "string" ? w.d.imgUrl : "";
+        if (existing) return w;
         return { ...w, d: { ...w.d, imgUrl: dealerLogoForWidget } };
       }
       if (w.type === "dealer" && dealerLines.length > 0) {

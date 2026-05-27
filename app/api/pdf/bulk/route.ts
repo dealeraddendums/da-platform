@@ -681,7 +681,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           dealer?.phone,
         ].filter(Boolean) as string[];
         widgets = widgets.map(w => {
-          if (w.type === "logo") return { ...w, d: { ...w.d, imgUrl: dealerLogoForWidget } };
+          if (w.type === "logo") {
+            // Same fallback rule as pdf/generate: a picked image (Choose Logo
+            // Image) survives; only an empty/missing imgUrl falls back to
+            // dealer.logo_url.
+            const existing = typeof w.d.imgUrl === "string" ? w.d.imgUrl : "";
+            if (existing) return w;
+            return { ...w, d: { ...w.d, imgUrl: dealerLogoForWidget } };
+          }
           if (w.type === "dealer" && dealerLines.length > 0) return { ...w, d: { ...w.d, text: dealerLines.join("\n") } };
           return w;
         });

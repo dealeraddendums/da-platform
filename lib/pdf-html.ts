@@ -120,10 +120,14 @@ export async function buildPdfHtml({
   const enriched = widgets.map(w => {
     const d = { ...w.d };
 
-    // Logo: always override saved template value with live dealer logo.
-    // null = dealer has no logo → render blank. undefined = not provided → keep saved.
+    // Logo: a specific image picked from the Choose Logo Image library is
+    // persisted on the widget as imgUrl and must win — both the canvas and
+    // the PDF need to render the user's selection. Only when the widget has
+    // no chosen image do we fall back to the dealer's canonical logo_url
+    // (undefined = caller did not pass dealerLogoUrl → keep whatever's there).
     if (w.type === 'logo' && dealerLogoUrl !== undefined) {
-      d.imgUrl = dealerLogoUrl;
+      const existing = typeof d.imgUrl === 'string' ? d.imgUrl : '';
+      if (!existing) d.imgUrl = dealerLogoUrl;
     }
 
     // Dealer address: always inject live dealer data so PDF never shows template placeholder.
