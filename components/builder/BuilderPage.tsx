@@ -1840,21 +1840,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
 
   return (
     <>
-      {/* Position & size */}
-      <EpSection>
-        <Eps>Position &amp; Size</Eps>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4 }}>
-          {(['x','y','w','h'] as const).map(k => (
-            <div key={k}>
-              <div style={{ fontSize: 10, color: '#55595c', marginBottom: 3 }}>{k.toUpperCase()}</div>
-              <input type="number" value={Math.round(w[k])} onChange={e => fp(k, +e.target.value)}
-                style={{ width: '100%', padding: '4px 5px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box' }} />
-            </div>
-          ))}
-        </div>
-      </EpSection>
-
-      {/* Type-specific controls */}
+      {/* === Widget-specific settings === */}
       {w.type === 'logo' && (
         <EpSection>
           <Eps>Logo</Eps>
@@ -1892,8 +1878,6 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
               <TogSwitch checked={d.showHeader !== false} onChange={v => u('showHeader', v)} />
             </div>
           </div>
-          <FontStepper label="Header font size" fkey="headerFontSize" base={14} d={d} fontScale={fontScale} af={af} />
-          <FontStepper label="Detail font size" fkey="fontSize" base={10} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
 
@@ -1905,7 +1889,6 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
             <span style={{ fontSize: 11, color: '#55595c' }}>Divider line below</span>
             <TogSwitch checked={d.divider !== false} onChange={v => u('divider', v)} />
           </div>
-          <FontStepper label="Font size" fkey="fontSize" base={11} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
 
@@ -1914,8 +1897,6 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Eps>Required Products Table</Eps>
           <Fd label="Section label"><input value={(d.sectionLabel as string) || ''} onChange={e => u('sectionLabel', e.target.value)} style={fiStyle} /></Fd>
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Shows dealer-installed Required options only. Option names and prices are set per vehicle in the addendum editor.</div>
-          <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
-          <LineSpacingStepper d={d} u={u} />
         </EpSection>
       )}
 
@@ -1924,8 +1905,6 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Eps>Suggested Products Table</Eps>
           <Fd label="Section label"><input value={(d.sectionLabel as string) || ''} onChange={e => u('sectionLabel', e.target.value)} style={fiStyle} /></Fd>
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Shows Suggested options only. Requires a Combo background template to separate sections visually.</div>
-          <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
-          <LineSpacingStepper d={d} u={u} />
         </EpSection>
       )}
 
@@ -1940,8 +1919,6 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Fd label="Price color">
             <ColorPair value={(d.valueColor as string) || '#000000'} onChange={v => u('valueColor', v)} />
           </Fd>
-          <FontStepper label="Label font size" fkey="labelFontSize" base={12} d={d} fontScale={fontScale} af={af} />
-          <FontStepper label="Price font size" fkey="valueFontSize" base={13} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
 
@@ -1949,7 +1926,6 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
         <EpSection>
           <Eps>Subtotal</Eps>
           <Fd label="Label"><input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} /></Fd>
-          <FontStepper label="Font size" fkey="fontSize" base={12} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
 
@@ -1964,8 +1940,6 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Fd label="Price color">
             <ColorPair value={(d.valueColor as string) || '#ffffff'} onChange={v => u('valueColor', v)} />
           </Fd>
-          <FontStepper label="Label font size" fkey="labelFontSize" base={12} d={d} fontScale={fontScale} af={af} />
-          <FontStepper label="Price font size" fkey="valueFontSize" base={13} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
 
@@ -1974,24 +1948,16 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Eps>Dealer Address</Eps>
           <textarea value={(d.text as string) || ''} onChange={e => u('text', e.target.value)} rows={5}
             style={{ ...fiStyle, resize: 'none', width: '100%', boxSizing: 'border-box' }} />
-          <FontStepper label="Font size" fkey="fontSize" base={10} d={d} fontScale={fontScale} af={af} />
-          <Eps style={{ marginTop: 8 }}>Text Format</Eps>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 4 }}>
-            <Fd label="Alignment">
-              <div style={{ display: 'flex', gap: 2 }}>
-                {(['left','center','right'] as const).map(a => (
-                  <button key={a} onClick={() => u('textAlign', a)}
-                    style={{ flex: 1, height: 28, border: `1px solid ${(d.textAlign as string || 'left') === a ? '#1976d2' : '#e0e0e0'}`, borderRadius: 4, background: (d.textAlign as string || 'left') === a ? '#e3f2fd' : '#fff', cursor: 'pointer', fontSize: 11, color: (d.textAlign as string || 'left') === a ? '#1976d2' : '#555', fontWeight: 600 }}>
-                    {a === 'left' ? '≡L' : a === 'center' ? '≡C' : '≡R'}
-                  </button>
-                ))}
-              </div>
-            </Fd>
-            <Fd label="Line spacing">
-              <input type="number" value={(d.lineHeight as number) || 1.5} min={1.0} max={3.0} step={0.1}
-                onChange={e => u('lineHeight', parseFloat(e.target.value))} style={{ ...fiStyle, width: '100%' }} />
-            </Fd>
-          </div>
+          <Fd label="Alignment" style={{ marginTop: 8 }}>
+            <div style={{ display: 'flex', gap: 2 }}>
+              {(['left','center','right'] as const).map(a => (
+                <button key={a} onClick={() => u('textAlign', a)}
+                  style={{ flex: 1, height: 28, border: `1px solid ${(d.textAlign as string || 'left') === a ? '#1976d2' : '#e0e0e0'}`, borderRadius: 4, background: (d.textAlign as string || 'left') === a ? '#e3f2fd' : '#fff', cursor: 'pointer', fontSize: 11, color: (d.textAlign as string || 'left') === a ? '#1976d2' : '#555', fontWeight: 600 }}>
+                  {a === 'left' ? '≡L' : a === 'center' ? '≡C' : '≡R'}
+                </button>
+              ))}
+            </div>
+          </Fd>
         </EpSection>
       )}
 
@@ -2028,29 +1994,19 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
             <Eps>Custom Text</Eps>
             <textarea ref={textareaRef} value={(d.text as string) || ''} onChange={e => u('text', e.target.value)} rows={3}
               style={{ ...fiStyle, resize: 'none', width: '100%', boxSizing: 'border-box' }} />
-            <Fd label="Font size" style={{ marginTop: 6 }}>
-              <input type="number" value={(d.fs as number) || 10} min={7} max={24} onChange={e => u('fs', +e.target.value)} style={fiStyle} />
+            <Fd label="Alignment" style={{ marginTop: 8 }}>
+              <div style={{ display: 'flex', gap: 2 }}>
+                {(['left','center','right'] as const).map(a => {
+                  const cur = (d.textAlign as string) || (d.align as string) || 'left';
+                  return (
+                    <button key={a} onClick={() => { u('textAlign', a); u('align', a); }}
+                      style={{ flex: 1, height: 28, border: `1px solid ${cur === a ? '#1976d2' : '#e0e0e0'}`, borderRadius: 4, background: cur === a ? '#e3f2fd' : '#fff', cursor: 'pointer', fontSize: 11, color: cur === a ? '#1976d2' : '#555', fontWeight: 600 }}>
+                      {a === 'left' ? '≡L' : a === 'center' ? '≡C' : '≡R'}
+                    </button>
+                  );
+                })}
+              </div>
             </Fd>
-            <Eps style={{ marginTop: 8 }}>Text Format</Eps>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 4 }}>
-              <Fd label="Alignment">
-                <div style={{ display: 'flex', gap: 2 }}>
-                  {(['left','center','right'] as const).map(a => {
-                    const cur = (d.textAlign as string) || (d.align as string) || 'left';
-                    return (
-                      <button key={a} onClick={() => { u('textAlign', a); u('align', a); }}
-                        style={{ flex: 1, height: 28, border: `1px solid ${cur === a ? '#1976d2' : '#e0e0e0'}`, borderRadius: 4, background: cur === a ? '#e3f2fd' : '#fff', cursor: 'pointer', fontSize: 11, color: cur === a ? '#1976d2' : '#555', fontWeight: 600 }}>
-                        {a === 'left' ? '≡L' : a === 'center' ? '≡C' : '≡R'}
-                      </button>
-                    );
-                  })}
-                </div>
-              </Fd>
-              <Fd label="Line spacing">
-                <input type="number" value={(d.lineHeight as number) || 1.5} min={1.0} max={3.0} step={0.1}
-                  onChange={e => u('lineHeight', parseFloat(e.target.value))} style={{ ...fiStyle, width: '100%' }} />
-              </Fd>
-            </div>
             <Eps style={{ marginTop: 10 }}>Populate From</Eps>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
               {([
@@ -2168,7 +2124,6 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
             <textarea value={(d.text as string) || ''} onChange={e => u('text', e.target.value)} rows={4}
               style={{ ...fiStyle, resize: 'none', width: '100%', boxSizing: 'border-box', fontSize: 11 }} />
           </Fd>
-          <FontStepper label="Font size" fkey="fontSize" base={10} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
 
@@ -2179,7 +2134,6 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, padding: '4px 0' }}>
             {d.aiMode === 'ai' ? 'Claude generates features list at print time. Items shown are a preview.' : 'Features pulled from vehicle equipment database. 2-column layout auto-formatted.'}
           </div>
-          <FontStepper label="Font size" fkey="fontSize" base={9} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
 
@@ -2281,7 +2235,111 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
         </EpSection>
       )}
 
-      {/* Layer order */}
+      {/* === Font Size === */}
+      {w.type === 'vehicle' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Header font size" fkey="headerFontSize" base={14} d={d} fontScale={fontScale} af={af} />
+          <FontStepper label="Detail font size" fkey="fontSize" base={10} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+      {w.type === 'msrp' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Font size" fkey="fontSize" base={11} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+      {w.type === 'options' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+      {w.type === 'suggested_options' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+      {w.type === 'suggested_price' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Label font size" fkey="labelFontSize" base={12} d={d} fontScale={fontScale} af={af} />
+          <FontStepper label="Price font size" fkey="valueFontSize" base={13} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+      {w.type === 'subtotal' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Font size" fkey="fontSize" base={12} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+      {w.type === 'askbar' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Label font size" fkey="labelFontSize" base={12} d={d} fontScale={fontScale} af={af} />
+          <FontStepper label="Price font size" fkey="valueFontSize" base={13} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+      {w.type === 'dealer' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Font size" fkey="fontSize" base={10} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+      {w.type === 'customtext' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <Fd label="Font size">
+            <input type="number" value={(d.fs as number) || 10} min={7} max={24} onChange={e => u('fs', +e.target.value)} style={fiStyle} />
+          </Fd>
+        </EpSection>
+      )}
+      {w.type === 'description' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Font size" fkey="fontSize" base={10} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+      {w.type === 'features' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Font size" fkey="fontSize" base={9} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+
+      {/* === Line Spacing === */}
+      {(w.type === 'options' || w.type === 'suggested_options') && (
+        <EpSection>
+          <Eps>Line Spacing</Eps>
+          <LineSpacingStepper d={d} u={u} />
+        </EpSection>
+      )}
+      {(w.type === 'dealer' || w.type === 'customtext') && (
+        <EpSection>
+          <Eps>Line Spacing</Eps>
+          <Fd label="Line spacing">
+            <input type="number" value={(d.lineHeight as number) || 1.5} min={1.0} max={3.0} step={0.1}
+              onChange={e => u('lineHeight', parseFloat(e.target.value))} style={{ ...fiStyle, width: '100%' }} />
+          </Fd>
+        </EpSection>
+      )}
+
+      {/* === Position & Size === */}
+      <EpSection>
+        <Eps>Position &amp; Size</Eps>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4 }}>
+          {(['x','y','w','h'] as const).map(k => (
+            <div key={k}>
+              <div style={{ fontSize: 10, color: '#55595c', marginBottom: 3 }}>{k.toUpperCase()}</div>
+              <input type="number" value={Math.round(w[k])} onChange={e => fp(k, +e.target.value)}
+                style={{ width: '100%', padding: '4px 5px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+          ))}
+        </div>
+      </EpSection>
+
+      {/* === Layer Order === */}
       {onLayerChange && (
         <EpSection>
           <Eps>Layer Order</Eps>
@@ -2302,7 +2360,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
         </EpSection>
       )}
 
-      {/* Delete button */}
+      {/* === Remove === */}
       <EpSection>
         <button onClick={() => onDelete(w.id)}
           style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px', borderRadius: 4, border: '1px solid #ffcdd2', background: '#ffebee', color: '#ff5252', fontSize: 11, fontWeight: 500, cursor: 'pointer', width: '100%', justifyContent: 'center', fontFamily: 'inherit' }}>
