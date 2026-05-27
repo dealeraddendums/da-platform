@@ -617,6 +617,75 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-load: on the blank /builder route, open the dealer's most recently
+  // updated saved template so returning visits resume work-in-progress
+  // instead of dropping the user on an empty canvas. Skipped when:
+  // - templateId URL param is set (explicit navigation always wins)
+  // - groupId is set (group library has its own selection semantics)
+  // - vehicle is bound (the vehicle builder resolves defaults server-side)
+  // - no dealer scope to read templates against
+  // The load is silent (no toast). applyLogoToWidgets re-resolves the dealer
+  // logo at this point so a logo-uploaded-in-Settings change reflects on the
+  // next Builder open without requiring a re-save of the template.
+  useEffect(() => {
+    if (templateId) return;
+    if (groupId) return;
+    if (vehicle) return;
+    const effDealerId = dealerId ?? null;
+    if (!effDealerId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const listRes = await fetch(`/api/templates?dealer_id=${encodeURIComponent(effDealerId)}`);
+        if (!listRes.ok) return;
+        const listJson = await listRes.json() as { data?: SavedTemplate[] };
+        const rows = listJson.data ?? [];
+        if (cancelled || rows.length === 0) return;
+        // Sort by updated_at DESC; prefer the dealer's own templates over
+        // assigned (locked) group templates so the auto-open never surprises
+        // the user with a 🔒 Locked surface.
+        const sorted = [...rows].sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''));
+        const pick = sorted.find(t => t.source !== 'group') ?? sorted[0];
+        if (cancelled || !pick) return;
+        const detailUrl = pick.source === 'group' && pick.group_id
+          ? `/api/group-templates/${pick.group_id}/${pick.id}`
+          : `/api/templates/${pick.id}`;
+        const detailRes = await fetch(detailUrl);
+        if (cancelled || !detailRes.ok) return;
+        const detailPayload = await detailRes.json();
+        const tmpl = (detailPayload && typeof detailPayload === 'object' && 'data' in detailPayload)
+          ? (detailPayload as { data?: Record<string, unknown> }).data
+          : detailPayload as Record<string, unknown>;
+        if (cancelled || !tmpl) return;
+        const tj = tmpl.template_json as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: string } | undefined;
+        if (!tj?.widgets || Object.keys(tj.widgets).length === 0) return;
+        const ps = tj.paperSize ?? 'standard';
+        const { w: pw, h: ph } = getPaperDims(ps, customSizesRef.current);
+        let ws = tj.widgets;
+        let n = tj.nid ?? 1;
+        ws = convertLegacyInfoboxes(ws);
+        [ws, n] = ensureAskbar(ws, n, ps);
+        ws = clampWidgets(ws, pw, ph);
+        if (dealerInfoRef.current) ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
+        ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
+        ws = applyDisclaimerToWidgets(ws, disclaimersRef.current);
+        if (cancelled) return;
+        setWidgets(ws);
+        widgetsRef.current = ws;
+        setNid(n);
+        if (tj.bgUrl) { setBgUrl(tj.bgUrl); setBgInputVal(tj.bgUrl); }
+        if (typeof tj.fontScale === 'number') setFontScale(tj.fontScale);
+        if (tj.paperSize) { setPaperSize(tj.paperSize); paperSizeRef.current = tj.paperSize; }
+        setTemplateName((tmpl.name as string) || 'Template');
+        setLoadedTemplateId(pick.id);
+        const locked = pick.source === 'group' && pick.is_locked !== false;
+        setLoadedTemplateLocked(locked);
+      } catch { /* silent — fall back to the default canvas */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Load template if templateId provided. When groupId is set we fetch from the
   // group-templates route so super_admin / group_admin can edit shared templates;
   // otherwise the dealer-templates route is used.
@@ -1113,6 +1182,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
             >
               {aiLoading ? '⟳ Generating…' : '✦ AI'}
             </button>
+          )}
+          {loadedTemplateId && (
+            <span
+              style={{ fontSize: 11, color: 'rgba(255,255,255,0.78)', whiteSpace: 'nowrap', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', padding: '0 4px' }}
+              title={`Editing ${templateName}`}
+            >
+              Editing: <strong style={{ color: '#fff', fontWeight: 600 }}>{templateName}</strong>
+            </span>
           )}
           <button onClick={openTemplates} style={tbBtn}>All templates</button>
           <button
