@@ -160,7 +160,7 @@ export async function POST(
       html: `
 <div style="font-family: Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; color: #333;">
   <div style="margin-bottom: 24px;">
-    <img src="https://new-infobox-images.s3.us-east-1.amazonaws.com/da-logo.png" alt="DA Platform" width="40" height="40" style="border-radius: 50%;" />
+    <img src="${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/images/da-logo.png" alt="DA Platform" width="40" height="40" style="border-radius: 50%;" />
   </div>
   <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">You're invited to DA Platform</h2>
   <p style="margin: 0 0 16px; color: #55595c;">Hi ${firstName.trim()},</p>

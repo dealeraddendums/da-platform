@@ -158,7 +158,7 @@ function buildWelcomeEmail(firstName: string, dealerName: string, magicLink: str
         <!-- Header -->
         <tr>
           <td style="background:#2a2b3c;border-radius:6px 6px 0 0;padding:28px 32px;text-align:center;">
-            <img src="https://new-infobox-images.s3.us-east-1.amazonaws.com/da-logo.png" alt="DA Platform" width="48" height="48" style="border-radius:50%;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;" />
+            <img src="${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/images/da-logo.png" alt="DA Platform" width="48" height="48" style="border-radius:50%;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;" />
             <div style="color:#fff;font-size:20px;font-weight:700;letter-spacing:-0.02em;">DealerAddendums Platform 5.0</div>
             <div style="color:rgba(255,255,255,0.65);font-size:13px;margin-top:4px;">Your account is ready</div>
           </td>

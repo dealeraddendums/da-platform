@@ -860,14 +860,14 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
             <div className="flex gap-2">
               {viewerRole === "super_admin" && isGhostMode && viewerDealerId && (
                 <button
-                  className="btn btn-secondary"
+                  className="btn btn-primary"
                   onClick={() => { setShowInviteAll(true); setInviteAllResult(null); }}
                 >
                   Invite All Users
                 </button>
               )}
               {dealerMode && (
-                <button className="btn btn-secondary" onClick={() => setShowInvite(true)}>+ Invite User</button>
+                <button className="btn btn-primary" onClick={() => setShowInvite(true)}>+ Invite User</button>
               )}
               <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add User</button>
             </div>

@@ -28,12 +28,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (inv.accepted_at) return NextResponse.json({ error: "Invitation already accepted" }, { status: 410 });
   if (new Date(inv.expires_at) < new Date()) return NextResponse.json({ error: "Invitation expired" }, { status: 410 });
 
+  // Wrap in { data: ... } — the signup page reads json.data.* and treats
+  // an undefined data field as an invalid invitation. Returning flat
+  // top-level fields breaks the accept flow on the client side.
   return NextResponse.json({
-    email: inv.email,
-    firstName: inv.first_name,
-    lastName: inv.last_name,
-    role: inv.role,
-    dealerName: inv.dealer_name,
+    data: {
+      email: inv.email,
+      firstName: inv.first_name,
+      lastName: inv.last_name,
+      role: inv.role,
+      dealerName: inv.dealer_name,
+    },
   });
 }
 
@@ -138,7 +143,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       html: `
 <div style="font-family: Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; color: #333;">
   <div style="margin-bottom: 24px;">
-    <img src="https://new-infobox-images.s3.us-east-1.amazonaws.com/da-logo.png" alt="DA Platform" width="40" height="40" style="border-radius: 50%;" />
+    <img src="${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/images/da-logo.png" alt="DA Platform" width="40" height="40" style="border-radius: 50%;" />
   </div>
   <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">You're invited to DA Platform</h2>
   <p style="margin: 0 0 16px; color: #55595c;">Hi ${firstName.trim()},</p>
