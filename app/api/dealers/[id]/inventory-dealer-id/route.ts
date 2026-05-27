@@ -41,10 +41,16 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
   }
 
+  // dealer_vehicles.dealer_id is the TEXT dealer_id (matches dealers.dealer_id),
+  // NOT the dealers.id UUID — every ingestion path (CDK import, bulk update,
+  // True ETL) keys by the text code. Counting/updating by params.id (which is
+  // the UUID) silently matches zero rows, which is why the confirmation
+  // dialog used to read "0 vehicles" for dealers with active inventory.
   const { count } = await admin
     .from("dealer_vehicles")
     .select("id", { count: "exact", head: true })
-    .eq("dealer_id", params.id);
+    .eq("dealer_id", dealer.dealer_id)
+    .eq("status", "active");
 
   const vehicleCount = count ?? 0;
 
@@ -69,7 +75,8 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     await admin
       .from("dealer_vehicles")
       .update({ status: "inactive", updated_at: new Date().toISOString() })
-      .eq("dealer_id", params.id);
+      .eq("dealer_id", dealer.dealer_id)
+      .eq("status", "active");
   }
 
   void admin.from("admin_audit").insert({
