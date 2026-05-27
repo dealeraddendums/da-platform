@@ -65,8 +65,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: authErr?.message ?? "Failed to create account" }, { status: 400 });
   }
 
-  // Create profile — group invites get group_id set, dealer invites get dealer_id set
-  const { error: profileErr } = await admin.from("profiles").insert({
+  // Upsert profile — handle_new_user trigger (migration 001) auto-creates a
+  // minimal row on auth.users INSERT with role from app_metadata and no
+  // dealer/group binding, so a plain .insert() races into a primary-key
+  // violation. Upsert by id rewrites the row with the full invite payload.
+  const { error: profileErr } = await admin.from("profiles").upsert({
     id: authData.user.id,
     email: inv.email,
     full_name: fullName,
@@ -74,11 +77,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     dealer_id: isGroupInvite ? null : dealerTextId,
     group_id: isGroupInvite ? inv.group_id : null,
     active: true,
-  });
+  }, { onConflict: "id" });
 
   if (profileErr) {
     // Best-effort rollback auth user
     await admin.auth.admin.deleteUser(authData.user.id).catch(() => null);
+    console.error("[invite/accept] profile upsert failed:", profileErr.message);
     return NextResponse.json({ error: "Failed to create profile" }, { status: 500 });
   }
 
