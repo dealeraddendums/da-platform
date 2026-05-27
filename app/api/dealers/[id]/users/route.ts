@@ -144,7 +144,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       first_name: firstName.trim(),
       last_name: lastName.trim(),
       role,
-      dealer_id: dealer.dealer_id,
+      dealer_id: dealer.id, // invitations.dealer_id is uuid REFERENCES dealers(id), not the TEXT code
       group_id: null,
       invited_by: claims.sub,
       accepted_at: null,
