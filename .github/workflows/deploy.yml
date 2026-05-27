@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
 
+# One deploy at a time. Rapid pushes (or a manual SSH deploy racing
+# against the workflow) caused npm install / next build to fight for
+# the same node_modules path on the EC2, producing SIGBUS / ENOENT
+# mid-build and leaving node_modules/.bin/ stripped.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -31,6 +39,10 @@ jobs:
             # .next/server rename step (ENOENT / ENOTEMPTY). The same code
             # builds cleanly on the next attempt. Retry up to 3 times with a
             # short FS settle delay between attempts.
+            # Cap Node heap so a runaway build cannot OOM the box (PM2 +
+            # active users are also resident). 2 GB is comfortable for
+            # Next 14 on this codebase.
+            export NODE_OPTIONS="--max-old-space-size=2048"
             build_ok=0
             for attempt in 1 2 3; do
               if /usr/bin/npm run build; then
