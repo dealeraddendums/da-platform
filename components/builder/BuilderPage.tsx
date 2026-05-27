@@ -137,13 +137,33 @@ function applyLogoToWidgets(ws: Record<string, Widget>, logoUrl: string | null):
   let changed = false;
   for (const [id, w] of Object.entries(ws)) {
     if (w.type === 'logo') {
-      result[id] = { ...w, d: { ...w.d, imgUrl: logoUrl ?? '' } };
+      result[id] = { ...w, d: { ...w.d, imgUrl: logoUrl ?? '', usesDealerLogo: true } };
       changed = true;
     } else {
       result[id] = w;
     }
   }
   return changed ? result : ws;
+}
+
+// Strip the resolved dealer logo URL from logo widgets before persisting a
+// template. Templates store the intent ("use the dealer's logo"), not the URL,
+// so a Settings-side logo change is reflected in every saved template on next
+// load. applyLogoToWidgets refills imgUrl from canonicalLogoRef on every load
+// path; the PDF pipeline (pdf/generate, pdf/bulk) also re-resolves from
+// dealers.logo_url at render time, so this stripping is canvas-only.
+function normalizeWidgetsForSave(ws: Record<string, Widget>): Record<string, Widget> {
+  const result: Record<string, Widget> = {};
+  for (const [id, w] of Object.entries(ws)) {
+    if (w.type === 'logo') {
+      const next: Record<string, unknown> = { ...w.d, usesDealerLogo: true };
+      delete next.imgUrl;
+      result[id] = { ...w, d: next };
+    } else {
+      result[id] = w;
+    }
+  }
+  return result;
 }
 
 // Apply dealer address to dealer widgets when no vehicle is available (blank builder).
@@ -850,7 +870,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       name,
       document_type: saveDocType,
       vehicle_types: vtypes.length ? vtypes : ['new'],
-      template_json: { widgets: widgetsRef.current, nid, bgUrl, fontScale, paperSize },
+      template_json: { widgets: normalizeWidgetsForSave(widgetsRef.current), nid, bgUrl, fontScale, paperSize },
       is_active: !isDraft,
     };
     try {
