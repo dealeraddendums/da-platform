@@ -4,6 +4,25 @@
 
 const BASE = process.env.BILLING_API_BASE ?? "https://billing.dealeraddendums.com/api/v1";
 
+// Customer-facing da-billing URL (Pay button target). da-billing returns
+// paymentUrl values bound to its own runtime host — on the production
+// server it serves itself as http://localhost:3009 — so we rewrite the
+// origin to the public domain before exposing URLs to the browser.
+const BILLING_PUBLIC_URL = process.env.BILLING_PUBLIC_URL ?? "https://billing.dealeraddendums.com";
+
+function publicPaymentUrl(raw: string | undefined, invoiceId: string): string | undefined {
+  if (!raw) return `${BILLING_PUBLIC_URL}/?invoice=${encodeURIComponent(invoiceId)}`;
+  try {
+    const u = new URL(raw);
+    const pub = new URL(BILLING_PUBLIC_URL);
+    u.protocol = pub.protocol;
+    u.host = pub.host;
+    return u.toString();
+  } catch {
+    return `${BILLING_PUBLIC_URL}/?invoice=${encodeURIComponent(invoiceId)}`;
+  }
+}
+
 export function billingConfigured(): boolean {
   return Boolean(process.env.BILLING_API_KEY);
 }
@@ -374,7 +393,10 @@ export async function listInvoices(customerId: string): Promise<ListInvoicesResu
   if (!res.ok) throw new BillingError(res.status, `listInvoices ${res.status}`, text);
   try {
     const parsed = JSON.parse(text) as { invoices?: BillingInvoice[]; total?: number };
-    const invoices = parsed.invoices ?? [];
+    const invoices = (parsed.invoices ?? []).map((inv) => ({
+      ...inv,
+      paymentUrl: publicPaymentUrl(inv.paymentUrl, inv.id),
+    }));
     const outstandingAmount = invoices
       .filter((inv) => inv.status === "pending" || inv.status === "overdue")
       .reduce((sum, inv) => sum + (Number(inv.total) || 0), 0);
