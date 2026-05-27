@@ -132,38 +132,33 @@ function applyDisclaimerToWidgets(
   return changed ? result : ws;
 }
 
+// Fill the dealer's canonical logo URL into logo widgets ONLY when they
+// don't already have one. A picked image (from the "Choose Logo Image"
+// library dialog) is persisted on the widget as imgUrl and must win over
+// the dealer's default logo_url, otherwise reloading a template wipes the
+// selection. Without an explicit pick this falls back to the canonical
+// dealer logo, so fresh templates and templates saved before the user
+// picked anything still show something sensible — and a logo upload in
+// Settings propagates to every template that hasn't been explicitly
+// assigned a different image.
 function applyLogoToWidgets(ws: Record<string, Widget>, logoUrl: string | null): Record<string, Widget> {
   const result: Record<string, Widget> = {};
   let changed = false;
   for (const [id, w] of Object.entries(ws)) {
     if (w.type === 'logo') {
-      result[id] = { ...w, d: { ...w.d, imgUrl: logoUrl ?? '', usesDealerLogo: true } };
-      changed = true;
+      const existing = (w.d as { imgUrl?: unknown }).imgUrl;
+      const hasExisting = typeof existing === 'string' && existing.length > 0;
+      if (hasExisting) {
+        result[id] = w;
+      } else {
+        result[id] = { ...w, d: { ...w.d, imgUrl: logoUrl ?? '' } };
+        changed = true;
+      }
     } else {
       result[id] = w;
     }
   }
   return changed ? result : ws;
-}
-
-// Strip the resolved dealer logo URL from logo widgets before persisting a
-// template. Templates store the intent ("use the dealer's logo"), not the URL,
-// so a Settings-side logo change is reflected in every saved template on next
-// load. applyLogoToWidgets refills imgUrl from canonicalLogoRef on every load
-// path; the PDF pipeline (pdf/generate, pdf/bulk) also re-resolves from
-// dealers.logo_url at render time, so this stripping is canvas-only.
-function normalizeWidgetsForSave(ws: Record<string, Widget>): Record<string, Widget> {
-  const result: Record<string, Widget> = {};
-  for (const [id, w] of Object.entries(ws)) {
-    if (w.type === 'logo') {
-      const next: Record<string, unknown> = { ...w.d, usesDealerLogo: true };
-      delete next.imgUrl;
-      result[id] = { ...w, d: next };
-    } else {
-      result[id] = w;
-    }
-  }
-  return result;
 }
 
 // Apply dealer address to dealer widgets when no vehicle is available (blank builder).
@@ -870,7 +865,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       name,
       document_type: saveDocType,
       vehicle_types: vtypes.length ? vtypes : ['new'],
-      template_json: { widgets: normalizeWidgetsForSave(widgetsRef.current), nid, bgUrl, fontScale, paperSize },
+      template_json: { widgets: widgetsRef.current, nid, bgUrl, fontScale, paperSize },
       is_active: !isDraft,
     };
     try {
