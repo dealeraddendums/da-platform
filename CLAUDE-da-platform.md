@@ -25,6 +25,9 @@
 **Deploy:** `git pull && npm ci && ./node_modules/.bin/next build && pm2 restart da-platform --update-env`
 **Logs:** `/var/log/da-platform/`
 
+### ⚠️ Auto-deploy on push to main
+`.github/workflows/deploy.yml` SSHes to this EC2 on every push to `main` and runs `sudo rm -rf node_modules .next && npm install && npm run build && pm2 restart`. Concurrency lock (`group: deploy-production`, `cancel-in-progress: false`) added 2026-05-26 — without it, rapid pushes raced each other (and any manual SSH deploy in flight), producing SIGBUS/ENOENT mid-build and stripping `node_modules/.bin/`. **Do not run a manual SSH deploy while a workflow run is in flight.** Build runs with `NODE_OPTIONS=--max-old-space-size=2048` to bound peak heap on the 7.6 GB box.
+
 **Legacy Platform EC2:** `ssh -i "~/ssh/DA2025.pem" ubuntu@ec2-52-22-32-67.compute-1.amazonaws.com`
 **FTP Server EC2:** `ec2-34-193-4-78.compute-1.amazonaws.com` — Windows, Cerberus FTP Pro 12.8.0.0
 
@@ -308,6 +311,7 @@ Simple CRUD — DEALER_NAME, DEALER_ID only.
 - **Base URL:** `https://billing.dealeraddendums.com/api/v1`
 - **Auth:** `X-API-Key: dab_b1ce5e7768aef3f94e652a69303f3ecce44f487244824e96562c9d0704b58a7f`
 - All calls non-blocking — errors logged to `billing_sync_errors` table
+- **Pay button URL rewrite:** da-billing returns `paymentUrl` bound to its own runtime host (`http://localhost:3009` when serving itself on prod). `listInvoices()` in `lib/billing.ts` rebuilds the URL as `${BILLING_PUBLIC_URL}${pathname}${search}${hash}` before exposing it to the browser. `BILLING_PUBLIC_URL` env var, default `https://billing.dealeraddendums.com`. Do NOT mutate `u.host` — the WHATWG URL host setter keeps the existing port when the new value has no colon.
 
 ### XPS Shipper
 - **API Key:** `Jx5vg3PLLL0HGCQV4YAyIuHdAMf0sXKb`
@@ -332,16 +336,14 @@ Simple CRUD — DEALER_NAME, DEALER_ID only.
 - Creates XPS shipping order + da-billing template line item
 - Stored in `label_orders` Supabase table
 - Daily tracking sync: `POST /api/cron/sync-xps-tracking` → `0 10 * * *`
+- Billing routing: `labels_billed_to = 'group'` → append to group template; `labels_billed_to = 'dealer'` with active template → append to dealer template; `labels_billed_to = 'dealer'` + group but no template → one-time invoice; Free/Trial + no group → blocked with upgrade message
+- Free/Trial dealers see upgrade notice, Place Order hidden
+- Label line item format: `{internal_id}::{name}::{sku}` (SKU appended for uniqueness on multi-SKU orders)
 
-#### SKU → labelType mapping (DA Platform → da-billing)
+### SKU → da-billing labelType mapping
+DA Platform sends `labelType` slug (not price) — da-billing resolves price from its own matrix:
 
-When `/api/orders/labels` appends a line item to the dealer's da-billing
-template, it sends a `labelType` slug — **not** the SKU or display name.
-da-billing's price resolver keys off these size+finish slugs. The
-mapping lives at the top of `app/api/orders/labels/route.ts` as
-`SKU_TO_LABEL_TYPE`. Keep in sync with da-billing's label price table.
-
-| DA Platform SKU | Display name | labelType (da-billing) |
+| SKU | Product Name | da-billing labelType |
 |---|---|---|
 | `8300-1` | Regular Addendums | `4.25x11-standard` |
 | `9300-1` | Regular Addendums — Waterproof | `4.25x11-waterproof` |
@@ -350,13 +352,40 @@ mapping lives at the top of `app/api/orders/labels/route.ts` as
 | `8300` | Full Sheet Labels | `8.5x11-standard` |
 | `9300` | Full Sheet Labels — Waterproof | `8.5x11-waterproof` |
 
-If da-billing ever receives a SKU verbatim (e.g. `8300-1`) the price
-resolver will not match and the line will be billed at $0. Always
-route through `SKU_TO_LABEL_TYPE`.
+Mapping lives in `app/api/orders/labels/route.ts` as `SKU_TO_LABEL_TYPE`. Must stay in sync with da-billing's `src/lib/label-pricing.ts`.
+
+### XPS Shipper credentials
+- API Key: `Jx5vg3PLLLOHGCQV4YAyIuHdAMfOsXKb` (capital O, not zero)
+- Customer ID: `12302875`
+- Integration ID: `91819`
+- Sender phone: `8014159435`
+- Sender address: `277 E 4600 S, Murray, UT 84107`
+- Env vars: `XPS_API_KEY`, `XPS_CUSTOMER_ID`, `XPS_INTEGRATION_ID`, `XPS_SENDER_*`
+
+### Group assignment (Super Admin)
+Super Admin can assign an existing standalone dealer to a group from the dealer profile page:
+- DA Group dropdown appears when editing dealer profile
+- Subscription Billed To + Labels Billed To fields shown on group selection
+- Defaults: Group/Group, Controls Templates ON
+- Triggers full billing cascade: template cleanup, group template update, discount sync
+- Cascade in `lib/group-billing-cascade.ts`
+
+### Auto group discount
+- Tier rules in `lib/group-discount.ts`: 0-1 dealers=0%, 2-10=10%, 11-30=20%, >30=30%
+- Fires on: dealer added to group, dealer removed, dealer deactivated
+- Respects `discountLocked` flag on da-billing customer — if locked, never auto-update
+- `lib/sync-group-discount.ts` → `fireGroupDiscountSync(groupId)`
 
 ## Migration Status
 
-Current highest migration: **070** (`ftp_users` notes table)
+Current highest migration: **075** (`qa_test_items_backfill`)
+
+Recent migrations:
+- 071 `dealer_inventory_provider` — track CDK/Tekion/manual feed source per dealer
+- 072 `box_folder_id` — auto-provision a Box.com folder per dealer + per group
+- 073 `qa_help_center` — QA portal help-center tables
+- 074 `qa_test_environment` — `/qa` + `/qa/test` QA portal (dealer_admin + dealer_user accounts, see CLAUDE-da-platform.md history for QA fixes)
+- 075 `qa_test_items_backfill` — backfill `qa_test_items` rows; companion to 074
 
 ## Phase Status
 
@@ -450,6 +479,7 @@ CERBERUS_PROXY_SECRET=            # in nginx fastcgi_param, not .env
 CERBERUS_FTP_USER=                # in nginx fastcgi_param, not .env
 CERBERUS_FTP_PASS=                # in nginx fastcgi_param, not .env
 BILLING_API_KEY=dab_b1ce5e7768aef3f94e652a69303f3ecce44f487244824e96562c9d0704b58a7f
+BILLING_PUBLIC_URL=https://billing.dealeraddendums.com   # customer-facing pay URL base; default if unset
 XPS_API_KEY=Jx5vg3PLLL0HGCQV4YAyIuHdAMf0sXKb
 XPS_CUSTOMER_ID=12302875
 XPS_INTEGRATION_ID=91819
