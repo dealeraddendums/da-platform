@@ -212,13 +212,17 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
   }
 
   // ---- 4. Test user accounts ----------------------------------------------
+  // profiles.dealer_id is TEXT and must hold dealers.dealer_id (the text code),
+  // not dealers.id (UUID) — every other route that resolves a profile to its
+  // dealer joins on dealers.dealer_id = profiles.dealer_id. Storing the UUID
+  // here used to silently break the dealer relationship for every QA user.
   const users = [
-    { email: "qa-dealer-admin@test.dealeraddendums.com",       role: "dealer_admin",      dealer_id: dealerA.entity_id, group_id: null,    full_name: "QA Dealer Admin" },
-    { email: "qa-dealer-user@test.dealeraddendums.com",        role: "dealer_user",       dealer_id: dealerA.entity_id, group_id: null,    full_name: "QA Dealer User" },
+    { email: "qa-dealer-admin@test.dealeraddendums.com",       role: "dealer_admin",      dealer_id: dealerA.dealer_id, group_id: null,    full_name: "QA Dealer Admin" },
+    { email: "qa-dealer-user@test.dealeraddendums.com",        role: "dealer_user",       dealer_id: dealerA.dealer_id, group_id: null,    full_name: "QA Dealer User" },
     // Second dealer_user account (was dealer_restricted before -- that role
     // is not allowed by profiles.role's check constraint, so we provision
     // a second dealer_user instead and distinguish it by display name).
-    { email: "qa-dealer-restricted@test.dealeraddendums.com",  role: "dealer_user",       dealer_id: dealerA.entity_id, group_id: null,    full_name: "QA Dealer User 2" },
+    { email: "qa-dealer-restricted@test.dealeraddendums.com",  role: "dealer_user",       dealer_id: dealerA.dealer_id, group_id: null,    full_name: "QA Dealer User 2" },
     { email: "qa-group-admin@test.dealeraddendums.com",        role: "group_admin",       dealer_id: null,              group_id: groupId, full_name: "QA Group Admin" },
   ];
 
@@ -227,13 +231,29 @@ export async function POST(_req: NextRequest): Promise<NextResponse> {
     out.push({ entity_type: "user", ...provisioned });
   }
 
+  // ---- 4b. Resync profile bindings ----------------------------------------
+  // Self-healing pass: provisionUser short-circuits when a qa_test_environment
+  // row already exists, so a pre-existing profile with the wrong (or null)
+  // dealer_id/group_id wouldn't be corrected by re-running setup. Apply the
+  // canonical bindings unconditionally here.
+  for (const u of users) {
+    const { error: syncErr } = await (admin as any)
+      .from("profiles")
+      .update({ dealer_id: u.dealer_id, group_id: u.group_id })
+      .eq("email", u.email);
+    if (syncErr) {
+      console.error(`[qa/setup-environment] profile resync failed (${u.email}):`, syncErr);
+    }
+  }
+
   return NextResponse.json({ success: true, entities: out, password: QA_PASSWORD });
 }
 
 // ---- helpers --------------------------------------------------------------
 
 type DealerProvisioned = {
-  entity_id: string;
+  entity_id: string;          // dealers.id (UUID) — primary key
+  dealer_id: string;          // dealers.dealer_id (TEXT) — the value profiles.dealer_id must hold to join correctly
   display_name: string;
   internal_id: string;
   billing_customer_id: string | null;
@@ -254,7 +274,7 @@ async function provisionDealer(
 ): Promise<DealerProvisioned> {
   const existing = await admin
     .from("dealers")
-    .select("id, name, internal_id, billing_customer_id, box_folder_id")
+    .select("id, name, dealer_id, internal_id, billing_customer_id, box_folder_id")
     .eq("test_account", true)
     .eq("name", cfg.name)
     .maybeSingle();
@@ -263,6 +283,7 @@ async function provisionDealer(
     await recordEnv(admin, "dealer", existing.data.id, null, null, cfg.name);
     return {
       entity_id: existing.data.id,
+      dealer_id: existing.data.dealer_id ?? cfg.dealer_id,
       display_name: cfg.name,
       internal_id: String(existing.data.internal_id ?? ""),
       billing_customer_id: existing.data.billing_customer_id ?? null,
@@ -311,6 +332,7 @@ async function provisionDealer(
   await recordEnv(admin, "dealer", dealerId, null, null, cfg.name);
   return {
     entity_id: dealerId,
+    dealer_id: cfg.dealer_id,
     display_name: cfg.name,
     internal_id: String(insertResp.data.internal_id ?? internalId),
     billing_customer_id: insertResp.data.billing_customer_id ?? null,
