@@ -149,11 +149,36 @@ In `renderW()`, hide Color, Trim, Mileage when null/empty/zero.
 ### Background Image, QR Code, VIN Barcode, Vehicle Photo
 - Vehicle Photo: ChromeData Account ID `323951`, canvas `640`, PDF `1280`, default angle `03`
 
+### Logo Widget
+- Source of truth for the dealer's default logo is `dealers.logo_url` (NOT `dealer_settings`). The Settings UI writes here via `/api/dealers/[id]/logo`.
+- The "Choose Logo Image" picker lists everything under `new-dealer-logos/{dealer_id}/` on S3. A picked image is persisted on the widget as `d.imgUrl`.
+- **Fallback contract** — every render path (canvas via `applyLogoToWidgets` in `BuilderPage.tsx`, PDF via `app/api/pdf/generate/route.ts`, `app/api/pdf/bulk/route.ts`, and `lib/pdf-html.ts`) treats `imgUrl` as authoritative: if the widget already has a non-empty `imgUrl`, it wins. Only when the widget has no picked image do we fall back to `dealers.logo_url`. A Settings logo upload propagates to every template that hasn't been explicitly assigned a different logo.
+- Do NOT strip `imgUrl` from logo widgets at save time or unconditionally override it at load time — both break the user's per-template selection.
+
 ### Disclaimer Widget
 - Draggable onto canvas under STRUCTURAL section
 - Renders all active disclaimers (group first, dealer second)
 - No automatic PDF injection — only prints if widget placed
 - Group admins place in group templates
+
+### Auto-load Most Recent Template
+- On blank `/builder` open, the page silently loads the dealer's most recently updated saved template (`/api/templates` sorted by `updated_at DESC`, dealer-owned rows preferred over assigned 🔒 group rows).
+- Skipped when: `?template=` URL param is set (explicit nav wins), scoped to a group, vehicle-builder path (`/builder/[vehicleId]` has its own default-template resolution), or no dealer scope.
+- A small "Editing: <name>" label sits next to the All Templates / Save Template buttons whenever a template is loaded.
+- No auto-save — explicit Save Template still required.
+
+### Inspector Panel Layout
+Right-panel sections follow the same skeleton for every widget type (`WidgetEditPanel` in `components/builder/BuilderPage.tsx`):
+1. Background Image (global; sits at the top of the scroll area above the widget header)
+2. Widget header — widget name + position/size readout
+3. Widget-specific settings (labels, toggles, colors, image picker, alignment, AI source, etc.)
+4. Font Size — its own EpSection when the widget has any font controls (Vehicle, MSRP, Required/Suggested Products, Suggested Price, Subtotal, Asking Price, Dealer Address, Custom Text, Description, Features)
+5. Line Spacing — its own EpSection (`LineSpacingStepper` for Required/Suggested Products tables, numeric input for Dealer Address / Custom Text)
+6. Position & Size
+7. Layer Order
+8. Remove widget
+
+When adding a new widget type, keep fonts and line spacing in the dedicated sections — do not inline them in the widget block.
 
 ### Backward Compatibility
 Old `infobox` widgets auto-converted at template load time.
