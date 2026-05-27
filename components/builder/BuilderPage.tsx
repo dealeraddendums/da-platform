@@ -1280,16 +1280,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         {/* EDIT PANEL */}
         {!previewMode && (
           <div style={{ width: 240, background: '#fff', borderLeft: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
-            <div style={{ padding: '11px 13px 9px', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#333' }}>
-                {sel ? (WIDGET_LABELS[sel.type] || sel.type) : 'Canvas'}
-              </div>
-              <div style={{ fontSize: 11, color: '#78828c', marginTop: 1 }}>
-                {sel ? `${Math.round(sel.x)}, ${Math.round(sel.y)} · ${Math.round(sel.w)}×${Math.round(sel.h)}` : 'Click any widget to edit'}
-              </div>
-            </div>
             <div style={{ flex: 1, overflowY: 'auto' }}>
-              {/* Background panel */}
+              {/* Background panel — global canvas setting, sits above widget selection */}
               <EpSection>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', fontSize: 10, fontWeight: 600, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.05em' }}
                   onClick={() => setBgOpen(o => !o)}>
@@ -1322,6 +1314,16 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                   </div>
                 )}
               </EpSection>
+
+              {/* Selected widget header — sits below Background, above widget-specific controls */}
+              <div style={{ padding: '11px 13px 9px', borderTop: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#333' }}>
+                  {sel ? (WIDGET_LABELS[sel.type] || sel.type) : 'Canvas'}
+                </div>
+                <div style={{ fontSize: 11, color: '#78828c', marginTop: 1 }}>
+                  {sel ? `${Math.round(sel.x)}, ${Math.round(sel.y)} · ${Math.round(sel.w)}×${Math.round(sel.h)}` : 'Click any widget to edit'}
+                </div>
+              </div>
 
               {/* Widget edit panel */}
               {sel ? (
@@ -1765,15 +1767,12 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
         <EpSection>
           <Eps>Logo</Eps>
           <Fd label="Logo Image">
-            <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
-              <input className="fi" value={(d.imgUrl as string) || ''} onChange={e => u('imgUrl', e.target.value)} style={{ ...fiStyle, flex: 1 }} placeholder="https://…" />
-              <button onClick={onPickLogoImage} style={{ padding: '5px 8px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, background: '#f5f6f7', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap', color: '#55595c' }}>
-                Choose
-              </button>
-            </div>
+            <button onClick={onPickLogoImage} style={{ padding: '5px 10px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, background: '#f5f6f7', cursor: 'pointer', whiteSpace: 'nowrap', color: '#55595c' }}>
+              Choose
+            </button>
             {(d.imgUrl as string) && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={d.imgUrl as string} alt="" style={{ maxWidth: '100%', maxHeight: 40, objectFit: 'contain', border: '1px solid #e0e0e0', borderRadius: 2, marginTop: 2 }} />
+              <img src={d.imgUrl as string} alt="" style={{ maxWidth: '100%', maxHeight: 40, objectFit: 'contain', border: '1px solid #e0e0e0', borderRadius: 2, marginTop: 6, display: 'block' }} />
             )}
           </Fd>
           <Fd label="Placeholder text">

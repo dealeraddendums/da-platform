@@ -28,7 +28,7 @@ export const LAYOUT: Record<string, { x: number; y: number; w: number; h: number
   suggested_options: { x: 40,  y: 460, w: 332, h: 120 },
   suggested_price:   { x: 40,  y: 584, w: 332, h: 28  },
   subtotal:          { x: 40,  y: 608, w: 332, h: 28  },
-  askbar:            { x: 40,  y: 624, w: 344, h: 45  },
+  askbar:            { x: 36,  y: 636, w: 344, h: 45  },
   dealer:            { x: 40,  y: 676, w: 336, h: 80  },
   // bgimage occupies the old infobox slot — when a fresh template is created
   // it gets the EPA/DOT Fuel Economy default so the addendum prints something
