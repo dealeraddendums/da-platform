@@ -301,6 +301,12 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // Dealer info for blank builder (no vehicle) — used to populate the dealer address widget.
   const dealerInfoRef = useRef<DealerInfo | undefined>(dealerInfo);
 
+  // Dirty tracker: flipped true by any user edit, reset to false after init,
+  // template load (manual or auto), or successful save. Read by the "+ New"
+  // toolbar action to decide whether to prompt before discarding work. Stored
+  // in a ref so flipping it doesn't trigger re-renders.
+  const isDirtyRef = useRef(false);
+
   // Refs for drag
   const paperRef = useRef<HTMLDivElement>(null);
   const widgetsRef = useRef<Record<string, Widget>>({});
@@ -386,7 +392,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       if (!silent) pushHistory(next, nid + 1);
       return next;
     });
-    if (!silent) setSelId(id);
+    if (!silent) { setSelId(id); isDirtyRef.current = true; }
   }, [nid, showToast, pushHistory]);
 
   // ── Delete widget ──────────────────────────────────────────────────
@@ -399,6 +405,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       return next;
     });
     setSelId(s => s === id ? null : s);
+    isDirtyRef.current = true;
   }, [nid, pushHistory]);
 
   // ── Update widget data field ───────────────────────────────────────
@@ -409,6 +416,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       widgetsRef.current = next;
       return next;
     });
+    isDirtyRef.current = true;
   }, []);
 
   const updateWidgetPos = useCallback((id: string, key: 'x'|'y'|'w'|'h', value: number) => {
@@ -419,6 +427,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       widgetsRef.current = next;
       return next;
     });
+    isDirtyRef.current = true;
   }, []);
 
   const adjFont = useCallback((id: string, key: string, delta: number) => {
@@ -430,9 +439,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       widgetsRef.current = next;
       return next;
     });
+    isDirtyRef.current = true;
   }, []);
 
   const handleLayerChange = useCallback((id: string, action: 'front'|'back'|'forward'|'backward') => {
+    isDirtyRef.current = true;
     setWidgets(prev => {
       const w = prev[id]; if (!w) return prev;
       const allZ = Object.values(prev).map(wg => wg.z ?? 10);
@@ -595,6 +606,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     setWidgets(ws);
     setNid(nextNid);
     pushHistory(ws, nextNid);
+    isDirtyRef.current = false;
     if (vehicle) setTemplateName(`${vehicle.year || ''} ${vehicle.make || ''} ${vehicle.model || ''}`.trim() || 'New Template');
     // Load dealer settings (nudge margins)
     fetch('/api/settings').then(r => r.ok ? r.json() : null).then(data => {
@@ -680,6 +692,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         setLoadedTemplateId(pick.id);
         const locked = pick.source === 'group' && pick.is_locked !== false;
         setLoadedTemplateLocked(locked);
+        isDirtyRef.current = false;
       } catch { /* silent — fall back to the default canvas */ }
     })();
     return () => { cancelled = true; };
@@ -726,12 +739,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         setTemplateName((data.name as string) || 'Template');
         setLoadedTemplateId(templateId);
         setLoadedTemplateLocked(data.source === 'group' && data.is_locked !== false);
+        isDirtyRef.current = false;
       })
       .catch(() => {});
   }, [templateId, groupId]);
 
   // ── Paper size switch ──────────────────────────────────────────────
   const switchPaperSize = useCallback((size: string) => {
+    isDirtyRef.current = true;
     setPaperSize(size);
     paperSizeRef.current = size;
     if (size === 'infosheet') {
@@ -943,6 +958,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         const r = await fetch(`/api/group-templates/${groupId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!r.ok) { showToast('Save failed — try again'); return; }
         setShowSave(false);
+        isDirtyRef.current = false;
         showToast(`✓ Group template saved: ${name}`);
         return;
       }
@@ -978,6 +994,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       setTemplateName(name);
       if (savedId) setLoadedTemplateId(savedId);
       setShowSave(false);
+      isDirtyRef.current = false;
 
       if (!isDraft && savedId) {
         const isAll = saveVtypes.has('all');
@@ -1072,11 +1089,58 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       setLoadedTemplateId(id);
       setSelId(null);
       setShowOpenModal(false);
+      isDirtyRef.current = false;
       showToast(`Loaded: ${tmpl.name || 'Template'}`);
     } catch {
       showToast('Failed to load template');
     }
   }, [showToast, groupId]);
+
+  // ── New template ───────────────────────────────────────────────────
+  // Resets the canvas to the default blank layout. Mirrors the work the
+  // init useEffect does on mount, plus history/state cleanup so the user
+  // can't undo back into the previous template's state. Prompts when there
+  // are unsaved changes (isDirtyRef tracks every user-side edit).
+  const newTemplate = useCallback(() => {
+    if (isDirtyRef.current) {
+      if (!window.confirm('Start a new template?\n\nUnsaved changes will be lost.')) return;
+    }
+    const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','bgimage'];
+    let nextNid = 1;
+    let ws: Record<string, Widget> = {};
+    order.forEach(type => {
+      const id = 'w' + nextNid++;
+      ws[id] = makeWidget(type, id);
+    });
+    if (vehicle) {
+      Object.values(ws).forEach(w => {
+        if (w.type === 'vehicle') w.d = { ...w.d, fields: ['stock','vin','year','color','make','trim','model'] };
+      });
+      ws = applyVehicleDataToWidgets(ws, vehicle);
+    } else if (dealerInfoRef.current) {
+      ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
+    }
+    ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
+    ws = applyDisclaimerToWidgets(ws, disclaimersRef.current);
+    widgetsRef.current = ws;
+    setWidgets(ws);
+    setNid(nextNid);
+    setSelId(null);
+    setTemplateName(vehicle ? `${vehicle.year || ''} ${vehicle.make || ''} ${vehicle.model || ''}`.trim() || 'New Template' : 'New Template');
+    setLoadedTemplateId(null);
+    setLoadedTemplateLocked(false);
+    setPaperSize('standard');
+    paperSizeRef.current = 'standard';
+    setBgUrl(BG_DEFAULT);
+    setBgInputVal(BG_DEFAULT);
+    setFontScale(1.0);
+    // History is reset to this single baseline so undo can't reach the
+    // previous template — that template is unrelated to the new one.
+    setHistory([JSON.stringify({ widgets: ws, nid: nextNid })]);
+    setHistIdx(0);
+    isDirtyRef.current = false;
+    showToast('New template');
+  }, [vehicle, showToast]);
 
   // ── Selected widget ────────────────────────────────────────────────
   const sel = selId ? widgets[selId] : null;
@@ -1191,6 +1255,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
               Editing: <strong style={{ color: '#fff', fontWeight: 600 }}>{templateName}</strong>
             </span>
           )}
+          <button onClick={newTemplate} style={tbBtn} title="Start a new blank template">+ New</button>
           <button onClick={openTemplates} style={tbBtn}>All templates</button>
           <button
             onClick={async () => {
@@ -1384,7 +1449,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                     <div style={{ border: '1px solid #e0e0e0', borderRadius: 6, marginBottom: 8 }}>
                       <div
                         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', background: bgUrl === BG_DEFAULT || bgUrl === IS_BG_DEFAULT ? '#e3f2fd' : '#fff', borderRadius: 6 }}
-                        onClick={() => { const u = isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT; setBgUrl(u); setBgInputVal(u); }}
+                        onClick={() => { const u = isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT; setBgUrl(u); setBgInputVal(u); isDirtyRef.current = true; }}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT} alt="" style={{ width: 18, height: 30, objectFit: 'cover', borderRadius: 2, flexShrink: 0, border: '1px solid #e0e0e0' }} />
@@ -1402,7 +1467,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                       style={{ width: '100%', padding: '5px 8px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, marginBottom: 4, boxSizing: 'border-box' }}
                       placeholder="https://s3.amazonaws.com/…/bg.png"
                     />
-                    <button onClick={() => { if (bgInputVal) setBgUrl(bgInputVal); }} style={{ width: '100%', padding: '6px', background: '#f5f6f7', color: '#55595c', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Load URL</button>
+                    <button onClick={() => { if (bgInputVal) { setBgUrl(bgInputVal); isDirtyRef.current = true; } }} style={{ width: '100%', padding: '6px', background: '#f5f6f7', color: '#55595c', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Load URL</button>
                   </div>
                 )}
               </EpSection>
@@ -1724,6 +1789,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           onSelect={url => {
             setBgUrl(url);
             setBgInputVal(url);
+            isDirtyRef.current = true;
             setShowBgLibPicker(false);
           }}
           onClose={() => setShowBgLibPicker(false)}
