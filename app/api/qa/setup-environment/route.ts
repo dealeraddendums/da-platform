@@ -279,7 +279,22 @@ async function provisionDealer(
     .eq("name", cfg.name)
     .maybeSingle();
 
+  // group_controls_templates only makes sense when the dealer is in a
+  // group — for standalone QA Test Dealer A (cfg.group_id null) it must
+  // be false, otherwise Builder is hidden from the dealer-admin nav. For
+  // QA Test Dealer B (in QA Test Group) match the super-admin group-
+  // assign default of true.
+  const groupControlsTemplates = cfg.group_id !== null;
+
   if (existing.data?.id) {
+    // Re-runs of setup may inherit a stale flag (e.g. set by a prior cycle
+    // where the dealer was grouped, then disassociated). Force it back to
+    // the canonical value so QA testers always see Builder when expected.
+    await admin
+      .from("dealers")
+      .update({ group_controls_templates: groupControlsTemplates })
+      .eq("id", existing.data.id);
+
     await recordEnv(admin, "dealer", existing.data.id, null, null, cfg.name);
     return {
       entity_id: existing.data.id,
@@ -302,6 +317,7 @@ async function provisionDealer(
       inventory_dealer_id: cfg.dealer_id,
       account_type: cfg.account_type,
       group_id: cfg.group_id,
+      group_controls_templates: groupControlsTemplates,
       subscription_billed_to: cfg.subscription_billed_to,
       labels_billed_to: cfg.labels_billed_to,
       active: true,

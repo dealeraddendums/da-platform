@@ -64,16 +64,21 @@ export default async function DashboardLayout({
   }
 
   // ── Dealer name + template-lock flag (dealer roles) ───────────────────────
+  // group_controls_templates is only meaningful when the dealer actually
+  // belongs to a group — a standalone dealer with the flag stuck "true"
+  // (e.g. from a prior group assignment that wasn't fully cleaned up)
+  // would otherwise have Builder silently hidden from their nav and the
+  // /builder page redirect them back to /dashboard.
   let dealerName: string | null = null;
   let templatesLocked = false;
   if (isDealerRole && profile?.dealer_id) {
     const { data: dealerData } = await admin
       .from("dealers")
-      .select("name, group_controls_templates")
+      .select("name, group_id, group_controls_templates")
       .eq("dealer_id", profile.dealer_id)
-      .maybeSingle<{ name: string; group_controls_templates: boolean | null }>();
+      .maybeSingle<{ name: string; group_id: string | null; group_controls_templates: boolean | null }>();
     dealerName = dealerData?.name ?? null;
-    templatesLocked = Boolean(dealerData?.group_controls_templates);
+    templatesLocked = Boolean(dealerData?.group_controls_templates && dealerData?.group_id);
   }
 
   // ── Group context (group_admin) ────────────────────────────────────────────

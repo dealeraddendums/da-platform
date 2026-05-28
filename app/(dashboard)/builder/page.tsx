@@ -25,14 +25,16 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
   const isDealerRole = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";
 
   // Group-controlled dealers: dealer roles are redirected away from the
-  // Builder. group_admin / super_admin always retain access.
+  // Builder. group_admin / super_admin always retain access. The flag is
+  // only enforced when the dealer is actually in a group — a standalone
+  // dealer with a stale "true" must not lose Builder access.
   if (isDealerRole && profile?.dealer_id) {
     const { data: dealerLock } = await admin
       .from("dealers")
-      .select("group_controls_templates")
+      .select("group_id, group_controls_templates")
       .eq("dealer_id", profile.dealer_id)
-      .maybeSingle<{ group_controls_templates: boolean | null }>();
-    if (dealerLock?.group_controls_templates) {
+      .maybeSingle<{ group_id: string | null; group_controls_templates: boolean | null }>();
+    if (dealerLock?.group_controls_templates && dealerLock?.group_id) {
       redirect("/dashboard");
     }
   }

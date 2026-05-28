@@ -41,13 +41,15 @@ export default async function SettingsPage() {
   if (dealerId) {
     const [{ data: s }, { data: dRow }] = await Promise.all([
       admin.from("dealer_settings").select("*").eq("dealer_id", dealerId).single(),
-      admin.from("dealers").select("id, logo_url, group_controls_templates").eq("dealer_id", dealerId).maybeSingle(),
+      admin.from("dealers").select("id, logo_url, group_id, group_controls_templates").eq("dealer_id", dealerId).maybeSingle(),
     ]);
     initialSettings = (s as DealerSettingsRow | null) ?? null;
-    const dealerRow = dRow as { id: string; logo_url: string | null; group_controls_templates: boolean | null } | null;
+    const dealerRow = dRow as { id: string; logo_url: string | null; group_id: string | null; group_controls_templates: boolean | null } | null;
     fixedDealerUuid = dealerRow?.id ?? null;
     initialLogoUrl = dealerRow?.logo_url ?? null;
-    templatesLocked = Boolean(dealerRow?.group_controls_templates);
+    // The flag is only meaningful when the dealer is actually in a group —
+    // see app/(dashboard)/layout.tsx for the same gating.
+    templatesLocked = Boolean(dealerRow?.group_controls_templates && dealerRow?.group_id);
   }
 
   return (
