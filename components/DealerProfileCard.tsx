@@ -186,6 +186,13 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
       const json = (await res.json()) as { data: DealerRow };
       setDealer(json.data);
       setEditing(false);
+      // The dealer detail page header and the /dealers list are server-rendered
+      // off this row. Without a refresh they keep the stale pre-edit name until
+      // the user signs out, which prompted the bug report. router.refresh()
+      // revalidates the current route's RSC data without remounting this
+      // component or losing form state — Next will refetch the list on its
+      // next visit automatically.
+      router.refresh();
     } else {
       const json = (await res.json()) as { error?: string };
       setError(json.error ?? "Failed to save");

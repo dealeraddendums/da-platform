@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
-import { archiveCustomer, unarchiveCustomer, billingConfigured } from "@/lib/billing";
+import { archiveCustomer, unarchiveCustomer, billingConfigured, updateCustomer, getTemplate, putTemplate } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
 import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 import { fireSuperAdminGroupAssignCascade } from "@/lib/group-billing-cascade";
@@ -157,27 +157,30 @@ export async function PATCH(
   if (body.inventory_provider_is_dms !== undefined && (claims.role === "super_admin" || claims.role === "group_admin")) {
     patch.inventory_provider_is_dms = body.inventory_provider_is_dms;
   }
-  // Snapshot the active flag + billing customer id + group_id before
-  // update so we can detect transitions (true→false, false→true) for
-  // Event 5 / discount sync, and null→UUID on group_id for the
-  // super-admin group-assign cascade.
+  // Snapshot the active flag + billing customer id + group_id + name
+  // before update so we can detect transitions (true→false, false→true)
+  // for Event 5 / discount sync, null→UUID on group_id for the
+  // super-admin group-assign cascade, and a name change to push the
+  // new label to da-billing's customer + template lineItemDescriptions.
   let prevActive: boolean | null = null;
   let billingCustomerId: string | null = null;
   let legacyBillingId: string | null = null;
   let dealerGroupId: string | null = null;
   let prevGroupId: string | null = null;
-  // Snapshot runs whenever active OR group_id is being touched.
-  if (typeof patch.active === "boolean" || patch.group_id !== undefined) {
+  let prevName: string | null = null;
+  // Snapshot runs whenever active, group_id, OR name is being touched.
+  if (typeof patch.active === "boolean" || patch.group_id !== undefined || typeof patch.name === "string") {
     const { data: snap } = await admin
       .from("dealers")
-      .select("active, billing_customer_id, internal_id, group_id")
+      .select("active, billing_customer_id, internal_id, group_id, name")
       .eq("id", params.id)
-      .maybeSingle<{ active: boolean; billing_customer_id: string | null; internal_id: string | null; group_id: string | null }>();
+      .maybeSingle<{ active: boolean; billing_customer_id: string | null; internal_id: string | null; group_id: string | null; name: string }>();
     prevActive = snap?.active ?? null;
     billingCustomerId = snap?.billing_customer_id ?? null;
     legacyBillingId = snap?.internal_id ?? null;
     dealerGroupId = snap?.group_id ?? null;
     prevGroupId = snap?.group_id ?? null;
+    prevName = snap?.name ?? null;
   }
 
   const { data, error: dbError } = await admin
@@ -248,7 +251,94 @@ export async function PATCH(
     fireSuperAdminGroupAssignCascade(params.id, patch.group_id);
   }
 
+  // Dealer name change → propagate to da-billing.
+  // Dealer-name lives in two places on the billing side: the customer's
+  // `company` field (used by the billing UI's dealer list) and the
+  // second `::`-separated segment of every product's lineItemDescription
+  // (used on the printed invoice). Subscriptions live on the dealer's
+  // own template when they're standalone or on the group's template when
+  // the group pays; labels follow labels_billed_to the same way. Cover
+  // both: the dealer's own customer/template if any, and rewrite this
+  // dealer's matching line items inside the group's template if any.
+  // All non-blocking — billing failures must not roll back the rename.
+  if (
+    typeof patch.name === "string"
+    && prevName !== null
+    && patch.name.trim() !== prevName
+    && billingConfigured()
+  ) {
+    const newName = patch.name.trim();
+    const internalId = legacyBillingId;
+    const ownCustomerId = billingCustomerId;
+    const groupIdForBilling = dealerGroupId;
+
+    if (ownCustomerId) {
+      fireAndForget(async () => {
+        await updateCustomer(ownCustomerId, { company: newName });
+        const tmpl = await getTemplate(ownCustomerId);
+        if (!tmpl) return;
+        const rewritten = tmpl.products.map(p => {
+          const next = rewriteLineItemDealerName(p.lineItemDescription, null, newName);
+          return next == null ? p : { ...p, lineItemDescription: next };
+        });
+        await putTemplate(ownCustomerId, rewritten);
+      }, { event: "billing.dealer.rename", dealerId: params.id, payload: { customerId: ownCustomerId, newName } });
+    }
+
+    if (groupIdForBilling && internalId) {
+      fireAndForget(async () => {
+        const { data: group } = await admin
+          .from("groups")
+          .select("billing_customer_id")
+          .eq("id", groupIdForBilling)
+          .maybeSingle<{ billing_customer_id: string | null }>();
+        const groupCustomerId = group?.billing_customer_id ?? null;
+        if (!groupCustomerId) return;
+        const tmpl = await getTemplate(groupCustomerId);
+        if (!tmpl) return;
+        let mutated = false;
+        const rewritten = tmpl.products.map(p => {
+          const next = rewriteLineItemDealerName(p.lineItemDescription, internalId, newName);
+          if (next == null) return p;
+          mutated = true;
+          return { ...p, lineItemDescription: next };
+        });
+        if (mutated) await putTemplate(groupCustomerId, rewritten);
+      }, { event: "billing.dealer.rename.group_template", dealerId: params.id, payload: { groupId: groupIdForBilling, internalId, newName } });
+    }
+  }
+
   return NextResponse.json({ data: data as DealerRow });
+}
+
+/**
+ * Rewrite the dealer-name segment of a da-billing lineItemDescription.
+ *
+ * Format is `{internal_id}::{DEALER_NAME}` for subscriptions and
+ * `{internal_id}::{DEALER_NAME}::{sku}` for labels. We replace the second
+ * segment only, preserving the rest verbatim.
+ *
+ * - `expectedInternalId == null` → rewrite every well-formed entry (used
+ *   for the dealer's own template, where every line belongs to them).
+ * - `expectedInternalId != null` → only rewrite lines whose first segment
+ *   matches (used for the group's template, which carries lines for many
+ *   member dealers).
+ *
+ * Returns the new description, or null if the entry should be left alone
+ * (malformed, doesn't match the expected internal id, or already equal).
+ */
+function rewriteLineItemDealerName(
+  desc: string | undefined,
+  expectedInternalId: string | null,
+  newName: string,
+): string | null {
+  if (!desc) return null;
+  const parts = desc.split("::");
+  if (parts.length < 2) return null;
+  if (expectedInternalId !== null && parts[0] !== expectedInternalId) return null;
+  if (parts[1] === newName) return null;
+  parts[1] = newName;
+  return parts.join("::");
 }
 
 /**
