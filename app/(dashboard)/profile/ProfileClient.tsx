@@ -1280,7 +1280,12 @@ function BillingTab() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, fontSize: 13 }}>
             <div>
               <div style={{ fontSize: 11, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>Plan</div>
-              <div style={{ color: "#333" }}>{sub.name ?? "—"}</div>
+              <div style={{ color: "#333" }}>
+                {/* da-billing's template stores products by productId only (no
+                    display name field), so sub.name is usually null. Map the
+                    productId back to the human label from SUBSCRIPTION_TIERS. */}
+                {sub.name ?? SUBSCRIPTION_TIERS.find(t => t.productKey === sub.productId)?.name ?? "—"}
+              </div>
             </div>
             <div>
               <div style={{ fontSize: 11, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>Price</div>
