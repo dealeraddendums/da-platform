@@ -83,16 +83,22 @@ function buildXpsOrder(order: LabelOrderRow, dealer: DealerRow | null) {
   const items = order.items;
   const shipTo = order.ship_to;
   const xpsOrderId = order.xps_order_id;
-  // XPS's webhook list-orders display read our "orderDate: 2026-05-28"
-  // as epoch zero (rendered as 12/31/1969 4:33 PM). The REST PUT envelope
-  // accepts that ISO-date format fine, but webhook mode wants a full
-  // datetime — and we don't know which field name it actually keys on,
-  // so populate every plausible spelling with the full ISO timestamp.
+  // orderDate MUST stay as date-only YYYY-MM-DD — the previous attempt
+  // to send full ISO datetime made XPS silently reject the entire
+  // order, even though the order WAS in the List Orders response and
+  // XPS WAS polling. Date-only is the format the REST PUT envelope
+  // accepted and is the field XPS validates for order intake.
+  //
+  // The 12/31/1969-display bug is in a separate field that drives the
+  // received-time column in the XPS list view — we don't know which
+  // name they use, so we populate every plausible spelling with the
+  // full ISO timestamp as an addition. Unknown fields should be ignored.
+  const orderDateOnly = toISODate(createdAt);
   const orderDateISO = createdAt.toISOString();
 
   return {
     orderId: xpsOrderId,
-    orderDate: orderDateISO,
+    orderDate: orderDateOnly,
     orderDateTime: orderDateISO,
     dateOrdered: orderDateISO,
     dateReceived: orderDateISO,
