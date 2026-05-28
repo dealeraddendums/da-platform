@@ -43,6 +43,7 @@ export default async function ProfilePage() {
         <ProfileClient
           dealer={dealer}
           canEdit={false}
+          canOrderLabels={false}
           userEmail={userEmail}
           userName={userName}
           userRole={role}
@@ -56,6 +57,7 @@ export default async function ProfilePage() {
       <ProfileClient
         dealer={null}
         canEdit={false}
+        canOrderLabels={false}
         userEmail={userEmail}
         userName={userName}
         userRole={role}
@@ -70,6 +72,7 @@ export default async function ProfilePage() {
       <ProfileClient
         dealer={null}
         canEdit={false}
+        canOrderLabels={false}
         userEmail={userEmail}
         userName={userName}
         userRole={role}
@@ -127,11 +130,19 @@ export default async function ProfilePage() {
   }
 
   const canEdit = role === "dealer_admin";
+  // Label ordering is open to both dealer_admin AND dealer_user — the API
+  // route at /api/orders/labels already allows the latter (and matches the
+  // role table in CLAUDE-da-platform.md, where dealer_user has print/order
+  // capability inside their dealer). dealer_restricted stays blocked at
+  // the UI; editing dealer/shipping profile fields remains dealer_admin
+  // only via the separate `canEdit` flag.
+  const canOrderLabels = role === "dealer_admin" || role === "dealer_user";
 
   return (
     <ProfileClient
       dealer={dealer}
       canEdit={canEdit}
+      canOrderLabels={canOrderLabels}
       userEmail={userEmail}
       userName={userName}
       userRole={role}

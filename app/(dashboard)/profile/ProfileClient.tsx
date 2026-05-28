@@ -11,7 +11,12 @@ type Tab = "info" | "shipping" | "labels" | "orders" | "billing" | "security";
 
 type Props = {
   dealer?: DealerRow | null;
+  /** Edit access to InfoTab + ShippingTab (dealer_admin only). */
   canEdit: boolean;
+  /** Place label orders (dealer_admin OR dealer_user). Distinct from
+   *  `canEdit` so dealer_user can buy labels without gaining edit on the
+   *  dealer profile / shipping address. */
+  canOrderLabels: boolean;
   userEmail: string;
   userName: string;
   userRole: string;
@@ -557,12 +562,13 @@ type CartItem = {
 
 function OrderLabelsTab({
   dealer,
-  canEdit,
+  canOrder,
   userEmail,
   userName,
 }: {
   dealer: DealerRow;
-  canEdit: boolean;
+  /** Allowed to place a label order. dealer_admin OR dealer_user. */
+  canOrder: boolean;
   userEmail: string;
   userName: string;
 }) {
@@ -735,7 +741,7 @@ function OrderLabelsTab({
         </div>
       )}
 
-      {!canEdit && !noSubscriptionAccess && (
+      {!canOrder && !noSubscriptionAccess && (
         <div
           style={{
             background: "#fff8e1",
@@ -747,7 +753,7 @@ function OrderLabelsTab({
             color: "#555",
           }}
         >
-          Label orders require Dealer Admin access. Contact your dealer administrator to place an order.
+          Label orders aren&apos;t available for your role. Contact your dealer administrator to place an order.
         </div>
       )}
 
@@ -789,8 +795,8 @@ function OrderLabelsTab({
                   return (
                     <button
                       key={idx}
-                      onClick={() => canEdit && toggleOption(product, idx)}
-                      disabled={!canEdit}
+                      onClick={() => canOrder && toggleOption(product, idx)}
+                      disabled={!canOrder}
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -801,7 +807,7 @@ function OrderLabelsTab({
                         borderRadius: 4,
                         border: sel ? "1px solid #1976d2" : "1px solid #e0e0e0",
                         background: sel ? "#e3f2fd" : "#fafafa",
-                        cursor: canEdit ? "pointer" : "default",
+                        cursor: canOrder ? "pointer" : "default",
                         fontSize: 13,
                         color: "#333",
                         textAlign: "left",
@@ -860,7 +866,7 @@ function OrderLabelsTab({
           <h3 style={{ fontSize: 14, fontWeight: 600, color: "#2a2b3c", margin: 0 }}>
             Ship To
           </h3>
-          {canEdit && (
+          {canOrder && (
             <button
               onClick={() => setShipOverride(v => !v)}
               style={{ ...secondaryBtn, fontSize: 12, padding: "4px 10px", height: "auto" }}
@@ -910,7 +916,7 @@ function OrderLabelsTab({
       {/* Order summary + place order — hidden for Free/Trial dealers
           without a group so they can't submit an order that the server
           would 403. */}
-      {canEdit && !noSubscriptionAccess && (
+      {canOrder && !noSubscriptionAccess && (
         <div
           style={{
             background: "#fff",
@@ -1533,7 +1539,7 @@ const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean }[] = [
   { id: "security", label: "Security" },
 ];
 
-export default function ProfileClient({ dealer, canEdit, userEmail, userName, userRole, memberSince }: Props) {
+export default function ProfileClient({ dealer, canEdit, canOrderLabels, userEmail, userName, userRole, memberSince }: Props) {
   const searchParams = useSearchParams();
   const hasDealer = !!dealer;
   const visibleTabs = ALL_TABS.filter(t => !t.dealerOnly || hasDealer);
@@ -1610,7 +1616,7 @@ export default function ProfileClient({ dealer, canEdit, userEmail, userName, us
         {tab === "labels" && dealer && (
           <OrderLabelsTab
             dealer={dealer}
-            canEdit={canEdit}
+            canOrder={canOrderLabels}
             userEmail={userEmail}
             userName={userName}
           />
