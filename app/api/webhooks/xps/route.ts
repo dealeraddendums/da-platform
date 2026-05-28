@@ -6,19 +6,22 @@ import { collectHeaders, validateWebhookSecret } from "@/lib/xps-webhook";
  * POST /api/webhooks/xps  — XPS Shipper "Update Order" webhook.
  *
  * Fires when an order is shipped (tracking number assigned), status changes
- * downstream (delivered, voided), and similar. Replaces the broken
- * /shipments polling cron — XPS's REST list endpoint returns only historical
- * fixtures regardless of filter, so push is the only reliable way to learn
- * a tracking number.
+ * downstream (delivered, voided), and similar.
  *
- * Auth: shared secret matching XPS_WEBHOOK_SECRET. Fail-closed (503 if env
- * unset, 401 if missing/wrong). See lib/xps-webhook.ts for the envelopes
- * we accept.
+ * XPS sends this as application/x-www-form-urlencoded, NOT JSON, despite
+ * the JSON-looking shape we use on the List Orders endpoint. The first
+ * real event (2026-05-28 19:57:07 UTC, 1333 bytes) was silently dropped
+ * because the original parser only tried JSON. We now try JSON first,
+ * fall back to form-urlencoded, and persist the raw text body to
+ * xps_webhook_log.raw_body so any future envelope we don't anticipate
+ * can still be recovered post-hoc.
+ *
+ * Auth: shared secret matching XPS_WEBHOOK_SECRET. Fail-closed.
  *
  * Expected payload fields (we tolerate variants):
  *   orderId | orderNumber  → matches our label_orders.xps_order_id
  *   trackingNumber | trackingNumbers[0]
- *   carrierCode | carrier
+ *   carrierCode | carrier | carrierName
  *   serviceCode | shippingService
  *   status | fulfillmentStatus     ("shipped" | "delivered" | ...)
  *   bookNumber                     (XPS internal id)
@@ -27,20 +30,58 @@ import { collectHeaders, validateWebhookSecret } from "@/lib/xps-webhook";
  * xps_webhook_log captures every call regardless of auth outcome, tagged
  * event_type='xps.shipment_update'.
  */
+
+function parseFormUrlencoded(body: string): Record<string, unknown> {
+  const params = new URLSearchParams(body);
+  const out: Record<string, unknown> = {};
+  // forEach instead of for…of to avoid downlevelIteration on URLSearchParams.
+  // Form bodies use repeated keys for arrays (e.g. trackingNumbers=A&trackingNumbers=B);
+  // we collapse them into a JS array when we see a second value.
+  params.forEach((v, k) => {
+    const existing = out[k];
+    if (existing === undefined) out[k] = v;
+    else if (Array.isArray(existing)) (existing as unknown[]).push(v);
+    else out[k] = [existing, v];
+  });
+  return out;
+}
+
+function parseBody(raw: string, contentType: string): Record<string, unknown> {
+  if (!raw) return {};
+  const ct = contentType.toLowerCase();
+  if (ct.includes("application/json")) {
+    try {
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      // Fall through to form-encoded best-effort.
+    }
+  }
+  if (ct.includes("application/x-www-form-urlencoded")) {
+    return parseFormUrlencoded(raw);
+  }
+  // Unknown content-type: try JSON, then form, then give up with empty.
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    try {
+      return parseFormUrlencoded(raw);
+    } catch {
+      return {};
+    }
+  }
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const raw = await req.text();
-  let payload: Record<string, unknown> = {};
-  try {
-    payload = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-  } catch {
-    // Still authorize against headers/query and still log the bad body.
-  }
+  const contentType = req.headers.get("content-type") ?? "";
+  const payload = parseBody(raw, contentType);
 
   const admin = createAdminSupabaseClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (admin as any).from("xps_webhook_log").insert({
     event_type: "xps.shipment_update",
     payload,
+    raw_body: raw,
     headers: collectHeaders(req),
   }).then(() => {}).catch(() => {});
 
@@ -69,16 +110,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const trackingNumber =
     (ship.trackingNumber as string | undefined) ??
     (Array.isArray(ship.trackingNumbers) ? (ship.trackingNumbers as string[])[0] : undefined) ??
+    (typeof ship.trackingNumbers === "string" ? (ship.trackingNumbers as string) : undefined) ??
     null;
   const carrier =
     (ship.carrierCode as string | undefined) ??
     (ship.carrier as string | undefined) ??
+    (ship.carrierName as string | undefined) ??
     null;
   const status =
     (ship.status as string | undefined) ??
     (ship.fulfillmentStatus as string | undefined) ??
     (trackingNumber ? "shipped" : "created");
-  const voided = Boolean(ship.voided);
+  const voided = ship.voided === true || ship.voided === "true";
 
   const patch: Record<string, unknown> = {
     xps_status: voided ? "voided" : status,

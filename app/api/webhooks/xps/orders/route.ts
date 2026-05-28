@@ -83,10 +83,22 @@ function buildXpsOrder(order: LabelOrderRow, dealer: DealerRow | null) {
   const items = order.items;
   const shipTo = order.ship_to;
   const xpsOrderId = order.xps_order_id;
+  // XPS's webhook list-orders display read our "orderDate: 2026-05-28"
+  // as epoch zero (rendered as 12/31/1969 4:33 PM). The REST PUT envelope
+  // accepts that ISO-date format fine, but webhook mode wants a full
+  // datetime — and we don't know which field name it actually keys on,
+  // so populate every plausible spelling with the full ISO timestamp.
+  const orderDateISO = createdAt.toISOString();
 
   return {
     orderId: xpsOrderId,
-    orderDate: toISODate(createdAt),
+    orderDate: orderDateISO,
+    orderDateTime: orderDateISO,
+    dateOrdered: orderDateISO,
+    dateReceived: orderDateISO,
+    dateCreated: orderDateISO,
+    createdAt: orderDateISO,
+    placedAt: orderDateISO,
     orderNumber: xpsOrderId,
     fulfillmentStatus: "pending",
     shippingService: items.some(i => i.shipping === "fedex") ? "FedEx" : "Standard",
@@ -159,6 +171,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   await (admin as any).from("xps_webhook_log").insert({
     event_type: "xps.list_orders",
     payload: { query: Object.fromEntries(req.nextUrl.searchParams) },
+    raw_body: null,
     headers: collectHeaders(req),
   }).then(() => {}).catch(() => {});
 
