@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
-import { getOrderWeightLbs } from "@/lib/label-weights";
 
 // DA Platform SKU -> da-billing labelType slug. da-billing's price
 // resolver keys off these slugs (size + finish), not our SKUs or the
@@ -463,123 +462,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     await admin.from('label_orders').update({ email_status: 'failed' }).eq('id', orderId).then(undefined, () => {});
   }
 
-  // ── Step 3: XPS Shipper ───────────────────────────────────────────────────────
-  const xpsKey = process.env.XPS_API_KEY;
-  const xpsCustomerId = process.env.XPS_CUSTOMER_ID;
-  const xpsIntegrationId = process.env.XPS_INTEGRATION_ID;
-
-  if (!xpsKey || !xpsCustomerId || !xpsIntegrationId) {
-    console.warn('[orders/labels] XPS env vars not set — skipping XPS step');
+  // ── Step 3: XPS Shipper (pull model) ──────────────────────────────────────
+  // We no longer PUT orders to XPS via REST. Instead we stage them with
+  // xps_status='pending_pull' and let XPS poll them via the List Orders
+  // webhook (GET /api/webhooks/xps/orders) — that's the only flow that
+  // makes XPS fire its Update Order webhook back to us with the tracking
+  // number when Virginia prints the label. Orders that were PUT via REST
+  // before this cutover stay at xps_status='created' and won't appear in
+  // List Orders, so XPS won't try to re-create them.
+  const xpsOrderId = `DA-${internalDealerId}-${Date.now()}`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: xpsStageErr } = await (admin as any)
+    .from('label_orders')
+    .update({ xps_status: 'pending_pull', xps_order_id: xpsOrderId })
+    .eq('id', orderId);
+  if (xpsStageErr) {
+    console.error('[orders/labels] failed to stage order for XPS pull:', xpsStageErr.message);
     xpsStatus = 'failed';
-    await admin.from('label_orders').update({ xps_status: 'failed' }).eq('id', orderId).then(undefined, () => {});
   } else {
-    try {
-      const xpsOrderId = `DA-${internalDealerId}-${Date.now()}`;
-      const dueDate = addBusinessDays(today, 3);
-
-      const xpsBody = {
-        orderId: xpsOrderId,
-        orderDate: toISODate(today),
-        orderNumber: xpsOrderId,
-        fulfillmentStatus: 'pending',
-        shippingService: items.some(i => i.shipping === 'fedex') ? 'FedEx' : 'Standard',
-        shippingTotal: '0.00',
-        weightUnit: 'lb',
-        dimUnit: 'in',
-        dueByDate: toISODate(dueDate),
-        orderGroup: 'DealerAddendums',
-        contentDescription: items.map(i => `${i.productName} x${i.qty}`).join(', '),
-        sender: {
-          name: process.env.XPS_SENDER_NAME ?? '',
-          company: process.env.XPS_SENDER_COMPANY ?? '',
-          address1: process.env.XPS_SENDER_ADDRESS1 ?? '',
-          address2: '',
-          city: process.env.XPS_SENDER_CITY ?? '',
-          state: process.env.XPS_SENDER_STATE ?? '',
-          zip: process.env.XPS_SENDER_ZIP ?? '',
-          country: 'US',
-          phone: process.env.XPS_SENDER_PHONE ?? '',
-        },
-        receiver: {
-          // XPS expects "name" = person, "company" = business.
-          // shipTo.name is the dealership name (collected from the
-          // dealer record), so it belongs in company. The receiver
-          // person is the attention contact when one was entered in
-          // the order form, otherwise the dealer's primary_contact.
-          name: shipTo.attention || dealerCfg?.primary_contact || '',
-          company: shipTo.name,
-          address1: shipTo.address1,
-          address2: shipTo.address2 || '',
-          city: shipTo.city,
-          state: shipTo.state,
-          zip: shipTo.zip,
-          country: shipTo.country || 'US',
-          phone: shipTo.phone || '',
-        },
-        // shipperReference = our DA-* xpsOrderId so the daily tracking cron
-        // can find this shipment back via GET /shipments?shipperReference=…
-        // once Virginia prints the label. XPS's /shipments lookup by our
-        // path-param treats the id as an internal bookNumber and 404s; the
-        // shipperReference query is the only working linkage. The attention
-        // contact stays on the receiver line (shipperReference2 carries it
-        // for printout) so the picker still sees who the box is for.
-        shipperReference: xpsOrderId,
-        shipperReference2: shipTo.attention || null,
-        items: items.map((item, i) => ({
-          productId: item.sku,
-          sku: item.sku,
-          // Each line is ONE shipment of N labels, not N individual units.
-          // The cart's item.qty is the label count (250–2000) but on the
-          // XPS manifest a "line" represents the shipped product entry —
-          // qty 1 — with the label count rolled into the title and the
-          // line total going through as the unit price. Without this XPS
-          // computes declared value as price-per-label × label-count, e.g.
-          // $455 × 2000 = $910,000 for one box of 8300-1 — wrong, plus
-          // weight would inflate the same way if per-line weight ever
-          // crept back above 0.
-          title: `${item.productName} x${item.qty}`,
-          price: String(item.price),
-          quantity: 1,
-          // Per-line weight stays at 0 — XPS multiplies this by `quantity`
-          // to derive a line total. Real shipment weight lives in
-          // packages[0].weight below (flat per-SKU from lib/label-weights).
-          weight: '0',
-          lineId: String(i + 1),
-          imgUrl: '',
-          htsNumber: '',
-          countryOfOrigin: 'US',
-        })),
-        // Authoritative shipment weight — sum of every line's SKU weight
-        // from lib/label-weights. Flat per-SKU regardless of qty, so an
-        // 8300-1 order is 2 lbs whether it's 250 labels or 2000.
-        packages: [{ weight: String(getOrderWeightLbs(items)), length: null, width: null, height: null, insuranceAmount: null, declaredValue: null }],
-      };
-
-      const xpsRes = await fetch(
-        `https://xpsshipper.com/restapi/v1/customers/${xpsCustomerId}/integrations/${xpsIntegrationId}/orders/${xpsOrderId}`,
-        {
-          method: 'PUT',
-          headers: { 'Authorization': `RSIS ${xpsKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(xpsBody),
-        }
-      );
-
-      if (xpsRes.status === 201 || xpsRes.ok) {
-        xpsStatus = 'created';
-        await admin.from('label_orders')
-          .update({ xps_status: 'created', xps_order_id: xpsOrderId })
-          .eq('id', orderId);
-      } else {
-        const errText = await xpsRes.text().catch(() => '');
-        console.error('[orders/labels] XPS PUT failed:', xpsRes.status, errText);
-        xpsStatus = 'failed';
-        await admin.from('label_orders').update({ xps_status: 'failed' }).eq('id', orderId).then(undefined, () => {});
-      }
-    } catch (err) {
-      console.error('[orders/labels] XPS step threw:', err instanceof Error ? err.message : err);
-      xpsStatus = 'failed';
-      await admin.from('label_orders').update({ xps_status: 'failed' }).eq('id', orderId).then(undefined, () => {});
-    }
+    xpsStatus = 'created';
   }
 
   // ── Build response ────────────────────────────────────────────────────────────
