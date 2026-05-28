@@ -82,7 +82,7 @@ INSERT INTO public.qa_test_items (id, area, title, role_required, description, s
 
 ('user-roles','User Management','Verify role-based navigation','any',
  $$Verify each role sees correct nav items and nothing more$$,
- $j$["In a private window, log in as qa-dealer-admin@test / QATest2026! — Verify nav: Dashboard, Products, Builder, Users, My Profile, Print Settings, Order Supplies, Help","Log out, log in as qa-dealer-user@test / QATest2026! — Verify nav: same minus Users tab","Log out, log in as qa-group-admin@test / QATest2026! — Verify nav: Dashboard, Dealers, My Group, My Profile, Builder","Verify no role can reach /dealers, /groups, /users admin pages they are not authorized for"]$j$::jsonb,
+ $j$["In a private window, log in as qa-dealer-admin@test.dealeraddendums.com / QATest2026! — Verify nav: Dashboard, Products, Builder, Users, My Profile, Print Settings, Order Supplies, Help","Log out, log in as qa-dealer-user@test.dealeraddendums.com / QATest2026! — Verify nav: same minus Users tab","Log out, log in as qa-group-admin@test.dealeraddendums.com / QATest2026! — Verify nav: Dashboard, Dealers, My Group, My Profile, Builder","Verify no role can reach /dealers, /groups, /users admin pages they are not authorized for"]$j$::jsonb,
  120),
 
 ('billing-group-template',$$Billing — Subscriptions$$,'Verify group billing template in da-billing','super_admin',
@@ -102,12 +102,12 @@ INSERT INTO public.qa_test_items (id, area, title, role_required, description, s
 
 ('labels-group-billed',$$Billing — Label Orders$$,'Order labels billed to group','dealer_admin',
  $$Verify label orders route to group template correctly$$,
- $j$["Open a private window, log in as qa-dealer-admin@test / QATest2026! (QA Test Dealer B is set up with Labels Billed To = Group)","Go to Order Supplies","Select 250 Regular Addendums","Verify Ship To address looks correct","Click Place Order","Verify green 'Order placed successfully' message","Log into billing.dealeraddendums.com → find QA Test Group template","Verify a Labels line item was added with label type and correct price"]$j$::jsonb,
+ $j$["Open a private window, log in as qa-dealer-admin@test.dealeraddendums.com / QATest2026! (QA Test Dealer B is set up with Labels Billed To = Group)","Go to Order Supplies","Select 250 Regular Addendums","Verify Ship To address looks correct","Click Place Order","Verify green 'Order placed successfully' message","Log into billing.dealeraddendums.com → find QA Test Group template","Verify a Labels line item was added with label type and correct price"]$j$::jsonb,
  160),
 
 ('labels-dealer-billed',$$Billing — Label Orders$$,'Order labels billed to dealer','dealer_admin',
  $$Verify label orders route to dealer template correctly$$,
- $j$["Open a private window, log in as qa-dealer-admin@test / QATest2026! (QA Test Dealer A is set up with Labels Billed To = Dealer)","Go to Order Supplies","Select 500 Narrow Addendums","Click Place Order","Verify green 'Order placed successfully' message","Log into billing.dealeraddendums.com → find QA Test Dealer A template","Verify a Labels line item was added with correct label type and price"]$j$::jsonb,
+ $j$["Open a private window, log in as qa-dealer-admin@test.dealeraddendums.com / QATest2026! (QA Test Dealer A is set up with Labels Billed To = Dealer)","Go to Order Supplies","Select 500 Narrow Addendums","Click Place Order","Verify green 'Order placed successfully' message","Log into billing.dealeraddendums.com → find QA Test Dealer A template","Verify a Labels line item was added with correct label type and price"]$j$::jsonb,
  170),
 
 ('labels-free-blocked',$$Billing — Label Orders$$,'Free dealer cannot order labels','dealer_admin',
@@ -122,37 +122,37 @@ INSERT INTO public.qa_test_items (id, area, title, role_required, description, s
 
 ('builder-template','Addendum Builder','Create and save an addendum template','dealer_admin',
  $$Verify the builder saves templates correctly$$,
- $j$["Open private window, log in as qa-dealer-admin@test / QATest2026!","Go to Builder","Click + New Template or modify an existing one","Add at least 2 widgets to the canvas","Change the font size on one widget using the font controls","Click Save Template","Verify success message appears","Reload the page — verify your template and changes are still there"]$j$::jsonb,
+ $j$["Open private window, log in as qa-dealer-admin@test.dealeraddendums.com / QATest2026!","Go to Builder","Click + New Template or modify an existing one","Add at least 2 widgets to the canvas","Change the font size on one widget using the font controls","Click Save Template","Verify success message appears","Reload the page — verify your template and changes are still there"]$j$::jsonb,
  200),
 
 ('builder-print','Addendum Builder','Print an addendum from inventory','dealer_admin',
  $$Verify full print flow from vehicle to PDF$$,
- $j$["Open private window, log in as qa-dealer-admin@test / QATest2026!","Go to Inventory (Vehicles in the nav)","Click any vehicle in the list","Click Print Now","Verify pre-print screen shows VIN, Year, Make, Model","Verify at least one product is auto-applied","Click Print / Generate PDF","Verify PDF opens or downloads to your device","Go back to Inventory — verify vehicle now shows a green printed indicator"]$j$::jsonb,
+ $j$["Open private window, log in as qa-dealer-admin@test.dealeraddendums.com / QATest2026!","Go to Inventory (Vehicles in the nav)","Click any vehicle in the list","Click Print Now","Verify pre-print screen shows VIN, Year, Make, Model","Verify at least one product is auto-applied","Click Print / Generate PDF","Verify PDF opens or downloads to your device","Go back to Inventory — verify vehicle now shows a green printed indicator"]$j$::jsonb,
  210),
 
 ('builder-queue','Addendum Builder','Add vehicle to print queue and print later','dealer_admin',
  $$Verify print queue works end to end$$,
- $j$["Open private window, log in as qa-dealer-admin@test / QATest2026!","Go to Inventory → click any unprinted vehicle","On the pre-print screen, click Print Later / Add to Queue","Verify vehicle shows an orange queued indicator in inventory","Click a different vehicle → on pre-print screen find the queued vehicle in the queue list and print it from there","Verify the queued vehicle now shows green printed indicator","Verify it is removed from the queue"]$j$::jsonb,
+ $j$["Open private window, log in as qa-dealer-admin@test.dealeraddendums.com / QATest2026!","Go to Inventory → click any unprinted vehicle","On the pre-print screen, click Print Later / Add to Queue","Verify vehicle shows an orange queued indicator in inventory","Click a different vehicle → on pre-print screen find the queued vehicle in the queue list and print it from there","Verify the queued vehicle now shows green printed indicator","Verify it is removed from the queue"]$j$::jsonb,
  220),
 
 ('buyers-guide-print',$$Buyer's Guide & Infosheet$$,$$Print a Buyer's Guide$$,'dealer_admin',
  $$Verify Buyer's Guide PDF generates with correct FTC form$$,
- $j$["Open private window, log in as qa-dealer-admin@test / QATest2026!","Go to Inventory → click any vehicle","Click the Buyer's Guide button","Verify the correct FTC form loads (AS-IS or warranty)","Click Print","Verify PDF opens and dealer name/address appear on the form"]$j$::jsonb,
+ $j$["Open private window, log in as qa-dealer-admin@test.dealeraddendums.com / QATest2026!","Go to Inventory → click any vehicle","Click the Buyer's Guide button","Verify the correct FTC form loads (AS-IS or warranty)","Click Print","Verify PDF opens and dealer name/address appear on the form"]$j$::jsonb,
  230),
 
 ('infosheet-print',$$Buyer's Guide & Infosheet$$,'Print an Infosheet','dealer_admin',
  $$Verify Infosheet PDF generates correctly$$,
- $j$["Open private window, log in as qa-dealer-admin@test / QATest2026!","Go to Inventory → click any vehicle","Click the Infosheet button","Verify vehicle information is shown on the infosheet","Click Print","Verify PDF opens and looks correct"]$j$::jsonb,
+ $j$["Open private window, log in as qa-dealer-admin@test.dealeraddendums.com / QATest2026!","Go to Inventory → click any vehicle","Click the Infosheet button","Verify vehicle information is shown on the infosheet","Click Print","Verify PDF opens and looks correct"]$j$::jsonb,
  240),
 
 ('settings-logo',$$Settings & Profile$$,'Upload dealer logo','dealer_admin',
  $$Verify logo upload saves and appears in builder$$,
- $j$["Open private window, log in as qa-dealer-admin@test / QATest2026!","Go to Settings","Find the Logo section and upload any PNG or JPG image","Save settings","Go to Builder","Verify the logo appears on the addendum template preview"]$j$::jsonb,
+ $j$["Open private window, log in as qa-dealer-admin@test.dealeraddendums.com / QATest2026!","Go to Settings","Find the Logo section and upload any PNG or JPG image","Save settings","Go to Builder","Verify the logo appears on the addendum template preview"]$j$::jsonb,
  250),
 
 ('profile-shipping',$$Settings & Profile$$,'Update shipping address','dealer_admin',
  $$Verify shipping address change reflects on Order Supplies page$$,
- $j$["Open private window, log in as qa-dealer-admin@test / QATest2026!","Go to My Profile → click Shipping tab","Change one field in the shipping address (e.g. add Suite 100)","Save","Go to Order Supplies","Verify Ship To section shows the updated address"]$j$::jsonb,
+ $j$["Open private window, log in as qa-dealer-admin@test.dealeraddendums.com / QATest2026!","Go to My Profile → click Shipping tab","Change one field in the shipping address (e.g. add Suite 100)","Save","Go to Order Supplies","Verify Ship To section shows the updated address"]$j$::jsonb,
  260),
 
 ('profile-security',$$Settings & Profile$$,'Add a passkey','any',
