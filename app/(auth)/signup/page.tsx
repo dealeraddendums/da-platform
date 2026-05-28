@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { AuthShell } from "../shell";
 
 type InviteDetails = {
   email: string;
@@ -25,11 +26,21 @@ function passwordStrength(pw: string): { pct: number; label: string; color: stri
   if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
   if (/\d/.test(pw)) score++;
   if (/[^A-Za-z0-9]/.test(pw)) score++;
-  if (pw.length < 8) return { pct: 25, label: "Too short", color: "#ff5252" };
-  if (score <= 2) return { pct: 40, label: "Weak", color: "#f57c00" };
-  if (score === 3) return { pct: 65, label: "Fair", color: "#fbc02d" };
-  if (score === 4) return { pct: 85, label: "Strong", color: "#4caf50" };
-  return { pct: 100, label: "Excellent", color: "#2e7d32" };
+  if (pw.length < 8) return { pct: 25, label: "Too short", color: "#D03A2E" };
+  if (score <= 2)    return { pct: 40, label: "Weak",      color: "#E9A23B" };
+  if (score === 3)   return { pct: 65, label: "Fair",      color: "#E9A23B" };
+  if (score === 4)   return { pct: 85, label: "Strong",    color: "#2E8B57" };
+  return                    { pct: 100, label: "Excellent", color: "#2E8B57" };
+}
+
+function IconAlert(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="8" x2="12" y2="12" />
+      <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+  );
 }
 
 function SignupPageInner() {
@@ -68,8 +79,8 @@ function SignupPageInner() {
   async function handleInviteSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
-    if (password !== confirm) { setError("Passwords don't match. Please re-enter."); return; }
+    if (password.length < 8)   { setError("Password must be at least 8 characters.");  return; }
+    if (password !== confirm)  { setError("Passwords don't match. Please re-enter.");  return; }
     setLoading(true);
 
     const res = await fetch("/api/invite/accept", {
@@ -104,8 +115,8 @@ function SignupPageInner() {
     e.preventDefault();
     setError("");
 
-    if (password !== confirm) { setError("Passwords do not match."); return; }
-    if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (password !== confirm)  { setError("Passwords do not match.");                return; }
+    if (password.length < 6)   { setError("Password must be at least 6 characters."); return; }
 
     setLoading(true);
 
@@ -128,45 +139,31 @@ function SignupPageInner() {
     router.refresh();
   }
 
-  const logo = (
-    <div className="text-center mb-8">
-      <div className="inline-flex items-center gap-2">
-        <img src="/images/da-logo.png" alt="DA" width={32} height={32} style={{ borderRadius: "50%" }} />
-        <span className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>DA Platform</span>
-      </div>
-    </div>
-  );
+  // ── Invite flow ────────────────────────────────────────────────────────────
 
-  const footer = (
-    <p className="mt-6 text-center text-xs" style={{ color: "rgba(255,255,255,0.45)" }}>
-      © {new Date().getFullYear()} DealerAddendums. All rights reserved.
-    </p>
-  );
-
-  // ── Invite flow ──────────────────────────────────────────────────────────────
   if (inviteToken) {
     if (inviteLoading) {
       return (
-        <div className="w-full max-w-sm">
-          {logo}
-          <div className="card p-8 text-center" style={{ color: "var(--text-muted)", fontSize: 14 }}>
-            Loading invitation…
+        <AuthShell title="Welcome to DA Platform" subtitle="Loading your invitation…">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 0", color: "var(--da-text-soft)", fontSize: 14 }}>
+            <span className="lp-spinner" style={{ marginRight: 8 }} />
+            One moment…
           </div>
-          {footer}
-        </div>
+        </AuthShell>
       );
     }
 
     if (inviteError) {
       return (
-        <div className="w-full max-w-sm">
-          {logo}
-          <div className="card p-8 text-center">
-            <p style={{ color: "#c62828", fontSize: 14, marginBottom: 16 }}>{inviteError}</p>
-            <Link href="/login" style={{ color: "var(--blue)", fontSize: 14 }}>Go to login</Link>
+        <AuthShell title="Invitation issue" subtitle="We couldn't load this invitation.">
+          <div role="alert" className="lp-server-error" style={{ marginBottom: 18 }}>
+            <IconAlert style={{ marginTop: 2, flexShrink: 0, color: "var(--da-red)" }} />
+            <span>{inviteError}</span>
           </div>
-          {footer}
-        </div>
+          <Link href="/login" className="lp-btn lp-btn-passkey" style={{ textDecoration: "none" }}>
+            Go to login
+          </Link>
+        </AuthShell>
       );
     }
 
@@ -175,184 +172,199 @@ function SignupPageInner() {
     const ready = !loading && password.length >= 8 && passwordsMatch;
 
     return (
-      <div className="w-full max-w-sm">
-        {logo}
-        <div className="card p-8">
-          <h1 className="text-xl font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
-            Welcome to DA Platform
-          </h1>
-          <p className="text-sm mb-1" style={{ color: "var(--text-secondary)" }}>
-            Create a password to complete your account setup
-          </p>
-          {inviteDetails && (
-            <p className="text-xs mt-3 mb-6 px-3 py-2 rounded" style={{ background: "var(--bg-subtle)", color: "var(--text-secondary)" }}>
-              Invited to <strong>{inviteDetails.dealerName}</strong> as{" "}
-              <strong>{inviteDetails.role.replace(/_/g, " ")}</strong>.
-            </p>
-          )}
+      <AuthShell
+        title="Set your password"
+        subtitle="Create a password to complete your account setup."
+      >
+        {inviteDetails && (
+          <div className="lp-invite-badge">
+            Invited to <strong>{inviteDetails.dealerName}</strong> as{" "}
+            <strong>{inviteDetails.role.replace(/_/g, " ")}</strong>
+          </div>
+        )}
 
-          <form onSubmit={e => void handleInviteSubmit(e)} noValidate>
-            <div className="mb-4">
-              <label className="label">Email address</label>
-              <input className="input" type="email" value={email} readOnly
-                style={{ background: "var(--bg-subtle)", color: "var(--text-muted)", cursor: "not-allowed" }} />
-            </div>
+        <form onSubmit={e => void handleInviteSubmit(e)} noValidate style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div>
+            <label className="lp-label" htmlFor="email">Email address</label>
+            <input
+              id="email"
+              className="lp-input"
+              type="email"
+              value={email}
+              readOnly
+            />
+          </div>
 
-            <div className="mb-3">
-              <label className="label" htmlFor="inv-password">New Password</label>
-              <input
-                id="inv-password"
-                className="input"
-                type="password"
-                autoComplete="new-password"
-                required
-                placeholder="At least 8 characters"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-              />
-              {password.length > 0 && (
-                <div className="mt-1 flex items-center gap-2" style={{ fontSize: 11 }}>
-                  <div style={{ flex: 1, height: 4, background: "var(--bg-subtle)", borderRadius: 2, overflow: "hidden" }}>
-                    <div style={{
-                      width: `${strength.pct}%`,
-                      height: "100%",
-                      background: strength.color,
-                      transition: "width 150ms, background 150ms",
-                    }} />
-                  </div>
-                  <span style={{ color: strength.color, fontWeight: 500, minWidth: 56, textAlign: "right" }}>
-                    {strength.label}
-                  </span>
+          <div>
+            <label className="lp-label" htmlFor="inv-password">New password</label>
+            <input
+              id="inv-password"
+              className="lp-input"
+              type="password"
+              autoComplete="new-password"
+              required
+              placeholder="At least 8 characters"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+            />
+            {password.length > 0 && (
+              <div className="lp-strength">
+                <div className="lp-strength-bar">
+                  <div
+                    className="lp-strength-fill"
+                    style={{ width: `${strength.pct}%`, background: strength.color }}
+                  />
                 </div>
-              )}
-            </div>
-
-            <div className="mb-2">
-              <label className="label" htmlFor="inv-confirm">Confirm Password</label>
-              <input
-                id="inv-confirm"
-                className="input"
-                type="password"
-                autoComplete="new-password"
-                required
-                placeholder="Repeat password"
-                value={confirm}
-                onChange={e => setConfirm(e.target.value)}
-                style={{
-                  borderColor: confirm.length > 0 && !passwordsMatch ? "#ff5252" : undefined,
-                }}
-              />
-              {confirm.length > 0 && !passwordsMatch && (
-                <p className="text-xs mt-1" style={{ color: "#ff5252" }}>Passwords don&apos;t match</p>
-              )}
-              {passwordsMatch && (
-                <p className="text-xs mt-1" style={{ color: "var(--success)" }}>✓ Passwords match</p>
-              )}
-            </div>
-
-            {error && (
-              <div className="mt-4 mb-2 px-3 py-2 rounded text-sm"
-                style={{ background: "#ffebee", color: "#c62828", border: "1px solid #ffcdd2" }}>
-                {error}
+                <span className="lp-strength-label" style={{ color: strength.color }}>
+                  {strength.label}
+                </span>
               </div>
             )}
+          </div>
 
-            <button
-              type="submit"
-              className="btn btn-primary w-full mt-4"
-              disabled={!ready}
-              style={{ opacity: ready ? 1 : 0.5, cursor: ready ? "pointer" : "not-allowed" }}
-            >
-              {loading ? "Creating password…" : "Create Password & Sign In"}
-            </button>
-          </form>
-        </div>
-        {footer}
-      </div>
+          <div>
+            <label className="lp-label" htmlFor="inv-confirm">Confirm password</label>
+            <input
+              id="inv-confirm"
+              className={`lp-input${confirm.length > 0 && !passwordsMatch ? " lp-input-error" : ""}`}
+              type="password"
+              autoComplete="new-password"
+              required
+              placeholder="Repeat password"
+              value={confirm}
+              onChange={e => setConfirm(e.target.value)}
+            />
+            {confirm.length > 0 && !passwordsMatch && (
+              <div className="lp-match-hint fail">Passwords don&apos;t match</div>
+            )}
+            {passwordsMatch && (
+              <div className="lp-match-hint ok">✓ Passwords match</div>
+            )}
+          </div>
+
+          {error && (
+            <div role="alert" className="lp-server-error">
+              <IconAlert style={{ marginTop: 2, flexShrink: 0, color: "var(--da-red)" }} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            className="lp-btn lp-btn-primary"
+            disabled={!ready}
+          >
+            {loading ? (<><span className="lp-spinner" /> Creating password…</>) : "Create Password & Sign In"}
+          </button>
+        </form>
+      </AuthShell>
     );
   }
 
-  // ── Standard signup flow ─────────────────────────────────────────────────────
+  // ── Standard signup flow (no invite token) ─────────────────────────────────
+
+  if (done) {
+    return (
+      <AuthShell title="Check your email" subtitle={`We sent a confirmation link to ${email}. Click it to activate your account.`}>
+        <Link href="/login" className="lp-btn lp-btn-passkey" style={{ textDecoration: "none" }}>
+          Back to login
+        </Link>
+      </AuthShell>
+    );
+  }
+
   return (
-    <div className="w-full max-w-sm">
-      {logo}
-      <div className="card p-8">
-        {done ? (
-          <div className="text-center">
-            <div className="text-2xl mb-3" style={{ color: "var(--success)" }}>✓</div>
-            <h2 className="text-lg font-semibold mb-2">Check your email</h2>
-            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              We sent a confirmation link to <strong>{email}</strong>. Click it to activate your account.
-            </p>
+    <AuthShell title="Create your account" subtitle="Set up your DA Platform login.">
+      <form onSubmit={e => void handleSubmit(e)} noValidate style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div>
+          <label className="lp-label" htmlFor="fullName">Full name</label>
+          <input
+            id="fullName"
+            className="lp-input"
+            type="text"
+            autoComplete="name"
+            required
+            placeholder="Jane Smith"
+            value={fullName}
+            onChange={e => setFullName(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <label className="lp-label" htmlFor="email">Email address</label>
+          <input
+            id="email"
+            className="lp-input"
+            type="email"
+            autoComplete="email"
+            required
+            placeholder="you@dealership.com"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <label className="lp-label" htmlFor="password">Password</label>
+          <input
+            id="password"
+            className="lp-input"
+            type="password"
+            autoComplete="new-password"
+            required
+            placeholder="Min. 6 characters"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <label className="lp-label" htmlFor="confirm">Confirm password</label>
+          <input
+            id="confirm"
+            className="lp-input"
+            type="password"
+            autoComplete="new-password"
+            required
+            placeholder="Repeat password"
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+          />
+        </div>
+
+        {error && (
+          <div role="alert" className="lp-server-error">
+            <IconAlert style={{ marginTop: 2, flexShrink: 0, color: "var(--da-red)" }} />
+            <span>{error}</span>
           </div>
-        ) : (
-          <>
-            <h1 className="text-lg font-semibold mb-6" style={{ color: "var(--text-primary)" }}>
-              Create your account
-            </h1>
-
-            <form onSubmit={e => void handleSubmit(e)} noValidate>
-              <div className="mb-4">
-                <label className="label" htmlFor="fullName">Full name</label>
-                <input id="fullName" className="input" type="text" autoComplete="name" required
-                  placeholder="Jane Smith" value={fullName} onChange={e => setFullName(e.target.value)} />
-              </div>
-
-              <div className="mb-4">
-                <label className="label" htmlFor="email">Email address</label>
-                <input id="email" className="input" type="email" autoComplete="email" required
-                  placeholder="you@dealership.com" value={email} onChange={e => setEmail(e.target.value)} />
-              </div>
-
-              <div className="mb-4">
-                <label className="label" htmlFor="password">Password</label>
-                <input id="password" className="input" type="password" autoComplete="new-password" required
-                  placeholder="Min. 6 characters" value={password} onChange={e => setPassword(e.target.value)} />
-              </div>
-
-              <div className="mb-6">
-                <label className="label" htmlFor="confirm">Confirm password</label>
-                <input id="confirm" className="input" type="password" autoComplete="new-password" required
-                  placeholder="Repeat password" value={confirm} onChange={e => setConfirm(e.target.value)} />
-              </div>
-
-              {error && (
-                <div className="mb-4 px-3 py-2 rounded text-sm"
-                  style={{ background: "#ffebee", color: "#c62828", border: "1px solid #ffcdd2" }}>
-                  {error}
-                </div>
-              )}
-
-              <button type="submit" className="btn btn-primary w-full"
-                disabled={loading || !fullName || !email || !password || !confirm}>
-                {loading ? "Creating account…" : "Create account"}
-              </button>
-            </form>
-
-            <p className="mt-6 text-center text-sm" style={{ color: "var(--text-secondary)" }}>
-              Already have an account?{" "}
-              <Link href="/login" style={{ color: "var(--blue)" }}>Sign in</Link>
-            </p>
-          </>
         )}
-      </div>
-      {footer}
-    </div>
+
+        <button
+          type="submit"
+          className="lp-btn lp-btn-primary"
+          disabled={loading || !fullName || !email || !password || !confirm}
+        >
+          {loading ? (<><span className="lp-spinner" /> Creating account…</>) : "Create account"}
+        </button>
+
+        <p style={{ marginTop: 8, textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
+          Already have an account?{" "}
+          <Link href="/login" className="lp-btn-link">Sign in</Link>
+        </p>
+      </form>
+    </AuthShell>
   );
 }
 
 export default function SignupPage() {
   return (
     <Suspense fallback={
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2">
-            <img src="/images/da-logo.png" alt="DA" width={32} height={32} style={{ borderRadius: "50%" }} />
-            <span className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>DA Platform</span>
-          </div>
+      <AuthShell title="Welcome to DA Platform" subtitle="Loading…">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 0", color: "var(--da-text-soft)", fontSize: 14 }}>
+          <span className="lp-spinner" style={{ marginRight: 8 }} />
+          One moment…
         </div>
-        <div className="card p-8 text-center" style={{ color: "var(--text-muted)", fontSize: 14 }}>Loading…</div>
-      </div>
+      </AuthShell>
     }>
       <SignupPageInner />
     </Suspense>
