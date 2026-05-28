@@ -222,9 +222,18 @@ export async function getTemplate(customerId: string): Promise<BillingTemplate |
   const text = await readBody(res);
   if (!res.ok) throw new BillingError(res.status, `getTemplate ${res.status}`, text);
   try {
-    const parsed = JSON.parse(text) as BillingTemplateResponse;
+    const parsed = JSON.parse(text) as {
+      template:
+        | (BillingTemplateResponse["template"] & { nextInvoiceDate?: string; scheduleInterval?: "monthly" | "yearly" })
+        | null;
+    };
     if (!parsed.template) return null;
-    return { customerId, products: parsed.template.products ?? [] };
+    return {
+      customerId,
+      products: parsed.template.products ?? [],
+      nextInvoiceDate: parsed.template.nextInvoiceDate,
+      scheduleInterval: parsed.template.scheduleInterval,
+    };
   } catch (err) {
     throw new BillingError(res.status, `getTemplate parse: ${(err as Error).message}`, text);
   }

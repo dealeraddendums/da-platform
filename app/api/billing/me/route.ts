@@ -155,7 +155,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       productId: first.productId ?? null,
       name: first.name ?? null,
       price: first.price ?? null,
-      nextInvoiceDate: (template as unknown as { nextInvoiceDate?: string }).nextInvoiceDate ?? null,
+      nextInvoiceDate: template.nextInvoiceDate ?? null,
     };
   }
 
