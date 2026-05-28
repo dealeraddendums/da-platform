@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
-import { getLabelWeightLbs, getOrderWeightLbs } from "@/lib/label-weights";
+import { getOrderWeightLbs } from "@/lib/label-weights";
 
 // DA Platform SKU -> da-billing labelType slug. da-billing's price
 // resolver keys off these slugs (size + finish), not our SKUs or the
@@ -523,14 +523,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           title: item.productName,
           price: String(item.price),
           quantity: item.qty,
-          weight: String(getLabelWeightLbs(item.sku)),
+          // Per-line weight stays at 0 — XPS interprets this field as the
+          // *per-unit* weight and multiplies it by `quantity` to derive a
+          // line total. With qty values in the 250–2000 range and any
+          // non-trivial unit weight (e.g. our SKU map's 2 lbs) the result
+          // explodes past XPS's 70 lb cutoff. Real shipment weight lives
+          // in packages[0].weight below; the items[] array is here for
+          // the manifest only, not the package weight calculation.
+          weight: '0',
           lineId: String(i + 1),
           imgUrl: '',
           htsNumber: '',
           countryOfOrigin: 'US',
         })),
-        // Package weight is the sum of every line's SKU weight. lib/label-weights
-        // is the source of truth — see that file for the SKU table.
+        // Authoritative shipment weight — sum of every line's SKU weight
+        // from lib/label-weights. Flat per-SKU regardless of qty, so an
+        // 8300-1 order is 2 lbs whether it's 250 labels or 2000.
         packages: [{ weight: String(getOrderWeightLbs(items)), length: null, width: null, height: null, insuranceAmount: null, declaredValue: null }],
       };
 
