@@ -9,6 +9,8 @@ import { fireSuperAdminGroupAssignCascade } from "@/lib/group-billing-cascade";
 
 type Params = { params: { id: string } };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * GET /api/dealers/[id]
  * Returns dealer profile.
@@ -70,6 +72,22 @@ export async function PATCH(
 
   const admin = createAdminSupabaseClient();
 
+  // Resolve params.id to the dealer row. Callers pass either the
+  // dealers.id UUID (super_admin paths from /dealers/[id]) or the text
+  // dealers.dealer_id (dealer_admin paths from Print Settings, which
+  // pass profile.dealer_id verbatim through DealerLogoUploader). Every
+  // downstream .eq("id", …) needs the UUID — without this resolution
+  // the dealer_admin scope check below would never find a row when the
+  // route was hit with a text id and would 403 "Forbidden" on every
+  // logo save (which is exactly the Print Settings bug).
+  const { data: resolved } = await admin
+    .from("dealers")
+    .select("id, dealer_id, group_id")
+    .eq(UUID_RE.test(params.id) ? "id" : "dealer_id", params.id)
+    .maybeSingle<{ id: string; dealer_id: string; group_id: string | null }>();
+  if (!resolved) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
+  const dealerUuid = resolved.id;
+
   // group_admin gets a narrow whitelist — inventory_provider /
   // inventory_provider_is_dms / inventory_dealer_id only, and only on
   // dealers in their group. Reject anything outside that whitelist up
@@ -82,26 +100,14 @@ export async function PATCH(
     if (extras.length > 0) {
       return NextResponse.json({ error: `group_admin cannot edit: ${extras.join(", ")}` }, { status: 403 });
     }
-    const { data: existing } = await admin
-      .from("dealers")
-      .select("group_id")
-      .eq("id", params.id)
-      .single();
-    const row = existing as { group_id: string | null } | null;
-    if (!row || row.group_id !== claims.group_id) {
+    if (resolved.group_id !== claims.group_id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
   }
 
   // For dealer_admin, verify they own this dealer before patching
   if (claims.role === "dealer_admin") {
-    const { data: existing } = await admin
-      .from("dealers")
-      .select("dealer_id")
-      .eq("id", params.id)
-      .single();
-    const row = existing as { dealer_id: string } | null;
-    if (!row || row.dealer_id !== claims.dealer_id) {
+    if (resolved.dealer_id !== claims.dealer_id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
   }
@@ -173,7 +179,7 @@ export async function PATCH(
     const { data: snap } = await admin
       .from("dealers")
       .select("active, billing_customer_id, internal_id, group_id, name")
-      .eq("id", params.id)
+      .eq("id", dealerUuid)
       .maybeSingle<{ active: boolean; billing_customer_id: string | null; internal_id: string | null; group_id: string | null; name: string }>();
     prevActive = snap?.active ?? null;
     billingCustomerId = snap?.billing_customer_id ?? null;
@@ -186,7 +192,7 @@ export async function PATCH(
   const { data, error: dbError } = await admin
     .from("dealers")
     .update(patch)
-    .eq("id", params.id)
+    .eq("id", dealerUuid)
     .select()
     .single();
 
@@ -211,12 +217,12 @@ export async function PATCH(
       if (patch.active === false) {
         fireAndForget(
           () => archiveCustomer(customerKey),
-          { event: "billing.customer.archive", dealerId: params.id, payload: { customerKey } },
+          { event: "billing.customer.archive", dealerId: dealerUuid, payload: { customerKey } },
         );
       } else {
         fireAndForget(
           () => unarchiveCustomer(customerKey),
-          { event: "billing.customer.unarchive", dealerId: params.id, payload: { customerKey } },
+          { event: "billing.customer.unarchive", dealerId: dealerUuid, payload: { customerKey } },
         );
       }
     }
@@ -248,7 +254,7 @@ export async function PATCH(
     && prevGroupId === null
     && claims.role === "super_admin"
   ) {
-    fireSuperAdminGroupAssignCascade(params.id, patch.group_id);
+    fireSuperAdminGroupAssignCascade(dealerUuid, patch.group_id);
   }
 
   // Dealer name change → propagate to da-billing.
@@ -282,7 +288,7 @@ export async function PATCH(
           return next == null ? p : { ...p, lineItemDescription: next };
         });
         await putTemplate(ownCustomerId, rewritten);
-      }, { event: "billing.dealer.rename", dealerId: params.id, payload: { customerId: ownCustomerId, newName } });
+      }, { event: "billing.dealer.rename", dealerId: dealerUuid, payload: { customerId: ownCustomerId, newName } });
     }
 
     if (groupIdForBilling && internalId) {
@@ -304,7 +310,7 @@ export async function PATCH(
           return { ...p, lineItemDescription: next };
         });
         if (mutated) await putTemplate(groupCustomerId, rewritten);
-      }, { event: "billing.dealer.rename.group_template", dealerId: params.id, payload: { groupId: groupIdForBilling, internalId, newName } });
+      }, { event: "billing.dealer.rename.group_template", dealerId: dealerUuid, payload: { groupId: groupIdForBilling, internalId, newName } });
     }
   }
 
