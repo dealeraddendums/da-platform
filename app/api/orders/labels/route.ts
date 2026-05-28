@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
+import { getLabelWeightLbs, getOrderWeightLbs } from "@/lib/label-weights";
 
 // DA Platform SKU -> da-billing labelType slug. da-billing's price
 // resolver keys off these slugs (size + finish), not our SKUs or the
@@ -522,13 +523,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           title: item.productName,
           price: String(item.price),
           quantity: item.qty,
-          weight: '1.0',
+          weight: String(getLabelWeightLbs(item.sku)),
           lineId: String(i + 1),
           imgUrl: '',
           htsNumber: '',
           countryOfOrigin: 'US',
         })),
-        packages: [{ weight: '1.0', length: null, width: null, height: null, insuranceAmount: null, declaredValue: null }],
+        // Package weight is the sum of every line's SKU weight. lib/label-weights
+        // is the source of truth — see that file for the SKU table.
+        packages: [{ weight: String(getOrderWeightLbs(items)), length: null, width: null, height: null, insuranceAmount: null, declaredValue: null }],
       };
 
       const xpsRes = await fetch(
