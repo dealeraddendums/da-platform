@@ -1100,7 +1100,11 @@ function OrdersTab() {
           <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
             <thead style={{ background: "#fafafa", borderBottom: "1px solid #e0e0e0" }}>
               <tr>
-                {["Date", "Items", "Total", "Billed to", "Status", "Tracking"].map(h => (
+                {/* Billing status and "Billed to" routing are intentionally
+                    omitted — both are DA-internal concerns, not something
+                    the dealer needs to see on their own order history.
+                    Dealers only need shipment status + tracking. */}
+                {["Date", "Items", "Total", "Status", "Tracking"].map(h => (
                   <th key={h} style={{ textAlign: "left", padding: "10px 12px", fontSize: 11, fontWeight: 700, color: "#78828c", textTransform: "uppercase", letterSpacing: ".04em" }}>{h}</th>
                 ))}
               </tr>
@@ -1111,6 +1115,13 @@ function OrdersTab() {
                   .map(it => `${it.productName} × ${it.qty.toLocaleString()}`)
                   .join(", ");
                 const shipped = o.xps_status === "shipped" || o.xps_status === "delivered";
+                // Friendly shipment-state label. XPS gives us pending →
+                // created → shipped → delivered; we collapse the first two
+                // to a single "Pending shipment" message that matches the
+                // wording in the order-confirmation email.
+                const shipLabel = shipped
+                  ? (o.xps_status === "delivered" ? "Delivered" : "Shipped")
+                  : "Pending shipment";
                 return (
                   <tr key={o.id} style={{ borderBottom: i < orders.length - 1 ? "1px solid #f0f0f0" : "none" }}>
                     <td style={{ padding: "10px 12px", color: "#555", whiteSpace: "nowrap" }}>
@@ -1120,14 +1131,12 @@ function OrdersTab() {
                     <td style={{ padding: "10px 12px", color: "#333", fontFamily: "monospace", whiteSpace: "nowrap" }}>
                       {o.total_amount != null ? `$${Number(o.total_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
                     </td>
-                    <td style={{ padding: "10px 12px", color: "#555" }}>
-                      {o.billed_to === "group" ? "Group" : "Dealer"}
-                    </td>
                     <td style={{ padding: "10px 12px" }}>
-                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                        <StatusPill label={`Billing ${o.billing_status ?? "?"}`} ok={o.billing_status === "written"} warn={o.billing_status === "pending" || o.billing_status === "skipped"} />
-                        <StatusPill label={`Ship ${o.xps_status ?? "?"}`} ok={shipped} warn={o.xps_status === "pending" || o.xps_status === "created"} />
-                      </div>
+                      <StatusPill
+                        label={shipLabel}
+                        ok={shipped}
+                        warn={!shipped}
+                      />
                     </td>
                     <td style={{ padding: "10px 12px" }}>
                       {o.xps_tracking_number ? (
