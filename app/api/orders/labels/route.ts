@@ -104,7 +104,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const { data, error: dbErr } = await admin
     .from('label_orders')
-    .select('id, dealer_id, items, ship_to, total_amount, billed_to, group_id, billing_status, email_status, xps_status, xps_order_id, xps_tracking_number, created_at')
+    .select('id, dealer_id, items, ship_to, total_amount, billed_to, group_id, billing_status, email_status, xps_status, xps_order_id, xps_tracking_number, xps_carrier, created_at')
     .eq('dealer_id', dealerUuid)
     .order('created_at', { ascending: false })
     .limit(100);

@@ -1036,7 +1036,21 @@ interface LabelOrderRow {
   xps_status: string | null;
   xps_order_id: string | null;
   xps_tracking_number: string | null;
+  xps_carrier: string | null;
   created_at: string;
+}
+
+// Carrier-specific tracking URL. XPS posts back a carrier code like
+// "USPS" / "UPS" / "FEDEX" alongside the tracking number; we prefer the
+// carrier's own tracking page when we know it and fall back to a generic
+// search when we don't.
+function trackingUrl(trackingNumber: string, carrier: string | null): string {
+  const c = (carrier ?? "").toUpperCase();
+  if (c.includes("USPS")) return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(trackingNumber)}`;
+  if (c.includes("UPS"))  return `https://www.ups.com/track?tracknum=${encodeURIComponent(trackingNumber)}`;
+  if (c.includes("FEDEX")) return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(trackingNumber)}`;
+  if (c.includes("DHL"))  return `https://www.dhl.com/us-en/home/tracking/tracking-express.html?submit=1&tracking-id=${encodeURIComponent(trackingNumber)}`;
+  return `https://www.google.com/search?q=${encodeURIComponent(trackingNumber)}+tracking`;
 }
 
 function StatusPill({ label, ok, warn }: { label: string; ok?: boolean; warn?: boolean }) {
@@ -1141,7 +1155,7 @@ function OrdersTab() {
                     <td style={{ padding: "10px 12px" }}>
                       {o.xps_tracking_number ? (
                         <a
-                          href={`https://www.google.com/search?q=${encodeURIComponent(o.xps_tracking_number)}+tracking`}
+                          href={trackingUrl(o.xps_tracking_number, o.xps_carrier)}
                           target="_blank"
                           rel="noreferrer"
                           style={{ color: "#1976d2", fontFamily: "monospace", fontSize: 12 }}
