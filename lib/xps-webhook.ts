@@ -22,7 +22,12 @@ export function extractWebhookSecret(
   req: NextRequest,
   body: Record<string, unknown> = {},
 ): string | null {
+  // XPS sends the secret as X-RSIS-Key (confirmed from real call captured
+  // 2026-05-28). The other names are kept as fallbacks in case XPS ever
+  // changes the header or runs the same secret through their REST API in
+  // a different shape.
   const headerNames = [
+    "x-rsis-key",
     "x-webhook-secret",
     "x-xps-secret",
     "x-api-key",
