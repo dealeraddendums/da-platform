@@ -528,16 +528,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         items: items.map((item, i) => ({
           productId: item.sku,
           sku: item.sku,
-          title: item.productName,
+          // Each line is ONE shipment of N labels, not N individual units.
+          // The cart's item.qty is the label count (250–2000) but on the
+          // XPS manifest a "line" represents the shipped product entry —
+          // qty 1 — with the label count rolled into the title and the
+          // line total going through as the unit price. Without this XPS
+          // computes declared value as price-per-label × label-count, e.g.
+          // $455 × 2000 = $910,000 for one box of 8300-1 — wrong, plus
+          // weight would inflate the same way if per-line weight ever
+          // crept back above 0.
+          title: `${item.productName} x${item.qty}`,
           price: String(item.price),
-          quantity: item.qty,
-          // Per-line weight stays at 0 — XPS interprets this field as the
-          // *per-unit* weight and multiplies it by `quantity` to derive a
-          // line total. With qty values in the 250–2000 range and any
-          // non-trivial unit weight (e.g. our SKU map's 2 lbs) the result
-          // explodes past XPS's 70 lb cutoff. Real shipment weight lives
-          // in packages[0].weight below; the items[] array is here for
-          // the manifest only, not the package weight calculation.
+          quantity: 1,
+          // Per-line weight stays at 0 — XPS multiplies this by `quantity`
+          // to derive a line total. Real shipment weight lives in
+          // packages[0].weight below (flat per-SKU from lib/label-weights).
           weight: '0',
           lineId: String(i + 1),
           imgUrl: '',
