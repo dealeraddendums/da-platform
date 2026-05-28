@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { createAdminSupabaseClient } from "@/lib/db";
 
 /**
@@ -10,53 +11,95 @@ import { createAdminSupabaseClient } from "@/lib/db";
  * returns only historical fixtures regardless of filter, so the push
  * model is the only reliable way to learn a tracking number.
  *
- * Auth: shared secret in X-Webhook-Secret header, set in XPS's webhook
- * config matching XPS_WEBHOOK_SECRET env var on our side. XPS doesn't
- * sign payloads, so the secret IS the auth.
+ * Auth: a shared secret matching XPS_WEBHOOK_SECRET. XPS doesn't sign
+ * payloads, so the secret IS the auth. The route fails closed — if
+ * XPS_WEBHOOK_SECRET isn't set in env we 503, and any call without a
+ * matching secret 401s. The secret is accepted in any of:
+ *   • X-Webhook-Secret / X-XPS-Secret / X-Api-Key / X-Secret-Key headers
+ *   • Authorization: Bearer <secret>  (or bare Authorization: <secret>)
+ *   • secret / secretKey / apiKey field in the JSON body
+ * because XPS's docs don't specify which envelope they use. As soon as a
+ * real XPS call arrives, xps_webhook_log will show the exact location and
+ * we can tighten this to just that one check.
  *
- * Payload shape is undocumented but observed-to-be a single shipment
- * event with these fields (we tolerate variants):
+ * Payload shape is undocumented but the observed/expected fields are:
  *   orderId | orderNumber  → matches our label_orders.xps_order_id
  *   trackingNumber | trackingNumbers[0]
  *   carrierCode | carrier
  *   serviceCode | shippingService
  *   status | fulfillmentStatus     ("shipped" | "delivered" | ...)
- *   bookNumber                     (XPS internal id, for our records)
+ *   bookNumber                     (XPS internal id)
  *   voided                         (boolean)
  *
- * We log every raw payload to xps_webhook_log table for diagnosis when
- * a field is named something we didn't anticipate.
+ * xps_webhook_log captures the raw payload AND every request header on
+ * every call — including the failed-auth attempts — so we can see which
+ * field XPS puts the secret in and adjust if the auto-detect missed it.
  */
+
+function safeEqual(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
+}
+
+function extractSecret(req: NextRequest, body: Record<string, unknown>): string | null {
+  const headerNames = ["x-webhook-secret", "x-xps-secret", "x-api-key", "x-secret-key", "x-shared-secret"];
+  for (const h of headerNames) {
+    const v = req.headers.get(h);
+    if (v) return v.trim();
+  }
+  const auth = req.headers.get("authorization");
+  if (auth) {
+    const m = auth.match(/^Bearer\s+(.+)$/i);
+    return (m ? m[1] : auth).trim();
+  }
+  for (const k of ["secret", "secretKey", "apiKey", "webhookSecret"]) {
+    const v = body[k];
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return null;
+}
+
+function collectHeaders(req: NextRequest): Record<string, string> {
+  const out: Record<string, string> = {};
+  req.headers.forEach((v, k) => { out[k] = v; });
+  return out;
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const expected = process.env.XPS_WEBHOOK_SECRET;
-  if (expected) {
-    const got = req.headers.get("x-webhook-secret") ?? req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-    if (got !== expected) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!expected) {
+    console.error("[webhooks/xps] XPS_WEBHOOK_SECRET not configured — refusing all webhook calls");
+    return NextResponse.json({ error: "Webhook not configured" }, { status: 503 });
   }
 
   const raw = await req.text();
-  let payload: Record<string, unknown>;
+  let payload: Record<string, unknown> = {};
   try {
-    payload = JSON.parse(raw) as Record<string, unknown>;
+    payload = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    // Still log the bad body so we can see what XPS actually sent — but
+    // we can't read a secret out of it, so authorize against headers only.
   }
 
+  const headers = collectHeaders(req);
   const admin = createAdminSupabaseClient();
 
-  // Always log the raw payload first, so if matching fails we can see
-  // what XPS actually sent.
+  // Log first so we have an audit trail even if validation fails. Headers
+  // are logged verbatim (including the secret if XPS sent it) because
+  // we're still discovering which field XPS uses; once we know we can
+  // redact in a follow-up.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (admin as any).from("xps_webhook_log").insert({
     payload,
-    headers: {
-      "user-agent": req.headers.get("user-agent"),
-      "x-event-type": req.headers.get("x-event-type"),
-      "x-event-id": req.headers.get("x-event-id"),
-    },
+    headers,
   }).then(() => {}).catch(() => {});
+
+  const provided = extractSecret(req, payload);
+  if (!provided || !safeEqual(provided, expected)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   // Pluck the order identifier — XPS may send any of these.
   const orderId =
