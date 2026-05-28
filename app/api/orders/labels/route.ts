@@ -562,17 +562,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // ── Build response ────────────────────────────────────────────────────────────
+  // `message` is the human-readable string the Order Supplies UI renders
+  // verbatim in the dealer's success card. Billing-side failures are a
+  // DA-internal concern (template-write race, missing dealer template,
+  // etc.) — they don't change what the dealer needs to do next and must
+  // never surface here. The structured `billing` field below stays in the
+  // response for internal/admin consumers (server logs, support tooling)
+  // that inspect the JSON.
   const success = emailStatus === 'sent';
-  const failures: string[] = [];
-  if (billingStatus === 'failed') failures.push('billing');
-  if (emailStatus === 'failed') failures.push('email notification');
-  if (xpsStatus === 'failed') failures.push('shipping order');
+  const dealerFacingFailures: string[] = [];
+  if (emailStatus === 'failed') dealerFacingFailures.push('email notification');
+  if (xpsStatus === 'failed')   dealerFacingFailures.push('shipping order');
 
   let message: string;
-  if (success && failures.length === 0) {
+  if (success && dealerFacingFailures.length === 0) {
     message = 'Order placed successfully.';
   } else if (success) {
-    message = `Order received. Failed steps: ${failures.join(', ')}.`;
+    message = `Order received. Failed steps: ${dealerFacingFailures.join(', ')}.`;
   } else {
     message = 'Order failed — email notification not sent.';
   }
