@@ -24,7 +24,13 @@ import * as fs from "node:fs";
 
 const DEALERS_PARENT_NAME = "Dealers";
 const GROUPS_PARENT_NAME  = "Groups";
-const BOX_ROOT_FOLDER_ID  = "0";
+// Allan's "DealerAddendums Platform" folder in his personal Box drive. The
+// JWT service account ("DA Platform", AutomationUser_2577618_…) has been
+// added as a co-owner so it can read/write here. We anchor under this id
+// instead of "0" (the service account's own root) so every dealer/group
+// folder we create shows up in Allan's Drive sidebar without an extra
+// collaboration step.
+const BOX_ROOT_FOLDER_ID  = "384943909938";
 
 interface BoxFolder {
   id: string;
