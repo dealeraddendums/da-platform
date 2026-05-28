@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
+import { getRecommendedAddendumPaperSizes } from "@/lib/recommended-labels";
 import ProfileClient from "./ProfileClient";
 
 export const metadata = { title: "My Profile — DA Platform" };
@@ -44,6 +45,7 @@ export default async function ProfilePage() {
           dealer={dealer}
           canEdit={false}
           canOrderLabels={false}
+          recommendedPaperSizes={[]}
           userEmail={userEmail}
           userName={userName}
           userRole={role}
@@ -58,6 +60,7 @@ export default async function ProfilePage() {
         dealer={null}
         canEdit={false}
         canOrderLabels={false}
+        recommendedPaperSizes={[]}
         userEmail={userEmail}
         userName={userName}
         userRole={role}
@@ -73,6 +76,7 @@ export default async function ProfilePage() {
         dealer={null}
         canEdit={false}
         canOrderLabels={false}
+        recommendedPaperSizes={[]}
         userEmail={userEmail}
         userName={userName}
         userRole={role}
@@ -138,11 +142,14 @@ export default async function ProfilePage() {
   // only via the separate `canEdit` flag.
   const canOrderLabels = role === "dealer_admin" || role === "dealer_user";
 
+  const recommendedPaperSizes = await getRecommendedAddendumPaperSizes(admin, profile.dealer_id);
+
   return (
     <ProfileClient
       dealer={dealer}
       canEdit={canEdit}
       canOrderLabels={canOrderLabels}
+      recommendedPaperSizes={recommendedPaperSizes}
       userEmail={userEmail}
       userName={userName}
       userRole={role}

@@ -6,6 +6,8 @@ import type { DealerRow } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
 import type { LabelProduct } from "@/lib/label-products";
 import { LABEL_PRODUCTS } from "@/lib/label-products";
+import type { AddendumPaperSize } from "@/lib/recommended-labels";
+import { paperSizeWidthLabel, productMatchesPaperSize } from "@/lib/recommended-labels";
 
 type Tab = "info" | "shipping" | "labels" | "orders" | "billing" | "security";
 
@@ -17,6 +19,10 @@ type Props = {
    *  `canEdit` so dealer_user can buy labels without gaining edit on the
    *  dealer profile / shipping address. */
   canOrderLabels: boolean;
+  /** Paper sizes of the dealer's active addendum template assignments.
+   *  Drives the "Recommended for your dealership" badge on matching
+   *  label-size cards. Empty array → no recommendation shown. */
+  recommendedPaperSizes: AddendumPaperSize[];
   userEmail: string;
   userName: string;
   userRole: string;
@@ -563,12 +569,14 @@ type CartItem = {
 function OrderLabelsTab({
   dealer,
   canOrder,
+  recommendedPaperSizes,
   userEmail,
   userName,
 }: {
   dealer: DealerRow;
   /** Allowed to place a label order. dealer_admin OR dealer_user. */
   canOrder: boolean;
+  recommendedPaperSizes: AddendumPaperSize[];
   userEmail: string;
   userName: string;
 }) {
@@ -768,12 +776,22 @@ function OrderLabelsTab({
       >
         {LABEL_PRODUCTS.map(product => {
           const selectedItem = cart.find(c => c.product.sku === product.sku);
+          const isRecommended = recommendedPaperSizes.some(ps =>
+            productMatchesPaperSize(product.size, ps),
+          );
           return (
             <div
               key={product.sku}
               style={{
                 background: "#fff",
-                border: selectedItem ? "2px solid #1976d2" : "1px solid #e0e0e0",
+                // Recommended cards get the orange accent border from the DA
+                // design system; selected (cart) state still wins so the
+                // dealer can see what they've actually picked.
+                border: selectedItem
+                  ? "2px solid #1976d2"
+                  : isRecommended
+                    ? "2px solid #ffa500"
+                    : "1px solid #e0e0e0",
                 borderRadius: 6,
                 overflow: "hidden",
               }}
@@ -784,8 +802,28 @@ function OrderLabelsTab({
                   borderBottom: "1px solid #f0f0f0",
                 }}
               >
-                <div style={{ fontWeight: 600, fontSize: 14, color: "#2a2b3c", marginBottom: 2 }}>
-                  {product.name}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 2 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: "#2a2b3c" }}>
+                    {product.name}
+                  </div>
+                  {isRecommended && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: "2px 7px",
+                        borderRadius: 10,
+                        background: "#ffa500",
+                        color: "#fff",
+                        textTransform: "uppercase",
+                        letterSpacing: ".04em",
+                        whiteSpace: "nowrap",
+                      }}
+                      title="Recommended for your dealership"
+                    >
+                      Recommended
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: 12, color: "#78828c" }}>{product.size}</div>
               </div>
@@ -843,6 +881,42 @@ function OrderLabelsTab({
           );
         })}
       </div>
+
+      {recommendedPaperSizes.length > 0 && (() => {
+        const recommendedProducts = LABEL_PRODUCTS.filter(p =>
+          recommendedPaperSizes.some(ps => productMatchesPaperSize(p.size, ps)),
+        );
+        const widths = recommendedPaperSizes.map(paperSizeWidthLabel);
+        // Comma-then-and join — "A, B and C" feels less terse than commas alone.
+        const widthSentence = widths.length === 1
+          ? widths[0]
+          : widths.length === 2
+            ? `${widths[0]} and ${widths[1]}`
+            : `${widths.slice(0, -1).join(", ")} and ${widths[widths.length - 1]}`;
+        const names = recommendedProducts.map(p => p.name);
+        const nameSentence = names.length === 1
+          ? names[0]
+          : names.length === 2
+            ? `${names[0]} or ${names[1]}`
+            : `${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}`;
+        return (
+          <div
+            style={{
+              marginTop: -12,
+              marginBottom: 24,
+              padding: "10px 14px",
+              background: "#fff8e1",
+              border: "1px solid #ffe082",
+              borderRadius: 6,
+              fontSize: 13,
+              color: "#7a5c00",
+            }}
+          >
+            Your active addendum template{recommendedPaperSizes.length > 1 ? "s use" : " uses"}{" "}
+            <strong>{widthSentence}</strong> labels — we recommend <strong>{nameSentence}</strong>.
+          </div>
+        );
+      })()}
 
       {/* Ship-to block */}
       <div
@@ -1567,7 +1641,7 @@ const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean }[] = [
   { id: "security", label: "Security" },
 ];
 
-export default function ProfileClient({ dealer, canEdit, canOrderLabels, userEmail, userName, userRole, memberSince }: Props) {
+export default function ProfileClient({ dealer, canEdit, canOrderLabels, recommendedPaperSizes, userEmail, userName, userRole, memberSince }: Props) {
   const searchParams = useSearchParams();
   const hasDealer = !!dealer;
   const visibleTabs = ALL_TABS.filter(t => !t.dealerOnly || hasDealer);
@@ -1645,6 +1719,7 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, userEma
           <OrderLabelsTab
             dealer={dealer}
             canOrder={canOrderLabels}
+            recommendedPaperSizes={recommendedPaperSizes}
             userEmail={userEmail}
             userName={userName}
           />
