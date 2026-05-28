@@ -78,42 +78,36 @@ interface DealerRow {
 }
 
 function buildXpsOrder(order: LabelOrderRow, dealer: DealerRow | null) {
+  // Schema reference: https://xpsshipper.com/restapi/docs/v1-ecommerce/webhooks/list-orders/
+  //
+  // Webhook list-orders schema is DIFFERENT from the REST PUT schema we
+  // used to use. Key differences that bit us:
+  //   - orderDate is a Unix timestamp in SECONDS (integer), not an ISO
+  //     string. Sending "2026-05-28" was parsed as NaN → 0 → 12/31/1969.
+  //   - shipping_total is snake_case, not shippingTotal.
+  //   - items[].quantity is a STRING per the example payload.
+  //   - customerNotes is required.
+  //   - Many REST PUT fields (fulfillmentStatus, orderGroup, dimUnit,
+  //     contentDescription, shipperReference2, lineId, htsNumber,
+  //     countryOfOrigin) are not in the webhook schema. Dropped to
+  //     avoid any chance they confuse the parser.
   const createdAt = new Date(order.created_at);
   const dueDate = addBusinessDays(createdAt, 3);
   const items = order.items;
   const shipTo = order.ship_to;
   const xpsOrderId = order.xps_order_id;
-  // orderDate MUST stay as date-only YYYY-MM-DD — the previous attempt
-  // to send full ISO datetime made XPS silently reject the entire
-  // order, even though the order WAS in the List Orders response and
-  // XPS WAS polling. Date-only is the format the REST PUT envelope
-  // accepted and is the field XPS validates for order intake.
-  //
-  // The 12/31/1969-display bug is in a separate field that drives the
-  // received-time column in the XPS list view — we don't know which
-  // name they use, so we populate every plausible spelling with the
-  // full ISO timestamp as an addition. Unknown fields should be ignored.
-  const orderDateOnly = toISODate(createdAt);
-  const orderDateISO = createdAt.toISOString();
 
   return {
     orderId: xpsOrderId,
-    orderDate: orderDateOnly,
-    orderDateTime: orderDateISO,
-    dateOrdered: orderDateISO,
-    dateReceived: orderDateISO,
-    dateCreated: orderDateISO,
-    createdAt: orderDateISO,
-    placedAt: orderDateISO,
+    status: "pending",
+    orderDate: Math.floor(createdAt.getTime() / 1000),
     orderNumber: xpsOrderId,
-    fulfillmentStatus: "pending",
-    shippingService: items.some(i => i.shipping === "fedex") ? "FedEx" : "Standard",
-    shippingTotal: "0.00",
-    weightUnit: "lb",
-    dimUnit: "in",
     dueByDate: toISODate(dueDate),
-    orderGroup: "DealerAddendums",
-    contentDescription: items.map(i => `${i.productName} x${i.qty}`).join(", "),
+    customerNotes: "",
+    shipperReference: xpsOrderId,
+    shippingService: items.some(i => i.shipping === "fedex") ? "FedEx" : "Standard",
+    shipping_total: "0.00",
+    weightUnit: "lb",
     sender: {
       name: process.env.XPS_SENDER_NAME ?? "",
       company: process.env.XPS_SENDER_COMPANY ?? "",
@@ -127,9 +121,9 @@ function buildXpsOrder(order: LabelOrderRow, dealer: DealerRow | null) {
     },
     receiver: {
       // XPS expects "name" = person, "company" = business. shipTo.name
-      // is the dealership name (collected from the dealer record), so it
-      // belongs in company. The receiver person is the attention contact
-      // when entered, otherwise the dealer's primary_contact.
+      // is the dealership name (from the dealer record), so it belongs
+      // in company. Receiver person is the attention contact when set,
+      // otherwise the dealer's primary_contact.
       name: shipTo.attention || dealer?.primary_contact || "",
       company: shipTo.name,
       address1: shipTo.address1,
@@ -140,25 +134,19 @@ function buildXpsOrder(order: LabelOrderRow, dealer: DealerRow | null) {
       country: shipTo.country || "US",
       phone: shipTo.phone || "",
     },
-    shipperReference: xpsOrderId,
-    shipperReference2: shipTo.attention || null,
-    // Each line is ONE shipment of N labels — qty=1 with the label count
-    // rolled into the title and the line total as the unit price. Without
+    // Each line = ONE shipment of N labels. Cart qty (250–2000) becomes
+    // the title; line total stays in price; quantity is "1". Without
     // this XPS computes declared value as price × labelCount (e.g.
-    // $455 × 2000 = $910k for one box of 8300-1). Per-line weight is 0
-    // for the same reason — XPS multiplies weight by quantity to derive
-    // a line total. Real shipment weight lives in packages[0].weight.
-    items: items.map((item, i) => ({
+    // $455 × 2000 = $910k for one box of 8300-1). Per-line weight is "0"
+    // for the same reason — real shipment weight is in packages[0].
+    items: items.map(item => ({
       productId: item.sku,
       sku: item.sku,
       title: `${item.productName} x${item.qty}`,
       price: String(item.price),
-      quantity: 1,
+      quantity: "1",
       weight: "0",
-      lineId: String(i + 1),
-      imgUrl: "",
-      htsNumber: "",
-      countryOfOrigin: "US",
+      imgUrl: null,
     })),
     packages: [{
       weight: String(getOrderWeightLbs(items)),
