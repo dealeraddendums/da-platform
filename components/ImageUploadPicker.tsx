@@ -42,9 +42,20 @@ export default function ImageUploadPicker({
   const [searchQ, setSearchQ] = useState("");
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Build a client-side thumbnail URL whenever the user picks a file. Revoke
+  // the previous blob URL so we don't leak object URLs over repeated picks,
+  // and revoke on unmount.
+  useEffect(() => {
+    if (!uploadFile) { setPreviewUrl(null); return; }
+    const url = URL.createObjectURL(uploadFile);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [uploadFile]);
 
   const actualTab1Label = tab1Label ?? (listEndpoint ? "Library" : "Current");
   const typeDisplay = acceptedTypes.replace(/image\//gi, "").toUpperCase().replace(/,/g, ", ");
@@ -186,11 +197,43 @@ export default function ImageUploadPicker({
                 onClick={() => fileRef.current?.click()}
                 onDragOver={e => e.preventDefault()}
                 onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleFileSelect(f); }}
-                style={{ border: "2px dashed #e0e0e0", borderRadius: 6, padding: "32px 16px", textAlign: "center", cursor: "pointer", background: "#fafafa", marginBottom: 14 }}
+                style={{
+                  border: "2px dashed #e0e0e0",
+                  borderRadius: 6,
+                  // Fixed footprint so the modal layout doesn't jump when a
+                  // preview replaces the instructions. Centered content fills
+                  // the box whether we're showing the upload-arrow prompt or
+                  // a thumbnail of the selected image.
+                  minHeight: 200,
+                  padding: "16px",
+                  textAlign: "center",
+                  cursor: "pointer",
+                  background: "#fafafa",
+                  marginBottom: 14,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                }}
               >
-                <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.35 }}>↑</div>
-                <div style={{ fontSize: 14, color: "#55595c", marginBottom: 4 }}>Drag & drop or click to browse</div>
-                <div style={{ fontSize: 11, color: "#78828c" }}>{typeDisplay} · Max {maxSizeMB} MB</div>
+                {previewUrl ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={previewUrl}
+                      alt="Selected file preview"
+                      style={{ maxWidth: "100%", maxHeight: 168, objectFit: "contain", display: "block" }}
+                    />
+                    <div style={{ fontSize: 11, color: "#78828c" }}>Click or drop another file to replace</div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 32, opacity: 0.35 }}>↑</div>
+                    <div style={{ fontSize: 14, color: "#55595c" }}>Drag & drop or click to browse</div>
+                    <div style={{ fontSize: 11, color: "#78828c" }}>{typeDisplay} · Max {maxSizeMB} MB</div>
+                  </>
+                )}
               </div>
               <input ref={fileRef} type="file" accept={acceptedTypes} style={{ display: "none" }}
                 onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }} />
