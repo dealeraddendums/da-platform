@@ -516,7 +516,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           country: shipTo.country || 'US',
           phone: shipTo.phone || '',
         },
-        shipperReference: shipTo.attention || null,
+        // shipperReference = our DA-* xpsOrderId so the daily tracking cron
+        // can find this shipment back via GET /shipments?shipperReference=…
+        // once Virginia prints the label. XPS's /shipments lookup by our
+        // path-param treats the id as an internal bookNumber and 404s; the
+        // shipperReference query is the only working linkage. The attention
+        // contact stays on the receiver line (shipperReference2 carries it
+        // for printout) so the picker still sees who the box is for.
+        shipperReference: xpsOrderId,
+        shipperReference2: shipTo.attention || null,
         items: items.map((item, i) => ({
           productId: item.sku,
           sku: item.sku,

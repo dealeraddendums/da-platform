@@ -120,26 +120,71 @@ export interface XpsShipmentStatus {
 }
 
 /**
- * GET /customers/:customerId/shipments/:orderId — used by the daily cron to
- * sync xps_status + xps_tracking_number into label_orders. XPS returns the
- * shipment for an order if one exists; otherwise 404.
+ * GET /customers/:customerId/shipments?shipperReference=:ref
+ *
+ * Used by the daily tracking cron to find the shipment XPS created when
+ * Virginia printed a label. The path-style GET /shipments/:id endpoint
+ * treats the id as an XPS-internal numeric bookNumber (not our DA-*
+ * orderId), so the only working linkage is via shipperReference — which
+ * the label-order POST sets to our xpsOrderId at order create time.
+ *
+ * Defensive: XPS has historically ignored filter parameters on this list
+ * endpoint, returning the first batch of customer-wide historical
+ * shipments instead. We verify that the returned shipment's
+ * shipperReference actually matches before treating it as a match, and
+ * fall back to scanning shipperReference2 + trackingNumbers in case
+ * the linkage flipped fields. Returns null when nothing matches.
  */
-export async function getShipment(xpsOrderId: string): Promise<XpsShipmentStatus | null> {
-  const url = `${BASE}/customers/${customerId()}/shipments/${encodeURIComponent(xpsOrderId)}`;
+export async function findShipmentByReference(reference: string): Promise<XpsShipmentStatus | null> {
+  const url = `${BASE}/customers/${customerId()}/shipments?shipperReference=${encodeURIComponent(reference)}`;
   const res = await fetch(url, { headers: authHeaders() });
   if (res.status === 404) return null;
   const text = await readBody(res);
-  if (!res.ok) throw new XpsError(res.status, `getShipment ${res.status}`, text);
+  if (!res.ok) throw new XpsError(res.status, `findShipmentByReference ${res.status}`, text);
+  let parsed: Record<string, unknown>;
   try {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    // XPS sometimes nests under { shipment: {...} } — accept both shapes.
-    const s = (parsed.shipment ?? parsed) as Record<string, unknown>;
-    return {
-      status: String(s.status ?? s.fulfillmentStatus ?? "unknown"),
-      trackingNumber: (s.trackingNumber ?? s.tracking ?? null) as string | null,
-      carrier: (s.carrier ?? s.serviceProvider ?? null) as string | null,
-    };
+    parsed = JSON.parse(text) as Record<string, unknown>;
   } catch (err) {
-    throw new XpsError(res.status, `getShipment parse: ${(err as Error).message}`, text);
+    throw new XpsError(res.status, `findShipmentByReference parse: ${(err as Error).message}`, text);
   }
+  const list = (parsed.shipments ?? []) as Array<Record<string, unknown>>;
+  // Only accept a hit when the shipment's own reference field genuinely
+  // matches what we asked for. XPS's filter param appears to be ignored
+  // on the test fixtures we've seen, so this guard prevents the cron
+  // from latching onto an unrelated historical shipment.
+  const match = list.find(s => {
+    if (s.shipperReference === reference) return true;
+    if (s.shipperReference2 === reference) return true;
+    return false;
+  });
+  if (!match) return null;
+  return {
+    status: String(match.status ?? match.fulfillmentStatus ?? "shipped"),
+    trackingNumber: (match.trackingNumber ?? (Array.isArray(match.trackingNumbers) ? match.trackingNumbers[0] : null) ?? null) as string | null,
+    carrier: (match.carrierCode ?? match.carrier ?? match.serviceProvider ?? null) as string | null,
+  };
+}
+
+/**
+ * GET /customers/:customerId/integrations/:integrationId/orders
+ *
+ * Returns the set of orders that XPS still considers "active" (not yet
+ * fulfilled). Used by the tracking cron as a secondary signal: when one
+ * of our previously-PUT xps_order_id values has dropped off this list,
+ * we infer the label has been printed (status → 'shipped') even if the
+ * shipperReference linkage hasn't surfaced the tracking number yet.
+ */
+export async function listActiveOrderIds(): Promise<Set<string>> {
+  const result = new Set<string>();
+  let url: string | null = `${BASE}/customers/${customerId()}/integrations/${integrationId()}/orders?limit=200`;
+  while (url) {
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) throw new XpsError(res.status, `listActiveOrderIds ${res.status}`, await readBody(res));
+    const parsed = await res.json() as { orders?: Array<{ orderId?: string }>; nextPageUrl?: string | null; hasMore?: boolean };
+    for (const o of parsed.orders ?? []) {
+      if (o.orderId) result.add(o.orderId);
+    }
+    url = (parsed.hasMore && parsed.nextPageUrl) ? parsed.nextPageUrl : null;
+  }
+  return result;
 }
