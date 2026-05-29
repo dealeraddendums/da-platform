@@ -361,8 +361,11 @@ async function provisionUser(
   admin: any,
   cfg: { email: string; role: string; dealer_id: string | null; group_id: string | null; full_name: string },
 ): Promise<{ entity_id: string; role: string; email: string; display_name: string; created: boolean }> {
-  // Check qa_test_environment first -- the auth user lookup by email
-  // isn't directly available via the typed client.
+  // Always reset the password on every setup run so a teardown/re-setup
+  // cycle (or any out-of-band password rotation) can never leave a QA
+  // account with a stale or unknown password. The fast path on
+  // "already provisioned" still applies — we just call updateUserById
+  // first instead of bailing out before it.
   const envRow = await admin
     .from("qa_test_environment")
     .select("entity_id")
@@ -370,6 +373,13 @@ async function provisionUser(
     .eq("email", cfg.email)
     .maybeSingle();
   if (envRow.data?.entity_id) {
+    const { error: pwErr } = await admin.auth.admin.updateUserById(envRow.data.entity_id, {
+      password: QA_PASSWORD,
+      email_confirm: true,
+    });
+    if (pwErr) {
+      throw new Error(`Password reset failed (${cfg.email}): ${pwErr.message}`);
+    }
     return { entity_id: envRow.data.entity_id, role: cfg.role, email: cfg.email, display_name: cfg.full_name, created: false };
   }
 
