@@ -16,11 +16,16 @@
 import { createAdminSupabaseClient } from "@/lib/db";
 import {
   getCustomer,
-  updateCustomer,
   billingConfigured,
   type BillingCustomerDetail,
 } from "@/lib/billing";
 import { calcGroupDiscountTier } from "@/lib/group-discount";
+
+// The four values calcGroupDiscountTier can ever emit. Any
+// subscriptionDiscount that isn't one of these is, by definition, a
+// custom value an operator hand-set in da-billing — and this sync must
+// not touch it under any circumstances.
+const AUTO_TIER_VALUES: ReadonlySet<number> = new Set([0, 10, 20, 30]);
 
 // da-billing's Customer type includes `subscriptionDiscount` and
 // `discountLocked` but lib/billing.ts's BillingCustomerDetail is the
@@ -86,21 +91,49 @@ export async function syncGroupDiscount(groupId: string): Promise<void> {
       return;
     }
 
-    // 5. Skip the round-trip when the value matches.
+    // 5. Custom-value guard: if the current subscriptionDiscount isn't one
+    //    of the auto-tier values (0/10/20/30), an operator has hand-set it
+    //    in da-billing and the sync must not touch it. This catches the
+    //    case where discountLocked wasn't flipped but the value is clearly
+    //    not auto-tier (e.g. 17%). Prevents a dealer-count change from
+    //    wiping a custom discount.
     const currentTier = Number(customer.subscriptionDiscount ?? 0);
+    if (!AUTO_TIER_VALUES.has(currentTier)) {
+      console.log(
+        `[group-discount] group ${groupId} (${group.name}) has custom subscriptionDiscount=${currentTier}% — skipping (auto-tier would have been ${newTier}%)`,
+      );
+      return;
+    }
+
+    // 6. Skip the round-trip when the value matches.
     if (currentTier === newTier) {
       return;
     }
 
-    // 6. Push the new tier.
-    await updateCustomer(group.billing_customer_id, {
-      // updateCustomer's typed fields don't include subscriptionDiscount;
-      // lib/billing.ts forwards the JSON body verbatim to da-billing
-      // PUT /customers/:id, so the extra field flows through the
-      // existing customer-spread pattern on the server side.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      subscriptionDiscount: newTier,
-    } as any);
+    // 7. Push the new tier. PUT /customers/:id directly here (instead of
+    //    via updateCustomer) so we can tag this request with the
+    //    X-DA-Auto-Tier-Sync header — da-billing uses that as a second
+    //    line of defense, ignoring subscriptionDiscount in the body when
+    //    the header is present and the existing value is non-auto-tier.
+    const BASE = "https://billing.dealeraddendums.com/api/v1";
+    const apiKey = process.env.BILLING_API_KEY;
+    if (!apiKey) {
+      console.warn("[group-discount] BILLING_API_KEY not set — skipping");
+      return;
+    }
+    const res = await fetch(`${BASE}/customers/${encodeURIComponent(group.billing_customer_id)}`, {
+      method: "PUT",
+      headers: {
+        "X-API-Key": apiKey,
+        "Content-Type": "application/json",
+        "X-DA-Auto-Tier-Sync": "1",
+      },
+      body: JSON.stringify({ subscriptionDiscount: newTier }),
+    });
+    if (!res.ok) {
+      console.error(`[group-discount] PUT failed for group ${groupId}: ${res.status} ${await res.text().catch(() => "")}`);
+      return;
+    }
     console.log(`[group-discount] group ${groupId} (${group.name}): ${dealerCount} active dealers → ${currentTier}% → ${newTier}%`);
   } catch (err) {
     console.error(
