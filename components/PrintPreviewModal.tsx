@@ -130,11 +130,28 @@ export default function PrintPreviewModal({
   useEffect(() => {
     if (!pdfUrl) return;
     if (pdfUrl.startsWith("blob:")) { setBlobUrl(pdfUrl); return; }
-    let objectUrl: string;
+    // Cross-origin signed S3 URL (Phase E async path). Try to convert to
+    // a blob URL so the Send-to-Printer button has a same-origin source,
+    // but if the S3 bucket doesn't have CORS allowed for our origin the
+    // fetch will reject — in that case fall back to the signed URL
+    // directly. The <iframe> tag has no CORS restriction for display, so
+    // the preview still renders even without the blob conversion.
+    let objectUrl: string | null = null;
+    let cancelled = false;
     fetch(pdfUrl)
       .then(r => r.blob())
-      .then(blob => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); });
-    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+      .then(blob => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setBlobUrl(pdfUrl);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [pdfUrl]);
 
   const label = DOC_LABELS[docType];
