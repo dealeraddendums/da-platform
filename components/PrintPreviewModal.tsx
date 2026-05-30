@@ -26,6 +26,38 @@ const DOC_PAPER: Record<DocType, string> = {
   buyer_guide: "standard",
 };
 
+/**
+ * Poll /api/pdf/status/:jobId every second until the service reports
+ * complete (returns signedUrl) or failed (throws). Stops early when
+ * `isCancelled()` returns true so an unmount halts polling immediately.
+ * `setLabel` updates the spinner text — moves from "Rendering…" to
+ * "Uploading…" to give a sense of progress.
+ */
+async function pollUntilComplete(
+  statusUrl: string,
+  isCancelled: () => boolean,
+  setLabel: (s: string) => void,
+): Promise<string> {
+  const deadline = Date.now() + 120_000; // 2 min cap, matches server poll
+  let tick = 0;
+  while (Date.now() < deadline) {
+    if (isCancelled()) throw new Error("cancelled");
+    const res = await fetch(statusUrl);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const j = await res.json() as {
+      status: "pending" | "running" | "complete" | "failed";
+      signedUrl?: string;
+      error?: string;
+    };
+    if (j.status === "complete" && j.signedUrl) return j.signedUrl;
+    if (j.status === "failed") throw new Error(j.error ?? "PDF render failed");
+    tick++;
+    setLabel(tick < 3 ? "Rendering…" : tick < 8 ? "Almost ready…" : "Finalizing…");
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  throw new Error("PDF render timed out");
+}
+
 export default function PrintPreviewModal({
   dealerVehicleId,
   docType,
@@ -37,6 +69,7 @@ export default function PrintPreviewModal({
   const [pdfUrl, setPdfUrl] = useState<string | null>(preloadedUrl ?? null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [generating, setGenerating] = useState(!preloadedUrl);
+  const [progressLabel, setProgressLabel] = useState("Rendering…");
   const [genError, setGenError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -52,7 +85,12 @@ export default function PrintPreviewModal({
           paperSize: DOC_PAPER[docType],
         };
 
-        const res = await fetch("/api/pdf/generate", {
+        // ?async=1 asks the server to enqueue and return { jobId } so
+        // the UI can show progress while the PDF service renders.
+        // If USE_PDF_SERVICE is OFF on the server, the endpoint
+        // ignores ?async and returns PDF bytes directly — we detect
+        // that via Content-Type and fall back to the blob path.
+        const res = await fetch("/api/pdf/generate?async=1", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -62,8 +100,20 @@ export default function PrintPreviewModal({
           throw new Error(json.error ?? "PDF generation failed");
         }
         if (cancelled) return;
-        const blob = await res.blob();
-        setPdfUrl(URL.createObjectURL(blob));
+
+        const contentType = res.headers.get("content-type") ?? "";
+        if (contentType.includes("application/json")) {
+          // Async path: poll until complete, then use the signed URL.
+          const j = await res.json() as { jobId: string; statusUrl: string };
+          const signedUrl = await pollUntilComplete(j.statusUrl, () => cancelled, setProgressLabel);
+          if (cancelled) return;
+          setPdfUrl(signedUrl);
+        } else {
+          // Sync path: response body is the PDF bytes (USE_PDF_SERVICE off
+          // OR async wasn't honored). Blob it like the old flow.
+          const blob = await res.blob();
+          setPdfUrl(URL.createObjectURL(blob));
+        }
         onPrinted?.();
       } catch (e) {
         if (!cancelled) setGenError(e instanceof Error ? e.message : "PDF generation failed");
@@ -138,7 +188,7 @@ export default function PrintPreviewModal({
                 animation: "ppm-spin 0.8s linear infinite",
               }} />
               <p style={{ color: "var(--text-secondary)", fontSize: 14, margin: 0 }}>
-                Generating {label}…
+                {label} — {progressLabel}
               </p>
             </div>
           )}

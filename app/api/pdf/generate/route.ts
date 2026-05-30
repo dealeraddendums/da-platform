@@ -5,7 +5,7 @@ import type { VehicleAuditLogInsert, AddendumHistoryInsert, AddendumDataInsert, 
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
-import { useService as usePdfService, renderViaService } from "@/lib/pdf-service-client";
+import { useService as usePdfService, renderViaService, enqueueGenerate, awaitJobAndFetch } from "@/lib/pdf-service-client";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 
 type BgOption = { option_name: string; option_price?: string; description?: string | null; required?: boolean };
@@ -722,6 +722,46 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       vin: dv.vin,
       docType,
     });
+
+    // Phase E: async mode. Browser sends ?async=1 to get a jobId back
+    // immediately, then polls /api/pdf/status/:jobId for completion.
+    // Only meaningful when the service path is on — the local Puppeteer
+    // path doesn't know about jobs, so it falls through to the sync
+    // bytes response below.
+    //
+    // logGeneratePdf still has to run (print_history, dealer_vehicles
+    // print flags, audit log) — we fire-and-forget a poller in the
+    // background that fetches the rendered buffer once the service
+    // marks complete and then runs the existing side-effect pipeline.
+    // From the user's perspective the print is "done" the moment the
+    // signed URL loads; the DB write happens shortly after.
+    const asyncMode = req.nextUrl.searchParams.get("async") === "1";
+    if (asyncMode && usePdfService()) {
+      try {
+        const { jobId } = await enqueueGenerate(html, {
+          paperSize: effectivePaperSizeStr,
+          customDims: customPaperDims,
+        }, s3Key);
+        // Fire-and-forget completion: poll the EXISTING jobId (not a
+        // new render), fetch bytes once complete, run the logging
+        // pipeline. Closure captures scope vars so no re-query.
+        void (async () => {
+          try {
+            const result = await awaitJobAndFetch(jobId);
+            await logGeneratePdf(result.buffer, s3Key, dealerVehicleId, dv, dealer, claims, docType, options, admin);
+          } catch (err) {
+            console.error("[pdf/generate async] completion failed for job", jobId, err instanceof Error ? err.message : err);
+          }
+        })();
+        return NextResponse.json({
+          jobId,
+          statusUrl: `/api/pdf/status/${jobId}`,
+          s3Key,
+        });
+      } catch (err) {
+        return NextResponse.json({ error: err instanceof Error ? err.message : "PDF enqueue failed" }, { status: 500 });
+      }
+    }
 
     let pdfBuffer: Buffer;
     try {

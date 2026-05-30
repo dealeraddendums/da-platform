@@ -167,3 +167,69 @@ export async function renderBuyerGuideViaService(
   const buffer = await fetchSigned(done.signedUrl);
   return { buffer, s3Key: done.s3Key };
 }
+
+// ── Phase E: fire-and-poll helpers ───────────────────────────────────────────
+//
+// These return the jobId immediately instead of polling-and-streaming. The
+// caller (a Next.js route in async mode) ships the jobId to the browser, the
+// browser polls /api/pdf/status/:jobId on da-platform, da-platform proxies
+// to the PDF service. Used when the client sends ?async=1.
+
+export async function enqueueGenerate(
+  html: string,
+  opts: RenderOpts,
+  s3Key: string,
+): Promise<{ jobId: string }> {
+  return postJson("/api/pdf/generate", {
+    html,
+    paperSize: opts.paperSize ?? "standard",
+    customDims: opts.customDims,
+    allPages: opts.allPages ?? false,
+    s3Key,
+  });
+}
+
+export async function enqueueBuyerGuide(
+  srcPdfBytes: Buffer,
+  input: unknown,
+  s3Key: string,
+): Promise<{ jobId: string }> {
+  return postJson("/api/pdf/buyer-guide", {
+    srcPdfBase64: srcPdfBytes.toString("base64"),
+    input,
+    s3Key,
+  });
+}
+
+/**
+ * Wait for an already-enqueued job to finish and return its buffer.
+ * Used by the async route flow: enqueueGenerate returns the jobId
+ * immediately (so the browser can start polling), then the route
+ * fire-and-forgets this to complete the DB-logging pipeline.
+ */
+export async function awaitJobAndFetch(jobId: string): Promise<{ buffer: Buffer; s3Key: string }> {
+  const done = await pollUntilDone(jobId);
+  if (!done.signedUrl || !done.s3Key) {
+    throw new Error("pdf-service complete but missing signedUrl/s3Key");
+  }
+  const buffer = await fetchSigned(done.signedUrl);
+  return { buffer, s3Key: done.s3Key };
+}
+
+/**
+ * Server-side proxy lookup for the job status. Called from
+ * GET /api/pdf/status/:jobId on da-platform to keep the PDF service URL
+ * private (the browser never sees 172.31.71.67).
+ */
+export async function fetchJobStatus(jobId: string): Promise<StatusResponse> {
+  const res = await fetch(`${baseUrl()}/api/pdf/status/${encodeURIComponent(jobId)}`, {
+    headers: headers(),
+  });
+  if (res.status === 404) {
+    return { jobId, status: "failed", error: "Job not found or expired" };
+  }
+  if (!res.ok) {
+    throw new Error(`pdf-service status ${res.status}`);
+  }
+  return res.json() as Promise<StatusResponse>;
+}
