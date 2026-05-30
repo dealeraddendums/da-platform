@@ -897,6 +897,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       mergedBuffer = result.buffer;
       // Splice each per-item signedUrl onto the matching bgJob so
       // uploadAndLogBulkJob skips its own uploadPdf.
+      //
+      // Self-heal for the missing per-vehicle {VIN}.pdf bug: the single-print
+      // path always re-uploads the per-vehicle PDF from da-platform as a
+      // safety net (see pdf/generate — "second PUT is a no-op overwrite").
+      // Bulk had no equivalent — it trusts the PDF service to upload each
+      // jobs[i].s3Key. When the service returns no signedUrl for an item (it
+      // didn't upload the per-vehicle PDF), reconstruct that vehicle's page
+      // from the merged PDF and stash it on bgJob.pdfBuffer so the existing
+      // background uploadAndLogBulkJob path writes the canonical per-vehicle
+      // slot. Auto-disables the moment the service starts returning signedUrls.
+      let mergedDocForSplit: PDFDocument | null = null;
+      let canSplit = false;
+      if (!result.items.every(it => it?.signedUrl)) {
+        try {
+          mergedDocForSplit = await PDFDocument.load(mergedBuffer);
+          // Safe only when the merge is exactly one page per vehicle — true
+          // for addendum + infosheet, the only docTypes that reach this path.
+          canSplit = mergedDocForSplit.getPageCount() === serviceItems.length;
+          if (!canSplit) {
+            console.warn(`[BULK] per-vehicle fallback skipped — merged pages=${mergedDocForSplit.getPageCount()} != items=${serviceItems.length}`);
+          }
+        } catch (err) {
+          console.error("[BULK] merged PDF load for per-vehicle fallback failed:", err instanceof Error ? err.message : err);
+        }
+      }
       for (let i = 0; i < serviceItems.length; i++) {
         const vehicleId = serviceItems[i].vehicleId;
         const itemResult = result.items[i];
@@ -904,6 +929,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         if (!bgJob) continue;
         if (itemResult?.signedUrl) {
           bgJob.preUploadedSignedUrl = itemResult.signedUrl;
+        } else if (canSplit && mergedDocForSplit) {
+          // Service didn't upload this one — extract its page and let the
+          // background logging path upload it to bgJob.s3Key.
+          try {
+            const single = await PDFDocument.create();
+            const [pg] = await single.copyPages(mergedDocForSplit, [i]);
+            single.addPage(pg);
+            bgJob.pdfBuffer = Buffer.from(await single.save());
+            console.warn(`[BULK] service skipped per-vehicle upload vehicleId=${vehicleId} — recovering ${bgJob.s3Key} from merged-split fallback`);
+          } catch (err) {
+            console.error(`[BULK] per-vehicle fallback split failed vehicleId=${vehicleId}:`, err instanceof Error ? err.message : err);
+          }
         } else if (itemResult?.error) {
           console.error(`[BULK] service item failed vehicleId=${vehicleId}: ${itemResult.error}`);
         }

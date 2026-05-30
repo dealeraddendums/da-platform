@@ -118,11 +118,12 @@ All UI labels use **Products** not Options. **Bodystyle** not Style. Code identi
 - `applyVehicleDataToWidgets()` called on: init, switchPaperSize, template load
 
 ### PDF Naming
-- Single: `{internal_id}/{vehicle_uuid}/{VIN}.pdf`
-- Infosheet: `{internal_id}/{vehicle_uuid}/{VIN}_infosheet.pdf`
-- Buyer's Guide: `{internal_id}/{vehicle_uuid}/{VIN}_buyers_guide.pdf`
-- Bulk combined: `[DealerName]_Addendums_[date].pdf`
-- Bulk also saves individual `{VIN}.pdf` per vehicle to S3
+Per-vehicle PDFs are stored **flat at the bucket root, keyed by uppercased VIN**, and overwritten in place on reprint — no nested folders, no timestamps. Storage uppercases the VIN to match the dealer-website lookup in `lib/addendum.ts` (`checkPdfExists` HEADs `${BUCKET}/{VIN}.pdf`); S3 keys are case-sensitive so the two must agree. `buildPdfKey()` in `lib/s3-upload.ts` is the only place the per-vehicle key is built.
+- Addendum: `{VIN}.pdf`
+- Infosheet: `{VIN}_infosheet.pdf`
+- Buyer's Guide: `{VIN}_buyers_guide.pdf` (Spanish: `{VIN}_buyers_guide_es.pdf`)
+- Reprints overwrite the same key — never a new version/timestamp.
+- Bulk combined: `{…}_bulk_{n}_{ts}.pdf` — merged print bundle, not a per-VIN file. Each vehicle in a bulk run is ALSO written to its `{VIN}.pdf` slot (parity with single print; see `app/api/pdf/bulk/route.ts` self-heal fallback).
 
 ## Product Rules Engine
 - `applies_to = 'rules'` evaluated at addendum page load AND PDF generation
@@ -759,7 +760,7 @@ Existing app (screenshots captured) — use as UX reference, not codebase. The n
 
 ### Code items
 - ⬜ NHTSA trim pagination fix — harvester only processes 1000 VINs (Supabase page limit)
-- 🟡 Phase 10b — PDF Microservice: A–E live on prod (`USE_PDF_SERVICE=1`). Remaining: D.5 (bulk cutover — service must honor `items[].s3Key`), E.2 (drop puppeteer dep; blocked by D.5)
+- ✅ Phase 10b — PDF Microservice: fully cut over. D.5 (bulk → service, per-vehicle `items[].s3Key`) and E.2 (puppeteer removed from da-platform) both shipped — commits efe91fb, 9bfbf35. Only the bulk `buyer_guide` pdf-lib overlay still renders locally.
 - ⬜ Phase 12 — Enterprise White Label (custom subdomains + branding for large groups)
 - ⬜ Phase 13 — Dealer Self-Serve Onboarding (magic link → password → FreshBooks unwind)
 - ⬜ Phase 14 — HubSpot + Billing Sync
@@ -818,7 +819,7 @@ BILLING_API_KEY=dab_b1ce5e7768aef3f94e652a69303f3ecce44f487244824e96562c9d0704b5
 BILLING_PUBLIC_URL=https://billing.dealeraddendums.com   # customer-facing pay URL base; default if unset
 PDF_SERVICE_URL=http://172.31.71.67:3001                 # Phase 10b PDF microservice (internal only)
 PDF_SERVICE_API_KEY=                                     # X-API-Key for da-pdf-service
-USE_PDF_SERVICE=1                                         # 1/true → /generate + /buyers-guide via service; 0 → local Puppeteer fallback
+USE_PDF_SERVICE=1                                         # 1/true → render via PDF service; 0 (or missing URL/key) → routes return 503 (no local Puppeteer fallback — removed in E.2)
 XPS_API_KEY=Jx5vg3PLLL0HGCQV4YAyIuHdAMf0sXKb
 XPS_CUSTOMER_ID=12302875
 XPS_INTEGRATION_ID=91819

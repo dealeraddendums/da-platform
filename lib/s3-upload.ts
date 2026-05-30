@@ -21,15 +21,21 @@ export function buildPdfKey(opts: {
   vin: string | null | undefined;
   docType: PdfDocType;
 }): string {
-  const dealerSegment = opts.internalId != null && String(opts.internalId).trim()
-    ? String(opts.internalId).trim()
-    : opts.dealerIdFallback;
+  // Flat, VIN-named key at the bucket root. Addendum is the bare {VIN}.pdf
+  // slot; infosheet / buyer's guide get suffixed siblings. Uppercased to
+  // match the dealer-website lookup in lib/addendum.ts (checkPdfExists HEADs
+  // `${BUCKET}/${vin.toUpperCase()}.pdf`) — S3 keys are case-sensitive, so
+  // storage and lookup must agree. Reprints reuse the same key and overwrite
+  // in place (no per-print timestamps, no nested folders). Falls back to the
+  // vehicle UUID when VIN is missing so we never emit an empty filename.
+  // internalId / dealerIdFallback stay in the signature for callers but are
+  // no longer part of the key.
   const vinTrimmed = opts.vin?.trim();
-  const filename = vinTrimmed && vinTrimmed.length > 0 ? vinTrimmed : opts.vehicleUuid;
+  const filename = vinTrimmed && vinTrimmed.length > 0 ? vinTrimmed.toUpperCase() : opts.vehicleUuid;
   const suffix = opts.docType === 'infosheet' ? '_infosheet'
     : opts.docType === 'buyer_guide' ? '_buyers_guide'
     : '';
-  return `${dealerSegment}/${opts.vehicleUuid}/${filename}${suffix}.pdf`;
+  return `${filename}${suffix}.pdf`;
 }
 
 function getClient(): S3Client {
