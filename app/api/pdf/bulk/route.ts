@@ -8,12 +8,7 @@ import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
-// Phase 10b note: bulk stays on local Puppeteer for now. The service's
-// /api/pdf/bulk endpoint only returns the merged output, but this route
-// also needs each per-vehicle PDF buffer for per-VIN S3 uploads (dealer
-// website links). Cutover blocked on adding items[].s3Key support to the
-// service so it can do all the per-vehicle uploads server-side. Tracked
-// as Phase D.5 in the task list.
+import { useService as usePdfService, renderBulkViaService, type BulkItem } from "@/lib/pdf-service-client";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
@@ -26,7 +21,13 @@ type LibRow = Record<string, unknown>;
 
 interface BulkBgJob {
   vehicleId: string;
-  pdfBuffer: Buffer;
+  /** Present when da-platform rendered locally; the post-loop log
+   *  pipeline uploads this buffer to s3Key. Absent when the PDF service
+   *  rendered + uploaded server-side — in that case
+   *  preUploadedSignedUrl carries the resulting 24h signed URL and
+   *  uploadAndLogBulkJob skips its own upload. */
+  pdfBuffer?: Buffer;
+  preUploadedSignedUrl?: string;
   s3Key: string;
   dvDealerId: string;
   dvVin: string | null;
@@ -42,11 +43,19 @@ async function uploadAndLogBulkJob(
 ): Promise<void> {
   let pdfUrl = "";
   let uploadedKey: string | null = null;
-  try {
-    pdfUrl = await uploadPdf(job.pdfBuffer, job.s3Key);
+  if (job.preUploadedSignedUrl) {
+    // Service path: per-vehicle PDF already uploaded by the PDF service.
+    pdfUrl = job.preUploadedSignedUrl;
     uploadedKey = job.s3Key;
-  } catch (err) {
-    console.error(`[BULK] S3 upload failed vehicleId=${job.vehicleId}:`, err instanceof Error ? err.message : err);
+  } else if (job.pdfBuffer) {
+    try {
+      pdfUrl = await uploadPdf(job.pdfBuffer, job.s3Key);
+      uploadedKey = job.s3Key;
+    } catch (err) {
+      console.error(`[BULK] S3 upload failed vehicleId=${job.vehicleId}:`, err instanceof Error ? err.message : err);
+    }
+  } else {
+    console.warn(`[BULK] no pdfBuffer or preUploadedSignedUrl for vehicleId=${job.vehicleId} — print_history.pdf_url will be null`);
   }
 
   const { error: phErr } = await admin.from("print_history").insert({
@@ -214,8 +223,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const knownSizes = new Set(["standard", "narrow", "infosheet"]);
   const admin = createAdminSupabaseClient();
+  const useService = usePdfService();
   const pdfBuffers: Buffer[] = [];
   const bgJobs: BulkBgJob[] = [];
+  // Service-path scratchpad. Parallel to bgJobs (same index per vehicle)
+  // when useService && docType !== "buyer_guide". Sent to
+  // renderBulkViaService after the loop; the merged buffer + per-item
+  // signedUrls come back together.
+  const serviceItems: (BulkItem & { vehicleId: string })[] = [];
   let firstDealerInternalId: string | null = null;
 
   const dealerSettingsCache = new Map<string, DealerSettingsRow | null>();
@@ -223,7 +238,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const templateMetaCache = new Map<string, { bgUrl?: string; fontScale?: number; paperSizeStr?: string }>();
   const libCache = new Map<string, LibRow[]>();
 
-  const sharedBrowser = await puppeteer.launch({
+  // Only launch a local Chrome when we're NOT using the PDF service.
+  // In service mode the loop collects HTML+s3Key into serviceItems and
+  // ships them as a single batch after the loop.
+  const sharedBrowser = useService ? null : await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
@@ -829,9 +847,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           dbDescription: vehicleData.DESCRIPTION ?? null,
           dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
         });
-        const pdfBuffer = await renderPdf(html, effectivePaperSizeStr, { customDims: customPaperDims, browser: sharedBrowser });
-        console.log(`[BULK]   pdf_rendered vehicleId=${vehicleId} bytes=${pdfBuffer.length}`);
-
         const s3Key = buildPdfKey({
           internalId: dealer?.internal_id ?? null,
           dealerIdFallback: dv.dealer_id,
@@ -839,34 +854,93 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           vin: dv.vin,
           docType,
         });
-        bgJobs.push({ vehicleId, pdfBuffer, s3Key, dvDealerId: dv.dealer_id, dvVin: dv.vin ?? null, dealerUuid: dealer?.id ?? null, docType, options });
-        pdfBuffers.push(pdfBuffer);
-        console.log(`[BULK]   rendered vehicleId=${vehicleId}`);
+
+        if (useService) {
+          // Service path: just queue the work; the rendered bytes + per-vehicle
+          // signedUrl come back from one batch call after the loop. bgJob
+          // intentionally has no pdfBuffer here — uploadAndLogBulkJob will
+          // use the service-supplied preUploadedSignedUrl filled in later.
+          serviceItems.push({
+            vehicleId,
+            html,
+            paperSize: effectivePaperSizeStr,
+            customDims: customPaperDims,
+            s3Key,
+          });
+          bgJobs.push({ vehicleId, s3Key, dvDealerId: dv.dealer_id, dvVin: dv.vin ?? null, dealerUuid: dealer?.id ?? null, docType, options });
+          console.log(`[BULK]   queued vehicleId=${vehicleId} (service mode)`);
+        } else {
+          const pdfBuffer = await renderPdf(html, effectivePaperSizeStr, { customDims: customPaperDims, browser: sharedBrowser! });
+          console.log(`[BULK]   pdf_rendered vehicleId=${vehicleId} bytes=${pdfBuffer.length}`);
+          bgJobs.push({ vehicleId, pdfBuffer, s3Key, dvDealerId: dv.dealer_id, dvVin: dv.vin ?? null, dealerUuid: dealer?.id ?? null, docType, options });
+          pdfBuffers.push(pdfBuffer);
+          console.log(`[BULK]   rendered vehicleId=${vehicleId}`);
+        }
 
       } catch (err) {
         console.error(`[BULK]   FAILED vehicleId=${vehicleId}:`, err instanceof Error ? err.message : err);
       }
     }
   } finally {
-    await sharedBrowser.close();
+    if (sharedBrowser) await sharedBrowser.close();
   }
 
-  console.log(`[BULK] Complete — rendered=${pdfBuffers.length} failed=${vehicleIds.length - pdfBuffers.length}`);
-
-  if (!pdfBuffers.length) {
-    return NextResponse.json({ error: "All vehicles failed to render" }, { status: 500 });
+  // ── Service-path render: one batch call, returns merged buffer + per-item signedUrls ──
+  let mergedBufferFromService: Buffer | null = null;
+  if (useService) {
+    if (serviceItems.length === 0) {
+      return NextResponse.json({ error: "No vehicles to render" }, { status: 500 });
+    }
+    const mergedKey = `${firstDealerInternalId ?? vehicleIds[0]}/${vehicleIds[0]}/${docType}_bulk_${vehicleIds.length}_${Date.now()}.pdf`;
+    try {
+      const result = await renderBulkViaService(
+        serviceItems.map(({ vehicleId: _vid, ...item }) => { void _vid; return item; }),
+        mergedKey,
+      );
+      mergedBufferFromService = result.buffer;
+      // Splice each per-item signedUrl onto the matching bgJob so
+      // uploadAndLogBulkJob can skip its own uploadPdf.
+      for (let i = 0; i < serviceItems.length; i++) {
+        const vehicleId = serviceItems[i].vehicleId;
+        const itemResult = result.items[i];
+        const bgJob = bgJobs.find(j => j.vehicleId === vehicleId);
+        if (!bgJob) continue;
+        if (itemResult?.signedUrl) {
+          bgJob.preUploadedSignedUrl = itemResult.signedUrl;
+        } else if (itemResult?.error) {
+          console.error(`[BULK] service item failed vehicleId=${vehicleId}: ${itemResult.error}`);
+        }
+      }
+      console.log(`[BULK] Complete via service — items=${serviceItems.length} mergedBytes=${mergedBufferFromService.length}`);
+    } catch (err) {
+      console.error("[BULK] service render failed:", err instanceof Error ? err.message : err);
+      return NextResponse.json({ error: err instanceof Error ? err.message : "PDF service render failed" }, { status: 500 });
+    }
+  } else {
+    console.log(`[BULK] Complete — rendered=${pdfBuffers.length} failed=${vehicleIds.length - pdfBuffers.length}`);
+    if (!pdfBuffers.length) {
+      return NextResponse.json({ error: "All vehicles failed to render" }, { status: 500 });
+    }
   }
 
-  // Merge all rendered PDFs into one document
+  // Merge all rendered PDFs into one document — only needed for the
+  // local path; service already returned a merged buffer.
   const merged = await PDFDocument.create();
   for (const buf of pdfBuffers) {
     const src = await PDFDocument.load(buf);
     const pages = await merged.copyPages(src, src.getPageIndices());
     pages.forEach(p => merged.addPage(p));
   }
-  const mergedBuffer = Buffer.from(await merged.save());
+  // Service path returns the merged bytes already; local path needs the
+  // pdf-lib save() above. Both routes converge on mergedBuffer.
+  const mergedBuffer = mergedBufferFromService ?? Buffer.from(await merged.save());
 
-  // S3 upload + DB logging — all happen in the background
+  // S3 upload + DB logging — all happen in the background.
+  // Service path: per-vehicle PDFs and merged PDF were already uploaded
+  // by the service. Only the print_history rows still need to land here,
+  // and uploadAndLogBulkJob honors job.preUploadedSignedUrl to skip its
+  // own upload. Local path: this is the original code — uploadPdf per
+  // vehicle + a final merged upload.
   const mergedKey = `${firstDealerInternalId ?? vehicleIds[0]}/${vehicleIds[0]}/${docType}_bulk_${vehicleIds.length}_${Date.now()}.pdf`;
   void Promise.all([
     ...bgJobs.map(job =>
@@ -874,12 +948,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         console.error(`[BULK] background logging failed vehicleId=${job.vehicleId}:`, err instanceof Error ? err.message : err)
       )
     ),
-    uploadPdf(mergedBuffer, mergedKey).catch(err =>
-      console.error("[BULK] merged S3 upload failed:", err instanceof Error ? err.message : err)
-    ),
+    ...(useService ? [] : [
+      uploadPdf(mergedBuffer, mergedKey).catch(err =>
+        console.error("[BULK] merged S3 upload failed:", err instanceof Error ? err.message : err)
+      ),
+    ]),
   ]);
 
-  return new NextResponse(mergedBuffer, {
+  return new NextResponse(mergedBuffer as unknown as BodyInit, {
     status: 200,
     headers: {
       "Content-Type": "application/pdf",

@@ -25,6 +25,17 @@ export interface BulkItem {
   paperSize?: string;
   customDims?: { widthIn: number; heightIn: number };
   allPages?: boolean;
+  /** Optional per-vehicle S3 key. When set, the service uploads each
+   *  rendered PDF to that key directly (saves a round-trip through
+   *  da-platform). Per-item s3Key/signedUrl come back in the status
+   *  response's `items[]` array. */
+  s3Key?: string;
+}
+
+export interface BulkItemResult {
+  s3Key: string | null;
+  signedUrl?: string;
+  error?: string;
 }
 
 interface StatusResponse {
@@ -32,6 +43,8 @@ interface StatusResponse {
   status: "pending" | "running" | "complete" | "failed";
   s3Key?: string;
   signedUrl?: string;
+  /** Present on bulk jobs. Parallel to the items[] array sent in. */
+  items?: BulkItemResult[];
   error?: string;
 }
 
@@ -137,7 +150,7 @@ export async function renderViaService(
 export async function renderBulkViaService(
   items: BulkItem[],
   s3Key: string,
-): Promise<{ buffer: Buffer; s3Key: string }> {
+): Promise<{ buffer: Buffer; s3Key: string; items: BulkItemResult[] }> {
   const { jobId } = await postJson("/api/pdf/bulk", {
     jobs: items,
     s3Key,
@@ -147,7 +160,7 @@ export async function renderBulkViaService(
     throw new Error("pdf-service bulk complete but missing signedUrl/s3Key");
   }
   const buffer = await fetchSigned(done.signedUrl);
-  return { buffer, s3Key: done.s3Key };
+  return { buffer, s3Key: done.s3Key, items: done.items ?? [] };
 }
 
 export async function renderBuyerGuideViaService(

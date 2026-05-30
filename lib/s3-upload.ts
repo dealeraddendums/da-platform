@@ -56,6 +56,25 @@ export async function uploadPdf(buffer: Buffer, key: string): Promise<string> {
     Body: buffer,
     ContentType: 'application/pdf',
   }));
+  return signPdfKey(key);
+}
+
+/**
+ * Produce a 24-hour signed GET URL for an existing key in the
+ * dealer-addendums bucket. Used by the bulk service path: the PDF
+ * service already uploaded the per-vehicle PDF, da-platform just needs
+ * a URL to store in print_history.pdf_url with the same TTL the local
+ * uploadPdf path produces, so dealer-website integrations see a
+ * consistent URL shape regardless of which code path generated it.
+ */
+export async function signPdfKey(key: string): Promise<string> {
+  const s3 = new S3Client({
+    region: 'us-west-1',
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+    },
+  });
   return getSignedUrl(
     s3,
     new GetObjectCommand({ Bucket: BUCKET, Key: key }),
