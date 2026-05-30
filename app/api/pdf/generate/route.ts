@@ -5,6 +5,7 @@ import type { VehicleAuditLogInsert, AddendumHistoryInsert, AddendumDataInsert, 
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
+import { useService as usePdfService, renderViaService } from "@/lib/pdf-service-client";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 
 type BgOption = { option_name: string; option_price?: string; description?: string | null; required?: boolean };
@@ -714,13 +715,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
     });
 
-    let pdfBuffer: Buffer;
-    try {
-      pdfBuffer = await renderPdf(html, effectivePaperSizeStr, { customDims: customPaperDims });
-    } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : "PDF render failed" }, { status: 500 });
-    }
-
     const s3Key = buildPdfKey({
       internalId: dealer?.internal_id ?? null,
       dealerIdFallback: dv.dealer_id,
@@ -728,6 +722,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       vin: dv.vin,
       docType,
     });
+
+    let pdfBuffer: Buffer;
+    try {
+      if (usePdfService()) {
+        // Phase 10b cutover. The service uploads to s3Key itself, but
+        // logGeneratePdf below still re-uploads via uploadPdf() so the
+        // DB row pdf_url remains the canonical signed URL produced by
+        // s3-upload.ts. Double-upload is intentional during dual-write:
+        // we keep both code paths writing the same key and the second
+        // PUT is a no-op overwrite of identical bytes.
+        const result = await renderViaService(html, {
+          paperSize: effectivePaperSizeStr,
+          customDims: customPaperDims,
+        }, s3Key);
+        pdfBuffer = result.buffer;
+      } else {
+        pdfBuffer = await renderPdf(html, effectivePaperSizeStr, { customDims: customPaperDims });
+      }
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : "PDF render failed" }, { status: 500 });
+    }
 
     // S3 upload + all DB logging happen in the background — PDF bytes returned immediately
     void logGeneratePdf(pdfBuffer, s3Key, dealerVehicleId, dv, dealer, claims, docType, options, admin)

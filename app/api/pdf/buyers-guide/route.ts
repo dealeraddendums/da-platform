@@ -4,6 +4,9 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { BuyersGuideDefaults } from "@/lib/db";
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
+import { useService as usePdfService, renderBuyerGuideViaService } from "@/lib/pdf-service-client";
+import { getBuyersGuidePdfBytes } from "@/lib/buyers-guide-storage";
+import type { BgKey } from "@/lib/buyers-guide-constants";
 import JSZip from "jszip";
 
 /**
@@ -100,7 +103,21 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
 
   const dealerUuid = dealer?.id ?? null;
 
-  function generateOneLang(lang: 'en' | 'es'): Promise<Buffer> {
+  async function generateOneLang(lang: 'en' | 'es', s3Key: string): Promise<Buffer> {
+    if (usePdfService()) {
+      // Service path: fetch the FTC background here (Supabase Storage)
+      // and ship the bytes over. Keeps the service Supabase-free.
+      const isImplied = warranty.warranty_type === 'implied_only';
+      const bgKey = `${lang === 'es' ? 'spanish' : 'english'}-${isImplied ? 'implied' : 'as-is-warranty'}` as BgKey;
+      const srcPdfBytes = await getBuyersGuidePdfBytes(bgKey, dealerUuid);
+      const result = await renderBuyerGuideViaService(srcPdfBytes, {
+        language: lang,
+        vehicle: vehicleData,
+        dealer: dealerData,
+        warranty,
+      }, s3Key);
+      return result.buffer;
+    }
     return buildBuyersGuidePdf({ language: lang, dealerUuid, vehicle: vehicleData, dealer: dealerData, warranty });
   }
 
@@ -122,9 +139,10 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
 
   // ── Generate ──────────────────────────────────────────────────────────────
   if (both) {
-    const [enBuffer, esBuffer] = await Promise.all([generateOneLang('en'), generateOneLang('es')]);
-    // Save the English buyer's guide to the canonical {VIN}_buyers_guide.pdf slot.
-    // Spanish is delivered in the zip but we keep one canonical buyer's guide per vehicle.
+    // Compute keys up front so the service uploads to the canonical
+    // {VIN}_buyers_guide.pdf path directly. English is canonical
+    // (logged to print_history); Spanish gets a sibling key so the
+    // service still uploads it, but we don't log a second row.
     const enKey = buildPdfKey({
       internalId: dealer?.internal_id ?? null,
       dealerIdFallback: dvDealerId,
@@ -132,6 +150,11 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
       vin: dv.vin,
       docType: 'buyer_guide',
     });
+    const esKey = enKey.replace(/_buyers_guide\.pdf$/, '_buyers_guide_es.pdf');
+    const [enBuffer, esBuffer] = await Promise.all([
+      generateOneLang('en', enKey),
+      generateOneLang('es', esKey),
+    ]);
     void logPrint(enBuffer, enKey).catch(err =>
       console.error("[buyers-guide] background logging error:", err instanceof Error ? err.message : err)
     );
@@ -152,7 +175,6 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  const buffer = await generateOneLang(language);
   const s3Key = buildPdfKey({
     internalId: dealer?.internal_id ?? null,
     dealerIdFallback: dvDealerId,
@@ -160,6 +182,7 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     vin: dv.vin,
     docType: 'buyer_guide',
   });
+  const buffer = await generateOneLang(language, s3Key);
   void logPrint(buffer, s3Key).catch(err =>
     console.error("[buyers-guide] background logging error:", err instanceof Error ? err.message : err)
   );

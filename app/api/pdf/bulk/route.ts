@@ -8,6 +8,12 @@ import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
+// Phase 10b note: bulk stays on local Puppeteer for now. The service's
+// /api/pdf/bulk endpoint only returns the merged output, but this route
+// also needs each per-vehicle PDF buffer for per-VIN S3 uploads (dealer
+// website links). Cutover blocked on adding items[].s3Key support to the
+// service so it can do all the per-vehicle uploads server-side. Tracked
+// as Phase D.5 in the task list.
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
