@@ -3,7 +3,6 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { VehicleAuditLogInsert, AddendumHistoryInsert, AddendumDataInsert, DealerSettingsRow } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
-import { renderPdf } from "@/lib/pdf-renderer";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { useService as usePdfService, renderViaService, enqueueGenerate, awaitJobAndFetch } from "@/lib/pdf-service-client";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
@@ -763,23 +762,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
+    // Phase 10b: PDF service is the only render path. Local Puppeteer
+    // was removed in Phase E.2 (commit notes for context). If the
+    // service env isn't configured, error rather than render something
+    // half-baked.
+    if (!usePdfService()) {
+      return NextResponse.json({ error: "PDF service not configured (PDF_SERVICE_URL + PDF_SERVICE_API_KEY required)" }, { status: 503 });
+    }
     let pdfBuffer: Buffer;
     try {
-      if (usePdfService()) {
-        // Phase 10b cutover. The service uploads to s3Key itself, but
-        // logGeneratePdf below still re-uploads via uploadPdf() so the
-        // DB row pdf_url remains the canonical signed URL produced by
-        // s3-upload.ts. Double-upload is intentional during dual-write:
-        // we keep both code paths writing the same key and the second
-        // PUT is a no-op overwrite of identical bytes.
-        const result = await renderViaService(html, {
-          paperSize: effectivePaperSizeStr,
-          customDims: customPaperDims,
-        }, s3Key);
-        pdfBuffer = result.buffer;
-      } else {
-        pdfBuffer = await renderPdf(html, effectivePaperSizeStr, { customDims: customPaperDims });
-      }
+      // The service uploads to s3Key itself; logGeneratePdf below
+      // re-uploads via uploadPdf() so the DB row pdf_url is the
+      // canonical 24h signed URL from s3-upload.ts. Second PUT is a
+      // no-op overwrite of identical bytes.
+      const result = await renderViaService(html, {
+        paperSize: effectivePaperSizeStr,
+        customDims: customPaperDims,
+      }, s3Key);
+      pdfBuffer = result.buffer;
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : "PDF render failed" }, { status: 500 });
     }

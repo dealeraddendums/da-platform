@@ -36,8 +36,8 @@
 - Next.js 14.2.35 (App Router)
 - Supabase (auth + all app data)
 - Aurora MySQL (READ ONLY — dead code removed, never query)
-- Puppeteer (PDF generation)
-- pdf-lib (Buyer's Guide overlay)
+- **da-pdf-service** microservice for Puppeteer rendering (Phase 10b — see section below). HTML→PDF for addendums/infosheets, pdf-lib FTC overlays for buyer's guides, S3 upload — all happens on `http://172.31.71.67:3001`. da-platform no longer depends on `puppeteer`.
+- pdf-lib (used locally only for bulk buyer_guide branch overlay; the single buyers-guide route routes through the microservice)
 - S3 `dealer-addendums` bucket (us-west-1, PDF storage, 24hr signed URLs)
 - Mapbox GL JS (dealer map)
 - Mandrill (transactional email)
@@ -241,8 +241,10 @@ addendum_data (
 
 ### Group Controls Templates (per-dealer)
 - `dealers.group_controls_templates` boolean (default false)
-- When true: Builder nav hidden for dealer, Print Settings template dropdowns read-only
+- When true AND `group_id IS NOT NULL`: Builder nav hidden for dealer, Print Settings template dropdowns read-only
+- ⚠️ **Defensive rule:** always AND with `group_id IS NOT NULL` in gating checks (`layout.tsx`, `settings/page.tsx`, `builder/page.tsx`) — a stale `true` on a standalone dealer must never strip Builder access
 - group_admin ghost mode: Builder always accessible
+- `provisionDealer()` in QA setup route explicitly sets this flag on insert and re-run upserts: standalone dealers → `false`, grouped dealers → `true`
 
 ## Dealer Management
 
@@ -357,10 +359,40 @@ Simple CRUD — DEALER_NAME, DEALER_ID only.
 - Dealer removed from group → revert to dealer-pays-everything
 - Dealer deactivated → archive in da-billing
 
+### Billing Tab — Plan Name Mapping
+The Current Subscription card PLAN field maps da-billing product type → display name:
+- Contains "Manual" → `"Manual"`
+- Contains "Automatic Web" or "AutomaticWeb" → `"Automatic Web"`
+- Contains "Automatic DMS" or "AutomaticDMS" → `"Automatic DMS"`
+
 ### Label orders
+- **Both `dealer_admin` and `dealer_user` can place label orders** — `dealer_restricted` cannot
+- `canEdit` (profile/shipping) is separate from `canOrderLabels` (label orders) in `app/(dashboard)/profile/page.tsx` — dealer_user can order but cannot edit dealer profile or shipping address
+- Label orders require an active da-billing template on the dealer — without one the API returns 403 "not available on your current plan" regardless of role
+- **Recommended label size feature:** Order Labels tab detects dealer's active addendum template(s) from `dealer_settings.default_addendum_new` / `default_addendum_used`, reads `template_json.paperSize`, and highlights matching label SKU cards with an orange `#ffa500` "Recommended" pill + border. Tip banner shown below grid. Silent fallback if no template assigned. Never disables ordering. Mixed sizes (new/used templates differ) shows both in tip.
+  - `paperSize: "standard"` → 4.25" cards (8300-1, 9300-1)
+  - `paperSize: "narrow"` → 3.125" cards (8300-3, 9300-3)
+  - `paperSize: "full"` → 8.5" cards (8300, 9300)
 - Creates XPS shipping order + da-billing template line item
 - Stored in `label_orders` Supabase table
-- Daily tracking sync: `POST /api/cron/sync-xps-tracking` → `0 10 * * *`
+- **Tracking:** XPS pushes tracking updates via webhook to `POST /api/webhooks/xps` — correlates by `orderId`, updates `xps_status` / `xps_tracking_number` / `xps_carrier` on `label_orders`
+- **xps_webhook_log table** — every raw XPS webhook payload logged here; use this to debug unexpected field names before touching the parser
+- **Webhook parser** handles multiple payload shapes: `orderId`/`orderNumber`/`shipperReference`, top-level vs nested under `shipment`, `trackingNumber` vs `trackingNumbers[0]`
+- **Carrier tracking URLs** — Orders tab uses carrier-specific URLs (USPS/UPS/FedEx/DHL), not Google search links
+- **Old polling cron retired** — `POST /api/cron/sync-xps-tracking` is now a no-op; EasyCron job 11088481 ("XPS Tracking", `0 10 * * *`) safe to delete once first real webhook fires and confirms tracking lands correctly
+- **XPS webhook endpoints:**
+  - `GET /api/webhooks/xps/orders` — List Orders stub (always returns `{"orders":[]}`, required by XPS to save integration config; we push orders via REST at order time so this is always empty)
+  - `POST /api/webhooks/xps` — Update Order receiver (tracking numbers, shipment status)
+- **XPS integration config:** List Orders URL → `/api/webhooks/xps/orders`, Update Order URL → `/api/webhooks/xps`, Secret Key in `XPS_WEBHOOK_SECRET` env var
+- Both endpoints validate `XPS_WEBHOOK_SECRET`, log to `xps_webhook_log`
+- **Fulfillment workflow:** DA Platform creates XPS order → Virginia sees it in her XPS queue → she packs and prints the label in XPS → tracking number generated at that point → daily cron pulls tracking and updates the order. No tracking number at order time is correct and expected.
+- **Billing is DA-internal only** — dealers never see billing status on label orders. All billing status indicators hidden from dealer-facing UI. Only super-admin views may show billing status.
+- **XPS payload spec (per line item):**
+  - `quantity: 1` always — one shipment per SKU line, never the label count
+  - `title: "{Product Name} x{labelCount}"` e.g. "Regular Addendums x2000"
+  - `unitPrice: orderLineTotal` — the total price for that SKU+quantity combination
+  - `weight: 0` on the line item — package-level weight is set separately from `lib/label-weights.ts` (flat per-SKU, summed for mixed carts)
+  - Mixed carts: one line item per SKU, package weight = sum of all SKU weights
 - Billing routing: `labels_billed_to = 'group'` → append to group template; `labels_billed_to = 'dealer'` with active template → append to dealer template; `labels_billed_to = 'dealer'` + group but no template → one-time invoice; Free/Trial + no group → blocked with upgrade message
 - Free/Trial dealers see upgrade notice, Place Order hidden
 - Label line item format: `{internal_id}::{name}::{sku}` (SKU appended for uniqueness on multi-SKU orders)
@@ -403,14 +435,53 @@ Super Admin can assign an existing standalone dealer to a group from the dealer 
 
 ## Migration Status
 
-Current highest migration: **075** (`qa_test_items_backfill`)
+Current highest migration: **081**
 
 Recent migrations:
 - 071 `dealer_inventory_provider` — track CDK/Tekion/manual feed source per dealer
 - 072 `box_folder_id` — auto-provision a Box.com folder per dealer + per group
+
+### Box Folder Provisioning (lib/box.ts)
+- **Root folder:** `384943909938` (`BOX_ROOT_FOLDER_ID`) — Allan's "DealerAddendums Platform" folder at `box.com/folder/384943909938`
+- **Service account:** `AutomationUser_2577618_5z5oxVB2bn@boxdevedition.com` (Box user id `51252734058`) — Co-Owner on root; all folders owned by `allan@allantone.com`
+- **Hierarchy:** `DealerAddendums Platform → Dealers/{dealer_name}` and `DealerAddendums Platform → Groups/{group_name}`
+- **Parents** ("Dealers", "Groups") lazily created on first use via `ensureParentFolder()`; `createOrReuseChild()` handles 409 conflicts via `responseInfo.body.context_info.conflicts[0].id`
+- ⚠️ **SDK history:** `box-node-sdk` bumped to v10.10.0 on 2026-05-25 broke v3 API. Fixed commit fd451f3 to v10: `JwtConfig.fromConfigJsonString` → `BoxJwtAuth` → `BoxClient`; `folders.create` → `folders.createFolder`; `folders.getItems` → `folders.getFolderItems({ queryParams: {...} })`
+- ⚠️ **Root history:** Original `BOX_ROOT_FOLDER_ID="0"` created folders under service account root (invisible to Allan). Fixed commit f619ab4 to `384943909938`
+- **QA folder IDs:** QA Test Group → `384945602222`, QA Test Dealer A → `384943614967`, QA Test Dealer B → `384935891285`
 - 073 `qa_help_center` — QA portal help-center tables
-- 074 `qa_test_environment` — `/qa` + `/qa/test` QA portal (dealer_admin + dealer_user accounts, see CLAUDE-da-platform.md history for QA fixes)
+- 074 `qa_test_environment` — `/qa` + `/qa/test` QA portal (dealer_admin + dealer_user accounts)
 - 075 `qa_test_items_backfill` — backfill `qa_test_items` rows; companion to 074
+- 076 `invitations_unique_indexes` — unique indexes on invitations table
+- 077 `invitations_unique_indexes_non_partial` — revised non-partial unique indexes on invitations (supersedes 076)
+- 078 `qa_test_items_email_fix` — idempotent UPDATE fixing truncated `@test` → `@test.dealeraddendums.com` in `qa_test_items.steps`; migrations 074+075 also corrected in source
+- 079–081 — (check repo for details; added during QA session 2026-05-28)
+
+
+## QA Bug Fix History
+
+### Custom Group Discount Overwritten by Sync (2026-05-28, commits a9d6c15 + 97ddc96)
+When a dealer was removed from a group, da-platform recalculated the auto-tier discount and synced it to da-billing, overwriting manually set custom discounts. Custom discounts are any value not in {0, 10, 20, 30}.
+
+Two-layer fix — either layer alone fixes the bug; together they survive a stale deploy on either side:
+- **da-platform** (`lib/sync-group-discount.ts`): before syncing, fetch current customer discount. If not in {0, 10, 20, 30}, log "custom subscriptionDiscount" and skip sync entirely. Sync PUTs carry header `X-DA-Auto-Tier-Sync: 1`.
+- **da-billing** (`PUT /customers/:id`): when request carries `X-DA-Auto-Tier-Sync: 1` and body includes `subscriptionDiscount` and existing value is not in {0, 10, 20, 30} → strip `subscriptionDiscount` from merge, log dropped attempt.
+- Operator UI PUTs carry no header → retain full control including walking custom values back to auto-tier
+- Existing `discountLocked` flag still short-circuits before either new check
+
+**Rule: custom discount = any value not in {0, 10, 20, 30}. Never auto-overwrite these.**
+
+### Builder Missing for dealer_admin / group_controls_templates (2026-05-28)
+`group_controls_templates=true` was stale on QA Test Dealer A (standalone dealer), hiding Builder nav and locking Print Settings. Root cause: flag was set without enforcing `group_id IS NOT NULL`. Fix: all gating in `layout.tsx`, `settings/page.tsx`, `builder/page.tsx` now ANDs with `group_id IS NOT NULL`. QA setup route `provisionDealer()` now explicitly sets the flag on every insert and re-run. Nav order also corrected: Dashboard → Products → Builder → Users → My Profile → Print Settings → [divider] → Order Supplies → Help.
+
+### Invite Flow (2026-05-27, commits abd3802 + 4f8f633)
+Three bugs: (1) Email logo 403 — old S3 URL dead, fixed to `${NEXT_PUBLIC_APP_URL}/images/da-logo.png` in 5 files. (2) Accept Invitation two-layer failure — GET wrapped in `{ data: {} }`; POST swapped `.insert()` to `.upsert({ onConflict: "id" })` because `handle_new_user` trigger auto-inserts a minimal profile row on every `auth.users` INSERT — **permanent rule: always upsert profiles, never insert after auth user creation**. (3) `+ Invite User` button used `btn-secondary` on `--bg-app` blue — changed to `btn-primary`. **Rule: never use `btn-secondary` on `--bg-app` backgrounds.**
+
+### QA Profile Binding (2026-05-27, commit f44dd1f)
+`profiles.dealer_id` is TEXT joining on `dealers.dealer_id` (e.g. `qa-test-dealer-a`) — NOT the UUID from `dealers.id`. Setup route was assigning the UUID. Fixed + post-loop resync pass added. QA Test Dealer A: `dealer_id=qa-test-dealer-a`, `id=49080658-bc91-4697-9696-a158b22ba9f4`. QA Test Group: `id=3559642e-58ef-4f85-b71a-4b4016f4918b`.
+
+### QA Email Truncation (2026-05-27, commit f596897)
+All 20 `@test` strings in migrations 074+075 seed data truncated the domain. Fixed in source + migration 078 patches live rows. Full addresses: `qa-dealer-admin@test.dealeraddendums.com`, `qa-dealer-user@test.dealeraddendums.com`, `qa-dealer-restricted@test.dealeraddendums.com`, `qa-group-admin@test.dealeraddendums.com`. Password: `QATest2026!`
 
 ## Phase Status
 
@@ -418,12 +489,90 @@ Recent migrations:
 |---|---|---|
 | 1–9b | All prior phases | ✅ Complete |
 | 10 | Billing Integration | ✅ Complete |
+| 10b | PDF Microservice | ✅ Complete — all phases shipped, puppeteer removed from da-platform |
 | 11 | Admin Ops | ⬜ Deferred |
-| 12 | Enterprise White Label | ⬜ Not started |
-| 13 | Dealer Migration & Onboarding | ⬜ Not started |
-| 14 | HubSpot + Billing Sync | 🔜 Next |
+| 12 | Enterprise White Label | ⬜ Queued |
+| 13 | Dealer Self-Serve Onboarding | ⬜ Queued |
+| 14 | HubSpot + Billing Sync | 🔜 Queued |
+| 15 | iOS & Android Apps | ⬜ Queued |
 
-## Phase 14 — HubSpot + Billing Sync (Next)
+## Phase 10b — PDF Microservice (✅ Complete, fully cut over)
+
+### Current Status — updated 2026-05-30
+
+**All HTML→PDF rendering runs on the PDF microservice at `http://172.31.71.67:3001`.** The `puppeteer` dependency has been removed from `da-platform`, `lib/pdf-renderer.ts` has been deleted, and the routes no longer carry a local fallback. The bulk route's `buyer_guide` branch is the only remaining local PDF work — it uses `pdf-lib` (no Puppeteer) to overlay FTC backgrounds and that's left as-is.
+
+**The user-visible flow (Print Now on a vehicle):**
+1. Modal opens with a spinner ("Rendering… → Almost ready… → Finalizing…").
+2. da-platform POSTs `/api/pdf/generate?async=1` with the assembled HTML; the service enqueues and returns `{ jobId, statusUrl, s3Key }`.
+3. Browser polls `GET /api/pdf/status/:jobId` (da-platform proxies to the service so the private IP stays internal).
+4. Service renders via Puppeteer, uploads to the canonical `s3Key` in `dealer-addendums` (us-west-1), responds `complete` with a 15-minute pre-signed URL.
+5. Modal swaps the spinner for an iframe loaded directly from the signed URL. Print Send-to-Printer also uses that URL.
+6. da-platform's route ran `awaitJobAndFetch(jobId)` in fire-and-forget alongside the async response, so `print_history` / `dealer_vehicles` print flags / `vehicle_audit_log` still land via the existing `logGeneratePdf` pipeline.
+
+**Hard requirement post-cutover:** `PDF_SERVICE_URL` + `PDF_SERVICE_API_KEY` must be set in da-platform's env. `useService()` in `lib/pdf-service-client.ts` returns false when either is missing AND `USE_PDF_SERVICE` isn't `1`, in which case the routes 503 — there's no local Puppeteer to fall back to anymore. To roll back to local rendering you'd have to `git revert` and `npm install puppeteer` again (no flag flip).
+
+**Client contract** (`lib/pdf-service-client.ts`):
+- Base `PDF_SERVICE_URL`; auth header `X-API-Key: $PDF_SERVICE_API_KEY`.
+- Service endpoints (all gated by `X-API-Key`):
+  - `POST /api/pdf/generate` — body `{ html, paperSize?, customDims?, allPages?, s3Key? }` → `{ jobId }`.
+  - `POST /api/pdf/bulk` — body `{ jobs: [{ html, paperSize?, customDims?, s3Key? }], s3Key? }` → `{ jobId }`. The service uploads each per-vehicle PDF to its `s3Key` plus a merged PDF to the top-level `s3Key`, and surfaces per-item `items[]` of `{ s3Key, signedUrl }` in the status response so da-platform can write `print_history.pdf_url` for each vehicle without re-uploading anything.
+  - `POST /api/pdf/buyer-guide` — body `{ srcPdfBase64, input, s3Key? }`. da-platform pre-fetches the FTC background from Supabase Storage and ships the bytes so the service stays Supabase-free.
+  - `GET /api/pdf/status/:jobId` — `{ status: "pending"|"running"|"complete"|"failed", s3Key, signedUrl, items?, error? }`.
+- Async flow: enqueue returns `{ jobId }` immediately; poll interval 1s, timeout 120s (covers a ~200-vehicle bulk).
+
+---
+
+## Phase 10b — PDF Microservice (original design notes)
+
+### Goal
+Offload all Puppeteer/PDF rendering from the main DA Platform EC2 to a dedicated high-resource server. Eliminates PDF generation competing with app traffic as dealer volume grows.
+
+### Infrastructure
+- **Instance:** c6i.2xlarge (8 vCPU, 16 GB RAM), us-west-1, same VPC as DA Platform
+- **Private IP:** `172.31.71.67`  <!-- was documented as 172.31.18.195; actual provisioned IP confirmed in lib/pdf-service-client.ts and on prod -->
+- **Port:** `3001` — internal HTTP, reached as `http://172.31.71.67:3001`
+- **AMI:** Ubuntu 22.04 LTS
+- **Storage:** 40 GB gp3
+- **Public IP:** None — internal only
+- **SSH key:** `~/ssh/da-pdf-service.pem`
+- **Security group inbound:** port 22 (SSH), port 3001 from `172.31.23.99/32` (DA Platform private IP) only
+- **PM2 app name:** `da-pdf-service`, port 3001
+- **Repo:** `github.com/dealeraddendums/da-pdf-service`
+- Node.js/Express service, PM2-managed
+- Auth: internal API key via `X-API-Key` header (same pattern as da-billing)
+- S3 uploads happen on the PDF service — main app receives S3 key in response
+- IAM: use existing `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars (s3:PutObject + s3:GetObject on `dealer-addendums` bucket)
+- **Setup:** Claude Code handles server bootstrap (Node, PM2, Puppeteer/Chrome deps)
+
+### Architecture — Async
+
+Single prints and bulk prints both go async:
+1. Main app POSTs job to PDF service (`/api/pdf/generate` or `/api/pdf/bulk`)
+2. PDF service queues the job, returns `{ jobId }` immediately
+3. PDF service renders via Puppeteer, overlays via pdf-lib, uploads to S3
+4. Main app polls `GET /api/pdf/status/:jobId` → `{ status, s3Key, signedUrl }`
+5. UI shows progress spinner; redirect/download fires when status = `complete`
+
+### What Moves to PDF Service
+- All Puppeteer rendering (addendum, infosheet, bulk combined PDF)
+- pdf-lib Buyer's Guide overlay
+- S3 upload of final PDF
+- Puppeteer dependency removed from `da-platform` entirely
+
+### Changes to DA Platform
+- `app/api/pdf/generate/route.ts` — replace Puppeteer call with POST to PDF service
+- `app/api/pdf/bulk/route.ts` — replace Puppeteer call with POST to PDF service
+- `lib/pdf-html.ts` — stays as HTML template generator; output sent to PDF service
+- New env var: `PDF_SERVICE_URL` (internal EC2 URL), `PDF_SERVICE_API_KEY`
+- Puppeteer removed from `package.json`
+
+### PDF Naming (unchanged)
+Same S3 key conventions as today — PDF service writes to the same `dealer-addendums` bucket.
+
+---
+
+## Phase 14 — HubSpot + Billing Sync (Queued)
 
 ### Architecture
 Event-driven, non-blocking sync service. DA Platform create/edit/delete events sync to:
@@ -442,19 +591,181 @@ Event-driven, non-blocking sync service. DA Platform create/edit/delete events s
 - Subscription upgraded/downgraded
 - Group created/updated/deleted
 
+## Phase 12 — Enterprise White Label (Queued)
+
+### Goal
+Large dealer groups (e.g., AutoNation) who want the platform to feel like their own product. We are NOT selling or licensing the software — this is cosmetic branding only, scoped to specific approved groups.
+
+### Features
+- **Custom subdomain** per group — e.g., `addendums.autonation.com` routed to the DA Platform via DNS + Nginx + SSL cert
+- **Custom logo** — group logo replaces DA logo in topbar and emails
+- **Skinning** — any simple CSS-level changes: topbar color, accent color, favicon. No structural changes.
+- **Custom email sender** — transactional emails (welcome, invite, notifications) sent from a group-specific address (e.g., `noreply@autonation.com`) via Mandrill sending domain configuration
+- **Custom welcome email** — group-specific copy and branding
+
+### Technical Approach
+- Next.js middleware reads the incoming hostname and resolves it to a group record in Supabase
+- `groups` table gains: `custom_domain`, `brand_logo_url`, `brand_primary_color`, `brand_email_from`, `brand_email_name`
+- Branding config injected into layout via server component — no client-side flicker
+- SSL: AWS Certificate Manager + ALB listener rule per subdomain
+- Mandrill: per-group sending domain must be verified in Mandrill before use
+- Fallback: if no group brand config found, render standard DA Platform branding
+
+### Scope Limits
+- No white-labeled mobile apps in this phase (mobile is Phase 15)
+- No custom domain for dealer subaccounts within a white-labeled group — subdomain is group-wide only
+- Only groups explicitly approved by Allan get a custom domain
+
+---
+
+## Phase 13 — Dealer Self-Serve Onboarding (Queued)
+
+### Goal
+A magic link Allan (or legacy platform) can send to any dealer to self-onboard onto DA 5.0. Dealer clicks, sets a password, and is live — legacy billing is simultaneously unwound.
+
+### Magic Link Format
+`https://app.dealeraddendums.com/onboard?email={email}&dealer_id={dealer_id}&token={signed_token}`
+
+- `token` is a signed, time-limited JWT (or Supabase invite token) generated server-side
+- Can be sent manually by Allan or embedded as a button/link on the legacy platform
+- CTA copy: **"Upgrade to DA 5.0 Now!"**
+
+### Onboarding Flow
+1. Dealer clicks link → `/onboard` page validates token + email + dealer_id
+2. Dealer creates a new password (min 8 chars) — same UI pattern as existing invite flow
+3. On password confirmation:
+   - Supabase auth user created/activated for this dealer
+   - Legacy DA subscription changed to **Free/Trial** — this automatically pauses the recurring bill in legacy DA (no FreshBooks API call needed)
+   - Existing FreshBooks invoices are left as-is — they remain outstanding but no new ones are generated
+   - New invoices going forward are created by `billing.dealeraddendums.com` only
+   - ⚠️ The dealer's recurring template in `billing.dealeraddendums.com` is **preserved** — do NOT delete it
+   - `migration_status` updated on dealer record in Supabase
+4. Dealer lands on DA Platform dashboard — onboarding complete
+
+### Billing Transition Notes
+- Changing legacy DA subscription to Free/Trial pauses recurring automatically — no direct FreshBooks manipulation required
+- All future invoicing runs through da-billing exclusively from this point forward
+- Outstanding FreshBooks invoices remain — not Allan's problem to resolve at migration time
+
+### Link Embedding (Legacy Platform)
+- A button or banner on the legacy platform dealer dashboard can embed the magic link
+- Link generation endpoint: `POST /api/onboard/generate-link` (super_admin or system only)
+- Allan can also generate links from the super admin panel
+
+---
+
+## Phase 15 — iOS & Android Apps (Queued)
+
+### Goal
+Native mobile apps for dealers on the lot — scan a VIN, assign products, print or queue for later. Not a mobile mirror of the full web app. Focused entirely on the lot workflow.
+
+### Reference App
+Existing app (screenshots captured) — use as UX reference, not codebase. The new app connects to the DA Platform (Supabase) not the legacy backend.
+
+---
+
+### Screens & Flows
+
+#### 1. Login / Splash
+- DA logo, "WELCOME!", tagline
+- Username + password login → authenticates against DA Platform (Supabase auth)
+- Auth token stored securely on device
+- Future: passkey when mobile platform support matures
+
+#### 2. Home / Dashboard
+- After login: "WELCOME!" + user name + dealership name
+- Three buttons: **Scan Vehicles** · **Vehicle Overview** · **Settings**
+
+#### 3. Scanner
+- Bottom tab: QR/barcode icon (left tab)
+- Three scan modes toggled by buttons: **VIN** · **Barcode** · **QR Code**
+- Live camera viewfinder with orange border
+- Flashlight toggle button
+- Mode-specific instructions ("Position VIN clearly in frame" / "Avoid Shadows and Glare")
+- "Capture VIN Now" button — captures frame and decodes
+- Manual entry field: "Scan or enter VIN manually"
+- "Go To Vehicle" button (enabled once VIN resolved)
+
+**VIN Scan Logic:**
+1. Scan/capture VIN
+2. Look up vehicle in dealer's Supabase inventory
+3. If found → go to Create Addendum screen for that vehicle
+4. If not found → run VIN decode (NHTSA or VinQuery) → add vehicle to dealer's Supabase inventory → go to Create Addendum screen
+
+#### 4. Vehicle Overview
+- Bottom tab: car icon (middle tab)
+- Filterable list: **Condition** dropdown · **Status** dropdown
+- Search icon (top right)
+- Each row: Year/Make/Model · VIN · Stock# · printer status icon + chevron
+  - **Green printer** = not yet printed
+  - **Orange printer** = in print queue
+- Tap row → go to Create Addendum for that vehicle
+
+#### 5. Create Addendum
+- Header: "Create Addendum"
+- Vehicle details displayed: VIN, Year, Make, Model, Body Style
+- Stock number field (editable)
+- Price/MSRP field (editable)
+- **Select Option** dropdown + **Add** button — pulls dealer's products from Supabase `vehicle_options`
+- **Options added to vehicle** list — each with Delete button
+- Three action buttons:
+  - **Print Now** (green) — triggers DA Platform PDF generation API; PDF delivered to device or AirPrint/Google Cloud Print
+  - **Print Later** (orange/yellow) — adds vehicle + selected products to `print_queue` in Supabase; shows "Vehicle added to print queue." success dialog; printer icon turns orange in Vehicle Overview
+  - **Cancel** (red) — discard and return
+
+**Select Option modal:** scrollable list of dealer's products; tap to select; Cancel button
+
+#### 6. Print Queue (web dashboard)
+- Print queue entries stored in Supabase `print_queue` table (dealer-scoped)
+- Accessible from DA Platform web dashboard — dealer can bulk-print queued vehicles from desktop
+- Mobile app shows queue status via printer icon color; does not manage the queue beyond adding to it
+
+#### 7. Settings
+- Bottom tab: gear icon (right tab)
+- Scope TBD — at minimum: logout, dealer/user info display
+
+---
+
+### Explicitly Excluded
+- User management
+- Billing / label orders
+- Products (options) management
+- Template Builder
+- Any super admin or group admin functionality
+
+---
+
+### Technical Approach
+- **Native apps** — not PWA or webview. Required for camera/scanner performance.
+- **Repo:** `github.com/dealeraddendums/da-mobile`
+- **Stack: React Native** — single codebase for iOS + Android. Camera/scanning via Vision Camera library.
+- **Auth:** Supabase email+password; passkey when mobile support matures
+- **API:** Consumes existing DA Platform REST API endpoints. No new backend — mobile is a client.
+- **Print Now:** Calls DA Platform PDF generation API (Phase 10b PDF service) → returns signed S3 URL → open in device PDF viewer or native print dialog
+- **Print Queue:** `print_queue` Supabase table — `id`, `dealer_id`, `vehicle_id`, `vin`, `products` (jsonb), `created_by`, `created_at`, `printed_at`
+- **VIN decode fallback:** NHTSA free API or VinQuery (already in platform) — same as web
+
+---
+
 ## Outstanding Items
 
 ### Manual tasks (Allan)
 - ✅ EasyCron `0 2 1 * *` → sync-vehicle-reference
 - ✅ EasyCron `0 9 5 * *` → chromedata-usage-report
 - ✅ EasyCron `0 3 * * *` → harvest-vin-trims
-- ⬜ Run manual vehicle backfill in tmux (script ready)
-- ⬜ EasyCron `0 10 * * *` → sync-xps-tracking (after Phase 10 deploy confirmed)
-- ⬜ Verify ChromeData report format via Reports page manual trigger
+- ✅ Run manual vehicle backfill in tmux (script ready)
+- ✅ EasyCron `0 10 * * *` → sync-xps-tracking (after Phase 10 deploy confirmed)
+- ✅ Verify ChromeData report format via Reports page manual trigger
 
 ### Code items
 - ⬜ NHTSA trim pagination fix — harvester only processes 1000 VINs (Supabase page limit)
+- 🟡 Phase 10b — PDF Microservice: A–E live on prod (`USE_PDF_SERVICE=1`). Remaining: D.5 (bulk cutover — service must honor `items[].s3Key`), E.2 (drop puppeteer dep; blocked by D.5)
+- ⬜ Phase 12 — Enterprise White Label (custom subdomains + branding for large groups)
+- ⬜ Phase 13 — Dealer Self-Serve Onboarding (magic link → password → FreshBooks unwind)
 - ⬜ Phase 14 — HubSpot + Billing Sync
+- ⬜ Phase 15 — iOS & Android Native Apps (VIN scan, Print Queue — review existing iOS app first)
+- ⬜ `billing_sync_errors` alerting — panel flagging non-zero error counts so Box/billing failures don't sit silent (Box SDK failed silently 2 days before discovery)
+- ⬜ Box folder backfill for ~1,600 legacy dealers — all have `box_folder_id = null`; needs audited bulk backfill script when ready
 
 ## Key S3 Buckets
 
@@ -478,7 +789,7 @@ Event-driven, non-blocking sync service. DA Platform create/edit/delete events s
 | `0 2 1 * *` | `/api/cron/sync-vehicle-reference` | ✅ |
 | `0 3 * * *` | `/api/cron/harvest-vin-trims` | ✅ |
 | `0 9 5 * *` | `/api/cron/chromedata-usage-report` | ✅ |
-| `0 10 * * *` | `/api/cron/sync-xps-tracking` | ⬜ add |
+| `0 10 * * *` | `/api/cron/sync-xps-tracking` | ✅ |
 
 ## Environment Variables
 
@@ -505,6 +816,9 @@ CERBERUS_FTP_USER=                # in nginx fastcgi_param, not .env
 CERBERUS_FTP_PASS=                # in nginx fastcgi_param, not .env
 BILLING_API_KEY=dab_b1ce5e7768aef3f94e652a69303f3ecce44f487244824e96562c9d0704b58a7f
 BILLING_PUBLIC_URL=https://billing.dealeraddendums.com   # customer-facing pay URL base; default if unset
+PDF_SERVICE_URL=http://172.31.71.67:3001                 # Phase 10b PDF microservice (internal only)
+PDF_SERVICE_API_KEY=                                     # X-API-Key for da-pdf-service
+USE_PDF_SERVICE=1                                         # 1/true → /generate + /buyers-guide via service; 0 → local Puppeteer fallback
 XPS_API_KEY=Jx5vg3PLLL0HGCQV4YAyIuHdAMf0sXKb
 XPS_CUSTOMER_ID=12302875
 XPS_INTEGRATION_ID=91819
@@ -527,6 +841,7 @@ RP_ORIGIN=https://app.dealeraddendums.com
 | Server | IP | Notes |
 |---|---|---|
 | DA Platform EC2 | `18.145.132.52` | us-west-1, private `172.31.23.99` |
+| PDF Service (da-pdf-service) | internal only | us-west-1, private `172.31.71.67`, port 3001 |
 | Legacy Platform (Hub) | `52.22.32.67` | being decommissioned |
 | Legacy ETL (DND ETL 2025) | `44.206.22.243` | |
 | ETL2 | `34.227.197.196` | |

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { BuyersGuideDefaults } from "@/lib/db";
-import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { useService as usePdfService, renderBuyerGuideViaService } from "@/lib/pdf-service-client";
 import { getBuyersGuidePdfBytes } from "@/lib/buyers-guide-storage";
@@ -104,21 +103,22 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
   const dealerUuid = dealer?.id ?? null;
 
   async function generateOneLang(lang: 'en' | 'es', s3Key: string): Promise<Buffer> {
-    if (usePdfService()) {
-      // Service path: fetch the FTC background here (Supabase Storage)
-      // and ship the bytes over. Keeps the service Supabase-free.
-      const isImplied = warranty.warranty_type === 'implied_only';
-      const bgKey = `${lang === 'es' ? 'spanish' : 'english'}-${isImplied ? 'implied' : 'as-is-warranty'}` as BgKey;
-      const srcPdfBytes = await getBuyersGuidePdfBytes(bgKey, dealerUuid);
-      const result = await renderBuyerGuideViaService(srcPdfBytes, {
-        language: lang,
-        vehicle: vehicleData,
-        dealer: dealerData,
-        warranty,
-      }, s3Key);
-      return result.buffer;
+    // Phase 10b / E.2: service is the only render path. da-platform
+    // pre-fetches the FTC background from Supabase Storage and ships
+    // the bytes over so the service stays Supabase-free.
+    if (!usePdfService()) {
+      throw new Error("PDF service not configured (PDF_SERVICE_URL + PDF_SERVICE_API_KEY required)");
     }
-    return buildBuyersGuidePdf({ language: lang, dealerUuid, vehicle: vehicleData, dealer: dealerData, warranty });
+    const isImplied = warranty.warranty_type === 'implied_only';
+    const bgKey = `${lang === 'es' ? 'spanish' : 'english'}-${isImplied ? 'implied' : 'as-is-warranty'}` as BgKey;
+    const srcPdfBytes = await getBuyersGuidePdfBytes(bgKey, dealerUuid);
+    const result = await renderBuyerGuideViaService(srcPdfBytes, {
+      language: lang,
+      vehicle: vehicleData,
+      dealer: dealerData,
+      warranty,
+    }, s3Key);
+    return result.buffer;
   }
 
   async function logPrint(buffer: Buffer, s3Key: string): Promise<void> {
