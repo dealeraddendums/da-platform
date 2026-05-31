@@ -9,6 +9,7 @@
 // lives in a separate cron route.
 
 import { createAdminSupabaseClient } from "@/lib/db";
+import { sendMandrillEmail } from "@/lib/mandrill";
 import {
   hubspotConfigured,
   upsertObject,
@@ -318,6 +319,103 @@ export async function syncProfileToHubspot(profileId: string): Promise<void> {
   } catch (err) {
     void logError("contact", profileId, "update", err, payload);
   }
+}
+
+// ── Reliable Trial-create path (retry + alert) ──────────────────────────────
+//
+// Spec §"Trial creation = immediate + reliable" (2026-05-31): a new
+// individual-dealer create triggers a HubSpot onboarding workflow that
+// enrolls the moment lifecyclestage=Dealer Trial lands on a Company.
+// A silent miss means the dealer's onboarding never starts, so the
+// create path is held to a higher bar than the general
+// fire-and-forget update flow:
+//
+//   - Retries 3× with short exponential backoff on transient errors
+//     (HubSpot 5xx, rate-limit 429, network blips).
+//   - On terminal failure, the failure still lands in
+//     hubspot_sync_errors (same logger as the regular path), AND a
+//     Mandrill alert goes to support@dealeraddendums.com so a human
+//     can replay manually.
+//   - Returns void, still fire-and-forget from the route's perspective
+//     so the HTTP response isn't blocked.
+//
+// Used by /api/dealers POST. /api/dealers PATCH stays on the simpler
+// fire-and-forget path since updates don't fire workflow enrollments.
+
+const TRIAL_CREATE_MAX_ATTEMPTS = 3;
+const TRIAL_CREATE_BACKOFF_MS = [500, 1500, 4000]; // sleep BEFORE attempt 2 and 3
+
+async function alertHubspotCreateFailure(args: {
+  objectType: "company" | "contact";
+  objectId: string;
+  context: string;        // e.g. "dealer create", "contact post-dealer-create"
+  attempts: number;
+  lastError: string;
+}): Promise<void> {
+  try {
+    await sendMandrillEmail({
+      subject: `[HubSpot sync] ${args.context} FAILED after ${args.attempts}× retries`,
+      from_email: "alerts@dealeraddendums.com",
+      from_name: "DA Platform Alerts",
+      to: [{ email: "support@dealeraddendums.com", name: "DA Support" }],
+      html: `<p>HubSpot ${args.objectType} sync failed for ${args.context}.</p>
+<p><b>Object id:</b> ${args.objectId}<br>
+<b>Attempts:</b> ${args.attempts}<br>
+<b>Last error:</b> <code>${args.lastError.replace(/</g, "&lt;").slice(0, 600)}</code></p>
+<p>This sync is the trigger for the HubSpot onboarding workflow (Marketing OS
+Phase 5). The dealer's enrollment did not fire automatically — replay manually
+from <code>hubspot_sync_errors</code> when ready.</p>`,
+    });
+  } catch (err) {
+    console.error("[hubspot-sync] alert send failed:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * Reliable dealer Company create — same payload + write-back as
+ * syncDealerToHubspot, but retries transient errors and alerts on
+ * terminal failure. Use ONLY on dealer-create (POST), not on update
+ * (PATCH) — workflow enrollment fires on the Trial-stage create.
+ *
+ * Returns the resulting hubspot_company_id on success, null on failure.
+ */
+export async function syncDealerCreateReliable(dealerId: string): Promise<string | null> {
+  if (!hubspotConfigured()) return null;
+  let lastError = "";
+  for (let attempt = 1; attempt <= TRIAL_CREATE_MAX_ATTEMPTS; attempt++) {
+    try {
+      await syncDealerToHubspot(dealerId);
+      // syncDealerToHubspot swallows errors into hubspot_sync_errors, so
+      // confirm success by reading the updated row back.
+      const admin = createAdminSupabaseClient();
+      const { data } = await admin.from("dealers").select("hubspot_company_id").eq("id", dealerId).maybeSingle<{ hubspot_company_id: string | null }>();
+      if (data?.hubspot_company_id) return data.hubspot_company_id;
+      lastError = "syncDealerToHubspot ran but hubspot_company_id was not written";
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+    if (attempt < TRIAL_CREATE_MAX_ATTEMPTS) {
+      await new Promise(r => setTimeout(r, TRIAL_CREATE_BACKOFF_MS[attempt - 1]));
+    }
+  }
+  // Terminal failure — alert.
+  await alertHubspotCreateFailure({
+    objectType: "company",
+    objectId: dealerId,
+    context: "dealer create (Trial — onboarding workflow trigger)",
+    attempts: TRIAL_CREATE_MAX_ATTEMPTS,
+    lastError,
+  });
+  return null;
+}
+
+/**
+ * Fire-and-forget kickoff for dealer-create. Runs in background but
+ * uses the reliable retry+alert variant so a flaky HubSpot doesn't
+ * silently skip onboarding.
+ */
+export function fireDealerCreateReliable(dealerId: string): void {
+  void syncDealerCreateReliable(dealerId);
 }
 
 // ── Fire-and-forget convenience wrappers (call from route handlers) ─────────

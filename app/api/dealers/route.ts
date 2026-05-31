@@ -13,7 +13,7 @@ import {
   type BillingProduct,
 } from "@/lib/billing";
 import { runSync, fireAndForget } from "@/lib/billing-sync";
-import { fireDealerSync } from "@/lib/sync-hubspot";
+import { fireDealerCreateReliable, fireProfileSync } from "@/lib/sync-hubspot";
 import { fireGroupAssignCascade } from "@/lib/group-billing-cascade";
 import { createDealerFolder, boxConfigured } from "@/lib/box";
 
@@ -486,11 +486,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // Phase 14a — HubSpot Company upsert. Fire-and-forget. Lifecyclestage
-  // defaults to "Dealer Trial" for new individual dealers; group-member
-  // dealers still post their own Company but inherit the group's stage
-  // via the daily cron in 14b.
-  fireDealerSync(createdDealerId);
+  // Phase 14a — HubSpot Company upsert. Uses the RELIABLE variant
+  // (3× retry + Mandrill alert on terminal failure) because a new
+  // individual-dealer create with lifecyclestage=Dealer Trial is the
+  // trigger event for the HubSpot onboarding workflow (Marketing OS
+  // Phase 5). A silent miss means the dealer's onboarding never
+  // starts — held to a higher bar than the general fire-and-forget
+  // update path. Still doesn't block the HTTP response.
+  fireDealerCreateReliable(createdDealerId);
 
   if (username?.trim() && password?.trim()) {
     const rawUsername = username.trim();
@@ -514,6 +517,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       role: "dealer_admin" as const,
       dealer_id,
     });
+
+    // Phase 14a — Contact sync for the dealer's primary user. Order
+    // matters here: dealer Company sync already kicked off above, so
+    // by the time the workflow's enrollment trigger fires on the
+    // Trial-stage Company, the associated Contact will be appearing
+    // moments later. Plain fire-and-forget — updates aren't the
+    // workflow trigger, so no retry+alert needed.
+    fireProfileSync(authUser.user.id);
   }
 
   const dealer = data as Record<string, unknown>;
