@@ -203,10 +203,18 @@ export async function upsertObject(args: {
     clean[k] = v;
   }
 
-  // (1) PATCH by known id.
+  // (1) PATCH by known id. If the stored id 404s the record was
+  //     deleted in HubSpot but Supabase didn't get the memo — fall
+  //     through to search-by-key + create. Caller will see
+  //     created=true and write the fresh id back over the stale one.
   if (args.existingHubspotId) {
-    const updated = await updateObject(args.object, args.existingHubspotId, clean);
-    return { hubspotId: updated.id, created: false };
+    try {
+      const updated = await updateObject(args.object, args.existingHubspotId, clean);
+      return { hubspotId: updated.id, created: false };
+    } catch (err) {
+      if (!(err instanceof HubspotError) || err.status !== 404) throw err;
+      console.warn(`[hubspot] stale ${args.object} id ${args.existingHubspotId} — falling through to search/create`);
+    }
   }
 
   // (2) Search by natural key.

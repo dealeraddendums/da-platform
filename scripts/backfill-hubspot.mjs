@@ -122,8 +122,17 @@ async function upsert({ object, properties, existingId, searchProperty, searchVa
     clean[k] = v;
   }
   if (existingId) {
-    const r = await hsFetch("PATCH", `/objects/${object}/${encodeURIComponent(existingId)}`, { properties: clean });
-    return { hubspotId: r.json.id, created: false };
+    try {
+      const r = await hsFetch("PATCH", `/objects/${object}/${encodeURIComponent(existingId)}`, { properties: clean });
+      return { hubspotId: r.json.id, created: false };
+    } catch (err) {
+      // 404 = stale id (record was deleted in HubSpot but Supabase
+      // still has the link). Fall through to search-by-key/create and
+      // signal to the caller that the stored id was stale so it can
+      // be replaced.
+      if (!String(err.message).includes(" 404:")) throw err;
+      console.warn(`\n    stale ${object} id ${existingId} (${searchValue ?? "no-search-key"}) — falling through to search/create`);
+    }
   }
   if (searchValue) {
     const found = await searchByProperty(object, searchProperty, searchValue);
