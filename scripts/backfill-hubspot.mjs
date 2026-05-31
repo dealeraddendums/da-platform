@@ -39,6 +39,26 @@ if (!TOKEN) { console.error("HUBSPOT_PRIVATE_APP_TOKEN not set"); process.exit(1
 
 const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
+/**
+ * Walk an entire table in 1000-row chunks. Supabase JS / PostgREST caps
+ * any single .select() at 1000 rows by default — without pagination the
+ * backfill silently skipped half the data set on first run.
+ */
+async function fetchAll(table, selectCols, eqFilters = []) {
+  const out = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    let q = admin.from(table).select(selectCols).range(from, from + PAGE - 1);
+    for (const [col, val] of eqFilters) q = q.eq(col, val);
+    const { data, error } = await q;
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    out.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return out;
+}
+
 // ── Reuse the same property builders + idempotent upsert as lib/sync-hubspot.ts ──
 // Re-implemented inline to keep the script self-contained (no @-import of TS).
 
@@ -186,14 +206,14 @@ async function run() {
   const stats = { dealers: { ok: 0, err: 0 }, groups: { ok: 0, err: 0 }, profiles: { ok: 0, err: 0 } };
 
   if (RUN_DEALERS) {
-    const { data: dealers, error } = await admin.from("dealers")
-      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at")
-      .eq("active", true);
-    if (error) { console.error("dealers query failed:", error.message); process.exit(1); }
+    const dealers = await fetchAll("dealers",
+      "id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at",
+      [["active", true]],
+    );
     console.log(`\nDealers to process: ${dealers.length}`);
     // Preload groups once
-    const { data: allGroups } = await admin.from("groups").select("id, name, internal_id");
-    const groupById = new Map((allGroups ?? []).map(g => [g.id, g]));
+    const allGroups = await fetchAll("groups", "id, name, internal_id");
+    const groupById = new Map(allGroups.map(g => [g.id, g]));
 
     for (const d of dealers) {
       try {
@@ -223,8 +243,7 @@ async function run() {
   }
 
   if (RUN_GROUPS) {
-    const { data: groups, error } = await admin.from("groups").select("id, name, internal_id, hubspot_company_id, billing_customer_id");
-    if (error) { console.error("groups query failed:", error.message); process.exit(1); }
+    const groups = await fetchAll("groups", "id, name, internal_id, hubspot_company_id, billing_customer_id");
     console.log(`\nGroups to process: ${groups.length}`);
     for (const g of groups) {
       try {
@@ -254,14 +273,14 @@ async function run() {
   }
 
   if (RUN_PROFILES) {
-    const { data: profiles, error } = await admin.from("profiles")
-      .select("id, email, full_name, phone, role, dealer_id, group_id, hubspot_contact_id, active")
-      .eq("active", true);
-    if (error) { console.error("profiles query failed:", error.message); process.exit(1); }
+    const profiles = await fetchAll("profiles",
+      "id, email, full_name, phone, role, dealer_id, group_id, hubspot_contact_id, active",
+      [["active", true]],
+    );
     console.log(`\nProfiles to process: ${profiles.length}`);
     // Preload dealers for company-name lookup
-    const { data: allDealers } = await admin.from("dealers").select("dealer_id, name");
-    const dealerNameBySlug = new Map((allDealers ?? []).map(d => [d.dealer_id, d.name]));
+    const allDealers = await fetchAll("dealers", "dealer_id, name");
+    const dealerNameBySlug = new Map(allDealers.map(d => [d.dealer_id, d.name]));
 
     for (const p of profiles) {
       try {
