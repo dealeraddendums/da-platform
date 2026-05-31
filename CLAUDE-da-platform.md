@@ -522,6 +522,30 @@ All 20 `@test` strings in migrations 074+075 seed data truncated the domain. Fix
   - `GET /api/pdf/status/:jobId` — `{ status: "pending"|"running"|"complete"|"failed", s3Key, signedUrl, items?, error? }`.
 - Async flow: enqueue returns `{ jobId }` immediately; poll interval 1s, timeout 120s (covers a ~200-vehicle bulk).
 
+### Per-vehicle `{VIN}.pdf` storage fix — 2026-05-30
+Bulk wasn't saving individual per-vehicle PDFs to S3 (single prints were fine). Two causes, both resolved by **deploy + a key-format change — no new service logic**. Runbook: `docs/pdf-vin-fix-deploy-task.md`.
+- **Flat key.** `buildPdfKey()` (`lib/s3-upload.ts`) now writes per-vehicle PDFs as flat, uppercased `{VIN}.pdf` (was nested `{internal_id}/{vehicle_uuid}/{VIN}.pdf`). Matches the dealer-website lookup in `lib/addendum.ts` (`checkPdfExists` HEADs `${BUCKET}/{VIN}.pdf`) and makes VIN-prefix bucket search work. Reprints overwrite in place; infosheet/buyer-guide keep VIN-prefixed suffixes (`{VIN}_infosheet.pdf`, `{VIN}_buyers_guide.pdf`).
+- **Bulk self-heal.** `app/api/pdf/bulk/route.ts` now splits the merged PDF and uploads each `{VIN}.pdf` itself when the service returns no per-item signed URL (parity with single-print's re-upload). Auto-disables once the service uploads per-item.
+- **Deploy gap.** da-pdf-service `503fd5c` (per-item `s3Key` upload + `items[]` in status) is committed but da-pdf-service has **no auto-deploy** — confirm the EC2 is past `503fd5c` (`git log` + `pm2 restart da-pdf-service`).
+
+### EOD 2026-05-30 — verification + open follow-ups
+
+Today's deploys are live and verified end-to-end. Resume points for tomorrow are below.
+
+**Verified on prod (3-vehicle bulk from `qa-dealer-admin`):**
+- `fc6872f` shipped on da-platform via GitHub Actions auto-deploy.
+- `503fd5c` confirmed already running on the PDF EC2 (`git log` matches; `pm2 list` shows ~3h uptime; no restart needed).
+- All three new per-vehicle PDFs landed at flat `{VIN}.pdf` keys (`QATESTVIN0000001.pdf` etc.) with realistic byte counts. `ListObjectsV2` prefix-by-VIN matches. Public HEAD against `https://dealer-addendums.s3.us-west-1.amazonaws.com/{VIN}.pdf` returns 200.
+- `print_history.pdf_url` for the new rows points at the flat key; older rows still carry the legacy nested URLs and won't move until reprint.
+
+**S3 CORS verified.** The `dealer-addendums` bucket already has a permissive CORS rule (`AllowedOrigins: ["*"]`, `AllowedMethods: ["GET", "POST"]`, `AllowedHeaders: ["*"]`, `MaxAgeSeconds: 3000`). Preflight `OPTIONS` and actual `GET` from `https://app.dealeraddendums.com` both return 200 with the expected `Access-Control-Allow-Origin` header, and the browser can read the response body as a blob. PrintPreviewModal's CORS-failure fallback path (commit `e5b88b4`) is now silent — only runs on rejection, which no longer happens.
+
+**Open decisions for Allan (no action until he says so):**
+- **Backfill of old nested keys.** PDFs printed before today still live at `{internal_id}/{vehicle_uuid}/{VIN}.pdf` and only migrate to flat `{VIN}.pdf` on reprint. A one-time S3 copy (uppercased VIN, overwrite-on-clash) could backfill the whole bucket if dealer websites need the flat key for historical inventory.
+- **Doc-type variant naming.** Infosheet and buyer's-guide keep VIN-prefixed suffixes so an infosheet print doesn't overwrite the addendum's `{VIN}.pdf`. The Spanish buyer's-guide variant currently has no suffix path (it's only emitted inside the `en+es` zip and not persisted standalone) — verify that's still the desired behavior or wire a `{VIN}_buyers_guide_es.pdf` upload from the service.
+- **Merged bulk PDF persistence.** The bulk run still uploads its combined output to a timestamped `{internal_id}/{vehicleUuid}/{docType}_bulk_{n}_{ts}.pdf` key. If the bucket should hold only `{VIN}.pdf` files (per-vehicle, no run-level artifacts), drop the merged-upload tail in the service — small tweak since da-platform consumes the merged via the signed URL, not the bucket.
+- **CORS tightening (optional, security hygiene).** Current rule allows `*` origins and both `GET` + `POST`. Signed URLs are the real access gate so origin doesn't matter much, but a tighter rule (`AllowedOrigins: ["https://app.dealeraddendums.com"]`, `AllowedMethods: ["GET"]` only) is the textbook play. Replacement JSON is in the `S3 CORS` task note.
+
 ---
 
 ## Phase 10b — PDF Microservice (original design notes)
