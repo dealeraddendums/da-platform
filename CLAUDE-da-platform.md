@@ -538,13 +538,23 @@ Today's deploys are live and verified end-to-end. Resume points for tomorrow are
 - All three new per-vehicle PDFs landed at flat `{VIN}.pdf` keys (`QATESTVIN0000001.pdf` etc.) with realistic byte counts. `ListObjectsV2` prefix-by-VIN matches. Public HEAD against `https://dealer-addendums.s3.us-west-1.amazonaws.com/{VIN}.pdf` returns 200.
 - `print_history.pdf_url` for the new rows points at the flat key; older rows still carry the legacy nested URLs and won't move until reprint.
 
-**S3 CORS verified.** The `dealer-addendums` bucket already has a permissive CORS rule (`AllowedOrigins: ["*"]`, `AllowedMethods: ["GET", "POST"]`, `AllowedHeaders: ["*"]`, `MaxAgeSeconds: 3000`). Preflight `OPTIONS` and actual `GET` from `https://app.dealeraddendums.com` both return 200 with the expected `Access-Control-Allow-Origin` header, and the browser can read the response body as a blob. PrintPreviewModal's CORS-failure fallback path (commit `e5b88b4`) is now silent — only runs on rejection, which no longer happens.
+**S3 access model — confirmed correct 2026-05-31.** The `dealer-addendums` bucket is intentionally configured as a public-read store with permissive CORS, and **this is the right setup** for two production constraints:
+
+1. **Dealer-website integration (1,600+ domains).** Each dealer site links to its inventory's addendums via direct `<a href="https://dealer-addendums.s3.us-west-1.amazonaws.com/{VIN}.pdf">…</a>` markup. These domains can't be enumerated, so:
+   - Bucket policy has a public `PublicReadGetObject` statement (`Principal: "*"`, `Action: s3:GetObject`). Unauthenticated HEAD/GET of `{VIN}.pdf` returns 200 directly — no signed URL needed for dealer-side links.
+   - PublicAccessBlock all four flags are `false` (i.e., NOT blocking).
+   - CORS `AllowedOrigins: ["*"]` covers the subset of dealer sites that preview PDFs via JS `fetch()` (anchor links and `<iframe src>` don't trigger CORS at all).
+2. **Legacy DA app writes through 2026-07** (~6-week parallel-run window). The legacy Laravel app writes via the server-side AWS SDK using IAM credentials — **CORS is browser-only and does not apply to server-to-S3 writes**. What matters there is the legacy IAM identity having `s3:PutObject` on `arn:aws:s3:::dealer-addendums/*`, which it already has. No bucket-side change is needed to support the legacy write path during the transition.
+
+Earlier suggestion to tighten `AllowedOrigins` to `app.dealeraddendums.com` only was **wrong given the dealer-website constraint** and is hereby retracted. Keep the wildcard.
+
+PrintPreviewModal's CORS-failure fallback path (commit `e5b88b4`) stays in code as defensive insurance — silent under the current config since rejections don't happen.
 
 **Open decisions for Allan (no action until he says so):**
-- **Backfill of old nested keys.** PDFs printed before today still live at `{internal_id}/{vehicle_uuid}/{VIN}.pdf` and only migrate to flat `{VIN}.pdf` on reprint. A one-time S3 copy (uppercased VIN, overwrite-on-clash) could backfill the whole bucket if dealer websites need the flat key for historical inventory.
+- **Backfill of old nested keys.** PDFs printed before today still live at `{internal_id}/{vehicle_uuid}/{VIN}.pdf` and only migrate to flat `{VIN}.pdf` on reprint. `scripts/backfill-flat-vin-pdfs.mjs` is a one-time idempotent copy ready to run when Allan says go.
 - **Doc-type variant naming.** Infosheet and buyer's-guide keep VIN-prefixed suffixes so an infosheet print doesn't overwrite the addendum's `{VIN}.pdf`. The Spanish buyer's-guide variant currently has no suffix path (it's only emitted inside the `en+es` zip and not persisted standalone) — verify that's still the desired behavior or wire a `{VIN}_buyers_guide_es.pdf` upload from the service.
 - **Merged bulk PDF persistence.** The bulk run still uploads its combined output to a timestamped `{internal_id}/{vehicleUuid}/{docType}_bulk_{n}_{ts}.pdf` key. If the bucket should hold only `{VIN}.pdf` files (per-vehicle, no run-level artifacts), drop the merged-upload tail in the service — small tweak since da-platform consumes the merged via the signed URL, not the bucket.
-- **CORS tightening (optional, security hygiene).** Current rule allows `*` origins and both `GET` + `POST`. Signed URLs are the real access gate so origin doesn't matter much, but a tighter rule (`AllowedOrigins: ["https://app.dealeraddendums.com"]`, `AllowedMethods: ["GET"]` only) is the textbook play. Replacement JSON is in the `S3 CORS` task note.
+- **Post-transition (after legacy writes stop, ~2026-07):** revisit whether `AllowedMethods: ["POST"]` is still needed and consider rotating/scoping the legacy IAM identity once it's no longer writing. CORS itself stays `["*"]` indefinitely — dealer-website use case is permanent.
 
 ---
 
