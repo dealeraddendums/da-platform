@@ -494,7 +494,7 @@ All 20 `@test` strings in migrations 074+075 seed data truncated the domain. Fix
 | 11 | Admin Ops | ⬜ Deferred |
 | 12 | Enterprise White Label | ⬜ Queued |
 | 13 | Dealer Self-Serve Onboarding | ⬜ Queued |
-| 14 | HubSpot + Billing Sync | 🔜 Queued |
+| 14 | HubSpot Sync (DA → HubSpot, one-way) | ✅ 14a + 14b shipped; backfill complete; EasyCron registration pending |
 | 15 | iOS & Android Apps | ⬜ Queued |
 
 ## Phase 10b — PDF Microservice (✅ Complete, fully cut over)
@@ -607,24 +607,57 @@ Same S3 key conventions as today — PDF service writes to the same `dealer-adde
 
 ---
 
-## Phase 14 — HubSpot + Billing Sync (Queued)
+## Phase 14 — HubSpot Sync (DA → HubSpot, one-way)
 
-### Architecture
-Event-driven, non-blocking sync service. DA Platform create/edit/delete events sync to:
-- HubSpot portal `23896347`
-- da-billing
+### Status — updated 2026-05-31
 
-### HubSpot details
-- Aurora has `HUBSPOT_COMPANY_ID` on `dealer_dim`/`dealer_group`
-- Aurora has `HUBSPOT_CONTACT_ID` on users
-- URL formats: dealers/groups = `/record/0-2/{ID}`, contacts = `/record/0-1/{ID}`
-- Needs: HubSpot private app token
+**Shipped + verified end-to-end on prod.** Portal `23896347`. One-way DA Platform → HubSpot — DA is single source of truth.
 
-### Events to sync
-- Dealer created/updated/deleted
-- Dealer added/removed from group
-- Subscription upgraded/downgraded
-- Group created/updated/deleted
+**14a — write path (fire-and-forget from lifecycle routes):**
+- `lib/hubspot.ts` typed client, Bearer auth, three-stage idempotent upsert (PATCH by stored id → search by natural key → POST create). 404 on PATCH falls through to search/create so a manual HubSpot delete self-heals on the next sync.
+- `lib/sync-hubspot.ts` property builders + fire-and-forget `fireDealerSync` / `fireGroupSync` / `fireProfileSync`.
+- Hooked at: `app/api/dealers/route.ts` POST + PATCH, `app/api/groups/route.ts` POST, `app/api/invite/accept/route.ts`.
+- Errors land in `hubspot_sync_errors` (migration 082) instead of bubbling to the user.
+
+**Reliable trial-create path (commit d1b7048):** New individual-dealer create with `lifecyclestage=Dealer Trial` is the trigger event for the HubSpot onboarding workflow (Marketing OS Phase 5, not built yet). The create path uses `syncDealerCreateReliable` — 3× retry with 500ms/1.5s/4s backoff, on terminal failure logs to `hubspot_sync_errors` AND sends a Mandrill alert to support@. Inline-created users get a `fireProfileSync` right after the auth user lands so the associated Contact appears moments after the Trial-stage Company. PATCH path stays on the plain fire-and-forget — updates don't fire workflow enrollments.
+
+**14b — daily cron** (`/api/cron/sync-hubspot-computed`, auth `x-cron-secret`): refreshes `prints_last_30`, `prints_last_12mo`, `dealers_in_group`, and re-evaluates Trial → Trial Expired (>30 days OR >30 prints since `dealer.created_at` — first_login_at doesn't exist on any DA table). PATCHes spaced ~35ms apart. EasyCron registration pending: `0 8 * * *` UTC.
+
+**Backfill:** `scripts/backfill-hubspot.mjs` walks every active dealer/group/profile in 1000-row chunks (PostgREST default cap). 2,025 dealers + 214 groups + 3,646 profiles → ~100% coverage with `hubspot_*_id` written back to Supabase. Idempotent — safe to re-run.
+
+### Field-mapping reference
+
+**Company ⟵ dealer** (live in `lib/sync-hubspot.ts → dealerCompanyProperties`):
+
+| HubSpot prop | DA source |
+|---|---|
+| `dealerid` | `dealer.inventory_dealer_id` (Aurora numeric) |
+| `platformid` AND `da_dealer_` | `dealer.dealer_id` (text slug — both fields exist in portal, write same value) |
+| `billingid` | `dealer.billing_customer_id ?? dealer.internal_id` |
+| `groupid` | `groups.internal_id` for the dealer's group |
+| `subscription_type` | `dealer.account_type` normalized: `Manual` / `Auto-Web` / `Auto-DMS` / `Free` / `Trial` / `PAYGo`. Strips `$NN` price suffixes; `sub-*` slugs collapse to `Manual` / `Auto-Web` / `Auto-DMS`. |
+| `lifecyclestage` | paying account → `customer`; trial → `60435067` (Dealer Trial). Cron flips to `65495635` (Trial Expired) past 30d/30 prints. |
+| `feed_company_type` | nulls out when there's no provider; otherwise `Auto-DMS`/`Auto-Web` based on `inventory_provider_is_dms`. |
+
+**Lifecycle stage internal values** (custom stages have numeric IDs, not human-readable strings):
+
+| Stage | Value |
+|---|---|
+| Customer | `customer` |
+| Dealer Trial | `60435067` |
+| Group/Reseller Trial | `60429213` |
+| Trial Expired | `65495635` |
+| Account Paused | `78548766` |
+| Account Downgraded | `108387744` |
+
+### Env vars (already in prod `.env.production`)
+
+```
+HUBSPOT_PRIVATE_APP_TOKEN=pat-na1-…   # private-app token, Bearer auth
+HUBSPOT_PORTAL_ID=23896347
+```
+
+Token is also writable from the marketing-side `HUBSPOT_API_KEY` — keep distinct.
 
 ## Phase 12 — Enterprise White Label (Queued)
 
@@ -797,7 +830,7 @@ Existing app (screenshots captured) — use as UX reference, not codebase. The n
 - ✅ Phase 10b — PDF Microservice: fully cut over. D.5 (bulk → service, per-vehicle `items[].s3Key`) and E.2 (puppeteer removed from da-platform) both shipped — commits efe91fb, 9bfbf35. Only the bulk `buyer_guide` pdf-lib overlay still renders locally.
 - ⬜ Phase 12 — Enterprise White Label (custom subdomains + branding for large groups)
 - ⬜ Phase 13 — Dealer Self-Serve Onboarding (magic link → password → FreshBooks unwind)
-- ⬜ Phase 14 — HubSpot + Billing Sync
+- ✅ Phase 14 — HubSpot Sync (DA → HubSpot, one-way): 14a write path + 14b cron shipped; backfill complete (2,025 dealers / 214 groups / 3,646 profiles). EasyCron registration for `/api/cron/sync-hubspot-computed` (schedule `0 8 * * *` UTC) still pending Allan.
 - ⬜ Phase 15 — iOS & Android Native Apps (VIN scan, Print Queue — review existing iOS app first)
 - ⬜ `billing_sync_errors` alerting — panel flagging non-zero error counts so Box/billing failures don't sit silent (Box SDK failed silently 2 days before discovery)
 - ⬜ Box folder backfill for ~1,600 legacy dealers — all have `box_folder_id = null`; needs audited bulk backfill script when ready
