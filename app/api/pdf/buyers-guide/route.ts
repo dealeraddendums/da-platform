@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { BuyersGuideDefaults } from "@/lib/db";
-import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
+import { signPdfKey, buildPdfKey } from "@/lib/s3-upload";
 import { useService as usePdfService, renderBuyerGuideViaService } from "@/lib/pdf-service-client";
 import { getBuyersGuidePdfBytes } from "@/lib/buyers-guide-storage";
 import type { BgKey } from "@/lib/buyers-guide-constants";
@@ -122,12 +122,16 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
   }
 
   async function logPrint(buffer: Buffer, s3Key: string): Promise<void> {
+    // Service already uploaded with doc_type=buyer_guide tag (→ 1-day
+    // lifecycle). Re-uploading from da-platform would clear the tag.
+    // Just sign the existing key for print_history.pdf_url.
     let pdfUrl = "";
     try {
-      pdfUrl = await uploadPdf(buffer, s3Key);
+      pdfUrl = await signPdfKey(s3Key);
     } catch (err) {
-      console.error("[buyers-guide] S3 upload failed:", err instanceof Error ? err.message : err);
+      console.error("[buyers-guide] signPdfKey failed:", err instanceof Error ? err.message : err);
     }
+    void buffer;
     await admin.from("print_history").insert({
       vehicle_id: vehicleId,
       dealer_id: dvDealerId,

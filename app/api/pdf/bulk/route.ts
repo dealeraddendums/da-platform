@@ -10,7 +10,7 @@ import { syncAddendumItems } from "@/lib/sync-addendum-items";
 // the PDF service too, the single buyers-guide route's pattern shows
 // how (fetch BG bytes from Supabase Storage, ship to service).
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
-import { useService as usePdfService, renderBulkViaService, type BulkItem } from "@/lib/pdf-service-client";
+import { useService as usePdfService, renderBulkViaService, type BulkItem, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
@@ -46,12 +46,16 @@ async function uploadAndLogBulkJob(
   let pdfUrl = "";
   let uploadedKey: string | null = null;
   if (job.preUploadedSignedUrl) {
-    // Service path: per-vehicle PDF already uploaded by the PDF service.
+    // Service path: per-vehicle PDF already uploaded by the PDF service
+    // with the appropriate doc_type tag.
     pdfUrl = job.preUploadedSignedUrl;
     uploadedKey = job.s3Key;
   } else if (job.pdfBuffer) {
     try {
-      pdfUrl = await uploadPdf(job.pdfBuffer, job.s3Key);
+      // Local fallback path — only the bulk buyer_guide branch reaches
+      // here today (uses pdf-lib locally, not the service). Tag with
+      // the doc_type so the lifecycle rule still applies.
+      pdfUrl = await uploadPdf(job.pdfBuffer, job.s3Key, { docType: job.docType });
       uploadedKey = job.s3Key;
     } catch (err) {
       console.error(`[BULK] S3 upload failed vehicleId=${job.vehicleId}:`, err instanceof Error ? err.message : err);
@@ -893,6 +897,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const result = await renderBulkViaService(
         serviceItems.map(({ vehicleId: _vid, ...item }) => { void _vid; return item; }),
         mergedKey,
+        docType as PdfDocTypeTag,
       );
       mergedBuffer = result.buffer;
       // Splice each per-item signedUrl onto the matching bgJob so
@@ -963,24 +968,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "All vehicles failed to render" }, { status: 500 });
   }
 
-  // S3 upload + DB logging in the background. The service already
-  // uploaded the per-vehicle PDFs AND the merged PDF for the
-  // serviceItems path — uploadAndLogBulkJob picks up the per-vehicle
-  // signedUrls via preUploadedSignedUrl. The buyer_guide branch still
-  // needs uploadPdf for both per-vehicle (inside uploadAndLogBulkJob)
-  // and merged (the explicit uploadPdf below).
-  void Promise.all([
-    ...bgJobs.map(job =>
+  // S3 upload + DB logging in the background.
+  //
+  // Service path (addendum / infosheet bulk): the PDF service already
+  // uploaded each per-vehicle PDF AND the merged transport PDF (the
+  // latter with doc_type=bulk_merged → 1-day TTL). uploadAndLogBulkJob
+  // picks up per-vehicle URLs via preUploadedSignedUrl.
+  //
+  // Local path (buyer_guide bulk only): each per-vehicle PDF is
+  // uploaded by uploadAndLogBulkJob with doc_type=buyer_guide. The
+  // merged buffer is returned to the caller as the HTTP response body
+  // and is NOT persisted — bulk merged files are intentionally
+  // ephemeral (Allan's retention policy: merged bulk PDFs are not
+  // archived).
+  void Promise.all(
+    bgJobs.map(job =>
       uploadAndLogBulkJob(job, claims.sub, admin).catch(err =>
         console.error(`[BULK] background logging failed vehicleId=${job.vehicleId}:`, err instanceof Error ? err.message : err)
       )
-    ),
-    ...(serviceItems.length > 0 ? [] : [
-      uploadPdf(mergedBuffer, mergedKey).catch(err =>
-        console.error("[BULK] merged S3 upload failed:", err instanceof Error ? err.message : err)
-      ),
-    ]),
-  ]);
+    )
+  );
+  void mergedKey;
 
   return new NextResponse(mergedBuffer as unknown as BodyInit, {
     status: 200,

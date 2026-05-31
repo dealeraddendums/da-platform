@@ -48,7 +48,24 @@ function getClient(): S3Client {
   });
 }
 
-export async function uploadPdf(buffer: Buffer, key: string): Promise<string> {
+/**
+ * @param buffer  PDF bytes
+ * @param key     S3 key (flat `{VIN}.pdf` convention)
+ * @param opts.docType  Optional. Tags the object with `doc_type=<value>`
+ *   so the bucket's lifecycle rule applies the right TTL:
+ *     "addendum"     → 180 days
+ *     "infosheet"    → 1 day
+ *     "buyer_guide"  → 1 day
+ *     "bulk_merged"  → 1 day
+ *   Omitting the tag leaves the object untagged — the lifecycle rules
+ *   above won't match, so the object will live indefinitely. ALWAYS
+ *   pass a docType unless you genuinely want permanent retention.
+ */
+export async function uploadPdf(
+  buffer: Buffer,
+  key: string,
+  opts: { docType?: 'addendum' | 'infosheet' | 'buyer_guide' | 'bulk_merged' } = {},
+): Promise<string> {
   const s3 = new S3Client({
     region: 'us-west-1',
     credentials: {
@@ -56,12 +73,16 @@ export async function uploadPdf(buffer: Buffer, key: string): Promise<string> {
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
     },
   });
-  await s3.send(new PutObjectCommand({
+  const params: ConstructorParameters<typeof PutObjectCommand>[0] = {
     Bucket: BUCKET,
     Key: key,
     Body: buffer,
     ContentType: 'application/pdf',
-  }));
+  };
+  if (opts.docType) {
+    params.Tagging = `doc_type=${opts.docType}`;
+  }
+  await s3.send(new PutObjectCommand(params));
   return signPdfKey(key);
 }
 

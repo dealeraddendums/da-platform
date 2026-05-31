@@ -12,12 +12,21 @@
 const POLL_INTERVAL_MS = 1000;
 const POLL_TIMEOUT_MS = 120_000; // 2 min — covers a 200-vehicle bulk
 
+/** Tag drives the S3 lifecycle rule. Defaults to "addendum" (180-day
+ *  retention) — explicitly opt into the short-TTL classes for everything
+ *  else. The service falls back to "addendum" on unknown input as a
+ *  safety net, so the worst case of a missing docType is over-retention,
+ *  not accidental same-day deletion of an addendum. */
+export type PdfDocTypeTag = "addendum" | "infosheet" | "buyer_guide";
+
 export interface RenderOpts {
   /** "standard" | "narrow" | "infosheet" | "buyers_guide" */
   paperSize?: string;
   customDims?: { widthIn: number; heightIn: number };
   /** Default false; pass true for Buyer's Guide which is a 2-page render. */
   allPages?: boolean;
+  /** Drives the S3 object tag and therefore the lifecycle retention. */
+  docType?: PdfDocTypeTag;
 }
 
 export interface BulkItem {
@@ -137,6 +146,7 @@ export async function renderViaService(
     paperSize: opts.paperSize ?? "standard",
     customDims: opts.customDims,
     allPages: opts.allPages ?? false,
+    docType: opts.docType ?? "addendum",
     s3Key,
   });
   const done = await pollUntilDone(jobId);
@@ -150,9 +160,11 @@ export async function renderViaService(
 export async function renderBulkViaService(
   items: BulkItem[],
   s3Key: string,
+  docType: PdfDocTypeTag = "addendum",
 ): Promise<{ buffer: Buffer; s3Key: string; items: BulkItemResult[] }> {
   const { jobId } = await postJson("/api/pdf/bulk", {
     jobs: items,
+    docType,
     s3Key,
   });
   const done = await pollUntilDone(jobId);
@@ -198,6 +210,7 @@ export async function enqueueGenerate(
     paperSize: opts.paperSize ?? "standard",
     customDims: opts.customDims,
     allPages: opts.allPages ?? false,
+    docType: opts.docType ?? "addendum",
     s3Key,
   });
 }

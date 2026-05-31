@@ -3,8 +3,8 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { VehicleAuditLogInsert, AddendumHistoryInsert, AddendumDataInsert, DealerSettingsRow } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
-import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
-import { useService as usePdfService, renderViaService, enqueueGenerate, awaitJobAndFetch } from "@/lib/pdf-service-client";
+import { signPdfKey, buildPdfKey } from "@/lib/s3-upload";
+import { useService as usePdfService, renderViaService, enqueueGenerate, awaitJobAndFetch, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 
 type BgOption = { option_name: string; option_price?: string; description?: string | null; required?: boolean };
@@ -20,14 +20,23 @@ async function logGeneratePdf(
   options: BgOption[],
   admin: ReturnType<typeof createAdminSupabaseClient>,
 ): Promise<void> {
+  // The PDF service already uploaded `pdfBuffer` to `s3Key` with the
+  // appropriate doc_type tag for lifecycle. Re-uploading from here
+  // would CLEAR the tag (PutObject Tagging param replaces the tag set),
+  // breaking the 180-day / 1-day lifecycle rules. So we just sign the
+  // existing key for print_history.pdf_url; no second PUT.
   let pdfUrl = "";
   let uploadedKey: string | null = null;
   try {
-    pdfUrl = await uploadPdf(pdfBuffer, s3Key);
+    pdfUrl = await signPdfKey(s3Key);
     uploadedKey = s3Key;
   } catch (err) {
-    console.error("[pdf/generate] S3 upload failed:", err instanceof Error ? err.message : err);
+    console.error("[pdf/generate] signPdfKey failed:", err instanceof Error ? err.message : err);
   }
+  // pdfBuffer is intentionally unused now that we don't re-upload; keep
+  // the parameter for signature continuity and to leave the door open
+  // for fallback resurrection if the service ever needs to be bypassed.
+  void pdfBuffer;
 
   const { error: phErr } = await admin.from("print_history").insert({
     vehicle_id: dealerVehicleId,
@@ -740,6 +749,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const { jobId } = await enqueueGenerate(html, {
           paperSize: effectivePaperSizeStr,
           customDims: customPaperDims,
+          docType: docType as PdfDocTypeTag,
         }, s3Key);
         // Fire-and-forget completion: poll the EXISTING jobId (not a
         // new render), fetch bytes once complete, run the logging
@@ -778,6 +788,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const result = await renderViaService(html, {
         paperSize: effectivePaperSizeStr,
         customDims: customPaperDims,
+        docType: docType as PdfDocTypeTag,
       }, s3Key);
       pdfBuffer = result.buffer;
     } catch (err) {
