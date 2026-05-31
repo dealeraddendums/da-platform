@@ -494,7 +494,7 @@ All 20 `@test` strings in migrations 074+075 seed data truncated the domain. Fix
 | 11 | Admin Ops | ⬜ Deferred |
 | 12 | Enterprise White Label | ⬜ Queued |
 | 13 | Dealer Self-Serve Onboarding | ⬜ Queued |
-| 14 | HubSpot Sync (DA → HubSpot, one-way) | ✅ 14a + 14b shipped; backfill complete; EasyCron registration pending |
+| 14 | HubSpot Sync (DA → HubSpot, one-way) | ✅ Complete — write path + daily cron live, backfill 100%, EasyCron registered + green |
 | 15 | iOS & Android Apps | ⬜ Queued |
 
 ## Phase 10b — PDF Microservice (✅ Complete, fully cut over)
@@ -621,7 +621,7 @@ Same S3 key conventions as today — PDF service writes to the same `dealer-adde
 
 **Reliable trial-create path (commit d1b7048):** New individual-dealer create with `lifecyclestage=Dealer Trial` is the trigger event for the HubSpot onboarding workflow (Marketing OS Phase 5, not built yet). The create path uses `syncDealerCreateReliable` — 3× retry with 500ms/1.5s/4s backoff, on terminal failure logs to `hubspot_sync_errors` AND sends a Mandrill alert to support@. Inline-created users get a `fireProfileSync` right after the auth user lands so the associated Contact appears moments after the Trial-stage Company. PATCH path stays on the plain fire-and-forget — updates don't fire workflow enrollments.
 
-**14b — daily cron** (`/api/cron/sync-hubspot-computed`, auth `x-cron-secret`): refreshes `prints_last_30`, `prints_last_12mo`, `dealers_in_group`, and re-evaluates Trial → Trial Expired (>30 days OR >30 prints since `dealer.created_at` — first_login_at doesn't exist on any DA table). PATCHes spaced ~35ms apart. EasyCron registration pending: `0 8 * * *` UTC.
+**14b — daily cron** (`/api/cron/sync-hubspot-computed`, auth `x-cron-secret`, EasyCron `0 8 * * *` UTC, ✅ live): refreshes `prints_last_30`, `prints_last_12mo`, `dealers_in_group`, and re-evaluates Trial → Trial Expired (>30 days OR >30 prints since `dealer.created_at` — first_login_at doesn't exist on any DA table). PATCHes spaced ~35ms apart. Fire-and-forget pattern (commit bcc4686): the route counts what's queued, returns `{ok, queued: {dealers, groups}}` in <300ms, and runs the ~2.2k-record loop in `void (async () => {...})()` under PM2 — ALB's 60s cap was the original gotcha that 504'd EasyCron before the refactor. Progress logs every 500 dealers via `pm2 logs`.
 
 **Backfill:** `scripts/backfill-hubspot.mjs` walks every active dealer/group/profile in 1000-row chunks (PostgREST default cap). 2,025 dealers + 214 groups + 3,646 profiles → ~100% coverage with `hubspot_*_id` written back to Supabase. Idempotent — safe to re-run.
 
@@ -823,6 +823,7 @@ Existing app (screenshots captured) — use as UX reference, not codebase. The n
 - ✅ EasyCron `0 3 * * *` → harvest-vin-trims
 - ✅ Run manual vehicle backfill in tmux (script ready)
 - ✅ EasyCron `0 10 * * *` → sync-xps-tracking (after Phase 10 deploy confirmed)
+- ✅ EasyCron `0 8 * * *` UTC → sync-hubspot-computed (Phase 14b, fire-and-forget after 504 fix)
 - ✅ Verify ChromeData report format via Reports page manual trigger
 
 ### Code items
