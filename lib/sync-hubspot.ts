@@ -110,9 +110,11 @@ function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, 
     billing_contact_email:           d.primary_contact_email,
     billing_contact_phone_number:    d.phone,
 
-    // Inventory feed
+    // Inventory feed. Both fields go null together when no provider —
+    // emitting Auto-Web on a dealer with no feed was misleading in the
+    // portal.
     feed_company:      d.inventory_provider,
-    feed_company_type: d.inventory_provider_is_dms ? "Auto-DMS" : "Auto-Web",
+    feed_company_type: d.inventory_provider ? (d.inventory_provider_is_dms ? "Auto-DMS" : "Auto-Web") : null,
 
     // Activity — last30 is event-driven (already on the row); 12mo +
     // dealers_in_group come from the cron in 14b.
