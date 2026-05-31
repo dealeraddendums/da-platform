@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
+import { fireProfileSync } from "@/lib/sync-hubspot";
 
 /**
  * POST /api/invite/accept
@@ -85,6 +86,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     console.error("[invite/accept] profile upsert failed:", profileErr.message);
     return NextResponse.json({ error: "Failed to create profile" }, { status: 500 });
   }
+
+  // Phase 14a — HubSpot Contact upsert for the new user. Fire-and-forget;
+  // if HubSpot is down the invite still succeeds and 14b cron will catch up.
+  fireProfileSync(authData.user.id);
 
   // Mark invitation accepted
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

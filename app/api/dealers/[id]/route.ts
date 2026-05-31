@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { archiveCustomer, unarchiveCustomer, billingConfigured, updateCustomer, getTemplate, putTemplate } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
+import { fireDealerSync } from "@/lib/sync-hubspot";
 import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 import { fireSuperAdminGroupAssignCascade } from "@/lib/group-billing-cascade";
 
@@ -313,6 +314,10 @@ export async function PATCH(
       }, { event: "billing.dealer.rename.group_template", dealerId: dealerUuid, payload: { groupId: groupIdForBilling, internalId, newName } });
     }
   }
+
+  // Phase 14a — push the post-edit dealer state to HubSpot Company.
+  // Fire-and-forget; failures land in hubspot_sync_errors.
+  fireDealerSync(dealerUuid);
 
   return NextResponse.json({ data: data as DealerRow });
 }

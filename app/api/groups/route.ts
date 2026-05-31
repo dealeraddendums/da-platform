@@ -5,6 +5,7 @@ import type { GroupRow, GroupUpdate } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { createCustomer, billingConfigured } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
+import { fireGroupSync } from "@/lib/sync-hubspot";
 import { createGroupFolder, boxConfigured } from "@/lib/box";
 
 type SortableCol = "name" | "active" | "account_type" | "dealer_count" | "created_at" | "billing_contact";
@@ -265,6 +266,11 @@ Username: ${username?.trim() ? (username.trim().includes("@") ? username.trim() 
 <strong>Created by:</strong> ${creatorName}<br>
 <strong>Created at:</strong> ${now} ET</p>`,
   }).catch((err) => console.error("[groups/notify] internal email failed:", err instanceof Error ? err.message : err));
+
+  // Phase 14a — HubSpot Company upsert for the group. Default
+  // lifecyclestage is "Group/Reseller Trial" on first sync; operator
+  // flips to Customer in HubSpot when the group starts paying.
+  fireGroupSync(group.id);
 
   return NextResponse.json(
     { data: group, emailSent: sendNotify && !!contactEmail },

@@ -13,6 +13,7 @@ import {
   type BillingProduct,
 } from "@/lib/billing";
 import { runSync, fireAndForget } from "@/lib/billing-sync";
+import { fireDealerSync } from "@/lib/sync-hubspot";
 import { fireGroupAssignCascade } from "@/lib/group-billing-cascade";
 import { createDealerFolder, boxConfigured } from "@/lib/box";
 
@@ -484,6 +485,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
     }
   }
+
+  // Phase 14a — HubSpot Company upsert. Fire-and-forget. Lifecyclestage
+  // defaults to "Dealer Trial" for new individual dealers; group-member
+  // dealers still post their own Company but inherit the group's stage
+  // via the daily cron in 14b.
+  fireDealerSync(createdDealerId);
 
   if (username?.trim() && password?.trim()) {
     const rawUsername = username.trim();
