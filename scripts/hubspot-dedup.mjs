@@ -209,7 +209,19 @@ function findOriginal({ subjectName, subjectPhone, ourRec, ownKey, byName }) {
   const confident = subjectDigits
     ? candidates.filter(c => digitsOnly(c.properties?.phone) === subjectDigits)
     : [];
-  if (confident.length === 1) return { kind: "merge", original: confident[0] };
+  if (confident.length === 1) {
+    // Owner-bearing safety: the backfill never set owners on the
+    // dups it created — every ourRec in a true backfill pair is
+    // ownerless. If ourRec has an owner, this isn't a backfill dup
+    // (it's two legitimate records that share name+phone — e.g. two
+    // historical records from a prior migration). Demote to REVIEW
+    // so a human picks the survivor; HubSpot's merge would otherwise
+    // discard the secondary's owner.
+    if (has(ourRec.properties?.hubspot_owner_id)) {
+      return { kind: "review", candidates: confident };
+    }
+    return { kind: "merge", original: confident[0] };
+  }
   return { kind: "review", candidates };
 }
 
