@@ -166,10 +166,10 @@ function dealerProps(d, groupName, groupInternalId) {
     feed_company:      d.inventory_provider,
     feed_company_type: d.inventory_provider ? (d.inventory_provider_is_dms ? "Auto-DMS" : "Auto-Web") : null,
     prints_last_30: d.last30 ?? 0,
-    lifecyclestage:
-      isPayingAccount(d.account_type) ? LIFECYCLE.CUSTOMER
-      : d.downgraded_at              ? LIFECYCLE.ACCOUNT_DOWNGRADED
-      :                                LIFECYCLE.DEALER_TRIAL,
+    // 2-way derivation (no downgraded_at — see SELECT note above). The
+    // cron at /api/cron/sync-hubspot-computed re-evaluates this nightly
+    // using the 3-way logic once migration 083 is applied.
+    lifecyclestage: isPayingAccount(d.account_type) ? LIFECYCLE.CUSTOMER : LIFECYCLE.DEALER_TRIAL,
   };
 }
 
@@ -277,8 +277,14 @@ async function run() {
 
   // ── Dealers ──────────────────────────────────────────────────────────────
   if (RUN_DEALERS) {
+    // NOTE: downgraded_at intentionally omitted from the SELECT — migration
+    // 083 isn't applied in every environment yet, and re-stamping a dealer
+    // who was ACCOUNT_DOWNGRADED is harmless: the nightly cron re-derives
+    // lifecyclestage from account_type + downgraded_at and restores the
+    // correct stage. Once 083 is applied everywhere, re-add the column
+    // here and the 3-way branch in dealerProps below.
     const dealers = await fetchAll("dealers",
-      "id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at, downgraded_at",
+      "id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at",
       [["active", true]],
     );
     const allGroups = await fetchAll("groups", "id, name, internal_id");
