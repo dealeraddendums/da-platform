@@ -137,7 +137,11 @@ function isPayingAccount(at) {
 }
 function digitsOnly(s) {
   if (!s) return null;
-  const d = String(s).replace(/\D+/g, "");
+  let d = String(s).replace(/\D+/g, "");
+  // US country code: "+1 270-745-0001" ↔ "(270) 745-0001" should match.
+  // Strip a leading 1 from 11-digit numbers so both normalize to the
+  // same 10-digit NANP string.
+  if (d.length === 11 && d.startsWith("1")) d = d.slice(1);
   return d || null;
 }
 
