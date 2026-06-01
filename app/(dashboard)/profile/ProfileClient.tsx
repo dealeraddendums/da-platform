@@ -9,7 +9,7 @@ import { LABEL_PRODUCTS } from "@/lib/label-products";
 import type { AddendumPaperSize } from "@/lib/recommended-labels";
 import { paperSizeWidthLabel, productMatchesPaperSize } from "@/lib/recommended-labels";
 
-type Tab = "info" | "shipping" | "labels" | "orders" | "billing" | "security";
+type Tab = "info" | "shipping" | "labels" | "orders" | "billing" | "hubspot" | "security";
 
 type Props = {
   dealer?: DealerRow | null;
@@ -438,6 +438,163 @@ function AccountInfoCard({
 }
 
 // ── Security Tab ─────────────────────────────────────────────────────────────
+
+// ── HubSpot Sync Tab (super_admin only, ghost mode required) ────────────────
+//
+// Thin UI over POST /api/hubspot/sync. The button kicks off the SSE stream;
+// each event renders as a row with a spinner / ✓ / ✗ indicator. Behavior
+// mirrors the existing event-driven sync — this just lets support trigger
+// it on demand without waiting for an edit event.
+
+interface HubSpotEvent {
+  step: "start" | "company" | "contact" | "done";
+  status?: "running" | "done" | "error";
+  message?: string;
+  email?: string;
+  hubspotId?: string;
+  name?: string | null;
+  okCount?: number;
+  errorCount?: number;
+  userCount?: number;
+}
+
+function HubSpotSyncTab({ dealer }: { dealer: DealerRow }) {
+  const [running, setRunning] = useState(false);
+  const [events, setEvents] = useState<HubSpotEvent[]>([]);
+  const [summary, setSummary] = useState<{ ok: number; err: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function start(): Promise<void> {
+    setRunning(true);
+    setEvents([]);
+    setSummary(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/hubspot/sync", { method: "POST" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j.error ?? `Request failed (${res.status})`);
+        setRunning(false);
+        return;
+      }
+      const reader = res.body?.getReader();
+      if (!reader) {
+        setError("Browser doesn't support streaming responses");
+        setRunning(false);
+        return;
+      }
+      const decoder = new TextDecoder();
+      let buffer = "";
+      // Read SSE frames (`data: {...}\n\n`) as they arrive.
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, nl);
+          buffer = buffer.slice(nl + 2);
+          for (const line of frame.split("\n")) {
+            if (!line.startsWith("data:")) continue;
+            try {
+              const evt = JSON.parse(line.slice(5).trim()) as HubSpotEvent;
+              setEvents(prev => mergeEvent(prev, evt));
+              if (evt.step === "done") setSummary({ ok: evt.okCount ?? 0, err: evt.errorCount ?? 0 });
+            } catch {
+              // bad frame — ignore so the stream keeps going
+            }
+          }
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  // Latest event for a given step/key supersedes the prior one — so a
+  // contact line goes from `running` → `done` in place rather than
+  // showing two rows.
+  function mergeEvent(prev: HubSpotEvent[], evt: HubSpotEvent): HubSpotEvent[] {
+    const key = evt.step === "contact" ? `contact:${evt.email}` : evt.step;
+    const idx = prev.findIndex(p => (p.step === "contact" ? `contact:${p.email}` : p.step) === key);
+    if (idx === -1) return [...prev, evt];
+    const copy = prev.slice();
+    copy[idx] = evt;
+    return copy;
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16 }}>
+        <h3 style={{ margin: "0 0 4px 0", fontSize: 16, fontWeight: 600, color: "#2a2b3c" }}>Manual HubSpot Sync</h3>
+        <p style={{ margin: 0, color: "#78828c", fontSize: 13 }}>
+          Pushes <strong>{dealer.name ?? dealer.dealer_id}</strong> + every active user to HubSpot right now.
+          Use this after a correction, or if an event-sync was missed. Computed totals
+          (<code>prints_last_12mo</code>, <code>dealers_in_group</code>) refresh nightly.
+        </p>
+      </div>
+
+      <button
+        onClick={() => void start()}
+        disabled={running}
+        style={{
+          padding: "8px 16px",
+          background: running ? "#9aa4ad" : "#1976d2",
+          color: "#fff",
+          border: "none",
+          borderRadius: 4,
+          cursor: running ? "default" : "pointer",
+          fontSize: 14,
+          fontFamily: "inherit",
+        }}
+      >
+        {running ? "Syncing…" : "Start Sync"}
+      </button>
+
+      {error && (
+        <div style={{ marginTop: 12, padding: "8px 12px", background: "#ffebee", color: "#c62828", border: "1px solid #ffcdd2", borderRadius: 4, fontSize: 13 }}>
+          {error}
+        </div>
+      )}
+
+      {events.length > 0 && (
+        <ul style={{ marginTop: 16, padding: 0, listStyle: "none", border: "1px solid #e0e0e0", borderRadius: 6, background: "#fff" }}>
+          {events.filter(e => e.step !== "start" && e.step !== "done").map((e, i) => {
+            const ok = e.status === "done";
+            const err = e.status === "error";
+            const indicator = ok ? "✓" : err ? "✗" : "…";
+            const indicatorColor = ok ? "#2e7d32" : err ? "#c62828" : "#78828c";
+            const label = e.step === "company"
+              ? "Company"
+              : `Contact — ${e.email}`;
+            return (
+              <li key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 14px", borderBottom: i < events.length - 1 ? "1px solid #f0f0f0" : "none", fontSize: 13 }}>
+                <span style={{ width: 20, textAlign: "center", fontWeight: 700, color: indicatorColor }}>{indicator}</span>
+                <span style={{ flex: 1, color: "#2a2b3c" }}>{label}</span>
+                {e.hubspotId && (
+                  <span style={{ color: "#78828c", fontFamily: "monospace", fontSize: 12 }}>id {e.hubspotId}</span>
+                )}
+                {err && e.message && (
+                  <span style={{ color: "#c62828", fontSize: 12 }}>{e.message}</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {summary && (
+        <div style={{ marginTop: 12, fontSize: 13, color: summary.err > 0 ? "#c62828" : "#2e7d32" }}>
+          {summary.err === 0
+            ? `Done — ${summary.ok} record${summary.ok === 1 ? "" : "s"} synced.`
+            : `${summary.ok} ok, ${summary.err} failed — check hubspot_sync_errors for details.`}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function SecurityTab({
   userEmail,
@@ -1632,19 +1789,28 @@ const tdStyle: React.CSSProperties = {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean }[] = [
+const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean; staffOnly?: boolean }[] = [
   { id: "info", label: "Dealership Info", dealerOnly: true },
   { id: "shipping", label: "Shipping", dealerOnly: true },
   { id: "labels", label: "Order Labels", dealerOnly: true },
   { id: "orders", label: "Orders", dealerOnly: true },
   { id: "billing", label: "Billing", dealerOnly: true },
+  // staffOnly: super_admin can see + use this when ghosting a dealer.
+  // Dealer roles never see the tab; the route enforces the same gate
+  // server-side (returns 403 for any non-super_admin caller).
+  { id: "hubspot", label: "HubSpot Sync", dealerOnly: true, staffOnly: true },
   { id: "security", label: "Security" },
 ];
 
 export default function ProfileClient({ dealer, canEdit, canOrderLabels, recommendedPaperSizes, userEmail, userName, userRole, memberSince }: Props) {
   const searchParams = useSearchParams();
   const hasDealer = !!dealer;
-  const visibleTabs = ALL_TABS.filter(t => !t.dealerOnly || hasDealer);
+  const isStaff = userRole === "super_admin";
+  const visibleTabs = ALL_TABS.filter(t => {
+    if (t.dealerOnly && !hasDealer) return false;
+    if (t.staffOnly && !isStaff) return false;
+    return true;
+  });
 
   // Reading searchParams inside a useState initializer causes a
   // hydration mismatch (React #425/#418/#423) because useSearchParams()
@@ -1661,8 +1827,10 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, recomme
     if (!hasDealer) return;
     if (t === "labels" || t === "info" || t === "shipping" || t === "billing" || t === "orders") {
       setTab(t as Tab);
+    } else if (t === "hubspot" && isStaff) {
+      setTab("hubspot");
     }
-  }, [searchParams, hasDealer]);
+  }, [searchParams, hasDealer, isStaff]);
 
   const title = "My Profile";
 
@@ -1726,6 +1894,9 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, recomme
         )}
         {tab === "orders" && <OrdersTab />}
         {tab === "billing" && <BillingTab />}
+        {tab === "hubspot" && dealer && isStaff && (
+          <HubSpotSyncTab dealer={dealer} />
+        )}
         {tab === "security" && (
           <SecurityTab userEmail={userEmail} userRole={userRole} memberSince={memberSince} />
         )}
