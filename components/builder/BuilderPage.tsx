@@ -26,6 +26,7 @@ const PALETTE_TILES = [
   { type: 'dealer',            emoji: '🏠', label: 'Dealer address',    hint: 'Contact info',          group: 'content' },
   { type: 'description',       emoji: '📝', label: 'Description',       hint: 'Populated at print time', group: 'infosheet' },
   { type: 'features',          emoji: '✦',  label: 'Features list',     hint: 'Populated at print time', group: 'infosheet' },
+  { type: 'mpg',               emoji: '⛽', label: 'MPG',               hint: 'City / Highway',         group: 'infosheet' },
   { type: 'headerbar',         emoji: '⬛', label: 'Header bar',        hint: 'Full-width text',       group: 'structural' },
   { type: 'customtext',        emoji: 'T',  label: 'Custom text',       hint: 'Free content',          group: 'structural' },
   { type: 'sigline',           emoji: '✎',  label: 'Signature line',    hint: 'Buyer + date',          group: 'structural' },
@@ -209,6 +210,8 @@ function applyVehicleDataToWidgets(
       }}};
     } else if (w.type === 'barcode') {
       result[id] = { ...w, d: { ...w.d, vin: vehicle.vin ?? '' } };
+    } else if (w.type === 'mpg') {
+      result[id] = { ...w, d: { ...w.d, cmpg: vehicle.cmpg ?? null, hmpg: vehicle.hmpg ?? null } };
     } else if (w.type === 'dealer') {
       const lines = [
         vehicle.dealer_name,
@@ -2270,6 +2273,25 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
         </EpSection>
       )}
 
+      {w.type === 'mpg' && (
+        <EpSection>
+          <Eps>MPG</Eps>
+          <Fd label="Order">
+            <div style={{ display: 'flex', gap: 4 }}>
+              {([['city_first', 'City first'], ['hwy_first', 'Highway first']] as const).map(([val, lbl]) => (
+                <button key={val} type="button" onClick={() => u('order', val)}
+                  style={{ flex: 1, padding: '5px', borderRadius: 4, border: `2px solid ${((d.order as string) || 'city_first') === val ? '#1976d2' : '#e0e0e0'}`, background: ((d.order as string) || 'city_first') === val ? '#e3f2fd' : '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: ((d.order as string) || 'city_first') === val ? '#1976d2' : '#55595c', fontFamily: 'inherit' }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </Fd>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, padding: '4px 0' }}>
+            Renders the vehicle&apos;s City + Highway MPG (no labels — the background graphic supplies them). A number is skipped when missing.
+          </div>
+        </EpSection>
+      )}
+
       {w.type === 'barcode' && (
         <EpSection>
           <Eps>VIN Barcode</Eps>
@@ -2438,6 +2460,23 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
         <EpSection>
           <Eps>Font Size</Eps>
           <FontStepper label="Font size" fkey="fontSize" base={9} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+      {w.type === 'mpg' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Number font size" fkey="fontSize" base={28} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+
+      {/* === Spacing === */}
+      {w.type === 'mpg' && (
+        <EpSection>
+          <Eps>Spacing</Eps>
+          <Fd label="Gap between numbers (px)">
+            <input type="number" value={(d.gap as number) ?? 120} min={0} max={600} step={4}
+              onChange={e => u('gap', +e.target.value)} style={{ ...fiStyle, width: '100%' }} />
+          </Fd>
         </EpSection>
       )}
 

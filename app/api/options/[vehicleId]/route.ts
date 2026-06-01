@@ -24,7 +24,7 @@ async function loadVehicleForRules(
   if (!isUUID(vehicleId)) return undefined;
   const { data: dv } = await admin
     .from("dealer_vehicles")
-    .select("dealer_id, vin, stock_number, year, make, model, trim, body_style, exterior_color, mileage, msrp, condition")
+    .select("dealer_id, vin, stock_number, year, make, model, trim, body_style, exterior_color, mileage, msrp, condition, cmpg, hmpg, mpg")
     .eq("id", vehicleId)
     .maybeSingle();
   if (!dv) return undefined;
@@ -41,6 +41,9 @@ async function loadVehicleForRules(
     mileage: number | null;
     msrp: number | null;
     condition: string | null;
+    cmpg: string | null;
+    hmpg: string | null;
+    mpg: string | null;
   };
   const v = dv as unknown as DV;
   return {
@@ -69,9 +72,9 @@ async function loadVehicleForRules(
     PHOTOS: null,
     DESCRIPTION: null,
     PRINT_STATUS: "0" as const,
-    HMPG: null,
-    CMPG: null,
-    MPG: null,
+    HMPG: v.hmpg ?? null,
+    CMPG: v.cmpg ?? null,
+    MPG: v.mpg ?? null,
   };
 }
 

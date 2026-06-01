@@ -15,7 +15,7 @@ export type WidgetType =
   | 'askbar' | 'dealer' | 'infobox' | 'headerbar' | 'customtext'
   | 'sigline' | 'description' | 'features' | 'barcode' | 'qrcode' | 'custom'
   | 'suggested_options' | 'suggested_price'
-  | 'bgimage' | 'vehiclephoto' | 'disclaimer';
+  | 'bgimage' | 'vehiclephoto' | 'disclaimer' | 'mpg';
 
 export interface OptionItem {
   name: string;
@@ -68,6 +68,8 @@ export interface VehiclePreload {
   dealer_zip?: string | null;
   dealer_phone?: string | null;
   vdp_link?: string | null;
+  cmpg?: string | null;
+  hmpg?: string | null;
 }
 
 export interface SavedTemplate {

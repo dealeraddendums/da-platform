@@ -244,6 +244,32 @@ export function renderW(type: string, d: D, fontScale: number): string {
     return `<div style="padding:3px 0;height:100%;box-sizing:border-box;overflow:hidden"><div style="font-size:8px;font-weight:700;color:#78828c;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;display:flex;align-items:center">Features / Options${badge}</div><div style="border:1px solid #e0e0e0;border-radius:2px;overflow:hidden">${rows}</div></div>`;
   }
 
+  // MPG — two numbers (city + highway) positioned over the EPA fuel-graphic
+  // labels on the infosheet background. No labels here — the background
+  // supplies them. Hide-if-empty rule: skip a missing number, render nothing
+  // if both are empty. Order toggle reverses the pair.
+  if (type === 'mpg') {
+    const fontPx = Math.round(28 * fs * ((d.fontSize as number) || 1));
+    const gapPx = (d.gap as number) ?? 120;
+    const cmpgRaw = (d.cmpg as string | number | null | undefined);
+    const hmpgRaw = (d.hmpg as string | number | null | undefined);
+    const fmt = (v: string | number | null | undefined): string | null => {
+      if (v == null) return null;
+      const s = String(v).trim();
+      if (!s || s === '0' || s === '0.0' || s === '0.00') return null;
+      return s;
+    };
+    const city = fmt(cmpgRaw);
+    const hwy = fmt(hmpgRaw);
+    if (!city && !hwy) return '';
+    const order = (d.order as string) === 'hwy_first' ? [hwy, city] : [city, hwy];
+    const numStyle = `font-size:${fontPx}px;font-weight:800;color:#1a1916;font-family:'Arial Black','Helvetica',sans-serif;line-height:1;letter-spacing:-.02em`;
+    const cells = order
+      .map(n => n ? `<span style="${numStyle}">${n}</span>` : `<span style="${numStyle};visibility:hidden">0</span>`)
+      .join(`<span style="display:inline-block;width:${gapPx}px"></span>`);
+    return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center">${cells}</div>`;
+  }
+
   if (type === 'barcode') {
     const vin = (d.vin as string) || '5TFDYS3F11MX956768';
     const seed = vin.split('').map(c => c.charCodeAt(0));

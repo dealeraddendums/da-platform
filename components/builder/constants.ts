@@ -56,6 +56,9 @@ export const LAYOUT_INFOSHEET: Record<string, { x: number; y: number; w: number;
   dealer:      { x: 536, y: 68,  w: 216, h: 60  },
   customtext:  { x: 40,  y: 944, w: 744, h: 60  },
   disclaimer:  { x: 40,  y: 1010, w: 744, h: 32 },
+  // Sized to straddle the EPA fuel-graphic pump art on the default
+  // infosheet background; operator nudges to fit a custom background.
+  mpg:         { x: 240, y: 720, w: 320, h: 60  },
 };
 
 export const WIDGET_LABELS: Record<string, string> = {
@@ -67,6 +70,7 @@ export const WIDGET_LABELS: Record<string, string> = {
   bgimage: 'Background Image', vehiclephoto: 'Vehicle Photo',
   suggested_options: 'Suggested Products', suggested_price: 'Suggested Price',
   disclaimer: 'Disclaimer',
+  mpg: 'MPG',
 };
 
 // One-instance-only widgets. QR Code, VIN Barcode, Background Image, and
@@ -78,6 +82,7 @@ export const UNIQUE_WIDGETS = [
   'description','features',
   'suggested_options','suggested_price',
   'disclaimer',
+  'mpg',
 ];
 
 export const ADDENDUM_WIDGETS = [
@@ -90,7 +95,7 @@ export const ADDENDUM_WIDGETS = [
 export const INFOSHEET_WIDGETS = [
   'logo','vehicle','description','features','askbar',
   'qrcode','barcode','dealer','customtext','disclaimer',
-  'bgimage','vehiclephoto',
+  'bgimage','vehiclephoto','mpg',
 ];
 // Addendum hides only infosheet-specific content widgets. qrcode/barcode are
 // now first-class addendum widgets too.
@@ -172,6 +177,13 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     items: [],
   },
   suggested_price: { label: 'Suggested Asking Price:', value: '$29,000.00', labelColor: '#ffffff', valueColor: '#000000', labelFontSize: 1.0, valueFontSize: 1.0 },
+  // Two numbers (no labels — the background graphic supplies "CITY"/"HWY").
+  // `order` flips which side prints first; `gap` is px between the two
+  // numbers so the operator can clear the center pump art.
+  // cmpg/hmpg are injected at render time from the vehicle row (canvas via
+  // applyVehicleDataToWidgets, server via lib/pdf-html.ts). Placeholder
+  // 12 / 22 shows on the empty canvas before any vehicle is loaded.
+  mpg: { order: 'city_first', fontSize: 1.0, gap: 120, cmpg: '12', hmpg: '22' },
 };
 
 export const DEFAULT_CUSTOM_WIDGETS: CustomWidgetDef[] = [

@@ -80,9 +80,9 @@ export default async function DealerVehicleAddendumPage({
     PHOTOS: null,
     DESCRIPTION: null,
     PRINT_STATUS: "0",
-    HMPG: null,
-    CMPG: null,
-    MPG: null,
+    HMPG: dv.hmpg ?? null,
+    CMPG: dv.cmpg ?? null,
+    MPG: dv.mpg ?? null,
   };
 
   const rawType = searchParams?.type;

@@ -341,9 +341,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       PHOTOS: null,
       DESCRIPTION: dv.description,
       PRINT_STATUS: "0" as const,
-      HMPG: null,
-      CMPG: null,
-      MPG: null,
+      HMPG: dv.hmpg ?? null,
+      CMPG: dv.cmpg ?? null,
+      MPG: dv.mpg ?? null,
     };
 
     // ── Corporate (group) products, rules-filtered for this vehicle ──────────

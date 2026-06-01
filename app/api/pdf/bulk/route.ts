@@ -636,7 +636,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           NEW_USED: dv.condition === "Used" ? "Used" : "New",
           CERTIFIED: dv.condition === "CPO" ? "Yes" : "No",
           OPTIONS: null, PHOTOS: null, DESCRIPTION: dv.description ?? null,
-          PRINT_STATUS: "0" as const, HMPG: null, CMPG: null, MPG: null,
+          PRINT_STATUS: "0" as const, HMPG: dv.hmpg ?? null, CMPG: dv.cmpg ?? null, MPG: dv.mpg ?? null,
         };
 
         // Corporate (group) products — rules-filtered for this vehicle, with layout fields

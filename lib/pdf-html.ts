@@ -180,6 +180,12 @@ export async function buildPdfHtml({
         };
       }
       if (w.type === 'barcode') d.vin = vehicle.VIN_NUMBER;
+      if (w.type === 'mpg') {
+        // CMPG / HMPG flow in from VehicleRow → widget data so the renderer's
+        // hide-if-empty rule decides what prints. Strings stay strings.
+        d.cmpg = vehicle.CMPG ?? null;
+        d.hmpg = vehicle.HMPG ?? null;
+      }
       if (w.type === 'infobox' && (d.ibType as string) === 'photo') {
         const photos = parsePhotos(vehicle.PHOTOS ?? null);
         if (photos[0]) d.imgUrl = photos[0];

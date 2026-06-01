@@ -69,9 +69,9 @@ export default async function AddendumPage({ params }: { params: { id: string } 
     PHOTOS: null,
     DESCRIPTION: dv.description ?? null,
     PRINT_STATUS: "0",
-    HMPG: null,
-    CMPG: null,
-    MPG: null,
+    HMPG: dv.hmpg ?? null,
+    CMPG: dv.cmpg ?? null,
+    MPG: dv.mpg ?? null,
   };
 
   const vehicleName = [vehicle.YEAR, vehicle.MAKE, vehicle.MODEL].filter(Boolean).join(" ");
