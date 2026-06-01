@@ -78,11 +78,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     };
 
     // ── Dealers ──────────────────────────────────────────────────────────
-    const { data: dealers } = await admin
+    // `as any` because Supabase types don't know about downgraded_at yet
+    // (migration 083). Runtime is fine; only TS is stale.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: dealers } = await (admin as any)
       .from("dealers")
-      .select("id, dealer_id, account_type, created_at, last30, hubspot_company_id, group_id")
+      .select("id, dealer_id, account_type, created_at, last30, hubspot_company_id, group_id, downgraded_at")
       .not("hubspot_company_id", "is", null)
-      .eq("active", true);
+      .eq("active", true) as { data: Array<{ id: string; dealer_id: string; account_type: string | null; created_at: string | null; last30: number | null; hubspot_company_id: string; group_id: string | null; downgraded_at: string | null }> | null };
 
     const twelveMonthsAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -98,6 +101,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         let stage: string | null = null;
         if (isPayingAccount(d.account_type)) {
           stage = LIFECYCLE.CUSTOMER;
+        } else if (d.downgraded_at) {
+          // Paying→Free transition (set by the dealer PATCH route). Stays
+          // Downgraded until the archive-downgraded cron flips active=false.
+          stage = LIFECYCLE.ACCOUNT_DOWNGRADED;
         } else {
           const trialStart = d.created_at ? new Date(d.created_at).getTime() : Date.now();
           const daysSinceStart = (Date.now() - trialStart) / (24 * 60 * 60 * 1000);

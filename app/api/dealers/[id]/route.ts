@@ -4,7 +4,8 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { archiveCustomer, unarchiveCustomer, billingConfigured, updateCustomer, getTemplate, putTemplate } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
-import { fireDealerSync } from "@/lib/sync-hubspot";
+import { fireDealerSync, fireDealerReliable } from "@/lib/sync-hubspot";
+import { normalizeSubscriptionType, isPayingAccount } from "@/lib/hubspot";
 import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 import { fireSuperAdminGroupAssignCascade } from "@/lib/group-billing-cascade";
 
@@ -119,6 +120,11 @@ export async function PATCH(
   if (body.active !== undefined && claims.role === "super_admin") patch.active = body.active;
   if (body.is_test !== undefined && claims.role === "super_admin") patch.is_test = body.is_test;
   if (body.group_id !== undefined && claims.role === "super_admin") patch.group_id = body.group_id;
+  // account_type drives the HubSpot subscription_type + lifecyclestage —
+  // super_admin only. Free downgrades and Manual/Auto-Web/Auto-DMS upgrades
+  // both flow through here.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (body.account_type !== undefined && claims.role === "super_admin") (patch as any).account_type = body.account_type;
   // subscription_billed_to / labels_billed_to / group_controls_templates —
   // super_admin only. The first two route billing for the cascade below;
   // group_controls_templates flags whether the group owns this dealer's
@@ -164,30 +170,38 @@ export async function PATCH(
   if (body.inventory_provider_is_dms !== undefined && (claims.role === "super_admin" || claims.role === "group_admin")) {
     patch.inventory_provider_is_dms = body.inventory_provider_is_dms;
   }
-  // Snapshot the active flag + billing customer id + group_id + name
-  // before update so we can detect transitions (true→false, false→true)
-  // for Event 5 / discount sync, null→UUID on group_id for the
-  // super-admin group-assign cascade, and a name change to push the
-  // new label to da-billing's customer + template lineItemDescriptions.
+  // Snapshot the active flag + billing customer id + group_id + name +
+  // account_type before update so we can detect transitions for
+  // (a) Event 5 / discount sync (true→false, false→true),
+  // (b) null→UUID on group_id for the super-admin group-assign cascade,
+  // (c) a name change pushed to da-billing's lineItemDescriptions, and
+  // (d) Phase 14 follow-up: paying→Free sets downgraded_at,
+  //     Free/Trial→paying clears it, and any account_type change routes
+  //     through the reliable HubSpot path.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const patchAny = patch as any;
   let prevActive: boolean | null = null;
   let billingCustomerId: string | null = null;
   let legacyBillingId: string | null = null;
   let dealerGroupId: string | null = null;
   let prevGroupId: string | null = null;
   let prevName: string | null = null;
-  // Snapshot runs whenever active, group_id, OR name is being touched.
-  if (typeof patch.active === "boolean" || patch.group_id !== undefined || typeof patch.name === "string") {
+  let prevAccountType: string | null = null;
+  // Snapshot runs whenever active, group_id, name, OR account_type is being touched.
+  if (typeof patch.active === "boolean" || patch.group_id !== undefined || typeof patch.name === "string" || patchAny.account_type !== undefined) {
     const { data: snap } = await admin
       .from("dealers")
-      .select("active, billing_customer_id, internal_id, group_id, name")
+      .select("active, billing_customer_id, internal_id, group_id, name, account_type")
       .eq("id", dealerUuid)
-      .maybeSingle<{ active: boolean; billing_customer_id: string | null; internal_id: string | null; group_id: string | null; name: string }>();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .maybeSingle<any>();
     prevActive = snap?.active ?? null;
     billingCustomerId = snap?.billing_customer_id ?? null;
     legacyBillingId = snap?.internal_id ?? null;
     dealerGroupId = snap?.group_id ?? null;
     prevGroupId = snap?.group_id ?? null;
     prevName = snap?.name ?? null;
+    prevAccountType = snap?.account_type ?? null;
   }
 
   const { data, error: dbError } = await admin
@@ -202,6 +216,41 @@ export async function PATCH(
       { error: dbError?.message ?? "Dealer not found" },
       { status: dbError ? 500 : 404 }
     );
+  }
+
+  // ── Phase 14 follow-up Part B: downgraded_at transition ──────────────────
+  //
+  // Detect plan-tier transitions and stamp the lifecycle timestamp:
+  //   paying → Free       → set downgraded_at = now()  (drives ACCOUNT_DOWNGRADED stage)
+  //   Free/Trial → paying → clear downgraded_at        (back to Customer)
+  // Other shapes (Free → Trial, Trial → Free, etc.) leave downgraded_at as-is.
+  //
+  // The follow-up only fires when account_type actually changed AND the
+  // pre/post normalized tiers cross the paying/non-paying line. The
+  // resulting subscription_type + lifecyclestage push rides the reliable
+  // HubSpot path below.
+  let accountTypeChanged = false;
+  let lifecycleTransition: "downgrade" | "upgrade" | null = null;
+  if (patchAny.account_type !== undefined && prevAccountType !== patchAny.account_type) {
+    accountTypeChanged = true;
+    const prevPaying = isPayingAccount(prevAccountType);
+    const newNormalized = normalizeSubscriptionType(patchAny.account_type);
+    const newPaying = isPayingAccount(patchAny.account_type);
+    if (prevPaying && newNormalized === "Free") {
+      lifecycleTransition = "downgrade";
+      await admin
+        .from("dealers")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .update({ downgraded_at: new Date().toISOString() } as any)
+        .eq("id", dealerUuid);
+    } else if (!prevPaying && newPaying) {
+      lifecycleTransition = "upgrade";
+      await admin
+        .from("dealers")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .update({ downgraded_at: null } as any)
+        .eq("id", dealerUuid);
+    }
   }
 
   // Event 5: archive/unarchive in da-billing on active flag transition.
@@ -315,9 +364,24 @@ export async function PATCH(
     }
   }
 
-  // Phase 14a — push the post-edit dealer state to HubSpot Company.
-  // Fire-and-forget; failures land in hubspot_sync_errors.
-  fireDealerSync(dealerUuid);
+  // Phase 14 sync — push the post-edit dealer state to HubSpot Company.
+  //   - Lifecycle-affecting edits (account_type change, paying↔Free
+  //     transition, lifecyclestage move) go through the RELIABLE path:
+  //     3× retry, Mandrill alert on terminal failure. These fields fire
+  //     Alex's HubSpot workflows; a silent miss is unacceptable.
+  //   - Non-lifecycle edits (address, phone, logo, etc.) stay on plain
+  //     fire-and-forget — failures still land in hubspot_sync_errors
+  //     for super_admin review.
+  if (accountTypeChanged) {
+    const ctx = lifecycleTransition === "downgrade"
+      ? "dealer update (paying → Free downgrade — Downgraded workflow)"
+      : lifecycleTransition === "upgrade"
+        ? "dealer update (upgrade to paying plan — Customer workflow)"
+        : "dealer update (plan tier change)";
+    fireDealerReliable(dealerUuid, ctx);
+  } else {
+    fireDealerSync(dealerUuid);
+  }
 
   return NextResponse.json({ data: data as DealerRow });
 }

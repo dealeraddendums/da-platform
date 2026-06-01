@@ -67,6 +67,7 @@ const LIFECYCLE = {
   DEALER_TRIAL:       "60435067",
   GROUP_TRIAL:        "60429213",
   TRIAL_EXPIRED:      "65495635",
+  ACCOUNT_DOWNGRADED: "108387744",
 };
 
 const SUBSCRIPTION_TYPE_MAP = {
@@ -179,7 +180,10 @@ function dealerProps(d, groupName, groupInternalId) {
     feed_company:      d.inventory_provider,
     feed_company_type: d.inventory_provider ? (d.inventory_provider_is_dms ? "Auto-DMS" : "Auto-Web") : null,
     prints_last_30: d.last30 ?? 0,
-    lifecyclestage: isPayingAccount(d.account_type) ? LIFECYCLE.CUSTOMER : LIFECYCLE.DEALER_TRIAL,
+    lifecyclestage:
+      isPayingAccount(d.account_type) ? LIFECYCLE.CUSTOMER
+      : d.downgraded_at              ? LIFECYCLE.ACCOUNT_DOWNGRADED
+      :                                LIFECYCLE.DEALER_TRIAL,
   };
 }
 
@@ -216,7 +220,7 @@ async function run() {
 
   if (RUN_DEALERS) {
     const dealers = await fetchAll("dealers",
-      "id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at",
+      "id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at, downgraded_at",
       [["active", true]],
     );
     console.log(`\nDealers to process: ${dealers.length}`);

@@ -48,6 +48,7 @@ interface DealerForHubspot {
   billing_to: string | null;
   hubspot_company_id: string | null;
   created_at: string | null;
+  downgraded_at: string | null;          // set on paying→Free, cleared on re-upgrade
 }
 
 interface GroupForHubspot {
@@ -73,7 +74,21 @@ function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, 
   const platformId = d.dealer_id;
   const billingId = d.billing_customer_id ?? d.internal_id ?? null;
   const subType = normalizeSubscriptionType(d.account_type);
-  const stage = isPayingAccount(d.account_type) ? LIFECYCLE.CUSTOMER : LIFECYCLE.DEALER_TRIAL;
+  // Three-way lifecycle derivation:
+  //   paying account                       → CUSTOMER
+  //   non-paying AND downgraded_at set     → ACCOUNT_DOWNGRADED (paying→Free transition)
+  //   non-paying AND never paid            → DEALER_TRIAL (existing Trial path; the cron
+  //                                          flips this to TRIAL_EXPIRED past 30d/30 prints)
+  // The PATCH route at app/api/dealers/[id]/route.ts is what sets/clears
+  // downgraded_at on transitions — this function just reads it.
+  let stage: string;
+  if (isPayingAccount(d.account_type)) {
+    stage = LIFECYCLE.CUSTOMER;
+  } else if (d.downgraded_at) {
+    stage = LIFECYCLE.ACCOUNT_DOWNGRADED;
+  } else {
+    stage = LIFECYCLE.DEALER_TRIAL;
+  }
 
   return {
     // Identity / four-ID block
@@ -205,11 +220,15 @@ export async function syncDealerToHubspot(dealerId: string): Promise<void> {
   const admin = createAdminSupabaseClient();
   let payload: Record<string, unknown> = {};
   try {
-    const { data: dealer } = await admin
+    // `as any` on the chain because migration 083 (downgraded_at) is
+    // applied at runtime but Supabase's generated types don't know
+    // about it yet. The DealerForHubspot interface is the contract.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: dealer } = await (admin as any)
       .from("dealers")
-      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at")
+      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at, downgraded_at")
       .eq("id", dealerId)
-      .maybeSingle<DealerForHubspot>();
+      .maybeSingle() as { data: DealerForHubspot | null };
     if (!dealer) return;
 
     let groupName: string | null = null;
@@ -321,34 +340,33 @@ export async function syncProfileToHubspot(profileId: string): Promise<void> {
   }
 }
 
-// ── Reliable Trial-create path (retry + alert) ──────────────────────────────
+// ── Reliable dealer sync (retry + Mandrill alert) ───────────────────────────
 //
-// Spec §"Trial creation = immediate + reliable" (2026-05-31): a new
-// individual-dealer create triggers a HubSpot onboarding workflow that
-// enrolls the moment lifecyclestage=Dealer Trial lands on a Company.
-// A silent miss means the dealer's onboarding never starts, so the
-// create path is held to a higher bar than the general
-// fire-and-forget update flow:
+// Two HubSpot Company properties — `subscription_type` and
+// `lifecyclestage` — are the fields Alex's workflows enroll off. A
+// silent fire-and-forget miss means a workflow never fires, so any
+// edit that moves either property has to reach HubSpot promptly and
+// reliably. The reliability bar is the same as the dealer-create
+// trigger (Marketing OS Phase 5 onboarding workflow): retry 3× with
+// short exponential backoff (500ms / 1.5s / 4s), terminal failure
+// alerts support@ via Mandrill alongside the usual hubspot_sync_errors
+// row, and the route's HTTP response is never blocked.
 //
-//   - Retries 3× with short exponential backoff on transient errors
-//     (HubSpot 5xx, rate-limit 429, network blips).
-//   - On terminal failure, the failure still lands in
-//     hubspot_sync_errors (same logger as the regular path), AND a
-//     Mandrill alert goes to support@dealeraddendums.com so a human
-//     can replay manually.
-//   - Returns void, still fire-and-forget from the route's perspective
-//     so the HTTP response isn't blocked.
+// Call sites today:
+//   - POST /api/dealers              → context="dealer create (Trial — onboarding workflow trigger)"
+//   - PATCH /api/dealers/[id] on    → context="dealer update (plan / lifecycle change)"
+//     account_type / lifecycle move
 //
-// Used by /api/dealers POST. /api/dealers PATCH stays on the simpler
-// fire-and-forget path since updates don't fire workflow enrollments.
+// Non-lifecycle field edits (address, phone, logo) still ride
+// fireDealerSync to keep the normal-case latency down.
 
-const TRIAL_CREATE_MAX_ATTEMPTS = 3;
-const TRIAL_CREATE_BACKOFF_MS = [500, 1500, 4000]; // sleep BEFORE attempt 2 and 3
+const RELIABLE_MAX_ATTEMPTS = 3;
+const RELIABLE_BACKOFF_MS = [500, 1500, 4000]; // sleep BEFORE attempt 2 and 3
 
 async function alertHubspotCreateFailure(args: {
   objectType: "company" | "contact";
   objectId: string;
-  context: string;        // e.g. "dealer create", "contact post-dealer-create"
+  context: string;        // free text, e.g. "dealer create" / "dealer update (plan change)"
   attempts: number;
   lastError: string;
 }): Promise<void> {
@@ -362,9 +380,10 @@ async function alertHubspotCreateFailure(args: {
 <p><b>Object id:</b> ${args.objectId}<br>
 <b>Attempts:</b> ${args.attempts}<br>
 <b>Last error:</b> <code>${args.lastError.replace(/</g, "&lt;").slice(0, 600)}</code></p>
-<p>This sync is the trigger for the HubSpot onboarding workflow (Marketing OS
-Phase 5). The dealer's enrollment did not fire automatically — replay manually
-from <code>hubspot_sync_errors</code> when ready.</p>`,
+<p>If the failed context was a Trial-stage create or a subscription_type /
+lifecyclestage change, the corresponding HubSpot workflow did NOT enroll
+automatically — replay manually from <code>hubspot_sync_errors</code> when
+ready.</p>`,
     });
   } catch (err) {
     console.error("[hubspot-sync] alert send failed:", err instanceof Error ? err.message : err);
@@ -372,17 +391,19 @@ from <code>hubspot_sync_errors</code> when ready.</p>`,
 }
 
 /**
- * Reliable dealer Company create — same payload + write-back as
+ * Reliable dealer Company upsert — same payload + write-back as
  * syncDealerToHubspot, but retries transient errors and alerts on
- * terminal failure. Use ONLY on dealer-create (POST), not on update
- * (PATCH) — workflow enrollment fires on the Trial-stage create.
+ * terminal failure. The single source of retry+alert behavior; use
+ * for any operation that fires a HubSpot workflow (create with
+ * lifecyclestage=Trial, paying↔Free transitions, etc.). For everything
+ * else (address/phone/logo updates) use the plain fireDealerSync.
  *
  * Returns the resulting hubspot_company_id on success, null on failure.
  */
-export async function syncDealerCreateReliable(dealerId: string): Promise<string | null> {
+export async function syncDealerReliable(dealerId: string, context: string): Promise<string | null> {
   if (!hubspotConfigured()) return null;
   let lastError = "";
-  for (let attempt = 1; attempt <= TRIAL_CREATE_MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= RELIABLE_MAX_ATTEMPTS; attempt++) {
     try {
       await syncDealerToHubspot(dealerId);
       // syncDealerToHubspot swallows errors into hubspot_sync_errors, so
@@ -394,19 +415,27 @@ export async function syncDealerCreateReliable(dealerId: string): Promise<string
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
     }
-    if (attempt < TRIAL_CREATE_MAX_ATTEMPTS) {
-      await new Promise(r => setTimeout(r, TRIAL_CREATE_BACKOFF_MS[attempt - 1]));
+    if (attempt < RELIABLE_MAX_ATTEMPTS) {
+      await new Promise(r => setTimeout(r, RELIABLE_BACKOFF_MS[attempt - 1]));
     }
   }
-  // Terminal failure — alert.
   await alertHubspotCreateFailure({
     objectType: "company",
     objectId: dealerId,
-    context: "dealer create (Trial — onboarding workflow trigger)",
-    attempts: TRIAL_CREATE_MAX_ATTEMPTS,
+    context,
+    attempts: RELIABLE_MAX_ATTEMPTS,
     lastError,
   });
   return null;
+}
+
+/**
+ * Back-compat: the create path keeps its dedicated entry point. Thin
+ * wrapper around syncDealerReliable with the create-context string so
+ * Mandrill alerts still call out the Marketing OS Phase 5 trigger.
+ */
+export async function syncDealerCreateReliable(dealerId: string): Promise<string | null> {
+  return syncDealerReliable(dealerId, "dealer create (Trial — onboarding workflow trigger)");
 }
 
 /**
@@ -416,6 +445,15 @@ export async function syncDealerCreateReliable(dealerId: string): Promise<string
  */
 export function fireDealerCreateReliable(dealerId: string): void {
   void syncDealerCreateReliable(dealerId);
+}
+
+/**
+ * Fire-and-forget kickoff for any lifecycle-affecting dealer update
+ * (plan tier change, paying↔Free, etc.). Same retry+alert bar as the
+ * create path because these edits fire HubSpot workflows.
+ */
+export function fireDealerReliable(dealerId: string, context: string): void {
+  void syncDealerReliable(dealerId, context);
 }
 
 // ── Fire-and-forget convenience wrappers (call from route handlers) ─────────
