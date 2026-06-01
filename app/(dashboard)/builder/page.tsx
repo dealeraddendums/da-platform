@@ -98,5 +98,5 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
     phone: dealerData.phone ?? null,
   } : undefined;
 
-  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={role === 'super_admin'} />;
+  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={role === 'super_admin'} canAdminUpload={role === 'super_admin'} />;
 }

@@ -238,9 +238,11 @@ interface Props {
   dealerInfo?: DealerInfo;
   groupId?: string;
   canAddCustomSize?: boolean;
+  /** Gates super_admin-only controls (currently: the canvas background upload, which posts to a super_admin-only API). */
+  canAdminUpload?: boolean;
 }
 
-export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, canAddCustomSize = false }: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, canAddCustomSize = false, canAdminUpload = false }: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
@@ -250,7 +252,10 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [paperSize, setPaperSize] = useState<string>('standard');
   const [fontScale, setFontScale] = useState(1.0);
   const [bgUrl, setBgUrl] = useState(BG_DEFAULT);
-  const [bgInputVal, setBgInputVal] = useState(BG_DEFAULT);
+  // Super-admin canvas-background upload (replaces the unused "load from URL" field).
+  // Posts to /api/admin/image-library/upload which is super_admin-only.
+  const canvasBgFileRef = useRef<HTMLInputElement>(null);
+  const [canvasBgUploading, setCanvasBgUploading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiPendingLoad, setAiPendingLoad] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -341,6 +346,33 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2400);
   }, []);
+
+  // Canvas-background upload (super_admin). Posts to the admin image-library
+  // route so the file lands in the same bucket the picker reads — the upload
+  // shows up in the "Choose Background" list afterward without a refresh of
+  // the picker's bucket query.
+  const uploadCanvasBackground = useCallback(async (file: File) => {
+    setCanvasBgUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('bucket', paperSizeRef.current === 'infosheet' ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds');
+      const res = await fetch('/api/admin/image-library/upload', { method: 'POST', body: fd });
+      const json = await res.json().catch(() => ({}));
+      if (res.status === 201 && json.url) {
+        setBgUrl(json.url);
+        isDirtyRef.current = true;
+        showToast('Background uploaded');
+      } else {
+        showToast(json.error ?? `Upload failed (${res.status})`);
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setCanvasBgUploading(false);
+      if (canvasBgFileRef.current) canvasBgFileRef.current.value = '';
+    }
+  }, [showToast]);
 
   // ── History ────────────────────────────────────────────────────────
   const pushHistory = useCallback((ws: Record<string, Widget>, n: number) => {
@@ -685,7 +717,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         setWidgets(ws);
         widgetsRef.current = ws;
         setNid(n);
-        if (tj.bgUrl) { setBgUrl(tj.bgUrl); setBgInputVal(tj.bgUrl); }
+        if (tj.bgUrl) { setBgUrl(tj.bgUrl); }
         if (typeof tj.fontScale === 'number') setFontScale(tj.fontScale);
         if (tj.paperSize) { setPaperSize(tj.paperSize); paperSizeRef.current = tj.paperSize; }
         setTemplateName((tmpl.name as string) || 'Template');
@@ -733,7 +765,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           widgetsRef.current = ws;
           setNid(n);
         }
-        if (json?.bgUrl) { setBgUrl(json.bgUrl); setBgInputVal(json.bgUrl); }
+        if (json?.bgUrl) { setBgUrl(json.bgUrl); }
         if (json?.fontScale) setFontScale(json.fontScale);
         if (json?.paperSize) setPaperSize(json.paperSize);
         setTemplateName((data.name as string) || 'Template');
@@ -750,7 +782,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     setPaperSize(size);
     paperSizeRef.current = size;
     if (size === 'infosheet') {
-      setBgUrl(IS_BG_DEFAULT); setBgInputVal(IS_BG_DEFAULT);
+      setBgUrl(IS_BG_DEFAULT);
       // Load infosheet default layout
       const order = ['logo','vehicle','description','features','askbar','qrcode','barcode','dealer','customtext'];
       let nextNid = 1;
@@ -782,7 +814,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       // Scale widget x/w proportionally when canvas width differs from the standard 408px reference
       const scaleW = pw / PAPERS.standard.w;
       const customBg = customSizesRef.current.find(c => c.id === size)?.background_url;
-      setBgUrl(customBg ?? BG_DEFAULT); setBgInputVal(customBg ?? BG_DEFAULT);
+      setBgUrl(customBg ?? BG_DEFAULT);
       // bgimage replaces the old monolithic 'infobox' slot — new templates get
     // the EPA/DOT Fuel Economy image pre-placed (DEFS.bgimage sets imgUrl).
     const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','bgimage'];
@@ -1082,7 +1114,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     ws = applyDisclaimerToWidgets(ws, disclaimersRef.current);
       setWidgets(ws); widgetsRef.current = ws;
       setNid(n);
-      if (json.bgUrl) { setBgUrl(json.bgUrl); setBgInputVal(json.bgUrl); }
+      if (json.bgUrl) { setBgUrl(json.bgUrl); }
       if (json.fontScale) setFontScale(json.fontScale);
       if (json.paperSize) { setPaperSize(json.paperSize); paperSizeRef.current = json.paperSize; }
       setTemplateName(tmpl.name || 'Template');
@@ -1132,7 +1164,6 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     setPaperSize('standard');
     paperSizeRef.current = 'standard';
     setBgUrl(BG_DEFAULT);
-    setBgInputVal(BG_DEFAULT);
     setFontScale(1.0);
     // History is reset to this single baseline so undo can't reach the
     // previous template — that template is unrelated to the new one.
@@ -1449,7 +1480,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                     <div style={{ border: '1px solid #e0e0e0', borderRadius: 6, marginBottom: 8 }}>
                       <div
                         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', background: bgUrl === BG_DEFAULT || bgUrl === IS_BG_DEFAULT ? '#e3f2fd' : '#fff', borderRadius: 6 }}
-                        onClick={() => { const u = isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT; setBgUrl(u); setBgInputVal(u); isDirtyRef.current = true; }}
+                        onClick={() => { setBgUrl(isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT); isDirtyRef.current = true; }}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT} alt="" style={{ width: 18, height: 30, objectFit: 'cover', borderRadius: 2, flexShrink: 0, border: '1px solid #e0e0e0' }} />
@@ -1460,14 +1491,24 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                     <button onClick={() => setShowBgLibPicker(true)} style={{ width: '100%', padding: '6px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer', marginBottom: 6 }}>
                       Choose Background
                     </button>
-                    <div style={{ marginBottom: 4, fontSize: 11, color: '#55595c' }}>Or load from URL</div>
-                    <input
-                      value={bgInputVal}
-                      onChange={e => setBgInputVal(e.target.value)}
-                      style={{ width: '100%', padding: '5px 8px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, marginBottom: 4, boxSizing: 'border-box' }}
-                      placeholder="https://s3.amazonaws.com/…/bg.png"
-                    />
-                    <button onClick={() => { if (bgInputVal) { setBgUrl(bgInputVal); isDirtyRef.current = true; } }} style={{ width: '100%', padding: '6px', background: '#f5f6f7', color: '#55595c', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Load URL</button>
+                    {canAdminUpload && (
+                      <>
+                        <input
+                          ref={canvasBgFileRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          style={{ display: 'none' }}
+                          onChange={e => { const f = e.target.files?.[0]; if (f) void uploadCanvasBackground(f); }}
+                        />
+                        <button
+                          onClick={() => canvasBgFileRef.current?.click()}
+                          disabled={canvasBgUploading}
+                          style={{ width: '100%', padding: '6px', background: canvasBgUploading ? '#9aa4ad' : '#f5f6f7', color: '#55595c', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 12, cursor: canvasBgUploading ? 'default' : 'pointer' }}
+                        >
+                          {canvasBgUploading ? 'Uploading…' : 'Upload background'}
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </EpSection>
@@ -1788,7 +1829,6 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           title="Platform Backgrounds"
           onSelect={url => {
             setBgUrl(url);
-            setBgInputVal(url);
             isDirtyRef.current = true;
             setShowBgLibPicker(false);
           }}
