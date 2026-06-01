@@ -449,7 +449,9 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                       style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}
                     >
                       <td className="px-3 py-2 text-center" style={{ color: "#1565c0", fontSize: 13 }}>
-                        {unlocked ? "🔓" : "🔒"}
+                        {unlocked
+                          ? "🔓"
+                          : <span title="Contact your Group Administrator to make changes to this product">🔒</span>}
                       </td>
                       <td className="px-3 py-2">
                         <span style={{ color: "var(--text-secondary)" }}>{opt.option_name}</span>

@@ -51,6 +51,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
   const [bulkPrinting, setBulkPrinting] = useState(false);
   const [bulkModal, setBulkModal] = useState<{ url: string; docType: "addendum" | "infosheet" | "buyer_guide"; count: number } | null>(null);
+  const [clearingHistory, setClearingHistory] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
   const isGroupAdmin = role === "group_admin";
@@ -107,6 +108,37 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
       setCheckedIds(new Set());
     } else {
       setCheckedIds(new Set(displayedVehicles.map((v) => v.id)));
+    }
+  }
+
+  async function clearPrintHistoryForSelection() {
+    if (checkedIds.size === 0) return;
+    const count = checkedIds.size;
+    const ok = window.confirm(
+      `Clear print history and saved products for ${count} vehicle${count === 1 ? "" : "s"}? This can't be undone.`,
+    );
+    if (!ok) return;
+    setClearingHistory(true);
+    try {
+      const res = await fetch("/api/print/clear-history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vehicleIds: Array.from(checkedIds) }),
+      });
+      const json = await res.json() as { cleared_vehicles?: number; error?: string };
+      if (!res.ok) {
+        alert(json.error ?? "Failed to clear print history");
+        return;
+      }
+      setCheckedIds(new Set());
+      // Hard reload so the dashboard counts (Printed this month / Unprinted)
+      // refresh alongside the inventory list — they're rendered by the
+      // parent dashboard page, not this component.
+      window.location.reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to clear print history");
+    } finally {
+      setClearingHistory(false);
     }
   }
 
@@ -347,6 +379,16 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
             onClick={() => void bulkPrint("buyer_guide")}
           >
             Buyer Guide ({checkedIds.size})
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary text-xs"
+            style={{ height: 30 }}
+            disabled={bulkPrinting || clearingHistory}
+            onClick={() => void clearPrintHistoryForSelection()}
+            title="Delete print history and saved products for the selected vehicles"
+          >
+            {clearingHistory ? "Clearing…" : `Clear Print History (${checkedIds.size})`}
           </button>
           {!bulkPrinting && (
             <button
