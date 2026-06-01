@@ -166,10 +166,10 @@ function dealerProps(d, groupName, groupInternalId) {
     feed_company:      d.inventory_provider,
     feed_company_type: d.inventory_provider ? (d.inventory_provider_is_dms ? "Auto-DMS" : "Auto-Web") : null,
     prints_last_30: d.last30 ?? 0,
-    // 2-way derivation (no downgraded_at — see SELECT note above). The
-    // cron at /api/cron/sync-hubspot-computed re-evaluates this nightly
-    // using the 3-way logic once migration 083 is applied.
-    lifecyclestage: isPayingAccount(d.account_type) ? LIFECYCLE.CUSTOMER : LIFECYCLE.DEALER_TRIAL,
+    lifecyclestage:
+      isPayingAccount(d.account_type) ? LIFECYCLE.CUSTOMER
+      : d.downgraded_at              ? LIFECYCLE.ACCOUNT_DOWNGRADED
+      :                                LIFECYCLE.DEALER_TRIAL,
   };
 }
 
@@ -270,26 +270,30 @@ async function run() {
   console.log(`  indexed: ${companies.length} companies · ${byPlatformid.size} with platformid · ${byGroupid.size} with groupid`);
 
   const totals = {
-    dealers: { merge: 0, skip: 0, review: 0, missing_our_rec: 0, errors: 0 },
-    groups:  { merge: 0, skip: 0, review: 0, missing_our_rec: 0, errors: 0 },
+    dealers: { merge: 0, skip: 0, review: 0, conflict: 0, missing_our_rec: 0, errors: 0 },
+    groups:  { merge: 0, skip: 0, review: 0, conflict: 0, missing_our_rec: 0, errors: 0 },
   };
-  const reviewList = [];
 
-  // ── Dealers ──────────────────────────────────────────────────────────────
+  // ── Pass 1: collect candidate merges ─────────────────────────────────────
+  // Decisions are gathered into a flat list so a second pass can detect
+  // ANY HubSpot id that appears more than once across both scopes (as
+  // primary OR secondary). Those are cross-target conflicts — e.g. a
+  // Supabase row exists at both the dealers AND groups level for the
+  // same business, so the dealer pass and group pass disagree on which
+  // direction to merge. The first --apply merge would retire the
+  // record, the second would 404 or worse. Demote any such pair to
+  // CONFLICT and let a human resolve in HubSpot's UI.
+  const decisions = []; // { scope, subjectId, subjectName, ourRec, kind, original?, candidates?, supabaseId, supabaseRow, groupById? }
+
+  let dealers = [];
+  let groupById = new Map();
   if (RUN_DEALERS) {
-    // NOTE: downgraded_at intentionally omitted from the SELECT — migration
-    // 083 isn't applied in every environment yet, and re-stamping a dealer
-    // who was ACCOUNT_DOWNGRADED is harmless: the nightly cron re-derives
-    // lifecyclestage from account_type + downgraded_at and restores the
-    // correct stage. Once 083 is applied everywhere, re-add the column
-    // here and the 3-way branch in dealerProps below.
-    const dealers = await fetchAll("dealers",
-      "id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at",
+    dealers = await fetchAll("dealers",
+      "id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at, downgraded_at",
       [["active", true]],
     );
     const allGroups = await fetchAll("groups", "id, name, internal_id");
-    const groupById = new Map(allGroups.map(g => [g.id, g]));
-    console.log(`\n=== Dealers (${dealers.length} active) ===`);
+    groupById = new Map(allGroups.map(g => [g.id, g]));
 
     for (const d of dealers) {
       const ourRec = (d.hubspot_company_id && byId.get(d.hubspot_company_id)) || byPlatformid.get(d.dealer_id) || null;
@@ -298,49 +302,15 @@ async function run() {
         continue;
       }
       const decision = findOriginal({
-        subjectName: d.name,
-        subjectPhone: d.phone,
-        ourRec,
-        ownKey: "platformid",
-        byName,
+        subjectName: d.name, subjectPhone: d.phone, ourRec, ownKey: "platformid", byName,
       });
-
-      if (decision.kind === "skip") {
-        totals.dealers.skip++;
-        continue;
-      }
-      if (decision.kind === "review") {
-        totals.dealers.review++;
-        reviewList.push({ kind: "dealer", id: d.dealer_id, name: d.name, ourRec, candidates: decision.candidates });
-        console.log(`  REVIEW  ${d.dealer_id}  "${d.name}"`);
-        console.log(`             ours: ${fmtRec(ourRec)}`);
-        for (const c of decision.candidates) console.log(`             cand: ${fmtRec(c)}`);
-        continue;
-      }
-
-      const original = decision.original;
-      totals.dealers.merge++;
-      console.log(`  MERGE   ${d.dealer_id}  "${d.name}"  primary=${original.id} secondary=${ourRec.id}  owner=${original.properties?.hubspot_owner_id || "-"}`);
-
-      if (APPLY) {
-        try {
-          const g = d.group_id ? groupById.get(d.group_id) : null;
-          const props = dealerProps(d, g?.name ?? null, g?.internal_id ?? null);
-          await mergeAndRestamp({ primary: original, secondary: ourRec, props, supabaseTable: "dealers", supabaseId: d.id });
-          process.stdout.write(".");
-        } catch (err) {
-          totals.dealers.errors++;
-          console.error(`\n    ❌ ${d.dealer_id}: ${err.message}`);
-        }
-      }
+      decisions.push({ scope: "dealer", subjectId: d.dealer_id, subjectName: d.name, ourRec, supabaseId: d.id, supabaseRow: d, ...decision });
     }
-    if (APPLY) console.log();
   }
 
-  // ── Groups ───────────────────────────────────────────────────────────────
+  let groups = [];
   if (RUN_GROUPS) {
-    const groups = await fetchAll("groups", "id, name, internal_id, billing_customer_id, hubspot_company_id, phone");
-    console.log(`\n=== Groups (${groups.length}) ===`);
+    groups = await fetchAll("groups", "id, name, internal_id, billing_customer_id, hubspot_company_id, phone");
 
     for (const g of groups) {
       const ourRec = (g.hubspot_company_id && byId.get(g.hubspot_company_id)) || byGroupid.get(g.internal_id) || null;
@@ -349,52 +319,102 @@ async function run() {
         continue;
       }
       const decision = findOriginal({
-        subjectName: g.name,
-        subjectPhone: g.phone,
-        ourRec,
-        ownKey: "groupid",
-        byName,
+        subjectName: g.name, subjectPhone: g.phone, ourRec, ownKey: "groupid", byName,
       });
+      decisions.push({ scope: "group", subjectId: g.internal_id, subjectName: g.name, ourRec, supabaseId: g.id, supabaseRow: g, ...decision });
+    }
+  }
 
-      if (decision.kind === "skip") {
-        totals.groups.skip++;
-        continue;
-      }
-      if (decision.kind === "review") {
-        totals.groups.review++;
-        reviewList.push({ kind: "group", id: g.internal_id, name: g.name, ourRec, candidates: decision.candidates });
-        console.log(`  REVIEW  group ${g.internal_id}  "${g.name}"`);
-        console.log(`             ours: ${fmtRec(ourRec)}`);
-        for (const c of decision.candidates) console.log(`             cand: ${fmtRec(c)}`);
-        continue;
-      }
+  // ── Pass 2: detect cross-target id reuse and demote to CONFLICT ─────────
+  const idTouchCount = new Map();
+  for (const dec of decisions) {
+    if (dec.kind !== "merge") continue;
+    for (const id of [dec.original.id, dec.ourRec.id]) {
+      idTouchCount.set(id, (idTouchCount.get(id) ?? 0) + 1);
+    }
+  }
+  const conflictedIds = new Set([...idTouchCount].filter(([, n]) => n > 1).map(([id]) => id));
+  for (const dec of decisions) {
+    if (dec.kind === "merge" && (conflictedIds.has(dec.original.id) || conflictedIds.has(dec.ourRec.id))) {
+      dec.kind = "conflict";
+    }
+  }
 
-      const original = decision.original;
-      totals.groups.merge++;
-      console.log(`  MERGE   group ${g.internal_id}  "${g.name}"  primary=${original.id} secondary=${ourRec.id}  owner=${original.properties?.hubspot_owner_id || "-"}`);
-
-      if (APPLY) {
-        try {
-          const { count: memberCount } = await admin.from("dealers").select("id", { count: "exact", head: true }).eq("group_id", g.id).eq("active", true);
-          const props = groupProps(g, memberCount ?? 0);
-          await mergeAndRestamp({ primary: original, secondary: ourRec, props, supabaseTable: "groups", supabaseId: g.id });
-          process.stdout.write(".");
-        } catch (err) {
-          totals.groups.errors++;
-          console.error(`\n    ❌ group ${g.internal_id}: ${err.message}`);
-        }
+  // ── Pass 3: emit + act ──────────────────────────────────────────────────
+  if (RUN_DEALERS) console.log(`\n=== Dealers (${dealers.length} active) ===`);
+  for (const dec of decisions.filter(d => d.scope === "dealer")) {
+    if (dec.kind === "skip")   { totals.dealers.skip++;     continue; }
+    if (dec.kind === "review") {
+      totals.dealers.review++;
+      console.log(`  REVIEW  ${dec.subjectId}  "${dec.subjectName}"`);
+      console.log(`             ours: ${fmtRec(dec.ourRec)}`);
+      for (const c of dec.candidates) console.log(`             cand: ${fmtRec(c)}`);
+      continue;
+    }
+    if (dec.kind === "conflict") {
+      totals.dealers.conflict++;
+      console.log(`  CONFLICT ${dec.subjectId}  "${dec.subjectName}"  primary=${dec.original.id} secondary=${dec.ourRec.id}  (id reused by another pair — resolve manually)`);
+      continue;
+    }
+    // merge
+    totals.dealers.merge++;
+    console.log(`  MERGE   ${dec.subjectId}  "${dec.subjectName}"  primary=${dec.original.id} secondary=${dec.ourRec.id}  owner=${dec.original.properties?.hubspot_owner_id || "-"}`);
+    if (APPLY) {
+      try {
+        const d = dec.supabaseRow;
+        const g = d.group_id ? groupById.get(d.group_id) : null;
+        const props = dealerProps(d, g?.name ?? null, g?.internal_id ?? null);
+        await mergeAndRestamp({ primary: dec.original, secondary: dec.ourRec, props, supabaseTable: "dealers", supabaseId: d.id });
+        process.stdout.write(".");
+      } catch (err) {
+        totals.dealers.errors++;
+        console.error(`\n    ❌ ${dec.subjectId}: ${err.message}`);
       }
     }
-    if (APPLY) console.log();
   }
+  if (RUN_DEALERS && APPLY) console.log();
+
+  if (RUN_GROUPS) console.log(`\n=== Groups (${groups.length}) ===`);
+  for (const dec of decisions.filter(d => d.scope === "group")) {
+    if (dec.kind === "skip")   { totals.groups.skip++;     continue; }
+    if (dec.kind === "review") {
+      totals.groups.review++;
+      console.log(`  REVIEW  group ${dec.subjectId}  "${dec.subjectName}"`);
+      console.log(`             ours: ${fmtRec(dec.ourRec)}`);
+      for (const c of dec.candidates) console.log(`             cand: ${fmtRec(c)}`);
+      continue;
+    }
+    if (dec.kind === "conflict") {
+      totals.groups.conflict++;
+      console.log(`  CONFLICT group ${dec.subjectId}  "${dec.subjectName}"  primary=${dec.original.id} secondary=${dec.ourRec.id}  (id reused by another pair — resolve manually)`);
+      continue;
+    }
+    // merge
+    totals.groups.merge++;
+    console.log(`  MERGE   group ${dec.subjectId}  "${dec.subjectName}"  primary=${dec.original.id} secondary=${dec.ourRec.id}  owner=${dec.original.properties?.hubspot_owner_id || "-"}`);
+    if (APPLY) {
+      try {
+        const g = dec.supabaseRow;
+        const { count: memberCount } = await admin.from("dealers").select("id", { count: "exact", head: true }).eq("group_id", g.id).eq("active", true);
+        const props = groupProps(g, memberCount ?? 0);
+        await mergeAndRestamp({ primary: dec.original, secondary: dec.ourRec, props, supabaseTable: "groups", supabaseId: g.id });
+        process.stdout.write(".");
+      } catch (err) {
+        totals.groups.errors++;
+        console.error(`\n    ❌ group ${dec.subjectId}: ${err.message}`);
+      }
+    }
+  }
+  if (RUN_GROUPS && APPLY) console.log();
 
   // ── Summary ──────────────────────────────────────────────────────────────
   console.log("\n=== Summary ===");
-  if (RUN_DEALERS) console.log(`  Dealers — MERGE: ${totals.dealers.merge}  REVIEW: ${totals.dealers.review}  SKIP (clean): ${totals.dealers.skip}  no-our-record: ${totals.dealers.missing_our_rec}  errors: ${totals.dealers.errors}`);
-  if (RUN_GROUPS)  console.log(`  Groups  — MERGE: ${totals.groups.merge}  REVIEW: ${totals.groups.review}  SKIP (clean): ${totals.groups.skip}  no-our-record: ${totals.groups.missing_our_rec}  errors: ${totals.groups.errors}`);
-  const totalMerges  = totals.dealers.merge  + totals.groups.merge;
-  const totalReviews = totals.dealers.review + totals.groups.review;
-  console.log(`  TOTAL would-merge: ${totalMerges}    needs-manual-review: ${totalReviews}`);
+  if (RUN_DEALERS) console.log(`  Dealers — MERGE: ${totals.dealers.merge}  REVIEW: ${totals.dealers.review}  CONFLICT: ${totals.dealers.conflict}  SKIP (clean): ${totals.dealers.skip}  no-our-record: ${totals.dealers.missing_our_rec}  errors: ${totals.dealers.errors}`);
+  if (RUN_GROUPS)  console.log(`  Groups  — MERGE: ${totals.groups.merge}  REVIEW: ${totals.groups.review}  CONFLICT: ${totals.groups.conflict}  SKIP (clean): ${totals.groups.skip}  no-our-record: ${totals.groups.missing_our_rec}  errors: ${totals.groups.errors}`);
+  const totalMerges    = totals.dealers.merge    + totals.groups.merge;
+  const totalReviews   = totals.dealers.review   + totals.groups.review;
+  const totalConflicts = totals.dealers.conflict + totals.groups.conflict;
+  console.log(`  TOTAL would-merge: ${totalMerges}    needs-manual-review: ${totalReviews}    cross-target conflicts: ${totalConflicts}`);
   if (!APPLY) {
     console.log("\n(dry-run — no writes performed. Spot-check 5–10 MERGE lines against HubSpot before re-running with --apply.)");
   } else {
