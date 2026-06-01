@@ -58,8 +58,12 @@ const ENV = loadEnv("BILLING_API_KEY", "BILLING_API_BASE", "NEXT_PUBLIC_SUPABASE
 const APPLY = process.argv.includes("--apply");
 const ONLY_FLAG = process.argv.indexOf("--only");
 const ONLY = ONLY_FLAG !== -1 ? process.argv[ONLY_FLAG + 1] : null;
-// 200ms = ~5 req/s — same as audit script, da-billing nginx 429s above that.
-const RATE_MS = 200;
+// Audit at 200ms (~5 req/s) saw heavy 429s; observed steady-state drain was
+// ~0.4 req/s. 1500ms (~0.67 req/s) sits above the drain rate with minimal
+// retry penalty. Trade-off: 2026 dealers × 1.5s ≈ 50 min if we had to walk
+// everyone — but the pre-filter below skips already-mapped account_types,
+// cutting the actual billing-fetch population to ~the unmapped subset.
+const RATE_MS = 1500;
 const MAX_RETRIES = 4;
 const RETRY_BACKOFF_MS = [500, 1500, 4000, 10000];
 
@@ -174,12 +178,27 @@ async function fetchAllDealers(filterDealerId) {
 async function run() {
   console.log(`Platform↔da-billing reconcile — ${APPLY ? "🔴 LIVE (--apply)" : "DRY RUN (no writes)"}${ONLY ? `  filter: dealer_id=${ONLY}` : ""}\n`);
 
-  const dealers = await fetchAllDealers(ONLY);
-  console.log(`Dealers to scan: ${dealers.length}`);
+  const allDealers = await fetchAllDealers(ONLY);
+  console.log(`Dealers in scope: ${allDealers.length}`);
+
+  // Pre-filter to reduce billing calls (we're heavily rate-limited by
+  // da-billing's nginx). Skip dealers whose platform account_type already
+  // maps to a known productId — those are presumed already-aligned. Walk
+  // only the unmapped tail (null / Free / Trial / Standard / legacy text).
+  // --only forces a billing fetch for the named dealer regardless.
+  const dealers = ONLY
+    ? allDealers
+    : allDealers.filter(d => subscriptionProductFromAccountType(d.account_type) === null);
+  console.log(`Candidates needing a billing check (unmapped account_type): ${dealers.length}`);
+  console.log(`Estimated walltime at ${RATE_MS}ms/dealer + retries: ~${Math.ceil(dealers.length * (RATE_MS / 1000) / 60)} min\n`);
 
   const stats = { updates: 0, hubspot_ok: 0, hubspot_skipped: 0, hubspot_err: 0, billing_err: 0, skipped_overreads: 0, skipped_no_billing_customer: 0, ok: 0 };
 
+  let scanned = 0;
   for (const d of dealers) {
+    scanned++;
+    if (scanned % 25 === 0) console.log(`… scanned ${scanned}/${dealers.length}   updates: ${stats.updates}   ok: ${stats.ok}   overreads: ${stats.skipped_overreads}   billing-err: ${stats.billing_err}`);
+
     const customerId = d.billing_customer_id ?? d.internal_id;
     if (!customerId) {
       stats.skipped_no_billing_customer++;
