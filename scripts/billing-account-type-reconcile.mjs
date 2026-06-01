@@ -31,10 +31,29 @@
  *     + lifecyclestage. Doesn't touch da-billing.
  */
 
-import { config } from "dotenv";
-config({ path: "/var/www/da-platform/.env.production" });
-
+import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+
+function loadEnv(...names) {
+  const out = Object.create(null);
+  for (const p of ["/var/www/da-platform/.env.production", ".env.production"]) {
+    try {
+      const lines = readFileSync(p, "utf8").split(/\r?\n/);
+      for (const line of lines) {
+        for (const name of names) {
+          const prefix = `${name}=`;
+          if (line.startsWith(prefix) && !(name in out)) {
+            out[name] = line.slice(prefix.length).trim().replace(/^["']|["']$/g, "");
+          }
+        }
+      }
+      if (Object.keys(out).length === names.length) return out;
+    } catch { /* try next path */ }
+  }
+  for (const name of names) if (!(name in out) && process.env[name]) out[name] = process.env[name];
+  return out;
+}
+const ENV = loadEnv("BILLING_API_KEY", "BILLING_API_BASE", "NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "HUBSPOT_PRIVATE_APP_TOKEN");
 
 const APPLY = process.argv.includes("--apply");
 const ONLY_FLAG = process.argv.indexOf("--only");
@@ -44,15 +63,19 @@ const RATE_MS = 200;
 const MAX_RETRIES = 4;
 const RETRY_BACKOFF_MS = [500, 1500, 4000, 10000];
 
-const BILLING_BASE = process.env.BILLING_API_BASE ?? "https://billing.dealeraddendums.com/api/v1";
-const BILLING_KEY = process.env.BILLING_API_KEY;
+const BILLING_BASE = ENV.BILLING_API_BASE ?? "https://billing.dealeraddendums.com/api/v1";
+const BILLING_KEY = ENV.BILLING_API_KEY;
 if (!BILLING_KEY) { console.error("BILLING_API_KEY not set"); process.exit(1); }
 
 const HUBSPOT_BASE = "https://api.hubapi.com/crm/v3";
-const HUBSPOT_TOKEN = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
+const HUBSPOT_TOKEN = ENV.HUBSPOT_PRIVATE_APP_TOKEN;
 if (!HUBSPOT_TOKEN) { console.error("HUBSPOT_PRIVATE_APP_TOKEN not set"); process.exit(1); }
+if (!ENV.NEXT_PUBLIC_SUPABASE_URL || !ENV.SUPABASE_SERVICE_ROLE_KEY) {
+  console.error("Supabase env vars not found in .env.production");
+  process.exit(1);
+}
 
-const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const admin = createClient(ENV.NEXT_PUBLIC_SUPABASE_URL, ENV.SUPABASE_SERVICE_ROLE_KEY);
 
 // ── Constants mirrored from lib/hubspot.ts ────────────────────────────────
 const LIFECYCLE = {
