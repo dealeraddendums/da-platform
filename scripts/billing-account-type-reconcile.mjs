@@ -39,7 +39,10 @@ import { createClient } from "@supabase/supabase-js";
 const APPLY = process.argv.includes("--apply");
 const ONLY_FLAG = process.argv.indexOf("--only");
 const ONLY = ONLY_FLAG !== -1 ? process.argv[ONLY_FLAG + 1] : null;
-const RATE_MS = 50;
+// 200ms = ~5 req/s — same as audit script, da-billing nginx 429s above that.
+const RATE_MS = 200;
+const MAX_RETRIES = 4;
+const RETRY_BACKOFF_MS = [500, 1500, 4000, 10000];
 
 const BILLING_BASE = process.env.BILLING_API_BASE ?? "https://billing.dealeraddendums.com/api/v1";
 const BILLING_KEY = process.env.BILLING_API_KEY;
@@ -81,16 +84,23 @@ function subscriptionProductFromAccountType(accountType) {
 }
 
 async function getBillingTemplate(customerId) {
-  const res = await fetch(`${BILLING_BASE}/templates/customer/${encodeURIComponent(customerId)}`, {
-    headers: { "X-API-Key": BILLING_KEY },
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`getTemplate ${customerId} ${res.status}: ${text.slice(0, 200)}`);
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(`${BILLING_BASE}/templates/customer/${encodeURIComponent(customerId)}`, {
+      headers: { "X-API-Key": BILLING_KEY },
+    });
+    if (res.status === 404) return null;
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]));
+      continue;
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`getTemplate ${customerId} ${res.status}: ${text.slice(0, 120)}`);
+    }
+    const parsed = await res.json();
+    return parsed?.template ?? null;
   }
-  const parsed = await res.json();
-  return parsed?.template ?? null;
+  throw new Error(`getTemplate ${customerId} 429 after ${MAX_RETRIES} retries`);
 }
 
 function subscriptionsOnTemplate(template) {

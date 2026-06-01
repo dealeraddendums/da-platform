@@ -41,7 +41,12 @@ import { createClient } from "@supabase/supabase-js";
 const LIST = process.argv.includes("--list-mismatches");
 const LIMIT_FLAG = process.argv.indexOf("--limit");
 const LIMIT = LIMIT_FLAG !== -1 ? Number(process.argv[LIMIT_FLAG + 1]) : Infinity;
-const RATE_MS = 50;
+// da-billing's nginx rate-limits at ~10–15 req/s on /api/v1/templates/*
+// (first run at 20 req/s hit 429 on 95% of requests). 200ms = ~5 req/s
+// holds steady. If you see 429s again, bump higher.
+const RATE_MS = 200;
+const MAX_RETRIES = 4;
+const RETRY_BACKOFF_MS = [500, 1500, 4000, 10000];
 
 const BILLING_BASE = process.env.BILLING_API_BASE ?? "https://billing.dealeraddendums.com/api/v1";
 const BILLING_KEY = process.env.BILLING_API_KEY;
@@ -68,16 +73,23 @@ function subscriptionProductFromAccountType(accountType) {
 }
 
 async function getBillingTemplate(customerId) {
-  const res = await fetch(`${BILLING_BASE}/templates/customer/${encodeURIComponent(customerId)}`, {
-    headers: { "X-API-Key": BILLING_KEY },
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`getTemplate ${customerId} ${res.status}: ${text.slice(0, 200)}`);
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(`${BILLING_BASE}/templates/customer/${encodeURIComponent(customerId)}`, {
+      headers: { "X-API-Key": BILLING_KEY },
+    });
+    if (res.status === 404) return null;
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]));
+      continue;
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`getTemplate ${customerId} ${res.status}: ${text.slice(0, 120)}`);
+    }
+    const parsed = await res.json();
+    return parsed?.template ?? null;
   }
-  const parsed = await res.json();
-  return parsed?.template ?? null;
+  throw new Error(`getTemplate ${customerId} 429 after ${MAX_RETRIES} retries`);
 }
 
 /** Subscription productIds present on the template (filtered to the three known tiers). */
