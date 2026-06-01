@@ -44,22 +44,33 @@ const PER_PAGE = 25;
 type SortCol = "name" | "group_name" | "active" | "account_type" | "lifetime_prints" | "last_30_prints" | "created_at";
 
 // Display labels for every account_type form we've ever written to the
-// DB: legacy full names (pre-migration) and current product-id values.
+// DB: short product-ids, long "Monthly Subscription …" names, bare
+// "Automatic Web" legacy forms, and trial. Anything else collapses to
+// "Free". Normalization mirrors lib/hubspot.ts normalizeSubscriptionType
+// so the dealer list and the HubSpot sync agree on classification —
+// without that mirror, ~78% of legacy-migrated dealers (whose
+// account_type is "Automatic Web" / "Manual" / "Automatic DMS",
+// sometimes with a " $price" suffix) rendered as "Free" in the list
+// while syncing to HubSpot correctly as paying customers.
 const SUBSCRIPTION_LABELS: Record<string, string> = {
   "sub-manual":                          "Manual",
   "sub-auto-web":                        "Automatic Web",
   "sub-auto-dms":                        "Automatic DMS",
+  "Manual":                              "Manual",
+  "Automatic Web":                       "Automatic Web",
+  "Automatic DMS":                       "Automatic DMS",
   "Monthly Subscription Manual":         "Manual",
   "Monthly Subscription Automatic Web":  "Automatic Web",
   "Monthly Subscription Automatic DMS":  "Automatic DMS",
   "Trial":                               "Trial",
 };
 
-// Anything else (null, "Free", legacy strings we don't recognise) collapses
-// to "Free" — the documented spec for unrecognised values.
 function subscriptionLabel(accountType: string | null): string {
   if (!accountType) return "Free";
-  return SUBSCRIPTION_LABELS[accountType] ?? "Free";
+  // Strip legacy " $price" suffix ("Automatic Web $135" → "Automatic Web")
+  // so price-tagged migrations resolve to a known label.
+  const trimmed = accountType.split(" $")[0].trim();
+  return SUBSCRIPTION_LABELS[trimmed] ?? "Free";
 }
 
 const MIN_DATE = new Date("2015-01-01").getTime();
