@@ -78,7 +78,7 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
 
   const [{ data: customSizeRows }, { data: dealerData }] = await Promise.all([
     dealerId
-      ? admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, created_at, updated_at").eq("dealer_id", dealerId).order("name")
+      ? admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, doc_type, created_at, updated_at").eq("dealer_id", dealerId).order("name")
       : Promise.resolve({ data: [] }),
     dealerId
       ? admin.from("dealers").select("logo_url, name, address, city, state, zip, phone").eq("dealer_id", dealerId).maybeSingle<DealerData>()

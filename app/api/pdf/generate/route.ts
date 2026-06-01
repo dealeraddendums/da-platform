@@ -490,25 +490,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // ── Resolve custom paper size dimensions ──────────────────────────────────
     let customPaperDims: { widthIn: number; heightIn: number } | undefined;
     let customSizeBgUrl: string | undefined;
+    let customSizeDocType: 'addendum' | 'infosheet' | undefined;
     const knownSizes = new Set(['standard', 'narrow', 'infosheet']);
     const effectivePaperSizeStr = savedTemplatePaperSize ?? paperSize;
     if (!knownSizes.has(effectivePaperSizeStr)) {
       const { data: cs } = await admin
         .from("dealer_custom_sizes")
-        .select("width_in, height_in, background_url")
+        .select("width_in, height_in, background_url, doc_type")
         .eq("id", effectivePaperSizeStr)
         .eq("dealer_id", dv.dealer_id)
         .maybeSingle();
       if (cs) {
         customPaperDims = { widthIn: Number(cs.width_in), heightIn: Number(cs.height_in) };
         if (cs.background_url) customSizeBgUrl = cs.background_url;
+        if (cs.doc_type === 'infosheet' || cs.doc_type === 'addendum') customSizeDocType = cs.doc_type;
       }
     }
 
     // ── Build widget layout ───────────────────────────────────────────────────
     const effectivePaperSize: PaperSize = (knownSizes.has(effectivePaperSizeStr) ? effectivePaperSizeStr : 'standard') as PaperSize;
     const effectiveFontScale = savedTemplateFontScale ?? fontScale;
-    const isInfosheet = effectivePaperSize === "infosheet";
+    // A custom size with doc_type='infosheet' should render as an infosheet
+    // even though effectivePaperSize falls back to 'standard' for the layout
+    // tables. Without this branch the AI description/features fetch and the
+    // infosheet background bucket selection both miss for custom infosheets.
+    const isInfosheet = effectivePaperSize === "infosheet" || customSizeDocType === "infosheet";
     let widgets: Widget[];
 
     if (inWidgets && inWidgets.length > 0) {

@@ -14,6 +14,7 @@ export default function AddCustomSizeModal({ dealerId, onSave, onClose }: Props)
   const [name, setName] = useState("");
   const [widthIn, setWidthIn] = useState("");
   const [heightIn, setHeightIn] = useState("11");
+  const [docType, setDocType] = useState<'addendum' | 'infosheet'>('addendum');
   const [bgUrl, setBgUrl] = useState<string | null>(null);
   const [showBgPicker, setShowBgPicker] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -31,7 +32,7 @@ export default function AddCustomSizeModal({ dealerId, onSave, onClose }: Props)
       const res = await fetch("/api/custom-sizes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), width_in: w, height_in: h, background_url: bgUrl, dealer_id: dealerId }),
+        body: JSON.stringify({ name: name.trim(), width_in: w, height_in: h, background_url: bgUrl, dealer_id: dealerId, doc_type: docType }),
       });
       const json = await res.json() as { data?: CustomSize; error?: string };
       if (!res.ok) throw new Error(json.error ?? "Save failed");
@@ -87,6 +88,18 @@ export default function AddCustomSizeModal({ dealerId, onSave, onClose }: Props)
                   placeholder="11"
                   style={{ width: "100%", padding: "7px 10px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13, outline: "none", boxSizing: "border-box" }}
                 />
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "block", fontSize: 12, color: "#55595c", marginBottom: 6 }}>Document Type</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                {(['addendum','infosheet'] as const).map(v => (
+                  <button key={v} type="button" onClick={() => setDocType(v)}
+                    style={{ flex: 1, padding: "6px", borderRadius: 4, border: `2px solid ${docType === v ? '#1976d2' : '#e0e0e0'}`, background: docType === v ? '#e3f2fd' : '#fff', cursor: "pointer", fontSize: 12, fontWeight: 600, color: docType === v ? '#1976d2' : '#55595c', textTransform: "capitalize" }}>
+                    {v}
+                  </button>
+                ))}
               </div>
             </div>
 

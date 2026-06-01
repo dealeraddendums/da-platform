@@ -39,7 +39,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { name?: string; width_in?: number; height_in?: number; background_url?: string | null; dealer_id?: string };
+  let body: { name?: string; width_in?: number; height_in?: number; background_url?: string | null; dealer_id?: string; doc_type?: string };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -48,6 +48,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const widthIn = Number(body.width_in);
   const heightIn = Number(body.height_in ?? 11);
   const backgroundUrl = body.background_url ?? null;
+  const docType: 'addendum' | 'infosheet' = body.doc_type === 'infosheet' ? 'infosheet' : 'addendum';
 
   if (!name) return NextResponse.json({ error: "name required" }, { status: 400 });
   if (isNaN(widthIn) || widthIn <= 0 || widthIn > 24) {
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient();
   const { data, error: dbErr } = await admin
     .from("dealer_custom_sizes")
-    .insert({ dealer_id: dealerId, name, width_in: widthIn, height_in: heightIn, background_url: backgroundUrl })
+    .insert({ dealer_id: dealerId, name, width_in: widthIn, height_in: heightIn, background_url: backgroundUrl, doc_type: docType })
     .select()
     .single<DealerCustomSizeRow>();
 

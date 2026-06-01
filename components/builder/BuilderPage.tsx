@@ -89,6 +89,17 @@ function convertLegacyInfoboxes(ws: Record<string, Widget>): Record<string, Widg
   return changed ? result : ws;
 }
 
+// Resolve infosheet-ness from a paperSize string. Returns true for the
+// built-in `'infosheet'` paper *or* a custom size whose `doc_type`
+// is `'infosheet'`. Every call site that used to test
+// `paperSize === 'infosheet'` should call this instead — palette
+// hide list, background bucket, AI fetch gate, saveDocType default,
+// picker bucket, bg-default click.
+function resolveIsInfosheet(ps: string, sizes: CustomSize[]): boolean {
+  if (ps === 'infosheet') return true;
+  return sizes.find(c => c.id === ps)?.doc_type === 'infosheet';
+}
+
 // Nudge any widget whose top-left corner is outside canvas back to the nearest in-bounds position
 function clampWidgets(ws: Record<string, Widget>, pw: number, ph: number): Record<string, Widget> {
   let changed = false;
@@ -356,7 +367,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     try {
       const fd = new FormData();
       fd.append('file', file);
-      fd.append('bucket', paperSizeRef.current === 'infosheet' ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds');
+      fd.append('bucket', resolveIsInfosheet(paperSizeRef.current, customSizesRef.current) ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds');
       const res = await fetch('/api/admin/image-library/upload', { method: 'POST', body: fd });
       const json = await res.json().catch(() => ({}));
       if (res.status === 201 && json.url) {
@@ -407,7 +418,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const addWidget = useCallback((
     type: string, x?: number, y?: number, w?: number, h?: number, silent = false
   ) => {
-    const isInfosheet = paperSizeRef.current === 'infosheet';
+    const isInfosheet = resolveIsInfosheet(paperSizeRef.current, customSizesRef.current);
     if (UNIQUE_WIDGETS.includes(type) && Object.values(widgetsRef.current).some(wg => wg.type === type as Widget['type'])) {
       showToast('Widget already on canvas — only one per template');
       return;
@@ -811,9 +822,25 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       }
     } else {
       const { w: pw, h: ph } = getPaperDims(size, customSizesRef.current);
+      const matchedCustom = customSizesRef.current.find(c => c.id === size);
+      const customBg = matchedCustom?.background_url ?? null;
+      // Custom infosheet sizes start BLANK — the portrait LAYOUT_INFOSHEET
+      // coords (816×1056) don't apply to a landscape 11×8.5 canvas, and the
+      // addendum LAYOUT below is the wrong widget set for an infosheet. The
+      // user places widgets by hand on top of their uploaded background.
+      // (For the built-in 'infosheet' the early branch above still loads
+      // the portrait layout.)
+      if (matchedCustom?.doc_type === 'infosheet') {
+        setBgUrl(customBg ?? IS_BG_DEFAULT);
+        widgetsRef.current = {};
+        setWidgets({});
+        setNid(1);
+        setSelId(null);
+        pushHistory({}, 1);
+        return;
+      }
       // Scale widget x/w proportionally when canvas width differs from the standard 408px reference
       const scaleW = pw / PAPERS.standard.w;
-      const customBg = customSizesRef.current.find(c => c.id === size)?.background_url;
       setBgUrl(customBg ?? BG_DEFAULT);
       // bgimage replaces the old monolithic 'infobox' slot — new templates get
     // the EPA/DOT Fuel Economy image pre-placed (DEFS.bgimage sets imgUrl).
@@ -924,7 +951,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     if (!vehicle?.id) { showToast('Open a vehicle to generate a PDF'); return; }
     setPdfLoading(true);
     try {
-      const docType = paperSize === 'infosheet' ? 'infosheet' : 'addendum';
+      const docType = resolveIsInfosheet(paperSize, customSizesRef.current) ? 'infosheet' : 'addendum';
       const res = await fetch('/api/pdf/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1184,7 +1211,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // RENDER
   // ────────────────────────────────────────────────────────────────────
   const ps = getPaperDims(paperSize, localCustomSizes);
-  const isInfosheet = paperSize === 'infosheet';
+  const isInfosheet = resolveIsInfosheet(paperSize, localCustomSizes);
   const usedTypes = new Set(Object.values(widgets).map(w => w.type));
 
   return (
@@ -1295,7 +1322,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 return;
               }
               setSaveTname(templateName);
-              setSaveDocType(paperSize === 'infosheet' ? 'infosheet' : 'addendum');
+              setSaveDocType(resolveIsInfosheet(paperSize, localCustomSizes) ? 'infosheet' : 'addendum');
               try { const r = await fetch('/api/templates'); if (r.ok) { const j = await r.json(); setSavedTemplates(j.data ?? []); } } catch {}
               setShowSave(true);
             }}

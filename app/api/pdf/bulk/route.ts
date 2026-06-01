@@ -436,23 +436,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           (body.paperSize && knownSizes.has(body.paperSize) ? body.paperSize : null)
           ?? templatePaperSizeStr
           ?? (docType === "infosheet" ? "infosheet" : "standard");
-        const isInfosheet = effectivePaperSizeStr === "infosheet";
         const effectivePaperSize = (knownSizes.has(effectivePaperSizeStr) ? effectivePaperSizeStr : "standard") as PaperSize;
 
+        // Fetch the custom-size row (if any) BEFORE deriving isInfosheet —
+        // a custom size with doc_type='infosheet' must produce isInfosheet=true
+        // so the AI description/features fetch + infosheet background bucket
+        // both engage at render time. Without the doc_type pivot the widgets
+        // show in the builder but print blank.
         let customPaperDims: { widthIn: number; heightIn: number } | undefined;
         let customSizeBgUrl: string | undefined;
+        let customSizeDocType: 'addendum' | 'infosheet' | undefined;
         if (!knownSizes.has(effectivePaperSizeStr)) {
           const { data: cs } = await admin
             .from("dealer_custom_sizes")
-            .select("width_in, height_in, background_url")
+            .select("width_in, height_in, background_url, doc_type")
             .eq("id", effectivePaperSizeStr)
             .eq("dealer_id", dv.dealer_id)
             .maybeSingle();
           if (cs) {
             customPaperDims = { widthIn: Number(cs.width_in), heightIn: Number(cs.height_in) };
             if (cs.background_url) customSizeBgUrl = cs.background_url;
+            if (cs.doc_type === 'infosheet' || cs.doc_type === 'addendum') customSizeDocType = cs.doc_type;
           }
         }
+        const isInfosheet = effectivePaperSizeStr === "infosheet" || customSizeDocType === "infosheet";
 
         // ── Options — UUID saved → legacy '0' sentinel → library matching ───
         type EffectiveOption = {

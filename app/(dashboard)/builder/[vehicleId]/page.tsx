@@ -46,7 +46,7 @@ export default async function BuilderVehicleRoute({
   const [{ data: settings }, { data: dealerRow }, { data: customSizeRows }] = await Promise.all([
     admin.from("dealer_settings").select("ai_content_default").eq("dealer_id", dv.dealer_id).single<{ ai_content_default: boolean }>(),
     admin.from("dealers").select("name, address, city, state, zip, phone, logo_url").eq("dealer_id", dv.dealer_id).maybeSingle<{ name: string | null; address: string | null; city: string | null; state: string | null; zip: string | null; phone: string | null; logo_url: string | null }>(),
-    admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, created_at, updated_at").eq("dealer_id", dv.dealer_id).order("name"),
+    admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, doc_type, created_at, updated_at").eq("dealer_id", dv.dealer_id).order("name"),
   ]);
 
   const aiEnabled = settings?.ai_content_default ?? false;

@@ -7,6 +7,7 @@ export interface CustomSize {
   width_in: number;
   height_in: number;
   background_url: string | null;
+  doc_type: 'addendum' | 'infosheet';
 }
 
 export type WidgetType =

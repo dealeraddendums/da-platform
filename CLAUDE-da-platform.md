@@ -904,6 +904,9 @@ RP_ORIGIN=https://app.dealeraddendums.com
 | 3⅛″ Addendum | 3.125"×11" | 469×1650px | 300×1056px |
 | 8½″ Addendum | 8.5"×11" | 816×1056px | 816×1056px |
 | 8½″ Infosheet | 8.5"×11" | 2657×3438px | 816×1056px |
+| Landscape Infosheet | 11"×8.5" | varies | dynamic (per custom size dims) |
+
+Custom paper sizes (`dealer_custom_sizes`) carry a `doc_type` of `addendum` or `infosheet` (migration 084). The builder resolves "is this an infosheet" via `resolveIsInfosheet(paperSize, customSizes)`: true for the built-in `'infosheet'` *or* any custom size whose `doc_type` is `'infosheet'`. PDF `generate` and `bulk` routes consult the same `doc_type` when the paperSize is a custom UUID. Custom infosheet sizes start with a blank canvas (no LAYOUT_INFOSHEET portrait auto-load) — operator places widgets onto the uploaded background.
 
 ## Infrastructure IPs (all servers)
 

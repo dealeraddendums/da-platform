@@ -437,6 +437,7 @@ export type DealerCustomSizeRow = {
   width_in: number;
   height_in: number;
   background_url: string | null;
+  doc_type: 'addendum' | 'infosheet';
   created_at: string;
   updated_at: string;
 };
@@ -1528,8 +1529,8 @@ export type Database = {
       };
       dealer_custom_sizes: {
         Row: DealerCustomSizeRow;
-        Insert: { dealer_id: string; name: string; width_in: number; height_in?: number; background_url?: string | null };
-        Update: { name?: string; width_in?: number; height_in?: number; background_url?: string | null; updated_at?: string };
+        Insert: { dealer_id: string; name: string; width_in: number; height_in?: number; background_url?: string | null; doc_type?: 'addendum' | 'infosheet' };
+        Update: { name?: string; width_in?: number; height_in?: number; background_url?: string | null; doc_type?: 'addendum' | 'infosheet'; updated_at?: string };
         Relationships: [];
       };
       label_orders: {

@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { DealerCustomSizeRow } from "@/lib/db";
 import ImageUploadPicker from "./ImageUploadPicker";
 
-type SizeItem = Pick<DealerCustomSizeRow, "id" | "dealer_id" | "name" | "width_in" | "height_in" | "background_url">;
+type SizeItem = Pick<DealerCustomSizeRow, "id" | "dealer_id" | "name" | "width_in" | "height_in" | "background_url" | "doc_type">;
 
 type Props = {
   dealerId: string;
@@ -19,6 +19,7 @@ type EditForm = {
   width_in: string;
   height_in: string;
   background_url: string | null;
+  doc_type: 'addendum' | 'infosheet';
 };
 
 export default function CustomSizesModal({ dealerId, initialSizes, onUpdate, onClose }: Props) {
@@ -34,12 +35,12 @@ export default function CustomSizesModal({ dealerId, initialSizes, onUpdate, onC
   }
 
   function startAdd() {
-    setForm({ name: "", width_in: "", height_in: "11", background_url: null });
+    setForm({ name: "", width_in: "", height_in: "11", background_url: null, doc_type: 'addendum' });
     setError(null);
   }
 
   function startEdit(cs: SizeItem) {
-    setForm({ id: cs.id, name: cs.name, width_in: String(cs.width_in), height_in: String(cs.height_in), background_url: cs.background_url });
+    setForm({ id: cs.id, name: cs.name, width_in: String(cs.width_in), height_in: String(cs.height_in), background_url: cs.background_url, doc_type: cs.doc_type ?? 'addendum' });
     setError(null);
   }
 
@@ -53,7 +54,7 @@ export default function CustomSizesModal({ dealerId, initialSizes, onUpdate, onC
     setError(null);
     setSaving(true);
     try {
-      const body = JSON.stringify({ name: form.name.trim(), width_in: w, height_in: h, background_url: form.background_url, dealer_id: dealerId });
+      const body = JSON.stringify({ name: form.name.trim(), width_in: w, height_in: h, background_url: form.background_url, dealer_id: dealerId, doc_type: form.doc_type });
       const headers = { "Content-Type": "application/json" };
       const [url, method] = form.id
         ? [`/api/custom-sizes/${form.id}`, "PATCH"]
@@ -112,6 +113,7 @@ export default function CustomSizesModal({ dealerId, initialSizes, onUpdate, onC
                   <tr style={{ borderBottom: "1px solid #e0e0e0", background: "#f5f6f7" }}>
                     <th style={{ ...cell, textAlign: "left", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase" }}>Name</th>
                     <th style={{ ...cell, textAlign: "left", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase" }}>Dimensions</th>
+                    <th style={{ ...cell, textAlign: "left", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase" }}>Type</th>
                     <th style={{ ...cell, textAlign: "left", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase" }}>Background</th>
                     <th style={{ ...cell, width: 100 }}></th>
                   </tr>
@@ -121,6 +123,7 @@ export default function CustomSizesModal({ dealerId, initialSizes, onUpdate, onC
                     <tr key={cs.id} style={{ borderBottom: "1px solid #e0e0e0" }}>
                       <td style={{ ...cell, color: "#333", fontSize: 13 }}>{cs.name}</td>
                       <td style={{ ...cell, color: "#55595c", fontSize: 13 }}>{cs.width_in}&quot; × {cs.height_in}&quot;</td>
+                      <td style={{ ...cell, color: "#55595c", fontSize: 12, textTransform: "capitalize" }}>{cs.doc_type ?? "addendum"}</td>
                       <td style={cell}>
                         {cs.background_url
                           // eslint-disable-next-line @next/next/no-img-element
@@ -169,6 +172,17 @@ export default function CustomSizesModal({ dealerId, initialSizes, onUpdate, onC
                     <input type="number" step="0.125" min="0.5" max="24"
                       style={{ width: "100%", padding: "7px 10px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13, outline: "none", boxSizing: "border-box" }}
                       value={form.height_in} onChange={e => setF("height_in", e.target.value)} placeholder="11" />
+                  </div>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", fontSize: 12, color: "#55595c", marginBottom: 6 }}>Document Type</label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {(['addendum','infosheet'] as const).map(v => (
+                      <button key={v} type="button" onClick={() => setF("doc_type", v)}
+                        style={{ flex: 1, padding: "6px", borderRadius: 4, border: `2px solid ${form.doc_type === v ? '#1976d2' : '#e0e0e0'}`, background: form.doc_type === v ? '#e3f2fd' : '#fff', cursor: "pointer", fontSize: 12, fontWeight: 600, color: form.doc_type === v ? '#1976d2' : '#55595c', textTransform: "capitalize" }}>
+                        {v}
+                      </button>
+                    ))}
                   </div>
                 </div>
                 <div style={{ marginBottom: 14 }}>

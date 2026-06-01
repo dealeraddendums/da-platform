@@ -24,7 +24,7 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { name?: string; width_in?: number; height_in?: number; background_url?: string | null };
+  let body: { name?: string; width_in?: number; height_in?: number; background_url?: string | null; doc_type?: string };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -33,10 +33,14 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
   const widthIn = body.width_in !== undefined ? Number(body.width_in) : existing.width_in;
   const heightIn = body.height_in !== undefined ? Number(body.height_in) : existing.height_in;
   const backgroundUrl = body.background_url !== undefined ? body.background_url : existing.background_url;
+  const docType: 'addendum' | 'infosheet' =
+    body.doc_type === 'addendum' || body.doc_type === 'infosheet'
+      ? body.doc_type
+      : (existing.doc_type ?? 'addendum');
 
   const { data, error: dbErr } = await admin
     .from("dealer_custom_sizes")
-    .update({ name, width_in: widthIn, height_in: heightIn, background_url: backgroundUrl, updated_at: new Date().toISOString() })
+    .update({ name, width_in: widthIn, height_in: heightIn, background_url: backgroundUrl, doc_type: docType, updated_at: new Date().toISOString() })
     .eq("id", params.id)
     .select()
     .single();
