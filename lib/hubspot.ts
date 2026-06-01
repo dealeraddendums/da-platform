@@ -32,6 +32,25 @@ class HubspotError extends Error {
   }
 }
 
+/**
+ * Thrown by upsertObject's pre-create dedup guard. Signals that the
+ * caller was about to create a duplicate of an existing unlinked
+ * HubSpot record (e.g. the original company an operator created
+ * manually, or one carried over from the dead legacy sync, that lacks
+ * our `platformid` / `groupid`). The caller catches this, logs it as
+ * a `dedup-skip`, and alerts a human to merge by hand. See
+ * docs/hubspot-dedup-cleanup.md (the 2026-05-31 cleanup plan).
+ */
+export class DedupSkipError extends Error {
+  unlinkedOriginalId: string;
+  matchedOn: string;
+  constructor(unlinkedOriginalId: string, matchedOn: string) {
+    super(`dedup-skip: would create a duplicate of unlinked HubSpot id ${unlinkedOriginalId} (matched on ${matchedOn})`);
+    this.unlinkedOriginalId = unlinkedOriginalId;
+    this.matchedOn = matchedOn;
+  }
+}
+
 async function readBody(res: Response): Promise<string> {
   try { return await res.text(); } catch { return ""; }
 }
@@ -175,6 +194,47 @@ async function updateObject(
   return res.json() as Promise<HubspotObject>;
 }
 
+/**
+ * Pre-create dedup probe — look up a HubSpot Company that matches by
+ * exact name + phone but **doesn't** carry our own-key (`platformid`
+ * for dealers, `groupid` for groups). A hit means: an unlinked
+ * original exists, and creating a new record now would make a
+ * duplicate. The upsert path uses this between stage 2 (search by own
+ * key) and stage 3 (create) — see upsertObject.dedupCheck.
+ *
+ * Strict by design: returns null when name or phone is empty, and
+ * matches phone exactly (no digits-only normalization). Format
+ * mismatches will miss; that's a safe failure mode — the dedup script
+ * catches what the guard misses, and false-positive create-refusals
+ * are more costly than false-negative ones.
+ */
+export async function findUnlinkedOriginal(args: {
+  name: string | null;
+  phone: string | null;
+  ownKey: "platformid" | "groupid";
+}): Promise<{ id: string; matchedOn: string } | null> {
+  if (!args.name || !args.phone) return null;
+  const res = await fetch(`${BASE}/objects/companies/search`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      filterGroups: [{ filters: [
+        { propertyName: "name",      operator: "EQ", value: args.name },
+        { propertyName: "phone",     operator: "EQ", value: args.phone },
+        { propertyName: args.ownKey, operator: "NOT_HAS_PROPERTY" },
+      ]}],
+      limit: 1,
+    }),
+  });
+  if (!res.ok) {
+    throw new HubspotError(res.status, `findUnlinkedOriginal ${res.status}`, await readBody(res));
+  }
+  const parsed = await res.json() as SearchResponse;
+  const hit = parsed.results?.[0];
+  if (!hit) return null;
+  return { id: hit.id, matchedOn: `name+phone, no ${args.ownKey}` };
+}
+
 // ── Three-stage idempotent upsert ────────────────────────────────────────────
 
 /**
@@ -193,6 +253,13 @@ export async function upsertObject(args: {
   existingHubspotId: string | null;
   searchProperty: string;
   searchValue: string | null;
+  /**
+   * Optional pre-create dedup hook. Called only on the path
+   * "no stored id (or stale) AND no natural-key hit AND about to
+   * create". A non-null return throws DedupSkipError so the caller
+   * can log + alert instead of manufacturing a duplicate.
+   */
+  dedupCheck?: () => Promise<{ id: string; matchedOn: string } | null>;
 }): Promise<{ hubspotId: string; created: boolean }> {
   // Strip null/undefined values — HubSpot rejects null on enumerations
   // and treats empty string as "set to empty" which clobbers operator
@@ -224,6 +291,15 @@ export async function upsertObject(args: {
       const updated = await updateObject(args.object, found.id, clean);
       return { hubspotId: updated.id, created: true /* caller writes id back */ };
     }
+  }
+
+  // (2.5) Dedup guard — refuse to create if an unlinked original
+  //       already exists for the same identity. Only runs when stages 1+2
+  //       didn't resolve, so the happy path (id stored OR own-key match)
+  //       skips this entirely. Throws DedupSkipError up to the caller.
+  if (args.dedupCheck) {
+    const hit = await args.dedupCheck();
+    if (hit) throw new DedupSkipError(hit.id, hit.matchedOn);
   }
 
   // (3) Create.

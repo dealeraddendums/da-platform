@@ -16,6 +16,8 @@ import {
   LIFECYCLE,
   normalizeSubscriptionType,
   isPayingAccount,
+  findUnlinkedOriginal,
+  DedupSkipError,
 } from "@/lib/hubspot";
 
 // ── Property builders ───────────────────────────────────────────────────────
@@ -57,6 +59,7 @@ interface GroupForHubspot {
   internal_id: string | null;
   hubspot_company_id: string | null;
   billing_customer_id: string | null;
+  phone: string | null;          // only used by the dedup guard, not written to HubSpot today
 }
 
 interface ProfileForHubspot {
@@ -183,7 +186,7 @@ function digitsOnly(s: string | null | undefined): number | null {
 async function logError(
   objectType: "company" | "contact",
   objectId: string,
-  op: "create" | "update" | "search",
+  op: "create" | "update" | "search" | "dedup-skip",
   err: unknown,
   payload: Record<string, unknown>,
   hubspotId: string | null = null,
@@ -203,6 +206,41 @@ async function logError(
     });
   } catch (logErr) {
     console.error("[hubspot-sync] failed to log error:", logErr instanceof Error ? logErr.message : logErr);
+  }
+}
+
+/**
+ * Operator alert fired the first time the dedup guard refuses a create
+ * for a given Supabase object. Mandrill same as the reliable-sync
+ * failure alert — support@ needs to manually merge the unlinked
+ * original in HubSpot, then re-run the sync (which now matches by
+ * platformid/groupid).
+ */
+async function alertDedupSkip(args: {
+  objectKind: "dealer" | "group";
+  supabaseId: string;
+  identityLabel: string;        // dealer slug / group internal_id — human-readable handle
+  unlinkedOriginalId: string;
+  matchedOn: string;
+}): Promise<void> {
+  try {
+    const portalUrl = `https://app.hubspot.com/contacts/23896347/record/0-2/${args.unlinkedOriginalId}`;
+    await sendMandrillEmail({
+      subject: `[HubSpot dedup] refused to duplicate ${args.objectKind} ${args.identityLabel}`,
+      from_email: "alerts@dealeraddendums.com",
+      from_name: "DA Platform Alerts",
+      to: [{ email: "support@dealeraddendums.com", name: "DA Support" }],
+      html: `<p>HubSpot sync for <b>${args.objectKind} ${args.identityLabel}</b> was about to create a duplicate Company.</p>
+<p>Found an unlinked match on <code>${args.matchedOn}</code> — HubSpot id <a href="${portalUrl}">${args.unlinkedOriginalId}</a>.</p>
+<p>The sync did <b>not</b> create a new record. To resolve:</p>
+<ol>
+  <li>Open the linked record and confirm it's the correct dealer/group.</li>
+  <li>Either (a) stamp <code>${args.objectKind === "dealer" ? "platformid" : "groupid"}</code> on that record manually and re-run the sync, or (b) run <code>scripts/hubspot-dedup.mjs --apply</code> to merge any sync-created stub into this record.</li>
+</ol>
+<p>Supabase id: <code>${args.supabaseId}</code>.</p>`,
+    });
+  } catch (err) {
+    console.error("[hubspot-sync] dedup alert send failed:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -252,12 +290,28 @@ export async function syncDealerToHubspot(dealerId: string): Promise<void> {
       existingHubspotId: dealer.hubspot_company_id,
       searchProperty: "platformid",
       searchValue: dealer.dealer_id,
+      dedupCheck: () => findUnlinkedOriginal({
+        name: dealer.name,
+        phone: dealer.phone,
+        ownKey: "platformid",
+      }),
     });
 
     if (created || hubspotId !== dealer.hubspot_company_id) {
       await admin.from("dealers").update({ hubspot_company_id: hubspotId }).eq("id", dealerId);
     }
   } catch (err) {
+    if (err instanceof DedupSkipError) {
+      void logError("company", dealerId, "dedup-skip", err, { ...payload, unlinkedOriginalId: err.unlinkedOriginalId, matchedOn: err.matchedOn }, err.unlinkedOriginalId);
+      void alertDedupSkip({
+        objectKind: "dealer",
+        supabaseId: dealerId,
+        identityLabel: String(payload.platformid ?? payload.name ?? dealerId),
+        unlinkedOriginalId: err.unlinkedOriginalId,
+        matchedOn: err.matchedOn,
+      });
+      return;
+    }
     void logError("company", dealerId, "update", err, payload);
   }
 }
@@ -269,7 +323,7 @@ export async function syncGroupToHubspot(groupId: string): Promise<void> {
   try {
     const { data: group } = await admin
       .from("groups")
-      .select("id, name, internal_id, hubspot_company_id, billing_customer_id")
+      .select("id, name, internal_id, hubspot_company_id, billing_customer_id, phone")
       .eq("id", groupId)
       .maybeSingle<GroupForHubspot>();
     if (!group) return;
@@ -289,12 +343,28 @@ export async function syncGroupToHubspot(groupId: string): Promise<void> {
       existingHubspotId: group.hubspot_company_id,
       searchProperty: "groupid",
       searchValue: group.internal_id,
+      dedupCheck: () => findUnlinkedOriginal({
+        name: group.name,
+        phone: group.phone,
+        ownKey: "groupid",
+      }),
     });
 
     if (created || hubspotId !== group.hubspot_company_id) {
       await admin.from("groups").update({ hubspot_company_id: hubspotId }).eq("id", groupId);
     }
   } catch (err) {
+    if (err instanceof DedupSkipError) {
+      void logError("company", groupId, "dedup-skip", err, { ...payload, unlinkedOriginalId: err.unlinkedOriginalId, matchedOn: err.matchedOn }, err.unlinkedOriginalId);
+      void alertDedupSkip({
+        objectKind: "group",
+        supabaseId: groupId,
+        identityLabel: String(payload.groupid ?? payload.name ?? groupId),
+        unlinkedOriginalId: err.unlinkedOriginalId,
+        matchedOn: err.matchedOn,
+      });
+      return;
+    }
     void logError("company", groupId, "update", err, payload);
   }
 }
