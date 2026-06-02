@@ -647,35 +647,15 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
       {/* Sections only visible to dealer_admin + admins */}
       {!isReadOnly && (
         <>
-          {/* Printer Nudge Margins */}
-          <div className="card p-5 mb-6">
-            <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
-              Printer Nudge Margins
-            </p>
-            <p className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
-              Fine-tune print alignment per printer (pixels). Set once, applies to all prints.
-            </p>
-            <div className="grid grid-cols-2 gap-4">
-              {(["left", "right", "top", "bottom"] as const).map((side) => {
-                const key = `nudge_${side}` as keyof typeof settings;
-                return (
-                  <div key={side}>
-                    <label className="block text-xs mb-1 capitalize" style={{ color: "var(--text-secondary)" }}>
-                      {side} (px)
-                    </label>
-                    <input
-                      type="number"
-                      className="input w-full"
-                      value={(settings[key] as number) ?? 0}
-                      onChange={(e) =>
-                        setSettings((s) => ({ ...s, [key]: parseInt(e.target.value, 10) || 0 }))
-                      }
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          {/* Printer Nudge Margins — graphical arrow pad + live sheet preview.
+              UI-only: settings.nudge_* + handleSave unchanged.
+              Sign convention: positive value = larger margin from that edge
+                               = print area inset further inward.
+              Confirmed against the standard CSS-margin convention; do one
+              real test print to verify direction in your printer setup
+              (spec callout). Negatives allowed; visually clamped to keep
+              the preview inside the sheet, but never clamped in storage. */}
+          <PrinterNudgeCard settings={settings} setSettings={setSettings} />
 
           {/* Print History */}
           {(role === "dealer_admin" || isAdminPicker) && dealerId && (
@@ -700,6 +680,153 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ── Printer Nudge Card (graphical, arrow pad + live sheet preview) ───────────
+//
+// Sign convention: positive nudge_* = larger margin from that edge = the
+// print area inches inward from that edge. The four arrow steppers each
+// move ±1px on one axis; the inset rectangle inside the sheet preview
+// updates the same way the real print would.
+
+const NUDGE_PREVIEW_W = 180;
+const NUDGE_PREVIEW_H = 233;                // 8.5×11 ratio @ ~22:1
+const NUDGE_BASE_INSET = 16;                // baseline gap from sheet edge → "print area"
+const NUDGE_SCALE = 1.8;                    // 1 stored px ≈ 1.8 preview px
+const NUDGE_VISUAL_CLAMP = 6;               // keep print-area at least this far from every sheet edge
+
+type SettingsState = Omit<DealerSettingsRow, "dealer_id" | "updated_at">;
+
+function PrinterNudgeCard({
+  settings,
+  setSettings,
+}: {
+  settings: SettingsState;
+  setSettings: React.Dispatch<React.SetStateAction<SettingsState>>;
+}) {
+  const setNudge = (side: "left" | "right" | "top" | "bottom", delta: number) =>
+    setSettings(s => ({ ...s, [`nudge_${side}`]: (s[`nudge_${side}` as const] ?? 0) + delta }));
+  const typeNudge = (side: "left" | "right" | "top" | "bottom", raw: string) => {
+    const v = raw === "" || raw === "-" ? 0 : parseInt(raw, 10);
+    if (Number.isNaN(v)) return;
+    setSettings(s => ({ ...s, [`nudge_${side}`]: v }));
+  };
+  const reset = () => setSettings(s => ({
+    ...s, nudge_left: 0, nudge_right: 0, nudge_top: 0, nudge_bottom: 0,
+  }));
+
+  const nl = settings.nudge_left ?? 0;
+  const nr = settings.nudge_right ?? 0;
+  const nt = settings.nudge_top ?? 0;
+  const nb = settings.nudge_bottom ?? 0;
+
+  // Visual offset = base + scale*stored, clamped so the box stays inside
+  // the sheet preview. Storage is NEVER clamped — only what we draw.
+  const vLeft = Math.max(NUDGE_VISUAL_CLAMP, NUDGE_BASE_INSET + nl * NUDGE_SCALE);
+  const vRight = Math.max(NUDGE_VISUAL_CLAMP, NUDGE_BASE_INSET + nr * NUDGE_SCALE);
+  const vTop = Math.max(NUDGE_VISUAL_CLAMP, NUDGE_BASE_INSET + nt * NUDGE_SCALE);
+  const vBottom = Math.max(NUDGE_VISUAL_CLAMP, NUDGE_BASE_INSET + nb * NUDGE_SCALE);
+  const innerW = Math.max(20, NUDGE_PREVIEW_W - vLeft - vRight);
+  const innerH = Math.max(20, NUDGE_PREVIEW_H - vTop - vBottom);
+
+  const arrowBtn: React.CSSProperties = {
+    width: 28, height: 28, padding: 0,
+    background: "#fff", border: "1px solid #c0c0c0", borderRadius: 4,
+    color: "#1976d2", fontSize: 12, fontWeight: 700,
+    cursor: "pointer", fontFamily: "inherit",
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+  };
+  const numInput: React.CSSProperties = {
+    width: 56, height: 28, padding: "0 6px",
+    border: "1px solid #e0e0e0", borderRadius: 4,
+    fontSize: 13, fontFamily: "monospace", textAlign: "center",
+    background: "#fff", color: "#1a1916", outline: "none", boxSizing: "border-box",
+  };
+
+  return (
+    <div className="card p-5 mb-6">
+      <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+        Printer Nudge Margins
+      </p>
+      <p className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
+        Fine-tune print alignment per printer (pixels). Set once, applies to all prints.
+      </p>
+
+      <div style={{ display: "flex", justifyContent: "center", paddingTop: 4 }}>
+        {/* 3-row layout: [top controls] / [left | sheet | right] / [bottom controls] */}
+        <div style={{ display: "inline-grid", gridTemplateColumns: "auto auto auto", gridTemplateRows: "auto auto auto", gap: 8, alignItems: "center", justifyItems: "center" }}>
+
+          {/* Top row */}
+          <div />
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button type="button" aria-label="Decrease top margin" onClick={() => setNudge("top", -1)} style={arrowBtn}>▲</button>
+            <input type="number" aria-label="Top nudge px" value={nt} onChange={e => typeNudge("top", e.target.value)} style={numInput} />
+            <button type="button" aria-label="Increase top margin" onClick={() => setNudge("top", +1)} style={arrowBtn}>▼</button>
+          </div>
+          <div />
+
+          {/* Middle row — left controls | sheet | right controls */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+            <button type="button" aria-label="Decrease left margin" onClick={() => setNudge("left", -1)} style={arrowBtn}>◀</button>
+            <input type="number" aria-label="Left nudge px" value={nl} onChange={e => typeNudge("left", e.target.value)} style={numInput} />
+            <button type="button" aria-label="Increase left margin" onClick={() => setNudge("left", +1)} style={arrowBtn}>▶</button>
+          </div>
+
+          <div
+            style={{
+              width: NUDGE_PREVIEW_W, height: NUDGE_PREVIEW_H,
+              background: "#fff", border: "1px solid #e0e0e0", borderRadius: 2,
+              position: "relative",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+            }}
+            aria-label="Sheet preview"
+          >
+            <div
+              style={{
+                position: "absolute",
+                left: vLeft, top: vTop, width: innerW, height: innerH,
+                background: "#f5f8ff",
+                border: "1px dashed #1976d2",
+                borderRadius: 2,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: "#78828c", fontSize: 9, fontWeight: 500,
+                textTransform: "uppercase", letterSpacing: "0.06em",
+                transition: "left 90ms, top 90ms, width 90ms, height 90ms",
+              }}
+            >
+              print area
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+            <button type="button" aria-label="Decrease right margin" onClick={() => setNudge("right", -1)} style={arrowBtn}>▶</button>
+            <input type="number" aria-label="Right nudge px" value={nr} onChange={e => typeNudge("right", e.target.value)} style={numInput} />
+            <button type="button" aria-label="Increase right margin" onClick={() => setNudge("right", +1)} style={arrowBtn}>◀</button>
+          </div>
+
+          {/* Bottom row */}
+          <div />
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button type="button" aria-label="Decrease bottom margin" onClick={() => setNudge("bottom", -1)} style={arrowBtn}>▼</button>
+            <input type="number" aria-label="Bottom nudge px" value={nb} onChange={e => typeNudge("bottom", e.target.value)} style={numInput} />
+            <button type="button" aria-label="Increase bottom margin" onClick={() => setNudge("bottom", +1)} style={arrowBtn}>▲</button>
+          </div>
+          <div />
+
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
+        <button
+          type="button"
+          onClick={reset}
+          style={{ background: "none", border: "none", color: "#1976d2", fontSize: 12, cursor: "pointer", fontFamily: "inherit", padding: "4px 8px" }}
+        >
+          Reset to 0
+        </button>
+      </div>
     </div>
   );
 }
