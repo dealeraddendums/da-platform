@@ -147,6 +147,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
   const [historyVehicle, setHistoryVehicle] = useState<{ id: string; stockNumber: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [clearingHistory, setClearingHistory] = useState(false);
 
   // Archive modal (super_admin only)
   const [showArchive, setShowArchive] = useState(false);
@@ -275,6 +276,37 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
     setPage(1);
   }
 
+  async function clearPrintHistoryForSelection() {
+    if (checkedIds.size === 0) return;
+    const count = checkedIds.size;
+    const ok = window.confirm(
+      `Clear print history and saved products for ${count} vehicle${count === 1 ? "" : "s"}? This can't be undone.`,
+    );
+    if (!ok) return;
+    setClearingHistory(true);
+    try {
+      const res = await fetch("/api/print/clear-history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vehicleIds: Array.from(checkedIds) }),
+      });
+      const json = await res.json() as { cleared_vehicles?: number; error?: string };
+      if (!res.ok) {
+        alert(json.error ?? "Failed to clear print history");
+        return;
+      }
+      setCheckedIds(new Set());
+      // Hard reload so the dashboard's Printed-this-month / Unprinted cards
+      // refresh alongside the inventory list — they're rendered by the
+      // parent dashboard page, not this component.
+      window.location.reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to clear print history");
+    } finally {
+      setClearingHistory(false);
+    }
+  }
+
   async function confirmBulkDelete() {
     setDeleting(true);
     const ids = Array.from(checkedIds);
@@ -393,6 +425,17 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
             title={!canPrint ? printBlockedMsg : undefined}
             style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: (bulkPrinting || checkedIds.size > 15 || !canPrint) ? "not-allowed" : "pointer", opacity: (checkedIds.size > 15 || !canPrint) ? 0.45 : 1 }}>
             Buyer Guide ({checkedIds.size})
+          </button>
+          {/* Bulk Clear Print History — secondary (not red, not blue). Full
+              reset for the selected ids only (route deliberately skips the
+              shared vehicle_id='0' sentinel). Not gated on canPrint —
+              dealers should be able to clear stale print state even when
+              their plan is past allowance. */}
+          <button onClick={() => void clearPrintHistoryForSelection()}
+            disabled={bulkPrinting || clearingHistory}
+            title="Delete print history and saved products for the selected vehicles"
+            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#fff", color: "#55595c", border: "1px solid #e0e0e0", borderRadius: 4, cursor: (bulkPrinting || clearingHistory) ? "not-allowed" : "pointer", opacity: (bulkPrinting || clearingHistory) ? 0.6 : 1, fontFamily: "inherit" }}>
+            {clearingHistory ? "Clearing…" : `Clear Print History (${checkedIds.size})`}
           </button>
           {!bulkPrinting && (
             <>
