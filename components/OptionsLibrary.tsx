@@ -87,6 +87,20 @@ const btnPrimary: React.CSSProperties = {
   padding: "7px 16px", background: "#1976d2", color: "#fff", border: "none",
   borderRadius: 4, cursor: "pointer", fontSize: 13, fontWeight: 600,
 };
+
+// Shared pill-toggle style. Used for Product Type (Required/Suggested),
+// Applies To (All/Rules/None), and Type (New/Used/CPO) — and mirrored in
+// CorporateProductModal so the two product forms stay visually consistent.
+// Convention: selected = blue (#1976d2 / #e3f2fd), unselected = white.
+function pillToggleStyle(on: boolean): React.CSSProperties {
+  return {
+    flex: 1, padding: "7px 0", borderRadius: 4, fontWeight: 600, fontSize: 12,
+    cursor: "pointer", fontFamily: "inherit",
+    border: `2px solid ${on ? "#1976d2" : "#e0e0e0"}`,
+    background: on ? "#e3f2fd" : "#fff",
+    color: on ? "#1976d2" : "#55595c",
+  };
+}
 const btnDanger: React.CSSProperties = {
   padding: "5px 10px", background: "#ff5252", color: "#fff", border: "none",
   borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600,
@@ -324,23 +338,19 @@ function OptionForm({
         </div>
       </div>
 
-      {/* Required vs Suggested */}
+      {/* Required vs Suggested — uses the shared blue=selected / white=unselected
+          toggle convention. Keep CorporateProductModal's mirror in sync. */}
       <div style={{ marginBottom: 14 }}>
         <label style={lbl}>Product Type</label>
         <div style={{ display: "flex", gap: 8 }}>
           {([
-            { val: true,  label: "Required",  active: "#e8f5e9", activeText: "#2e7d32", activeBorder: "#4caf50" },
-            { val: false, label: "Suggested", active: "#fff3e0", activeText: "#e65100", activeBorder: "#ffa500" },
-          ] as const).map(({ val, label, active, activeText, activeBorder }) => {
+            { val: true,  label: "Required" },
+            { val: false, label: "Suggested" },
+          ] as const).map(({ val, label }) => {
             const on = form.required === val;
             return (
               <button type="button" key={label} onClick={() => f("required", val)}
-                style={{
-                  flex: 1, padding: "7px 0", borderRadius: 4, fontWeight: 600, fontSize: 12, cursor: "pointer",
-                  border: `2px solid ${on ? activeBorder : "#e0e0e0"}`,
-                  background: on ? active : "#fff",
-                  color: on ? activeText : "#55595c",
-                }}>
+                style={pillToggleStyle(on)}>
                 {label}
               </button>
             );
@@ -377,14 +387,11 @@ function OptionForm({
         )}
       </div>
 
-      {/* Type — only shown when auto-applying (all or rules) */}
+      {/* Type — only shown when auto-applying (all or rules). Multi-select:
+          each chosen condition shows blue (= on); unselected are white. */}
       {appliesTo !== "none" && row("Type", (
         <div style={{ display: "flex", gap: 8 }}>
-          {([
-            { val: "New",  active: "#e8f5e9", activeText: "#2e7d32", activeBorder: "#4caf50" },
-            { val: "Used", active: "#e3f2fd", activeText: "#1565c0", activeBorder: "#1976d2" },
-            { val: "CPO",  active: "#fff3e0", activeText: "#e65100", activeBorder: "#ffa500" },
-          ]).map(({ val, active, activeText, activeBorder }) => {
+          {(["New", "Used", "CPO"] as const).map((val) => {
             const on = form.ad_types.includes(val);
             return (
               <button type="button" key={val}
@@ -394,11 +401,7 @@ function OptionForm({
                     : [...form.ad_types, val];
                   f("ad_types", next);
                 }}
-                style={{ flex: 1, padding: "6px 0", borderRadius: 4, fontWeight: 600, fontSize: 12, cursor: "pointer",
-                  border: `2px solid ${on ? activeBorder : "#e0e0e0"}`,
-                  background: on ? active : "#fff",
-                  color: on ? activeText : "#55595c",
-                }}>
+                style={pillToggleStyle(on)}>
                 {val}
               </button>
             );

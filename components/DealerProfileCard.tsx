@@ -28,6 +28,9 @@ type Props = {
 
 function HubSpotPill({ href }: { href: string }) {
   const [hovered, setHovered] = useState(false);
+  // Solid white pill so it reads on the navy --bg-app header; HubSpot
+  // orange (#ff7a59) for the border + label keeps the brand cue. Hover
+  // tints the background a touch so the click target remains obvious.
   return (
     <a
       href={href}
@@ -38,13 +41,13 @@ function HubSpotPill({ href }: { href: string }) {
       onMouseLeave={() => setHovered(false)}
       style={{
         display: "inline-flex", alignItems: "center",
-        height: 22, padding: "0 8px", borderRadius: 20,
-        fontSize: 11, fontWeight: 500,
-        background: "transparent",
-        border: `1px solid ${hovered ? "#ff7a59" : "#c0c0c0"}`,
-        color: hovered ? "#ff7a59" : "#78828c",
+        height: 22, padding: "0 10px", borderRadius: 20,
+        fontSize: 11, fontWeight: 600,
+        background: hovered ? "#fff3ee" : "#fff",
+        border: "1px solid #ff7a59",
+        color: "#ff7a59",
         textDecoration: "none",
-        transition: "border-color 120ms, color 120ms",
+        transition: "background-color 120ms",
         whiteSpace: "nowrap",
       }}
     >
@@ -404,11 +407,24 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
               <HubSpotPill href={`https://app.hubspot.com/contacts/23896347/record/0-2/${hubspotCompanyId}`} />
             )}
             {isSuperAdmin && !editing && (
+              // Solid white pill so it reads on the navy --bg-app header;
+              // red text + border signals the destructive action without
+              // shouting (Delete Dealer below stays solid red).
               <button
-                className="btn btn-secondary"
                 onClick={() => void toggleActive()}
                 disabled={toggling}
-                style={{ fontSize: 13 }}
+                style={{
+                  fontSize: 13,
+                  padding: "6px 12px",
+                  background: "#fff",
+                  color: "#ff5252",
+                  border: "1px solid #ff5252",
+                  borderRadius: 4,
+                  fontWeight: 500,
+                  cursor: toggling ? "not-allowed" : "pointer",
+                  opacity: toggling ? 0.6 : 1,
+                  fontFamily: "inherit",
+                }}
               >
                 {toggling ? "…" : dealer.active ? "Deactivate" : "Activate"}
               </button>

@@ -75,20 +75,25 @@ const lbl: React.CSSProperties = {
   letterSpacing: "0.05em", color: "#78828c", marginBottom: 5,
 };
 
-function TypePill({ active, color, bg, border, label, onClick }: {
-  active: boolean; color: string; bg: string; border: string; label: string; onClick: () => void;
+// Shared pill-toggle style. Mirror of components/OptionsLibrary.tsx —
+// keep the two in sync. Convention: selected = blue (#1976d2 / #e3f2fd),
+// unselected = white. The legacy TypePill signature is preserved so
+// existing call sites keep working without per-pill color args.
+function pillToggleStyle(on: boolean): React.CSSProperties {
+  return {
+    flex: 1, padding: "8px 0", borderRadius: 4, fontWeight: 600, fontSize: 13,
+    cursor: "pointer", fontFamily: "inherit",
+    border: `2px solid ${on ? "#1976d2" : "#e0e0e0"}`,
+    background: on ? "#e3f2fd" : "#fff",
+    color: on ? "#1976d2" : "#55595c",
+  };
+}
+
+function TypePill({ active, label, onClick }: {
+  active: boolean; label: string; onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        flex: 1, padding: "8px 0", borderRadius: 4, fontWeight: 600, fontSize: 13, cursor: "pointer",
-        border: `2px solid ${active ? border : "#e0e0e0"}`,
-        background: active ? bg : "#fff",
-        color: active ? color : "#55595c",
-      }}
-    >
+    <button type="button" onClick={onClick} style={pillToggleStyle(active)}>
       {label}
     </button>
   );
@@ -207,8 +212,8 @@ export default function CorporateProductModal({
           <div style={{ marginBottom: 14 }}>
             <label style={lbl}>Product Type</label>
             <div style={{ display: "flex", gap: 8 }}>
-              <TypePill active={form.required} color="#2e7d32" bg="#e8f5e9" border="#4caf50" label="Required" onClick={() => f("required", true)} />
-              <TypePill active={!form.required} color="#e65100" bg="#fff3e0" border="#ffa500" label="Suggested" onClick={() => f("required", false)} />
+              <TypePill active={form.required} label="Required" onClick={() => f("required", true)} />
+              <TypePill active={!form.required} label="Suggested" onClick={() => f("required", false)} />
             </div>
             <p style={{ fontSize: 11, color: "#78828c", marginTop: 6, marginBottom: 0 }}>
               {form.required
@@ -247,12 +252,7 @@ export default function CorporateProductModal({
                 const on = form.applies_to === opt.v;
                 return (
                   <button key={opt.v} type="button" onClick={() => f("applies_to", opt.v)}
-                    style={{
-                      flex: 1, padding: "8px 0", borderRadius: 4, fontWeight: 600, fontSize: 12, cursor: "pointer",
-                      border: `2px solid ${on ? "#1976d2" : "#e0e0e0"}`,
-                      background: on ? "#e3f2fd" : "#fff",
-                      color: on ? "#0d47a1" : "#55595c",
-                    }}>
+                    style={pillToggleStyle(on)}>
                     {opt.label}
                   </button>
                 );
@@ -267,12 +267,7 @@ export default function CorporateProductModal({
                 const on = form.ad_types.includes(t);
                 return (
                   <button key={t} type="button" onClick={() => toggleAdType(t)}
-                    style={{
-                      flex: 1, padding: "8px 0", borderRadius: 4, fontWeight: 600, fontSize: 12, cursor: "pointer",
-                      border: `2px solid ${on ? "#1976d2" : "#e0e0e0"}`,
-                      background: on ? "#e3f2fd" : "#fff",
-                      color: on ? "#0d47a1" : "#55595c",
-                    }}>
+                    style={pillToggleStyle(on)}>
                     {t}
                   </button>
                 );
