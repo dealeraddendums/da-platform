@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { verifyGhostToken } from "@/lib/ghost";
 import DealerList from "@/components/DealerList";
 import GroupDealerList from "@/components/GroupDealerList";
 import { PageHeader } from "@/components/PageHeader";
@@ -24,6 +26,16 @@ export default async function DealersPage() {
     ?? "dealer_user";
 
   if (role === "super_admin") {
+    // Group-ghost: super_admin operating as a group_admin should see
+    // only that group's dealers, same as a real group_admin would. The
+    // ghost token is signed in app/api/admin/ghost/route.ts with
+    // group_id; a dealer-ghost (dealer_text_id present) takes a
+    // different code path elsewhere and shouldn't land here. The
+    // sidebar + impersonation banner already honor this token.
+    const ghostCtx = verifyGhostToken(cookies().get("da_ghost_token")?.value ?? "");
+    if (ghostCtx?.group_id && !ghostCtx.dealer_text_id) {
+      return <GroupDealerList groupId={ghostCtx.group_id} />;
+    }
     return <DealerList role={role} />;
   }
 

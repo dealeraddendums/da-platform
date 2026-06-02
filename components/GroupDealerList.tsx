@@ -190,6 +190,11 @@ export default function GroupDealerList({ groupId }: Props) {
     setLoading(true);
     const params = new URLSearchParams();
     if (search) params.set("q", search);
+    // Pass the group id so /api/dealers can scope server-side even when
+    // the caller is a super_admin (group-ghost mode). For real
+    // group_admins the route auto-scopes by claims.group_id and ignores
+    // the param; for super_admin it filters by this value.
+    if (groupId) params.set("group_id", groupId);
     try {
       const res = await fetch(`/api/dealers?${params.toString()}`);
       if (res.ok) {
@@ -198,7 +203,7 @@ export default function GroupDealerList({ groupId }: Props) {
         setFiltered(json.data ?? []);
       }
     } finally { setLoading(false); }
-  }, [search]);
+  }, [search, groupId]);
 
   useEffect(() => { void fetchDealers(); }, [fetchDealers]);
 
@@ -216,8 +221,6 @@ export default function GroupDealerList({ groupId }: Props) {
     });
     window.location.href = "/dashboard";
   }
-
-  const _ = groupId; // used for future group-specific features
 
   return (
     <div>

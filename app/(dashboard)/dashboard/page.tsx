@@ -143,12 +143,23 @@ export default async function DashboardPage() {
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user") as UserRole;
 
+  // Ghost token is read once at the top so both the dealer-ghost branch
+  // (super_admin → dealer view) and the group-ghost branch (super_admin →
+  // group_admin view) can see it. A group-ghost has group_id but no
+  // dealer_text_id; route those into the existing group_admin branch
+  // further down rather than letting them fall through to the platform
+  // super_admin branch.
+  const cookieStore = cookies();
+  const ghostTokenStr = cookieStore.get("da_ghost_token")?.value;
+  const ghostCtx = role === "super_admin" && ghostTokenStr ? verifyGhostToken(ghostTokenStr) : null;
+  const groupGhostId =
+    role === "super_admin" && ghostCtx?.group_id && !ghostCtx?.dealer_text_id
+      ? ghostCtx.group_id
+      : null;
+
   // ── Ghost mode: super_admin operating as a dealer ─────────────────────────
   // Must be checked before the super_admin branch so ghost mode shows dealer view.
   if (role === "super_admin") {
-    const cookieStore = cookies();
-    const ghostToken = cookieStore.get("da_ghost_token")?.value;
-    const ghostCtx = ghostToken ? verifyGhostToken(ghostToken) : null;
     if (ghostCtx?.dealer_text_id) {
       // Treat as dealer — fall through to dealer view below using ghost dealer_id
       const ghostDealerId = ghostCtx.dealer_text_id;
@@ -200,7 +211,9 @@ export default async function DashboardPage() {
   }
 
   // ── super_admin (not in ghost mode) ──────────────────────────────────────
-  if (role === "super_admin") {
+  // groupGhostId guard ensures a group-ghost session skips the platform
+  // branch and falls through to the group_admin branch below.
+  if (role === "super_admin" && !groupGhostId) {
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
@@ -255,9 +268,12 @@ export default async function DashboardPage() {
     );
   }
 
-  // ── group_admin ────────────────────────────────────────────────────────────
-  if (role === "group_admin") {
-    const groupId = profile?.group_id ?? null;
+  // ── group_admin (or super_admin in group-ghost mode) ─────────────────────
+  // Same branch serves both real group_admin logins and super_admin ghosting
+  // as a group. groupGhostId wins when present; otherwise falls back to the
+  // real profile's group_id.
+  if (role === "group_admin" || groupGhostId) {
+    const groupId = groupGhostId ?? profile?.group_id ?? null;
     if (!groupId) {
       return (
         <div>

@@ -316,6 +316,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (active === "true") query = query.eq("active", true);
   else if (active === "false") query = query.eq("active", false);
   if (createdSinceIso) query = query.gte("created_at", createdSinceIso);
+  // Honor ?group_id= for super_admin (used by GroupDealerList under a
+  // super_admin group-ghost session — real group_admin callers are
+  // scoped earlier in this handler by claims.group_id).
+  const groupIdParam = searchParams.get("group_id");
+  if (groupIdParam) query = query.eq("group_id", groupIdParam);
 
   // Apply DB-level ordering; "created_at" sorts by legacy_id (sequential int)
   const dbSortCol = DB_SORT_COLS.has(sortCol)
