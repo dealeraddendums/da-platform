@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
+import { canPrintForDealer } from "@/lib/print-eligibility";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import { PageHeader } from "@/components/PageHeader";
 import ActivitySection from "@/components/dashboard/ActivitySection";
@@ -191,6 +192,7 @@ export default async function DashboardPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             {ghostStats.map(ghostStatCard)}
           </div>
+          {/* super_admin in ghost mode bypasses the gate — leave printGate undefined */}
           <ManualVehicleInventory dealerId={ghostDealerId} />
         </div>
       );
@@ -377,13 +379,18 @@ export default async function DashboardPage() {
     </div>
   );
 
+  // Dealer roles: gate the inventory print buttons by the same canPrint
+  // check the server routes enforce. super_admin bypasses (handled
+  // separately above and in enforceCanPrint).
+  const printGate = await canPrintForDealer(dealerId);
+
   return (
     <div>
       <PageHeader title="Dashboard" />
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         {dealerStats.map(statCard)}
       </div>
-      <ManualVehicleInventory dealerId={dealerId} />
+      <ManualVehicleInventory dealerId={dealerId} printGate={printGate} />
     </div>
   );
 }

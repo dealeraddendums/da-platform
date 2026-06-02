@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import VehicleSubNav from "@/components/VehicleSubNav";
+import { canPrintForDealer } from "@/lib/print-eligibility";
 
 export const metadata = { title: "Inventory — DA Platform" };
 
@@ -82,10 +83,16 @@ export default async function VehiclesPage() {
     );
   }
 
+  // super_admin bypasses the print gate (enforceCanPrint short-circuits
+  // on role==='super_admin'). For everyone else, resolve the gate
+  // server-side so the buttons render in the correct state on first
+  // paint (avoids the click-then-403 round-trip).
+  const printGate = role === "super_admin" ? undefined : await canPrintForDealer(fixedDealerId);
+
   return (
     <div>
       {isDealerContext && <VehicleSubNav />}
-      <ManualVehicleInventory dealerId={fixedDealerId} isSuperAdmin={role === "super_admin"} />
+      <ManualVehicleInventory dealerId={fixedDealerId} isSuperAdmin={role === "super_admin"} printGate={printGate} />
     </div>
   );
 }

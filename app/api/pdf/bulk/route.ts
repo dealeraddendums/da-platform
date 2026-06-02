@@ -14,6 +14,7 @@ import { useService as usePdfService, renderBulkViaService, type BulkItem, type 
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
+import { enforceCanPrint } from "@/lib/print-eligibility";
 import { generateVehicleContent } from "@/lib/ai-content";
 import QRCode from "qrcode";
 import { PDFDocument } from "pdf-lib";
@@ -234,6 +235,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const knownSizes = new Set(["standard", "narrow", "infosheet"]);
   const admin = createAdminSupabaseClient();
+
+  // Print-eligibility gate (super_admin bypasses). Resolve the distinct
+  // dealers represented in the requested vehicles, then check each one.
+  // Dealer roles are scope-limited to their own dealer below, so this is
+  // usually a single check; super_admin bypasses the helper outright.
+  {
+    const { data: dealerScope } = await admin
+      .from("dealer_vehicles")
+      .select("dealer_id")
+      .in("id", vehicleIds);
+    const distinctDealers = Array.from(new Set((dealerScope ?? []).map(r => r.dealer_id as string)));
+    for (const dealerSlug of distinctDealers) {
+      const blocked = await enforceCanPrint(dealerSlug, claims);
+      if (blocked) return blocked;
+    }
+  }
   const pdfBuffers: Buffer[] = []; // populated only by buyer_guide path
   const bgJobs: BulkBgJob[] = [];
   // Service-path scratchpad. Parallel to bgJobs (same index per vehicle)

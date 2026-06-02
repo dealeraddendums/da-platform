@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { enforceCanPrint } from "@/lib/print-eligibility";
 
 /**
  * POST /api/print/bulk
@@ -44,6 +45,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const forbidden = dvRows.some((r) => r.dealer_id !== claims.dealer_id);
     if (forbidden) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Print-eligibility gate (super_admin bypasses). For dealer_admin /
+  // dealer_user the scope-check above guarantees all vehicles share one
+  // dealer slug — first row is representative.
+  const blocked = await enforceCanPrint(dvRows[0].dealer_id, claims);
+  if (blocked) return blocked;
 
   const inserts = dvRows.map((v) => ({
     vehicle_id:    v.id,

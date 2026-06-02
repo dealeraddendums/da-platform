@@ -19,6 +19,7 @@ import {
   findUnlinkedOriginal,
   DedupSkipError,
 } from "@/lib/hubspot";
+import { isOverAllowance, isFreeAccountType } from "@/lib/print-eligibility";
 
 // ── Property builders ───────────────────────────────────────────────────────
 
@@ -73,22 +74,33 @@ interface ProfileForHubspot {
   hubspot_contact_id: string | null;
 }
 
-function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, groupId: string | null): Record<string, string | number | null> {
+function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, groupId: string | null, lifetimePrints: number): Record<string, string | number | null> {
   const platformId = d.dealer_id;
   const billingId = d.billing_customer_id ?? d.internal_id ?? null;
   const subType = normalizeSubscriptionType(d.account_type);
-  // Three-way lifecycle derivation:
-  //   paying account                       → CUSTOMER
-  //   non-paying AND downgraded_at set     → ACCOUNT_DOWNGRADED (paying→Free transition)
-  //   non-paying AND never paid            → DEALER_TRIAL (existing Trial path; the cron
-  //                                          flips this to TRIAL_EXPIRED past 30d/30 prints)
-  // The PATCH route at app/api/dealers/[id]/route.ts is what sets/clears
-  // downgraded_at on transitions — this function just reads it.
+  // Four-way lifecycle derivation (precedence from docs/print-eligibility-free-expired.md):
+  //   1. paying account                          → CUSTOMER
+  //   2. downgraded_at set OR account_type=Free  → ACCOUNT_DOWNGRADED
+  //         (paying→Free transition OR a directly-Free row carries no
+  //          downgraded_at if it was never a paid account — both go to
+  //          the same stage)
+  //   3. trial (over allowance: >30 days OR >30 lifetime prints) → TRIAL_EXPIRED
+  //   4. trial within allowance                  → DEALER_TRIAL
+  //
+  // The same isOverAllowance predicate gates server-side printing in
+  // lib/print-eligibility.ts. Sharing it here means the dealer-side
+  // canPrint and the HubSpot lifecyclestage never disagree about who's
+  // expired.
+  //
+  // The nightly cron at /api/cron/sync-hubspot-computed re-evaluates
+  // Trial → Trial Expired daily even when nothing event-driven fires.
   let stage: string;
   if (isPayingAccount(d.account_type)) {
     stage = LIFECYCLE.CUSTOMER;
-  } else if (d.downgraded_at) {
+  } else if (d.downgraded_at || isFreeAccountType(d.account_type)) {
     stage = LIFECYCLE.ACCOUNT_DOWNGRADED;
+  } else if (isOverAllowance({ created_at: d.created_at, lifetime_prints: lifetimePrints })) {
+    stage = LIFECYCLE.TRIAL_EXPIRED;
   } else {
     stage = LIFECYCLE.DEALER_TRIAL;
   }
@@ -281,7 +293,19 @@ export async function syncDealerToHubspot(dealerId: string): Promise<void> {
       groupNumericId = g?.internal_id ?? null;
     }
 
-    const properties = dealerCompanyProperties(dealer, groupName, groupNumericId);
+    // Lifetime print count from print_history — feeds the Trial Expired
+    // derivation alongside created_at. dealers.lifetime_prints isn't a
+    // stored column (getPrintCounts in app/api/dealers/route.ts computes
+    // it on demand from print_history), so we count it here too. Only
+    // matters when the dealer isn't paid and isn't already Free — paid
+    // wins outright via isPayingAccount, so this is bounded to legacy
+    // trials and ex-trials.
+    const { count: lifetimePrints } = await admin
+      .from("print_history")
+      .select("id", { count: "exact", head: true })
+      .eq("dealer_id", dealer.dealer_id);
+
+    const properties = dealerCompanyProperties(dealer, groupName, groupNumericId, lifetimePrints ?? 0);
     payload = properties;
 
     const { hubspotId, created } = await upsertObject({

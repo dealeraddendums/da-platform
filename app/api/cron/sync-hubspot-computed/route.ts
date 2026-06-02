@@ -11,6 +11,7 @@ import {
   LIFECYCLE,
   isPayingAccount,
 } from "@/lib/hubspot";
+import { isOverAllowance, isFreeAccountType } from "@/lib/print-eligibility";
 
 /**
  * POST /api/cron/sync-hubspot-computed
@@ -35,8 +36,9 @@ import {
  */
 
 const PROD_PATCH_RATE_MS = 35;          // ≈ 28 req/s
-const TRIAL_DAYS_CAP = 30;
-const TRIAL_PRINTS_CAP = 30;
+// Trial cap constants live in lib/print-eligibility.ts now; this cron uses
+// isOverAllowance() so the gate, the event-driven sync, and this nightly
+// re-evaluation can never disagree about who's expired.
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const secret = req.headers.get("x-cron-secret");
@@ -98,22 +100,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           .eq("dealer_id", d.dealer_id)
           .gte("created_at", twelveMonthsAgo);
 
+        // Lifecycle precedence mirrors lib/sync-hubspot.ts dealerCompanyProperties
+        // (and the docs/print-eligibility-free-expired.md spec). Free is
+        // bucketed alongside downgraded_at; isOverAllowance shared with the
+        // server-side canPrint gate.
         let stage: string | null = null;
         if (isPayingAccount(d.account_type)) {
           stage = LIFECYCLE.CUSTOMER;
-        } else if (d.downgraded_at) {
-          // Paying→Free transition (set by the dealer PATCH route). Stays
-          // Downgraded until the archive-downgraded cron flips active=false.
+        } else if (d.downgraded_at || isFreeAccountType(d.account_type)) {
           stage = LIFECYCLE.ACCOUNT_DOWNGRADED;
         } else {
-          const trialStart = d.created_at ? new Date(d.created_at).getTime() : Date.now();
-          const daysSinceStart = (Date.now() - trialStart) / (24 * 60 * 60 * 1000);
-          const { count: printsSinceStart } = await admin
+          const { count: lifetimePrints } = await admin
             .from("print_history")
             .select("id", { count: "exact", head: true })
-            .eq("dealer_id", d.dealer_id)
-            .gte("created_at", new Date(trialStart).toISOString());
-          const expired = daysSinceStart > TRIAL_DAYS_CAP || (printsSinceStart ?? 0) > TRIAL_PRINTS_CAP;
+            .eq("dealer_id", d.dealer_id);
+          const expired = isOverAllowance({ created_at: d.created_at, lifetime_prints: lifetimePrints ?? 0 });
           stage = expired ? LIFECYCLE.TRIAL_EXPIRED : LIFECYCLE.DEALER_TRIAL;
           if (expired) stats.dealers_expired++;
         }

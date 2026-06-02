@@ -8,7 +8,13 @@ import PdfBuildingOverlay from "./PdfBuildingOverlay";
 import VehicleHistoryPanel from "./VehicleHistoryPanel";
 import type { DealerVehicleRow, DealerVehicleArchiveRow } from "@/lib/db";
 
-type Props = { dealerId: string; isSuperAdmin?: boolean };
+type Props = {
+  dealerId: string;
+  isSuperAdmin?: boolean;
+  /** Print-eligibility gate result, resolved server-side. Defaults to allowed
+   *  when omitted (the server-route gate is the actual enforcement). */
+  printGate?: { ok: boolean; message?: string };
+};
 
 type ListResponse = {
   data: DealerVehicleRow[];
@@ -44,27 +50,40 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
 }
 
-function PrintNowBtn({ vehicleId, printed, printDate }: {
+function PrintNowBtn({ vehicleId, printed, printDate, canPrint, blockedMsg }: {
   vehicleId: string;
   printed: boolean;
   printDate: string | null;
+  canPrint: boolean;
+  blockedMsg?: string;
 }) {
-  const tooltip = printed && printDate
-    ? `Last printed ${new Date(`${printDate}T12:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`
-    : undefined;
+  const tooltip = !canPrint && blockedMsg
+    ? blockedMsg
+    : printed && printDate
+      ? `Last printed ${new Date(`${printDate}T12:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`
+      : undefined;
+  const baseStyle = {
+    display: "inline-block" as const,
+    height: 28, padding: "0 11px", fontSize: 11, fontWeight: 600 as const,
+    borderRadius: 4, whiteSpace: "nowrap" as const, textDecoration: "none" as const,
+    lineHeight: "28px",
+    background: printed ? "#4caf50" : "#fff",
+    color: printed ? "#fff" : "#333",
+    border: printed ? "1px solid #43a047" : "1px solid #c0c0c0",
+  };
+  if (!canPrint) {
+    return (
+      <span title={tooltip}
+        style={{ ...baseStyle, cursor: "not-allowed", opacity: 0.45 }}>
+        Print Now
+      </span>
+    );
+  }
   return (
     <a
       href={`/vehicles/${vehicleId}/addendum`}
       title={tooltip}
-      style={{
-        display: "inline-block",
-        height: 28, padding: "0 11px", fontSize: 11, fontWeight: 600,
-        borderRadius: 4, whiteSpace: "nowrap", textDecoration: "none",
-        lineHeight: "28px",
-        background: printed ? "#4caf50" : "#fff",
-        color: printed ? "#fff" : "#333",
-        border: printed ? "1px solid #43a047" : "1px solid #c0c0c0",
-      }}
+      style={baseStyle}
     >
       Print Now
     </a>
@@ -94,7 +113,9 @@ function SortTh({ label, col, sortBy, sortDir, onSort }: {
   );
 }
 
-export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false }: Props) {
+export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false, printGate }: Props) {
+  const canPrint = printGate?.ok !== false;
+  const printBlockedMsg = printGate?.message;
   const [vehicles, setVehicles] = useState<DealerVehicleRow[]>([]);
   const [printedTypes, setPrintedTypes] = useState<Record<string, string[]>>({});
   const [total, setTotal] = useState(0);
@@ -355,16 +376,22 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
               You can print a maximum of 15 vehicles at once. Please select 15 or fewer vehicles.
             </span>
           )}
-          <button onClick={() => void bulkPrint("addendum")} disabled={bulkPrinting || checkedIds.size > 15}
-            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: (bulkPrinting || checkedIds.size > 15) ? "not-allowed" : "pointer", opacity: checkedIds.size > 15 ? 0.45 : 1 }}>
+          {!canPrint && printBlockedMsg && (
+            <span style={{ fontSize: 12, color: "#ff5252" }}>{printBlockedMsg}</span>
+          )}
+          <button onClick={() => void bulkPrint("addendum")} disabled={bulkPrinting || checkedIds.size > 15 || !canPrint}
+            title={!canPrint ? printBlockedMsg : undefined}
+            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: (bulkPrinting || checkedIds.size > 15 || !canPrint) ? "not-allowed" : "pointer", opacity: (checkedIds.size > 15 || !canPrint) ? 0.45 : 1 }}>
             Print Now ({checkedIds.size})
           </button>
-          <button onClick={() => void bulkPrint("infosheet")} disabled={bulkPrinting || checkedIds.size > 15}
-            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: (bulkPrinting || checkedIds.size > 15) ? "not-allowed" : "pointer", opacity: checkedIds.size > 15 ? 0.45 : 1 }}>
+          <button onClick={() => void bulkPrint("infosheet")} disabled={bulkPrinting || checkedIds.size > 15 || !canPrint}
+            title={!canPrint ? printBlockedMsg : undefined}
+            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: (bulkPrinting || checkedIds.size > 15 || !canPrint) ? "not-allowed" : "pointer", opacity: (checkedIds.size > 15 || !canPrint) ? 0.45 : 1 }}>
             Info Sheet ({checkedIds.size})
           </button>
-          <button onClick={() => void bulkPrint("buyer_guide")} disabled={bulkPrinting || checkedIds.size > 15}
-            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: (bulkPrinting || checkedIds.size > 15) ? "not-allowed" : "pointer", opacity: checkedIds.size > 15 ? 0.45 : 1 }}>
+          <button onClick={() => void bulkPrint("buyer_guide")} disabled={bulkPrinting || checkedIds.size > 15 || !canPrint}
+            title={!canPrint ? printBlockedMsg : undefined}
+            style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: (bulkPrinting || checkedIds.size > 15 || !canPrint) ? "not-allowed" : "pointer", opacity: (checkedIds.size > 15 || !canPrint) ? 0.45 : 1 }}>
             Buyer Guide ({checkedIds.size})
           </button>
           {!bulkPrinting && (
@@ -473,7 +500,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false 
                         </button>
                       </td>
                       <td className="px-3 py-2">
-                        <PrintNowBtn vehicleId={v.id} printed={v.print_status === 1} printDate={v.print_date ?? null} />
+                        <PrintNowBtn vehicleId={v.id} printed={v.print_status === 1} printDate={v.print_date ?? null} canPrint={canPrint} blockedMsg={printBlockedMsg} />
                       </td>
                     </tr>
                   );

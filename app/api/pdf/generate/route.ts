@@ -6,6 +6,7 @@ import { buildPdfHtml } from "@/lib/pdf-html";
 import { signPdfKey, buildPdfKey } from "@/lib/s3-upload";
 import { useService as usePdfService, renderViaService, enqueueGenerate, awaitJobAndFetch, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
+import { enforceCanPrint } from "@/lib/print-eligibility";
 
 type BgOption = { option_name: string; option_price?: string; description?: string | null; required?: boolean };
 
@@ -220,6 +221,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (isDealer && effectiveDealerId && dv.dealer_id !== effectiveDealerId) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+
+    // Print-eligibility gate (super_admin bypasses).
+    const blocked = await enforceCanPrint(dv.dealer_id, claims);
+    if (blocked) return blocked;
 
     // ── Dealer from Supabase ──────────────────────────────────────────────────
     // dealer_vehicles.dealer_id is the TEXT dealer_id (matches dealers.dealer_id, not dealers.id UUID)

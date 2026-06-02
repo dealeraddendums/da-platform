@@ -26,6 +26,8 @@ type Props = {
   fixedDealerId: string | null;
   role: string;
   groupId: string | null;
+  /** Print-eligibility gate resolved server-side; null = allowed. */
+  printGate?: { ok: boolean; message?: string };
 };
 
 const PER_PAGE_OPTIONS = [15, 25, 50, 0] as const; // 0 = All
@@ -34,7 +36,9 @@ type Condition = "all" | "new" | "used" | "cpo";
 type Status = "active" | "all";
 type PrintFilter = "all" | "printed" | "unprinted";
 
-export default function VehicleInventory({ fixedDealerId, role, groupId }: Props) {
+export default function VehicleInventory({ fixedDealerId, role, groupId, printGate }: Props) {
+  const canPrint = printGate?.ok !== false;
+  const printBlockedMsg = printGate?.message;
   const [dealerId, setDealerId] = useState<string | null>(fixedDealerId);
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -353,11 +357,15 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
               You can print a maximum of 15 vehicles at once. Please select 15 or fewer vehicles.
             </span>
           )}
+          {!canPrint && printBlockedMsg && (
+            <span className="text-xs" style={{ color: "#ff5252" }}>{printBlockedMsg}</span>
+          )}
           <button
             type="button"
             className="btn btn-primary text-xs"
-            style={{ height: 30, opacity: checkedIds.size > 15 ? 0.45 : 1 }}
-            disabled={bulkPrinting || checkedIds.size > 15}
+            style={{ height: 30, opacity: (checkedIds.size > 15 || !canPrint) ? 0.45 : 1 }}
+            disabled={bulkPrinting || checkedIds.size > 15 || !canPrint}
+            title={!canPrint ? printBlockedMsg : undefined}
             onClick={() => void bulkPrint("addendum")}
           >
             Print Now ({checkedIds.size})
@@ -365,8 +373,9 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
           <button
             type="button"
             className="btn btn-secondary text-xs"
-            style={{ height: 30, opacity: checkedIds.size > 15 ? 0.45 : 1 }}
-            disabled={bulkPrinting || checkedIds.size > 15}
+            style={{ height: 30, opacity: (checkedIds.size > 15 || !canPrint) ? 0.45 : 1 }}
+            disabled={bulkPrinting || checkedIds.size > 15 || !canPrint}
+            title={!canPrint ? printBlockedMsg : undefined}
             onClick={() => void bulkPrint("infosheet")}
           >
             Info Sheet ({checkedIds.size})
@@ -374,8 +383,9 @@ export default function VehicleInventory({ fixedDealerId, role, groupId }: Props
           <button
             type="button"
             className="btn btn-secondary text-xs"
-            style={{ height: 30, opacity: checkedIds.size > 15 ? 0.45 : 1 }}
-            disabled={bulkPrinting || checkedIds.size > 15}
+            style={{ height: 30, opacity: (checkedIds.size > 15 || !canPrint) ? 0.45 : 1 }}
+            disabled={bulkPrinting || checkedIds.size > 15 || !canPrint}
+            title={!canPrint ? printBlockedMsg : undefined}
             onClick={() => void bulkPrint("buyer_guide")}
           >
             Buyer Guide ({checkedIds.size})

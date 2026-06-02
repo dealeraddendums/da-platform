@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { AddendumHistoryInsert } from "@/lib/db";
+import { enforceCanPrint } from "@/lib/print-eligibility";
 
 type Params = { params: { vehicleId: string } };
 
@@ -52,6 +53,13 @@ export async function POST(
   ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Print-eligibility gate (super_admin bypasses). Blocks Free / Downgraded
+  // and trial-over-allowance dealers with a 403 + the canonical upgrade
+  // message; same predicate used by the HubSpot Trial Expired derivation
+  // so the gate and the lifecycle stage never disagree.
+  const blocked = await enforceCanPrint(dealerId, claims);
+  if (blocked) return blocked;
 
   const { data, error: err } = await admin
     .from("print_history")
