@@ -1445,9 +1445,39 @@ function BillingTab() {
   const [changeOpen, setChangeOpen] = useState(false);
   const [savingTier, setSavingTier] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // Close-flow state: which step of the close path the dealer is on.
+  // null = picker visible, 'reason' = entering soft reason, 'closing' = POST in flight.
+  const [closeStep, setCloseStep] = useState<null | "reason" | "closing">(null);
+  const [closeReason, setCloseReason] = useState<string>("");
+  const [closeDetail, setCloseDetail] = useState<string>("");
 
   const refresh = useCallbackFetch(setData, setLoading, setError);
   useEffect(() => { void refresh(); }, [refresh]);
+
+  async function closeAccount() {
+    setCloseStep("closing");
+    setToast(null);
+    try {
+      const res = await fetch("/api/billing/me/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: closeReason || undefined, detail: closeDetail || undefined }),
+      });
+      const j = await res.json().catch(() => ({})) as { error?: string; message?: string; outstandingAmount?: number };
+      if (!res.ok) {
+        setToast(j.message ?? j.error ?? "Account close failed");
+        setCloseStep("reason");
+        return;
+      }
+      setToast("✓ Account closed. Billing stopped — you have 60 days to re-subscribe before the account is archived.");
+      setCloseStep(null);
+      setChangeOpen(false);
+      await refresh();
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : "Account close failed");
+      setCloseStep("reason");
+    }
+  }
 
   async function changeTier(tier: { key: string; productKey: string; name: string }) {
     setSavingTier(tier.key);
@@ -1574,6 +1604,127 @@ function BillingTab() {
                   </button>
                 );
               })}
+              {/* ── Free / close-account option ──────────────────────────────
+                  Per spec: rendered as a real choice in the picker so the
+                  consequence is visible before the dealer commits. Selecting
+                  does NOT call changeTier (that PATCHes to a paid plan);
+                  it launches the close flow — balance pre-check then a
+                  soft-reason modal. */}
+              {(() => {
+                const isCurrentFree = !sub || sub.productId == null;
+                const balanceDue = data.outstandingAmount > 0;
+                return (
+                  <button
+                    key="free"
+                    disabled={isCurrentFree || closeStep !== null}
+                    onClick={() => {
+                      if (balanceDue) {
+                        setToast(`Settle your balance (${money(data.outstandingAmount)}) before closing — see Outstanding Invoices below.`);
+                        return;
+                      }
+                      setCloseReason("");
+                      setCloseDetail("");
+                      setCloseStep("reason");
+                    }}
+                    style={{
+                      textAlign: "left",
+                      padding: "10px 14px",
+                      border: `1px solid ${isCurrentFree ? "#1976d2" : "#e0e0e0"}`,
+                      background: isCurrentFree ? "#e3f2fd" : "#fff",
+                      borderRadius: 6,
+                      cursor: isCurrentFree || closeStep !== null ? "default" : "pointer",
+                      fontFamily: "inherit",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "#333" }}>
+                        Free
+                        {isCurrentFree && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#1565c0" }}>CURRENT</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#78828c", marginTop: 2, lineHeight: 1.5 }}>
+                        Cancels your subscription and closes your account. Billing stops immediately. You keep log-in access for 60 days (view only — no printing), then the account is archived. Re-subscribe any time within 60 days to restore it. Requires a $0 balance.
+                      </div>
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 13, color: "#333", whiteSpace: "nowrap" }}>
+                      $0/mo
+                    </div>
+                  </button>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* ── Close-confirm modal (soft reason + final confirm) ──────────── */}
+        {closeStep !== null && (
+          <div
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+            onClick={e => { if (e.target === e.currentTarget && closeStep !== "closing") setCloseStep(null); }}
+          >
+            <div style={{ background: "#fff", borderRadius: 6, width: 460, maxWidth: "94vw", overflow: "hidden", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+              <div style={{ padding: "14px 18px", background: "#2a2b3c", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontWeight: 600, fontSize: 14, color: "#fff" }}>Close account</span>
+                {closeStep !== "closing" && (
+                  <button onClick={() => setCloseStep(null)} style={{ fontSize: 20, color: "rgba(255,255,255,0.7)", background: "none", border: "none", cursor: "pointer", lineHeight: 1 }}>×</button>
+                )}
+              </div>
+              <div style={{ padding: 20 }}>
+                <p style={{ fontSize: 13, color: "#333", margin: "0 0 14px", lineHeight: 1.5 }}>
+                  Closing will cancel your subscription immediately. You&apos;ll keep log-in access for <strong>60 days</strong> (view only — no printing). Re-subscribe within 60 days to restore the account; after that it&apos;s archived.
+                </p>
+
+                <label style={{ display: "block", fontSize: 12, color: "#55595c", marginBottom: 4 }}>
+                  Why are you leaving? <span style={{ color: "#9aa4ad", fontWeight: 400 }}>(optional — helps us improve)</span>
+                </label>
+                <select
+                  value={closeReason}
+                  onChange={e => setCloseReason(e.target.value)}
+                  disabled={closeStep === "closing"}
+                  style={{ width: "100%", padding: "7px 10px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13, marginBottom: 10, background: "#fff", fontFamily: "inherit" }}
+                >
+                  <option value="">— select a reason —</option>
+                  <option value="too_expensive">Too expensive</option>
+                  <option value="not_enough_value">Not enough value</option>
+                  <option value="switching_provider">Switching to another provider</option>
+                  <option value="closed_dealership">Closed / sold the dealership</option>
+                  <option value="seasonal_pause">Pausing for the season</option>
+                  <option value="missing_feature">Missing a feature I need</option>
+                  <option value="other">Other</option>
+                </select>
+
+                <label style={{ display: "block", fontSize: 12, color: "#55595c", marginBottom: 4 }}>
+                  Anything else? <span style={{ color: "#9aa4ad", fontWeight: 400 }}>(optional)</span>
+                </label>
+                <textarea
+                  value={closeDetail}
+                  onChange={e => setCloseDetail(e.target.value)}
+                  disabled={closeStep === "closing"}
+                  rows={3}
+                  placeholder="Tell us what wasn't working — we read every note."
+                  style={{ width: "100%", padding: "7px 10px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }}
+                />
+
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                  <button
+                    onClick={() => setCloseStep(null)}
+                    disabled={closeStep === "closing"}
+                    style={{ padding: "7px 14px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "#55595c", fontFamily: "inherit" }}
+                  >
+                    Keep my account
+                  </button>
+                  <button
+                    onClick={() => void closeAccount()}
+                    disabled={closeStep === "closing"}
+                    style={{ padding: "7px 14px", background: closeStep === "closing" ? "#9aa4ad" : "#c62828", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: closeStep === "closing" ? "default" : "pointer", fontFamily: "inherit" }}
+                  >
+                    {closeStep === "closing" ? "Closing…" : "Close account"}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}

@@ -442,6 +442,22 @@ export type DealerCustomSizeRow = {
   updated_at: string;
 };
 
+export type AccountClosureRow = {
+  id: string;
+  dealer_id: string;        // dealers.id UUID
+  reason: string | null;
+  detail: string | null;
+  closed_by: string | null;
+  closed_at: string;
+};
+
+export type AccountClosureInsert = {
+  dealer_id: string;
+  reason?: string | null;
+  detail?: string | null;
+  closed_by?: string | null;
+};
+
 export type DealerSettingsRow = {
   dealer_id: string;
   ai_content_default: boolean;
@@ -1531,6 +1547,12 @@ export type Database = {
         Row: DealerCustomSizeRow;
         Insert: { dealer_id: string; name: string; width_in: number; height_in?: number; background_url?: string | null; doc_type?: 'addendum' | 'infosheet' };
         Update: { name?: string; width_in?: number; height_in?: number; background_url?: string | null; doc_type?: 'addendum' | 'infosheet'; updated_at?: string };
+        Relationships: [];
+      };
+      account_closures: {
+        Row: AccountClosureRow;
+        Insert: AccountClosureInsert;
+        Update: { reason?: string | null; detail?: string | null };
         Relationships: [];
       };
       label_orders: {
