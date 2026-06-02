@@ -103,7 +103,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const { data, error: dbErr } = await admin
     .from('label_orders')
-    .select('id, dealer_id, items, ship_to, total_amount, billed_to, group_id, billing_status, email_status, xps_status, xps_order_id, xps_tracking_number, xps_carrier, created_at')
+    .select('id, dealer_id, items, ship_to, total_amount, billed_to, group_id, billing_status, email_status, xps_status, xps_order_id, xps_tracking_number, xps_carrier, created_at, ordered_by, ordered_by_name')
     .eq('dealer_id', dealerUuid)
     .order('created_at', { ascending: false })
     .limit(100);
@@ -203,6 +203,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .insert({
       dealer_id: dealerId,
       ordered_by: claims.sub,
+      ordered_by_name: orderedByName,
       items: items as unknown as Record<string, unknown>[],
       ship_to: shipTo as unknown as Record<string, unknown>,
       total_amount: totalAmount,

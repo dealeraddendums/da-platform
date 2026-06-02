@@ -1269,6 +1269,8 @@ interface LabelOrderRow {
   xps_tracking_number: string | null;
   xps_carrier: string | null;
   created_at: string;
+  ordered_by?: string | null;
+  ordered_by_name?: string | null;
 }
 
 // Carrier-specific tracking URL. XPS posts back a carrier code like
@@ -1349,7 +1351,7 @@ function OrdersTab() {
                     omitted — both are DA-internal concerns, not something
                     the dealer needs to see on their own order history.
                     Dealers only need shipment status + tracking. */}
-                {["Date", "Items", "Total", "Status", "Tracking"].map(h => (
+                {["Date", "Ordered By", "Items", "Total", "Status", "Tracking"].map(h => (
                   <th key={h} style={{ textAlign: "left", padding: "10px 12px", fontSize: 11, fontWeight: 700, color: "#78828c", textTransform: "uppercase", letterSpacing: ".04em" }}>{h}</th>
                 ))}
               </tr>
@@ -1371,6 +1373,9 @@ function OrdersTab() {
                   <tr key={o.id} style={{ borderBottom: i < orders.length - 1 ? "1px solid #f0f0f0" : "none" }}>
                     <td style={{ padding: "10px 12px", color: "#555", whiteSpace: "nowrap" }}>
                       {new Date(o.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </td>
+                    <td style={{ padding: "10px 12px", color: "#333", whiteSpace: "nowrap" }}>
+                      {o.ordered_by_name ?? "—"}
                     </td>
                     <td style={{ padding: "10px 12px", color: "#333", maxWidth: 320 }}>{itemSummary}</td>
                     <td style={{ padding: "10px 12px", color: "#333", fontFamily: "monospace", whiteSpace: "nowrap" }}>
