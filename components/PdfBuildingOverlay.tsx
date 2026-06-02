@@ -19,7 +19,7 @@ export default function PdfBuildingOverlay({ visible }: Props) {
           (3,100+ lines); keep the URL reference so the browser caches it
           and the bundle stays light. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/datire_loader.svg" alt="" width={200} height={200} style={{ display: "block" }} />
+      <img src="/datire_loader.svg?v=2" alt="" width={200} height={200} style={{ display: "block" }} />
 
       <p style={{ color: "#ffffff", fontSize: 18, fontWeight: 500, marginTop: 24, letterSpacing: "0.01em" }}>
         Building your addenda…

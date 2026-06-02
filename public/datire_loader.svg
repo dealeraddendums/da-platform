@@ -3048,8 +3048,8 @@
 	</g>
 </g>
 <radialGradient id="SVGID_00000139283835200487711730000009595114764681372548_" cx="506.001" cy="209545.6719" r="446.8901" gradientTransform="matrix(1 0 0 0.0398 0 -7384.7441)" gradientUnits="userSpaceOnUse">
-	<stop  offset="0" style="stop-color:#231F20"/>
-	<stop  offset="1" style="stop-color:#FFFFFF"/>
+	<stop  offset="0" style="stop-color:#231F20;stop-opacity:0.6"/>
+	<stop  offset="1" style="stop-color:#231F20;stop-opacity:0"/>
 </radialGradient>
 <rect y="930.86" style="fill:url(#SVGID_00000139283835200487711730000009595114764681372548_);" width="1000" height="51.01"/>
 <g>
