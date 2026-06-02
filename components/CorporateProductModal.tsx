@@ -4,6 +4,7 @@ import { useState } from "react";
 import RichTextEditor from "@/components/RichTextEditor";
 import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
 import type { GroupOptionRow } from "@/lib/db";
+import { ProductName } from "@/lib/product-name";
 
 type FormState = {
   option_name: string;
@@ -192,6 +193,15 @@ export default function CorporateProductModal({
           <div style={{ marginBottom: 14 }}>
             <label style={lbl}>Item Name *</label>
             <input value={form.option_name} onChange={e => f("option_name", e.target.value)} style={inp} placeholder="e.g. Lifetime Powertrain Warranty" />
+            {/* Preview when the name embeds an <img> — shows the
+                thumbnail + label so the editor sees what will actually
+                print instead of the raw tag. */}
+            {form.option_name && /<img\b/i.test(form.option_name) && (
+              <div style={{ marginTop: 6, padding: "6px 10px", background: "#f5f6f7", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 12 }}>
+                <span style={{ color: "#78828c", marginRight: 6, fontSize: 11 }}>Preview:</span>
+                <ProductName name={form.option_name} thumb={40} />
+              </div>
+            )}
           </div>
 
           <div style={{ marginBottom: 14 }}>

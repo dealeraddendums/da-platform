@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { VehicleRow } from "@/lib/vehicles";
 import { vehicleCondition, parsePhotos } from "@/lib/vehicles";
 import { formatOptionPrice, parseOptionPriceValue, priceSetUsesDecimals, formatCurrencyAmount } from "@/lib/option-price";
+import { ProductName } from "@/lib/product-name";
 import type { VehicleOptionRow } from "@/lib/db";
 import PrintPreviewModal from "@/components/PrintPreviewModal";
 import BuyersGuideModal from "@/components/BuyersGuideModal";
@@ -454,7 +455,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                           : <span title="Contact your Group Administrator to make changes to this product">🔒</span>}
                       </td>
                       <td className="px-3 py-2">
-                        <span style={{ color: "var(--text-secondary)" }}>{opt.option_name}</span>
+                        <ProductName name={opt.option_name} style={{ color: "var(--text-secondary)" }} />
                         <span
                           className="ml-2 text-xs px-1.5 py-0.5 rounded"
                           style={{ background: "#e3f2fd", color: "#1565c0", fontSize: 10, fontWeight: 600 }}
@@ -532,7 +533,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                               style={{ color: "var(--text-primary)", cursor: "text" }}
                               onClick={() => setEditingId(String(id))}
                             >
-                              {opt.option_name}
+                              <ProductName name={opt.option_name} />
                             </span>
                             {(() => {
                               const desc = (opt as MatchedOption).description ?? (opt as VehicleOptionRow).description;
@@ -772,7 +773,9 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                       style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }}
                       onClick={() => addFromLibrary(opt)}
                     >
-                      <td className="px-4 py-2.5" style={{ color: "var(--text-primary)" }}>{opt.option_name}</td>
+                      <td className="px-4 py-2.5" style={{ color: "var(--text-primary)" }}>
+                        <ProductName name={opt.option_name} />
+                      </td>
                       <td className="px-4 py-2.5 text-right font-medium" style={{ color: "var(--text-secondary)", width: 90 }}>
                         {formatOptionPrice(opt.option_price, decimals)}
                       </td>

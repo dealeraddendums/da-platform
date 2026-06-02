@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { formatOptionPrice } from "@/lib/option-price";
 import type { AddendumLibraryRow } from "@/lib/db";
 import ImageUploadPicker from "@/components/ImageUploadPicker";
+import { ProductName } from "@/lib/product-name";
 import RichTextEditor from "@/components/RichTextEditor";
 import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
 
@@ -275,7 +276,17 @@ function OptionForm({
   return (
     <div>
       {row("Item Name *", (
-        <input value={form.option_name} onChange={e => f("option_name", e.target.value)} style={inp} placeholder="e.g. Ceramic Tint" />
+        <div>
+          <input value={form.option_name} onChange={e => f("option_name", e.target.value)} style={inp} placeholder="e.g. Ceramic Tint" />
+          {/* Preview — renders an <img> name as thumbnail + label so the
+              editor sees what will actually print instead of the raw tag. */}
+          {form.option_name && /<img\b/i.test(form.option_name) && (
+            <div style={{ marginTop: 6, padding: "6px 10px", background: "#f5f6f7", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 12 }}>
+              <span style={{ color: "#78828c", marginRight: 6, fontSize: 11 }}>Preview:</span>
+              <ProductName name={form.option_name} thumb={40} />
+            </div>
+          )}
+        </div>
       ))}
 
       {row("Price", (
@@ -525,8 +536,14 @@ function OptionForm({
           uploadBucket="addendum-product-images"
           acceptedTypes="image/png,image/jpeg,image/jpg,image/gif,image/webp"
           maxSizeMB={5}
-          onSelect={url => {
-            const tag = `<img src="${url}" width="125" style="max-width:125px;" />`;
+          requestAlt
+          onSelect={(url, meta) => {
+            // Embed an alt attribute so the product-name renderer
+            // (<ProductName>) and any future readers can show a readable
+            // label instead of the raw URL filename. Meta-supplied alt
+            // wins; falls back to "" only when the user explicitly cleared it.
+            const altAttr = (meta?.alt ?? "").replace(/"/g, "&quot;");
+            const tag = `<img src="${url}" alt="${altAttr}" width="125" style="max-width:125px;" />`;
             if (insertTarget === "item_name") {
               f("option_name", form.option_name + tag);
             } else {
@@ -811,7 +828,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                   <tr key={c.id} style={{ borderBottom: i < corporate.length - 1 ? "1px solid var(--border)" : "none", background: "#f8f9ff" }}>
                     <td style={td}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontWeight: 600, color: "#1a237e" }}>{c.option_name}</span>
+                        <ProductName name={c.option_name} style={{ fontWeight: 600, color: "#1a237e" }} />
                         <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 10, background: "#e3f2fd", color: "#0d47a1", border: "1px solid #bbdefb" }}>
                           Group
                         </span>
@@ -899,7 +916,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                         <td style={{ padding: "8px 8px", textAlign: "center", color: "#bbb", fontSize: 18 }}>⠿</td>
                       )}
                       <td style={td}>
-                        <div style={{ fontWeight: 600, color: "#333", fontSize: 13 }}>{item.option_name}</div>
+                        <ProductName name={item.option_name} style={{ fontWeight: 600, color: "#333", fontSize: 13 }} />
                       </td>
                       <td style={td}>
                         <span style={{ color: "#78828c", fontSize: 12 }}>

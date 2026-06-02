@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { deriveAltFromUrl } from "@/lib/product-name";
 
 interface ImageItem { key: string; url: string; }
 
@@ -17,8 +18,14 @@ type Props = {
   uploadKeyPrefix?: string;
   acceptedTypes?: string;
   maxSizeMB?: number;
+  // Show + collect a "Label (alt text)" input alongside the selection.
+  // When true, onSelect is called with the alt as the second arg so the
+  // caller can embed it in an <img> tag. Callers that just need the URL
+  // (logo upload, custom-size background) leave this off and ignore the
+  // optional second arg.
+  requestAlt?: boolean;
   // Callbacks
-  onSelect: (url: string) => void;
+  onSelect: (url: string, meta?: { alt?: string }) => void;
   onClose: () => void;
 };
 
@@ -32,6 +39,7 @@ export default function ImageUploadPicker({
   uploadKeyPrefix = "",
   acceptedTypes = "image/png,image/jpeg,image/jpg",
   maxSizeMB = 5,
+  requestAlt = false,
   onSelect,
   onClose,
 }: Props) {
@@ -46,6 +54,21 @@ export default function ImageUploadPicker({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Alt text for the image when requestAlt is on. Auto-fills from the
+  // selected/uploaded URL via the shared deriveAltFromUrl; user can edit
+  // before confirming.
+  const [altText, setAltText] = useState("");
+  useEffect(() => {
+    if (!requestAlt) return;
+    if (selectedUrl) setAltText(deriveAltFromUrl(selectedUrl));
+  }, [requestAlt, selectedUrl]);
+  useEffect(() => {
+    if (!requestAlt) return;
+    if (uploadFile && !altText) {
+      // Pre-fill from the picked filename before upload completes.
+      setAltText(deriveAltFromUrl(`https://example.com/${uploadFile.name}`));
+    }
+  }, [requestAlt, uploadFile, altText]);
 
   // Build a client-side thumbnail URL whenever the user picks a file. Revoke
   // the previous blob URL so we don't leak object URLs over repeated picks,
@@ -100,7 +123,10 @@ export default function ImageUploadPicker({
       if (json.url) {
         const newItem = { key: json.url, url: json.url };
         setImages(prev => [newItem, ...prev]);
-        onSelect(json.url);
+        const alt = requestAlt
+          ? (altText.trim() || deriveAltFromUrl(json.url))
+          : undefined;
+        onSelect(json.url, requestAlt ? { alt } : undefined);
         onClose();
       }
     } finally {
@@ -247,11 +273,37 @@ export default function ImageUploadPicker({
           )}
         </div>
 
+        {/* Label (alt text) — only shown when caller asks for it. Pre-fills
+            from the selected URL's filename; editable before confirm. */}
+        {requestAlt && (tab === "upload" ? !!uploadFile : !!selectedUrl) && (
+          <div style={{ padding: "10px 18px", borderTop: "1px solid #e0e0e0", flexShrink: 0, background: "#fafafa" }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>
+              Label (alt text)
+            </label>
+            <input
+              value={altText}
+              onChange={e => setAltText(e.target.value)}
+              placeholder="e.g. EG Assurance Lifetime Powertrain"
+              style={{ width: "100%", padding: "7px 10px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13, outline: "none", boxSizing: "border-box", background: "#fff" }}
+            />
+            <p style={{ fontSize: 11, color: "#78828c", margin: "4px 0 0 0" }}>
+              Shown when the image is referenced by name in product lists.
+            </p>
+          </div>
+        )}
+
         {/* Footer */}
         <div style={{ padding: "12px 18px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "flex-end", gap: 8, flexShrink: 0 }}>
           <button onClick={onClose} style={{ padding: "7px 16px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "#55595c" }}>Cancel</button>
           {tab === "tab1" && listEndpoint && selectedUrl && (
-            <button onClick={() => { onSelect(selectedUrl); onClose(); }}
+            <button
+              onClick={() => {
+                const alt = requestAlt
+                  ? (altText.trim() || deriveAltFromUrl(selectedUrl))
+                  : undefined;
+                onSelect(selectedUrl, requestAlt ? { alt } : undefined);
+                onClose();
+              }}
               style={{ padding: "7px 16px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               Use This Image
             </button>
