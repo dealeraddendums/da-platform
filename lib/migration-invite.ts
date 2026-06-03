@@ -146,6 +146,43 @@ export async function inviteUsersForDealer(
   return result;
 }
 
+/**
+ * Send a single passkey/magic-link onboarding invite to one already-created
+ * auth user. Reuses the same magic-link generation + branded welcome email as
+ * inviteUsersForDealer (the migration path), but for one specific email rather
+ * than every profile on a dealer — used by the self-serve signup endpoint after
+ * it creates the dealer/group + the admin auth user + profile. The magic link
+ * doubles as email verification: only the real inbox owner can finish setup.
+ *
+ * Throws on failure so the caller can surface it (the auth user + profile still
+ * exist, so the invite can be re-sent).
+ */
+export async function sendPasskeyInvite(opts: {
+  email: string;
+  fullName: string | null;
+  /** Dealer or group name — shown in the welcome email. */
+  entityName: string;
+}): Promise<void> {
+  const admin = createAdminSupabaseClient();
+  const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email: opts.email,
+    options: { redirectTo: "https://app.dealeraddendums.com/dashboard" },
+  });
+  if (linkErr || !linkData) {
+    throw new Error(`failed to generate magic link — ${linkErr?.message ?? "unknown"}`);
+  }
+  const magicLink = linkData.properties.action_link;
+  const firstName = (opts.fullName ?? "").split(" ")[0] || "there";
+  await sendMandrillEmail({
+    subject: `Your DealerAddendums account is ready — ${opts.entityName}`,
+    from_email: "noreply@dealeraddendums.com",
+    from_name: "DealerAddendums",
+    to: [{ email: opts.email, name: opts.fullName ?? opts.email, type: "to" }],
+    html: buildWelcomeEmail(firstName, opts.entityName, magicLink),
+  });
+}
+
 function buildWelcomeEmail(firstName: string, dealerName: string, magicLink: string): string {
   return `<!DOCTYPE html>
 <html>
