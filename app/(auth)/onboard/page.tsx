@@ -39,7 +39,7 @@ function OnboardInner() {
     setNotice("");
     const cleanEmail = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) { setError("Please enter the email this code was sent to."); return; }
-    if (!/^\d{6}$/.test(code)) { setError("Enter the 6-digit code from your email."); return; }
+    if (!code) { setError("Enter the verification code from your email."); return; }
 
     setLoading(true);
     const supabase = createClient();
@@ -147,7 +147,7 @@ function OnboardInner() {
 
   // ── Code-entry step ─────────────────────────────────────────────────────────
   return (
-    <AuthShell title="Enter your code" subtitle="We emailed you a 6-digit code to finish setting up your account.">
+    <AuthShell title="Enter your code" subtitle="We emailed you a verification code to finish setting up your account.">
       <form onSubmit={e => void handleVerify(e)} noValidate style={{ display: "flex", flexDirection: "column", gap: 18 }}>
         <div>
           <label className="lp-label" htmlFor="email">Email address</label>
@@ -163,7 +163,7 @@ function OnboardInner() {
         </div>
 
         <div>
-          <label className="lp-label" htmlFor="code">6-digit code</label>
+          <label className="lp-label" htmlFor="code">Verification code</label>
           <input
             id="code"
             ref={codeRef}
@@ -171,11 +171,10 @@ function OnboardInner() {
             type="text"
             inputMode="numeric"
             autoComplete="one-time-code"
-            maxLength={6}
             required
-            placeholder="123456"
+            placeholder="Code from your email"
             value={code}
-            onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
             style={{ fontFamily: "'Courier New', monospace", fontSize: 22, letterSpacing: 8, textAlign: "center" }}
           />
         </div>
@@ -190,7 +189,7 @@ function OnboardInner() {
           <div role="status" style={{ fontSize: 13, color: "var(--da-text-soft)" }}>{notice}</div>
         )}
 
-        <button type="submit" className="lp-btn lp-btn-primary" disabled={loading || code.length !== 6}>
+        <button type="submit" className="lp-btn lp-btn-primary" disabled={loading || code.length === 0}>
           {loading ? (<><span className="lp-spinner" /> Verifying…</>) : "Verify code"}
         </button>
 

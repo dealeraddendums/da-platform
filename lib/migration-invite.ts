@@ -101,7 +101,7 @@ export async function inviteUsersForDealer(
       continue;
     }
 
-    // Use the 6-digit code, NOT the clickable action_link — dealer email
+    // Use the one-time code, NOT the clickable action_link — dealer email
     // scanners pre-fetch links and would consume the shared one-time token.
     const code = linkData.properties.email_otp;
     const firstName = (profile.full_name ?? "").split(" ")[0] || "there";
@@ -154,7 +154,7 @@ export async function inviteUsersForDealer(
  * inviteUsersForDealer (the migration path), but for one specific email rather
  * than every profile on a dealer — used by the self-serve signup endpoint after
  * it creates the dealer/group + the admin auth user + profile, and by the
- * /api/onboard/resend route. Emails a typed 6-digit code (NOT a clickable
+ * /api/onboard/resend route. Emails a typed one-time code (NOT a clickable
  * link) so dealer email-security scanners can't pre-consume the one-time token;
  * entering the code doubles as email verification.
  *
@@ -176,7 +176,7 @@ export async function sendPasskeyInvite(opts: {
   if (linkErr || !linkData) {
     throw new Error(`failed to generate onboarding code — ${linkErr?.message ?? "unknown"}`);
   }
-  // Email the 6-digit code, never the action_link (scanner-proof).
+  // Email the one-time code, never the action_link (scanner-proof).
   const code = linkData.properties.email_otp;
   const firstName = (opts.fullName ?? "").split(" ")[0] || "there";
   await sendMandrillEmail({
