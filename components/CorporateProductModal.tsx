@@ -4,7 +4,7 @@ import { useState } from "react";
 import RichTextEditor from "@/components/RichTextEditor";
 import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
 import type { GroupOptionRow } from "@/lib/db";
-import { ProductName } from "@/lib/product-name";
+import { RichName } from "@/lib/product-name";
 
 type FormState = {
   option_name: string;
@@ -199,7 +199,7 @@ export default function CorporateProductModal({
             {form.option_name && /<img\b/i.test(form.option_name) && (
               <div style={{ marginTop: 6, padding: "6px 10px", background: "#f5f6f7", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 12 }}>
                 <span style={{ color: "#78828c", marginRight: 6, fontSize: 11 }}>Preview:</span>
-                <ProductName name={form.option_name} thumb={40} />
+                <RichName name={form.option_name} imgMaxH={40} />
               </div>
             )}
           </div>

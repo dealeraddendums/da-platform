@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { formatOptionPrice } from "@/lib/option-price";
 import type { AddendumLibraryRow } from "@/lib/db";
 import ImageUploadPicker from "@/components/ImageUploadPicker";
-import { ProductName } from "@/lib/product-name";
+import { RichName } from "@/lib/product-name";
 import RichTextEditor from "@/components/RichTextEditor";
 import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
 
@@ -283,7 +283,7 @@ function OptionForm({
           {form.option_name && /<img\b/i.test(form.option_name) && (
             <div style={{ marginTop: 6, padding: "6px 10px", background: "#f5f6f7", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 12 }}>
               <span style={{ color: "#78828c", marginRight: 6, fontSize: 11 }}>Preview:</span>
-              <ProductName name={form.option_name} thumb={40} />
+              <RichName name={form.option_name} imgMaxH={40} />
             </div>
           )}
         </div>
@@ -828,7 +828,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                   <tr key={c.id} style={{ borderBottom: i < corporate.length - 1 ? "1px solid var(--border)" : "none", background: "#f8f9ff" }}>
                     <td style={td}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <ProductName name={c.option_name} style={{ fontWeight: 600, color: "#1a237e" }} />
+                        <RichName name={c.option_name} imgMaxH={24} showLabel style={{ fontWeight: 600, color: "#1a237e" }} />
                         <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 10, background: "#e3f2fd", color: "#0d47a1", border: "1px solid #bbdefb" }}>
                           Group
                         </span>
@@ -916,7 +916,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                         <td style={{ padding: "8px 8px", textAlign: "center", color: "#bbb", fontSize: 18 }}>⠿</td>
                       )}
                       <td style={td}>
-                        <ProductName name={item.option_name} style={{ fontWeight: 600, color: "#333", fontSize: 13 }} />
+                        <RichName name={item.option_name} imgMaxH={24} showLabel style={{ fontWeight: 600, color: "#333", fontSize: 13 }} />
                       </td>
                       <td style={td}>
                         <span style={{ color: "#78828c", fontSize: 12 }}>

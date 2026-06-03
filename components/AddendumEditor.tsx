@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { VehicleRow } from "@/lib/vehicles";
 import { vehicleCondition, parsePhotos } from "@/lib/vehicles";
 import { formatOptionPrice, parseOptionPriceValue, priceSetUsesDecimals, formatCurrencyAmount } from "@/lib/option-price";
-import { ProductName } from "@/lib/product-name";
+import { RichName, sanitizeProductHtml } from "@/lib/product-name";
 import type { VehicleOptionRow } from "@/lib/db";
 import PrintPreviewModal from "@/components/PrintPreviewModal";
 import BuyersGuideModal from "@/components/BuyersGuideModal";
@@ -455,7 +455,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                           : <span title="Contact your Group Administrator to make changes to this product">🔒</span>}
                       </td>
                       <td className="px-3 py-2">
-                        <ProductName name={opt.option_name} style={{ color: "var(--text-secondary)" }} />
+                        <RichName name={opt.option_name} imgMaxH={28} showLabel style={{ color: "var(--text-secondary)" }} />
                         <span
                           className="ml-2 text-xs px-1.5 py-0.5 rounded"
                           style={{ background: "#e3f2fd", color: "#1565c0", fontSize: 10, fontWeight: 600 }}
@@ -533,16 +533,22 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                               style={{ color: "var(--text-primary)", cursor: "text" }}
                               onClick={() => setEditingId(String(id))}
                             >
-                              <ProductName name={opt.option_name} />
+                              <RichName name={opt.option_name} imgMaxH={28} showLabel />
                             </span>
                             {(() => {
                               const desc = (opt as MatchedOption).description ?? (opt as VehicleOptionRow).description;
-                              return desc ? (
+                              if (!desc) return null;
+                              // Route through the shared sanitizer — same
+                              // allowlist as the name rendering so operators
+                              // can use inline emphasis here too without
+                              // re-opening the XSS hole.
+                              return (
                                 <div
                                   style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, paddingLeft: 8, lineHeight: 1.4 }}
-                                  dangerouslySetInnerHTML={{ __html: desc }}
+                                  // eslint-disable-next-line react/no-danger
+                                  dangerouslySetInnerHTML={{ __html: sanitizeProductHtml(desc) }}
                                 />
-                              ) : null;
+                              );
                             })()}
                           </div>
                         )}
@@ -774,7 +780,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                       onClick={() => addFromLibrary(opt)}
                     >
                       <td className="px-4 py-2.5" style={{ color: "var(--text-primary)" }}>
-                        <ProductName name={opt.option_name} />
+                        <RichName name={opt.option_name} imgMaxH={20} showLabel />
                       </td>
                       <td className="px-4 py-2.5 text-right font-medium" style={{ color: "var(--text-secondary)", width: 90 }}>
                         {formatOptionPrice(opt.option_price, decimals)}
