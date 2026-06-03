@@ -101,7 +101,9 @@ export async function inviteUsersForDealer(
       continue;
     }
 
-    const magicLinkUrl = linkData.properties.action_link;
+    // Use the 6-digit code, NOT the clickable action_link — dealer email
+    // scanners pre-fetch links and would consume the shared one-time token.
+    const code = linkData.properties.email_otp;
     const firstName = (profile.full_name ?? "").split(" ")[0] || "there";
 
     // Send branded welcome email
@@ -111,7 +113,7 @@ export async function inviteUsersForDealer(
         from_email: "noreply@dealeraddendums.com",
         from_name: "DealerAddendums",
         to: [{ email: profile.email, name: profile.full_name ?? profile.email, type: "to" }],
-        html: buildWelcomeEmail(firstName, dealer.name, magicLinkUrl),
+        html: buildWelcomeEmail(firstName, dealer.name, code, profile.email),
       });
       result.invited++;
     } catch (emailErr) {
@@ -147,12 +149,14 @@ export async function inviteUsersForDealer(
 }
 
 /**
- * Send a single passkey/magic-link onboarding invite to one already-created
- * auth user. Reuses the same magic-link generation + branded welcome email as
+ * Send a single passkey onboarding invite to one already-created auth user.
+ * Reuses the same code generation + branded welcome email as
  * inviteUsersForDealer (the migration path), but for one specific email rather
  * than every profile on a dealer — used by the self-serve signup endpoint after
- * it creates the dealer/group + the admin auth user + profile. The magic link
- * doubles as email verification: only the real inbox owner can finish setup.
+ * it creates the dealer/group + the admin auth user + profile, and by the
+ * /api/onboard/resend route. Emails a typed 6-digit code (NOT a clickable
+ * link) so dealer email-security scanners can't pre-consume the one-time token;
+ * entering the code doubles as email verification.
  *
  * Throws on failure so the caller can surface it (the auth user + profile still
  * exist, so the invite can be re-sent).
@@ -170,20 +174,25 @@ export async function sendPasskeyInvite(opts: {
     options: { redirectTo: "https://app.dealeraddendums.com/dashboard" },
   });
   if (linkErr || !linkData) {
-    throw new Error(`failed to generate magic link — ${linkErr?.message ?? "unknown"}`);
+    throw new Error(`failed to generate onboarding code — ${linkErr?.message ?? "unknown"}`);
   }
-  const magicLink = linkData.properties.action_link;
+  // Email the 6-digit code, never the action_link (scanner-proof).
+  const code = linkData.properties.email_otp;
   const firstName = (opts.fullName ?? "").split(" ")[0] || "there";
   await sendMandrillEmail({
     subject: `Your DealerAddendums account is ready — ${opts.entityName}`,
     from_email: "noreply@dealeraddendums.com",
     from_name: "DealerAddendums",
     to: [{ email: opts.email, name: opts.fullName ?? opts.email, type: "to" }],
-    html: buildWelcomeEmail(firstName, opts.entityName, magicLink),
+    html: buildWelcomeEmail(firstName, opts.entityName, code, opts.email),
   });
 }
 
-function buildWelcomeEmail(firstName: string, dealerName: string, magicLink: string): string {
+function buildWelcomeEmail(firstName: string, dealerName: string, code: string, email: string): string {
+  // Tokenless landing URL — carries only the email, no consumable auth token,
+  // so a link scanner's GET does nothing. The code is the only credential.
+  const onboardUrl = `https://app.dealeraddendums.com/onboard?email=${encodeURIComponent(email)}`;
+  const spacedCode = code.split("").join(" "); // thin spaces between digits
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -221,15 +230,25 @@ function buildWelcomeEmail(firstName: string, dealerName: string, magicLink: str
               </table>
             </div>
 
-            <!-- CTA -->
+            <!-- Code (the only credential — no clickable auth link in this email) -->
+            <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 14px;text-align:center;">
+              Enter this code at <strong>app.dealeraddendums.com</strong> to finish setting up:
+            </p>
+            <div style="text-align:center;margin:0 0 24px;">
+              <div style="display:inline-block;background:#f5f6f7;border:1px solid #e0e0e0;border-radius:8px;padding:18px 28px;font-family:'Courier New',Courier,monospace;font-size:34px;font-weight:700;letter-spacing:6px;color:#1a1a2e;">
+                ${escapeHtml(spacedCode)}
+              </div>
+            </div>
+
+            <!-- Tokenless CTA — no auth token in this URL, safe for link scanners -->
             <div style="text-align:center;margin-bottom:28px;">
-              <a href="${magicLink}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;letter-spacing:-0.01em;">
-                Set Up Your Account &rarr;
+              <a href="${onboardUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;letter-spacing:-0.01em;">
+                Enter your code &rarr;
               </a>
             </div>
 
             <p style="font-size:12px;color:#78828c;text-align:center;margin:0;line-height:1.6;">
-              This link expires in 24 hours. If you didn't expect this email, you can safely ignore it.
+              This code expires in 1 hour. If you didn't expect this email, you can safely ignore it.
             </p>
           </td>
         </tr>
