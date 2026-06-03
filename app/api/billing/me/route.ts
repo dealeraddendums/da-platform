@@ -10,12 +10,22 @@ import {
   type BillingPriceEntry,
   type BillingInvoice,
 } from "@/lib/billing";
+import { isOverAllowance, TRIAL_DAYS_CAP, TRIAL_PRINTS_CAP } from "@/lib/print-eligibility";
 
 interface SubscriptionInfo {
   productId: string | null;
   name: string | null;
   price: number | null;
   nextInvoiceDate: string | null;
+}
+
+// Trial progress for the "Free" card copy (no-subscription dealers are on Trial).
+interface TrialInfo {
+  dayN: number;          // 1..daysCap, clamped
+  printN: number;        // lifetime print count
+  overAllowance: boolean;
+  daysCap: number;
+  printsCap: number;
 }
 
 interface BillingMeResponse {
@@ -29,7 +39,23 @@ interface BillingMeResponse {
   pricing: BillingPriceEntry[];
   invoices: BillingInvoice[];
   outstandingAmount: number;
+  trial: TrialInfo;
   notes?: string;
+}
+
+function computeTrial(createdAt: string | null, lifetimePrints: number): TrialInfo {
+  const createdMs = createdAt ? new Date(createdAt).getTime() : Date.now();
+  const dayN = Math.min(
+    Math.max(Math.floor((Date.now() - createdMs) / 86_400_000) + 1, 1),
+    TRIAL_DAYS_CAP,
+  );
+  return {
+    dayN,
+    printN: lifetimePrints,
+    overAllowance: isOverAllowance({ created_at: createdAt, lifetime_prints: lifetimePrints }),
+    daysCap: TRIAL_DAYS_CAP,
+    printsCap: TRIAL_PRINTS_CAP,
+  };
 }
 
 async function resolveDealerId(
@@ -88,13 +114,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient();
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, name, billing_customer_id, internal_id")
+    .select("id, name, billing_customer_id, internal_id, created_at")
     .eq("dealer_id", resolved.dealerTextId)
-    .maybeSingle<{ id: string; name: string; billing_customer_id: string | null; internal_id: string | null }>();
+    .maybeSingle<{ id: string; name: string; billing_customer_id: string | null; internal_id: string | null; created_at: string | null }>();
 
   if (!dealer) {
     return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
   }
+
+  // Trial progress (lifetime prints from print_history, same source as
+  // canPrintForDealer) — drives the "Free"/"Trial" card copy.
+  const { count: lifetimePrints } = await admin
+    .from("print_history")
+    .select("id", { count: "exact", head: true })
+    .eq("dealer_id", resolved.dealerTextId);
+  const trial = computeTrial(dealer.created_at, lifetimePrints ?? 0);
 
   if (!billingConfigured()) {
     const payload: BillingMeResponse = {
@@ -108,6 +142,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       pricing: [],
       invoices: [],
       outstandingAmount: 0,
+      trial,
       notes: "Billing API not configured",
     };
     return NextResponse.json(payload);
@@ -128,6 +163,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       pricing: [],
       invoices: [],
       outstandingAmount: 0,
+      trial,
       notes: "No billing customer yet for this dealer",
     };
     return NextResponse.json(payload);
@@ -170,6 +206,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     pricing,
     invoices: invoiceResult.invoices,
     outstandingAmount: invoiceResult.outstandingAmount,
+    trial,
   };
   return NextResponse.json(payload);
 }

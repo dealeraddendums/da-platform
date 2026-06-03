@@ -1429,6 +1429,7 @@ interface BillingMeData {
     paymentUrl?: string;
   }>;
   outstandingAmount: number;
+  trial: { dayN: number; printN: number; overAllowance: boolean; daysCap: number; printsCap: number };
   notes?: string;
 }
 
@@ -1647,11 +1648,15 @@ function BillingTab() {
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 13, color: "#333" }}>
-                        Free
+                        {isCurrentFree ? "Trial" : "Free"}
                         {isCurrentFree && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#1565c0" }}>CURRENT</span>}
                       </div>
                       <div style={{ fontSize: 11, color: "#78828c", marginTop: 2, lineHeight: 1.5 }}>
-                        Cancels your subscription and closes your account. Billing stops immediately. You keep log-in access for 60 days (view only — no printing), then the account is archived. Re-subscribe any time within 60 days to restore it. Requires a $0 balance.
+                        {isCurrentFree
+                          ? (data.trial.overAllowance
+                              ? `Trial ended — you've reached the ${data.trial.daysCap}-day or ${data.trial.printsCap}-print limit. Upgrade to keep printing.`
+                              : `Trial — you're on day ${data.trial.dayN} of ${data.trial.daysCap} and have printed ${data.trial.printN} of ${data.trial.printsCap}. When you reach either limit, you'll need to upgrade to keep printing.`)
+                          : "Cancels your subscription and closes your account. Billing stops immediately. You keep log-in access for 60 days (view only — no printing), then the account is archived. Re-subscribe any time within 60 days to restore it. Requires a $0 balance."}
                       </div>
                     </div>
                     <div style={{ fontFamily: "monospace", fontSize: 13, color: "#333", whiteSpace: "nowrap" }}>
