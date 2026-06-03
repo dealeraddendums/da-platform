@@ -188,6 +188,95 @@ export async function sendPasskeyInvite(opts: {
   });
 }
 
+/**
+ * Send a one-time sign-in / onboarding code (the scanner-proof OTP). Generates
+ * a magiclink (for its email_otp) and emails ONLY the code — never the
+ * action_link. `purpose` picks the copy: 'onboard' = "your account is ready"
+ * (reuses the welcome email), 'login' = "here's your sign-in code". Callers must
+ * have already confirmed the auth user exists (generateLink would otherwise
+ * create one); the login/onboard routes guard on existence before calling.
+ */
+export async function sendOtpCode(
+  email: string,
+  opts: { purpose: "login" | "onboard"; fullName?: string | null; entityName?: string }
+): Promise<void> {
+  const admin = createAdminSupabaseClient();
+  const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email,
+    options: { redirectTo: "https://app.dealeraddendums.com/dashboard" },
+  });
+  if (linkErr || !linkData) {
+    throw new Error(`failed to generate code — ${linkErr?.message ?? "unknown"}`);
+  }
+  const code = linkData.properties.email_otp;
+  const firstName = (opts.fullName ?? "").split(" ")[0] || "there";
+
+  if (opts.purpose === "onboard") {
+    const entityName = opts.entityName ?? "your account";
+    await sendMandrillEmail({
+      subject: `Your DealerAddendums account is ready — ${entityName}`,
+      from_email: "noreply@dealeraddendums.com",
+      from_name: "DealerAddendums",
+      to: [{ email, name: opts.fullName ?? email, type: "to" }],
+      html: buildWelcomeEmail(firstName, entityName, code, email),
+    });
+  } else {
+    await sendMandrillEmail({
+      subject: "Your DealerAddendums sign-in code",
+      from_email: "noreply@dealeraddendums.com",
+      from_name: "DealerAddendums",
+      to: [{ email, name: opts.fullName ?? email, type: "to" }],
+      html: buildSignInCodeEmail(firstName, code),
+    });
+  }
+}
+
+function buildSignInCodeEmail(firstName: string, code: string): string {
+  // Tokenless — the email carries only the code (no consumable auth link).
+  const spacedCode = code.split("").join(" ");
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f6f7;font-family:Roboto,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f7;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+        <tr>
+          <td style="background:#2a2b3c;border-radius:6px 6px 0 0;padding:28px 32px;text-align:center;">
+            <img src="${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/images/da-logo.png" alt="DA Platform" width="48" height="48" style="border-radius:50%;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;" />
+            <div style="color:#fff;font-size:20px;font-weight:700;letter-spacing:-0.02em;">DealerAddendums Platform</div>
+            <div style="color:rgba(255,255,255,0.65);font-size:13px;margin-top:4px;">Your sign-in code</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#fff;padding:32px;border-left:1px solid #e0e0e0;border-right:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;border-radius:0 0 6px 6px;">
+            <p style="font-size:16px;font-weight:500;color:#1a1a2e;margin:0 0 8px;">Hi ${escapeHtml(firstName)},</p>
+            <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 20px;">
+              Here's your sign-in code. Enter it at <strong>app.dealeraddendums.com</strong> to sign in:
+            </p>
+            <div style="text-align:center;margin:0 0 24px;">
+              <div style="display:inline-block;background:#f5f6f7;border:1px solid #e0e0e0;border-radius:8px;padding:18px 28px;font-family:'Courier New',Courier,monospace;font-size:34px;font-weight:700;letter-spacing:6px;color:#1a1a2e;">
+                ${escapeHtml(spacedCode)}
+              </div>
+            </div>
+            <div style="text-align:center;margin-bottom:24px;">
+              <a href="https://app.dealeraddendums.com/login" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;letter-spacing:-0.01em;">
+                Go to sign in &rarr;
+              </a>
+            </div>
+            <p style="font-size:12px;color:#78828c;text-align:center;margin:0;line-height:1.6;">
+              This code expires in 1 hour. If you didn't try to sign in, you can safely ignore this email.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
 function buildWelcomeEmail(firstName: string, dealerName: string, code: string, email: string): string {
   // Tokenless landing URL — carries only the email, no consumable auth token,
   // so a link scanner's GET does nothing. The code is the only credential.

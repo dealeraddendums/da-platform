@@ -4,6 +4,8 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { AuthShell } from "../shell";
+import OtpCodeForm from "../OtpCodeForm";
+import PasskeySetup from "../PasskeySetup";
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
@@ -64,6 +66,15 @@ function IconPasskey(p: React.SVGProps<SVGSVGElement>) {
   );
 }
 
+function IconMail(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <rect x="2" y="4" width="20" height="16" rx="2"/>
+      <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+    </svg>
+  );
+}
+
 // ── Field error ───────────────────────────────────────────────────────────────
 
 function FieldError({ msg }: { msg: string }) {
@@ -96,6 +107,52 @@ function LoginForm() {
   const [passkeyState, setPasskeyState] = useState<PasskeyState>("idle");
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
   const [passkeySupported, setPasskeySupported] = useState(false);
+
+  // OTP code sign-in fallback (passwordless dealers)
+  const [mode, setMode] = useState<"password" | "code" | "passkey-offer">("password");
+  const [codeSending, setCodeSending] = useState(false);
+  const [codeEmail, setCodeEmail] = useState("");
+
+  function goNext() {
+    router.push(next);
+    router.refresh();
+  }
+
+  // Email me a sign-in code — always available (the recovery path for
+  // passwordless users). Only the email needs to be valid.
+  async function startCodeLogin() {
+    setServerError(null);
+    setPasskeyError(null);
+    setTouched(t => ({ ...t, email: true }));
+    if (!emailValid) { setShakeKey(k => k + 1); return; }
+    setCodeSending(true);
+    try {
+      await fetch("/api/auth/otp-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+    } catch {
+      // otp-login always reports success; ignore transport errors and proceed
+    }
+    setCodeEmail(email);
+    setCodeSending(false);
+    setMode("code");
+  }
+
+  // After a successful OTP sign-in, offer a passkey if the user has none.
+  async function afterOtpLogin() {
+    try {
+      const res = await fetch("/api/auth/passkey/list");
+      if (res.ok) {
+        const { passkeys } = await res.json() as { passkeys?: unknown[] };
+        if (!passkeys || passkeys.length === 0) { setMode("passkey-offer"); return; }
+      }
+    } catch {
+      // fall through to dashboard on any error
+    }
+    goNext();
+  }
 
   useEffect(() => {
     if (
@@ -204,6 +261,41 @@ function LoginForm() {
     }
   }
 
+  // ── Code sign-in step ───────────────────────────────────────────────────────
+  if (mode === "code") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <p style={{ fontSize: 14, color: "var(--da-text-soft)", margin: 0 }}>
+          We emailed a sign-in code to <strong>{codeEmail || "your email"}</strong>. Enter it below — no password needed.
+        </p>
+        <OtpCodeForm
+          initialEmail={codeEmail}
+          resendEndpoint="/api/auth/otp-login"
+          onVerified={afterOtpLogin}
+          footer={
+            <p style={{ textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
+              <button type="button" className="lp-btn-link" onClick={() => setMode("password")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+                &larr; Back to password sign-in
+              </button>
+            </p>
+          }
+        />
+      </div>
+    );
+  }
+
+  // ── Optional passkey offer after an OTP sign-in ─────────────────────────────
+  if (mode === "passkey-offer") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <p style={{ fontSize: 14, color: "var(--da-text-soft)", margin: 0 }}>
+          You&apos;re signed in. Set up a passkey for faster, password-free sign-in next time?
+        </p>
+        <PasskeySetup onDone={goNext} onSkip={goNext} />
+      </div>
+    );
+  }
+
   return (
     <form
       key={shakeKey}
@@ -232,13 +324,14 @@ function LoginForm() {
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <label className="lp-label" htmlFor="password">Password</label>
-          <a
-            href="/reset-password"
+          <button
+            type="button"
+            onClick={() => void startCodeLogin()}
             className="lp-btn-link"
-            style={{ fontSize: 12, letterSpacing: ".04em", textTransform: "uppercase", fontWeight: 600 }}
+            style={{ fontSize: 12, letterSpacing: ".04em", textTransform: "uppercase", fontWeight: 600, background: "none", border: "none", padding: 0, cursor: "pointer" }}
           >
             Forgot?
-          </a>
+          </button>
         </div>
         <div style={{ position: "relative" }}>
           <input
@@ -297,11 +390,25 @@ function LoginForm() {
         )}
       </button>
 
-      {/* Divider + Passkey — only shown when platform authenticator is available */}
+      <div className="lp-divider"><span>or</span></div>
+
+      {/* Email me a sign-in code — always available (recovery for passwordless dealers) */}
+      <button
+        type="button"
+        className="lp-btn lp-btn-passkey"
+        onClick={() => void startCodeLogin()}
+        disabled={codeSending}
+      >
+        {codeSending ? (
+          <><span className="lp-spinner" /> Sending code…</>
+        ) : (
+          <><IconMail /> Email me a sign-in code</>
+        )}
+      </button>
+
+      {/* Passkey — only shown when a platform authenticator is available */}
       {passkeySupported && (
         <>
-          <div className="lp-divider"><span>or</span></div>
-
           <button
             type="button"
             className="lp-btn lp-btn-passkey"
