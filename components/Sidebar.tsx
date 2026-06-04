@@ -426,7 +426,7 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
             Styled as a yellow button, deliberately distinct from nav-item rows. */}
         {showUpgrade && (
           <Link
-            href="/profile?tab=billing"
+            href="/profile?tab=billing&upgrade=1"
             style={{
               display: "flex",
               alignItems: "center",

@@ -1444,11 +1444,14 @@ function money(n: number | null | undefined): string {
   return `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function BillingTab() {
+function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
   const [data, setData] = useState<BillingMeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [changeOpen, setChangeOpen] = useState(false);
+  // Expanded on load when deep-linked via ?upgrade=1 (sidebar "Upgrade Now").
+  // BillingTab only mounts client-side once the tab switches to "billing", so
+  // seeding useState from the prop is hydration-safe.
+  const [changeOpen, setChangeOpen] = useState(openChangePlan);
   const [savingTier, setSavingTier] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // Close-flow state: which step of the close path the dealer is on.
@@ -1983,9 +1986,14 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, recomme
   // searchParams in a useEffect after mount — both passes (SSR + first
   // client render) then produce the same tree.
   const [tab, setTab] = useState<Tab>(hasDealer ? "info" : "security");
+  // ?upgrade=1 (from the sidebar "Upgrade Now" CTA) → open Billing's Change Plan
+  // picker on load. Read in the same post-mount effect as ?tab= so it's
+  // hydration-safe (useSearchParams is null on the server).
+  const [openChangePlan, setOpenChangePlan] = useState(false);
 
   useEffect(() => {
     const t = searchParams.get("tab");
+    if (searchParams.get("upgrade") === "1") setOpenChangePlan(true);
     if (t === "security") { setTab("security"); return; }
     if (!hasDealer) return;
     if (t === "labels" || t === "info" || t === "shipping" || t === "billing" || t === "orders") {
@@ -2056,7 +2064,7 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, recomme
           />
         )}
         {tab === "orders" && <OrdersTab />}
-        {tab === "billing" && <BillingTab />}
+        {tab === "billing" && <BillingTab openChangePlan={openChangePlan} />}
         {tab === "hubspot" && dealer && isStaff && (
           <HubSpotSyncTab dealer={dealer} />
         )}
