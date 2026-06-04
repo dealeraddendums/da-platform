@@ -154,7 +154,12 @@ export async function createAdminUserWithInvite(input: {
     dealer_id: input.dealerTextId ?? null,
     group_id: input.groupId ?? null,
   };
-  const { error: profileErr } = await admin.from("profiles").upsert(profile as never);
+  // onConflict:"id" is REQUIRED — the handle_new_user trigger already inserted a
+  // minimal profile row (role defaulting to 'dealer_user') on the createUser
+  // above with ON CONFLICT DO NOTHING. Without an explicit id conflict target the
+  // role never updates and the admin is stuck as dealer_user (can't manage
+  // billing). Codebase permanent rule: always upsert profiles with onConflict id.
+  const { error: profileErr } = await admin.from("profiles").upsert(profile as never, { onConflict: "id" });
   if (profileErr) {
     // Roll back the orphaned auth user so a retry is clean.
     await admin.auth.admin.deleteUser(authUser.user.id).catch(() => {});

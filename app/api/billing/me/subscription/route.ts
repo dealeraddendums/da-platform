@@ -4,11 +4,23 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import {
   getTemplate,
   putTemplate,
+  createCustomer,
+  createTemplate,
+  firstOfNextMonthIso,
   lookupPrice,
   subscriptionDescriptorFor,
   billingConfigured,
   type BillingProduct,
 } from "@/lib/billing";
+import { fireDealerReliable } from "@/lib/sync-hubspot";
+
+// dealers.account_type value for each tier — flips Trial → a paying type on
+// conversion so the print gate unblocks and HubSpot moves Trial → Customer.
+const ACCOUNT_TYPE_FOR_TIER: Record<string, string> = {
+  "sub-manual": "Manual",
+  "sub-auto-web": "Automatic Web",
+  "sub-auto-dms": "Automatic DMS",
+};
 
 /**
  * PATCH /api/billing/me/subscription
@@ -80,18 +92,28 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, name, internal_id, billing_customer_id")
+    .select("id, name, internal_id, billing_customer_id, legacy_id, account_type, primary_contact, primary_contact_email, phone, address, state")
     .eq("dealer_id", dealerTextId)
-    .maybeSingle<{ id: string; name: string; internal_id: string | null; billing_customer_id: string | null }>();
+    .maybeSingle<{
+      id: string; name: string; internal_id: string | null; billing_customer_id: string | null;
+      legacy_id: number | null; account_type: string | null;
+      primary_contact: string | null; primary_contact_email: string | null;
+      phone: string | null; address: string | null; state: string | null;
+    }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
-
-  const customerKey = dealer.billing_customer_id ?? dealer.internal_id;
-  if (!customerKey) {
-    return NextResponse.json({ error: "Dealer has no da-billing customer" }, { status: 409 });
-  }
   if (!dealer.internal_id) {
     return NextResponse.json({ error: "Dealer missing internal_id (line item tag)" }, { status: 409 });
   }
+
+  // Three da-billing customer cases:
+  //   1. billing_customer_id set         → existing platform customer (tier swap).
+  //   2. null + legacy_id set            → legacy dealer; FreshBooks customer is
+  //                                         keyed by internal_id (don't recreate).
+  //   3. null + legacy_id null (native)  → TRIAL → PAID conversion: no da-billing
+  //                                         customer exists yet (billing skipped at
+  //                                         trial) — create customer + template now.
+  const isConversion = !dealer.billing_customer_id && dealer.legacy_id == null;
+  const customerKey = dealer.billing_customer_id ?? dealer.internal_id;
 
   // Look up the new price; abort if /pricing doesn't have an entry.
   const newPrice = await lookupPrice(descriptor.key);
@@ -102,10 +124,6 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Read current template + merge. The subscription line is identified by
-  // productId starting with "sub-" — preserve any label-order line items
-  // appended via /api/orders/labels.
-  const current = await getTemplate(customerKey);
   const newSubLine: BillingProduct = {
     productId: descriptor.key,
     name: descriptor.name,
@@ -114,20 +132,21 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
   };
 
+  // Build the product list. Conversion → brand-new template (just the sub line).
+  // Otherwise merge over the existing template, preserving non-subscription
+  // (label-order) lines, identified by productId NOT starting with "sub-".
   let merged: BillingProduct[];
-  if (!current) {
-    // No template yet — create implicitly by PUTting (createTemplate would
-    // require nextInvoiceDate which is up to da-billing). PUT with the new
-    // sub line, leaving da-billing to set defaults if it supports that.
+  if (isConversion) {
     merged = [newSubLine];
   } else {
-    const nonSub = current.products.filter((p) => !p.productId?.startsWith?.("sub-"));
-    merged = [newSubLine, ...nonSub];
+    const current = await getTemplate(customerKey);
+    merged = current
+      ? [newSubLine, ...current.products.filter((p) => !p.productId?.startsWith?.("sub-"))]
+      : [newSubLine];
   }
 
-  // When the new tier is sub-auto-dms, ensure a one-time DMS Setup Charge
-  // is present. Skip if the dealer already has one — detect by productId
-  // OR by the "<internal_id>::dms-setup" tag so re-runs never double-bill.
+  // sub-auto-dms → ensure a one-time DMS Setup Charge (de-duped by productId or
+  // the "<internal_id>::dms-setup" tag so re-runs never double-bill).
   if (descriptor.key === "sub-auto-dms") {
     const hasSetup = merged.some(p =>
       p.productId === "dms-setup"
@@ -145,13 +164,53 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  await putTemplate(customerKey, merged);
+  let effectiveCustomerKey = customerKey;
+  if (isConversion) {
+    // First subscription for a trial dealer — create the da-billing customer +
+    // recurring template (reuses the create path from POST /api/dealers).
+    const cust = await createCustomer({
+      name: (dealer.primary_contact ?? dealer.name).trim(),
+      company: dealer.name,
+      email: dealer.primary_contact_email ?? undefined,
+      phone: dealer.phone ?? undefined,
+      address: dealer.address ?? undefined,
+      state: dealer.state ?? undefined,
+      isGroup: false,
+    });
+    effectiveCustomerKey = cust.id;
+    // Persist the customer id (+ template_id mirror) BEFORE creating the
+    // template so a retry sees billing_customer_id and takes the existing path.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any).from("dealers")
+      .update({ billing_customer_id: cust.id, template_id: cust.id })
+      .eq("id", dealer.id);
+    await createTemplate({
+      customerId: cust.id,
+      products: merged,
+      nextInvoiceDate: firstOfNextMonthIso(),
+      scheduleInterval: "monthly",
+    });
+  } else {
+    await putTemplate(customerKey, merged);
+  }
+
+  // Conversion only: flip Trial → the paid account_type (unblocks the print
+  // gate) and fire the reliable HubSpot sync (lifecyclestage Trial → Customer).
+  // Existing paying dealers swapping tiers keep their account_type + behavior.
+  if (isConversion) {
+    const newAccountType = ACCOUNT_TYPE_FOR_TIER[descriptor.key];
+    if (newAccountType && newAccountType !== dealer.account_type) {
+      await admin.from("dealers").update({ account_type: newAccountType }).eq("id", dealer.id);
+    }
+    fireDealerReliable(dealer.id, "trial→paid conversion (lifecycle)");
+  }
 
   return NextResponse.json({
     ok: true,
     tier: descriptor.key,
     name: descriptor.name,
     price: newPrice,
-    customerId: customerKey,
+    customerId: effectiveCustomerKey,
+    converted: isConversion,
   });
 }
