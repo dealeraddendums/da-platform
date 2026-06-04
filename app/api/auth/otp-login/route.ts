@@ -34,17 +34,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     const admin = createAdminSupabaseClient();
-    // Only send to an existing auth user — generateLink(magiclink) would create
-    // one otherwise, which would both leak and litter junk accounts.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: users } = await (admin as any)
-      .schema("auth").from("users").select("id").eq("email", email).limit(1) as { data: { id: string }[] | null };
+    // Only send when a profile exists for this email — the don't-create-users
+    // guard. (Don't query the `auth` schema: it isn't exposed to the data API,
+    // so admin.schema("auth").from("users") always returns nothing — same root
+    // cause as the Users-page "Last sign in: Never". The profiles table is the
+    // reliable, case-insensitive existence signal.)
+    const { data: profile } = await admin
+      .from("profiles").select("full_name").ilike("email", email)
+      .maybeSingle<{ full_name: string | null }>();
 
-    if (users && users.length > 0) {
-      const { data: profile } = await admin
-        .from("profiles").select("full_name").ilike("email", email)
-        .maybeSingle<{ full_name: string | null }>();
-      await sendOtpCode(email, { purpose: "login", fullName: profile?.full_name ?? null });
+    if (profile) {
+      await sendOtpCode(email, { purpose: "login", fullName: profile.full_name });
     }
   } catch (err) {
     console.error("[auth/otp-login] failed:", err instanceof Error ? err.message : err);
