@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
+import { isPaidAccountType } from "@/lib/print-eligibility";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
@@ -71,14 +72,16 @@ export default async function DashboardLayout({
   // /builder page redirect them back to /dashboard.
   let dealerName: string | null = null;
   let templatesLocked = false;
+  let dealerAccountType: string | null = null;
   if (isDealerRole && profile?.dealer_id) {
     const { data: dealerData } = await admin
       .from("dealers")
-      .select("name, group_id, group_controls_templates")
+      .select("name, group_id, group_controls_templates, account_type")
       .eq("dealer_id", profile.dealer_id)
-      .maybeSingle<{ name: string; group_id: string | null; group_controls_templates: boolean | null }>();
+      .maybeSingle<{ name: string; group_id: string | null; group_controls_templates: boolean | null; account_type: string | null }>();
     dealerName = dealerData?.name ?? null;
     templatesLocked = Boolean(dealerData?.group_controls_templates && dealerData?.group_id);
+    dealerAccountType = dealerData?.account_type ?? null;
   }
 
   // ── Group context (group_admin) ────────────────────────────────────────────
@@ -127,9 +130,15 @@ export default async function DashboardLayout({
     groupId: profile?.group_id ?? null,
   };
 
+  // Yellow "Upgrade Now" CTA — only a real dealer_admin on a non-paid plan
+  // (Trial / Trial-Expired / Free / Downgraded). Gated on the real `role`, not
+  // sidebarRole, so it never shows for group_admin/super_admin acting as a
+  // dealer (active-dealer or ghost mode), nor for dealer_user/restricted.
+  const showUpgrade = role === "dealer_admin" && !isPaidAccountType(dealerAccountType);
+
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar role={sidebarRole} hideBuilder={isDealerRole && templatesLocked} />
+      <Sidebar role={sidebarRole} hideBuilder={isDealerRole && templatesLocked} showUpgrade={showUpgrade} />
       <div className="flex flex-col flex-1 overflow-hidden">
         <ImpersonationBanner />
         <BuilderBreadcrumbProvider>

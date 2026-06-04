@@ -372,7 +372,7 @@ const nav: NavEntry[] = [
   },
 ];
 
-export default function Sidebar({ role = "dealer_user", hideBuilder = false }: { role?: UserRole | "group_user"; hideBuilder?: boolean }) {
+export default function Sidebar({ role = "dealer_user", hideBuilder = false, showUpgrade = false }: { role?: UserRole | "group_user"; hideBuilder?: boolean; showUpgrade?: boolean }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -422,6 +422,34 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false }: {
 
       {/* Navigation */}
       <nav className="flex-1 py-2 overflow-y-auto">
+        {/* Upgrade CTA — non-paying dealer_admin only; links to the Billing tab.
+            Styled as a yellow button, deliberately distinct from nav-item rows. */}
+        {showUpgrade && (
+          <Link
+            href="/profile?tab=billing"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              margin: "6px 12px 12px",
+              padding: "10px 12px",
+              background: "#ffa500",
+              color: "#2a2b3c",
+              fontWeight: 700,
+              fontSize: 14,
+              borderRadius: 6,
+              textDecoration: "none",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="12" y1="19" x2="12" y2="5" />
+              <polyline points="5 12 12 5 19 12" />
+            </svg>
+            <span>Upgrade Now</span>
+          </Link>
+        )}
         {visibleNav.map((entry, i) => {
           if ("section" in entry) {
             return (
