@@ -1492,7 +1492,9 @@ function BillingTab() {
       const res = await fetch("/api/billing/me/subscription", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier: tier.key }),
+        // Send the productKey ("sub-auto-web"), not the short key ("auto-web") —
+        // subscriptionDescriptorFor keys off the product slug / full name.
+        body: JSON.stringify({ tier: tier.productKey }),
       });
       const j = await res.json().catch(() => ({})) as { error?: string };
       if (!res.ok) {

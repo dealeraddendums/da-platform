@@ -459,13 +459,13 @@ export function subscriptionDescriptorFor(accountType: string | null | undefined
     return SUBSCRIPTION_TIERS["sub-manual"];
   }
   if (
-    a === "automatic web" || a === "automatic_web" ||
+    a === "automatic web" || a === "automatic_web" || a === "auto-web" ||
     a === "monthly subscription automatic web" || a === "sub-auto-web"
   ) {
     return SUBSCRIPTION_TIERS["sub-auto-web"];
   }
   if (
-    a === "automatic dms" || a === "automatic_dms" ||
+    a === "automatic dms" || a === "automatic_dms" || a === "auto-dms" ||
     a === "monthly subscription automatic dms" || a === "sub-auto-dms"
   ) {
     return SUBSCRIPTION_TIERS["sub-auto-dms"];
