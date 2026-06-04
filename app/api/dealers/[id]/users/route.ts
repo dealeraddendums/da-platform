@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
+import { buildInviteEmail } from "@/lib/invite-email";
 
 type Params = { params: { id: string } };
 
@@ -73,7 +74,17 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
     last_sign_in_at: lastById.get(r.id as string) ?? null,
   }));
 
-  return NextResponse.json({ data: enriched });
+  // Pending invitations for this dealer (invitations.dealer_id is the UUID).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: pending } = await (admin as any)
+    .from("invitations")
+    .select("id, email, first_name, last_name, role, created_at, expires_at")
+    .eq("dealer_id", dealerRow.id)
+    .is("accepted_at", null)
+    .gt("expires_at", new Date().toISOString())
+    .order("created_at", { ascending: false });
+
+  return NextResponse.json({ data: enriched, pendingInvitations: pending ?? [] });
 }
 
 /**
@@ -124,15 +135,15 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     return NextResponse.json({ error: "Only super_admin can invite another dealer_admin" }, { status: 403 });
   }
 
-  // Reject if the email is already registered.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: existing } = await (admin as any)
-    .schema("auth")
-    .from("users")
+  // Reject if already registered. (auth schema isn't on the data API — the old
+  // admin.schema("auth") check silently returned null; a profile is the reliable
+  // case-insensitive existence signal.)
+  const { data: existingProfile } = await admin
+    .from("profiles")
     .select("id")
-    .eq("email", email.trim().toLowerCase())
-    .limit(1) as { data: { id: string }[] | null };
-  if (existing && existing.length > 0) {
+    .ilike("email", email.trim().toLowerCase())
+    .maybeSingle<{ id: string }>();
+  if (existingProfile) {
     return NextResponse.json({ error: "This email is already registered." }, { status: 409 });
   }
 
@@ -167,35 +178,15 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       from_email: "noreply@dealeraddendums.com",
       from_name: "DealerAddendums",
       to: [{ email: email.trim(), name: fullName, type: "to" }],
-      html: `
-<div style="font-family: Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; color: #333;">
-  <div style="margin-bottom: 24px;">
-    <img src="${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/images/da-logo.png" alt="DA Platform" width="40" height="40" style="border-radius: 50%;" />
-  </div>
-  <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">You're invited to DA Platform</h2>
-  <p style="margin: 0 0 16px; color: #55595c;">Hi ${firstName.trim()},</p>
-  <p style="margin: 0 0 16px; color: #55595c;">
-    You've been invited to join <strong>${dealer.name}</strong> on DealerAddendums Platform
-    as a ${roleLabel}.
-    Click the button below to set your password and get started.
-  </p>
-  <a href="${inviteUrl}"
-     style="display: inline-block; background: #1976d2; color: #fff; text-decoration: none;
-            padding: 10px 24px; border-radius: 4px; font-weight: 600; font-size: 14px; margin: 8px 0 24px;">
-    Accept Invitation
-  </a>
-  <p style="color: #78828c; font-size: 12px; margin: 0;">
-    This invitation expires in 7 days. If you did not expect this email, you can safely ignore it.
-  </p>
-</div>`,
+      html: buildInviteEmail({ firstName: firstName.trim(), orgName: dealer.name, roleLabel, inviteUrl }),
     });
   } catch (mailErr) {
-    // Invitation row exists — surface the email failure but return 200
-    // so the operator knows the row was created.
+    // Invitation row exists — surface the email failure but return 200 so the
+    // operator knows the row was created. emailSent:false drives the UI warning.
     return NextResponse.json(
-      { ok: true, warning: `Invitation saved but email failed: ${mailErr instanceof Error ? mailErr.message : String(mailErr)}` },
+      { ok: true, emailSent: false, warning: `Invitation created, but the email could not be delivered: ${mailErr instanceof Error ? mailErr.message : String(mailErr)}` },
     );
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, emailSent: true });
 }

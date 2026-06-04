@@ -19,6 +19,16 @@ type DealerUserProfile = {
   created_at: string;
 };
 
+type PendingInvite = {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  role: string;
+  created_at: string;
+  expires_at: string;
+};
+
 type ViewerRole = "super_admin" | "group_admin" | "dealer_admin" | string;
 
 interface Props {
@@ -59,7 +69,8 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
   const [invFields, setInvFields] = useState({ firstName: "", lastName: "", email: "", role: inviteRoles[0]?.value ?? "dealer_user" });
   const [inviting, setInviting] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
-  const [invSuccess, setInvSuccess] = useState(false);
+  const [invToast, setInvToast] = useState<{ kind: "success" | "warning"; msg: string } | null>(null);
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState("");
   const [editActive, setEditActive] = useState(true);
@@ -72,8 +83,9 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
     setError(null);
     const res = await fetch(`/api/dealers/${dealerId}/users`);
     if (res.ok) {
-      const json = await res.json() as { data: DealerUserProfile[] };
+      const json = await res.json() as { data: DealerUserProfile[]; pendingInvitations?: PendingInvite[] };
       setUsers(json.data ?? []);
+      setPendingInvites(json.pendingInvitations ?? []);
     } else {
       const json = await res.json().catch(() => ({})) as { error?: string };
       setError(json.error ?? "Failed to load users");
@@ -87,20 +99,49 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
     e.preventDefault();
     setInviting(true);
     setInvError(null);
+    const sentTo = invFields.email;
     const res = await fetch(`/api/dealers/${dealerId}/users`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(invFields),
     });
     if (res.ok) {
-      setInvSuccess(true);
+      const json = await res.json() as { emailSent?: boolean; warning?: string };
+      setInvToast(json.emailSent === false
+        ? { kind: "warning", msg: json.warning ?? `Invitation created for ${sentTo}, but the email could not be delivered.` }
+        : { kind: "success", msg: `Invitation sent to ${sentTo}.` });
       setInvFields({ firstName: "", lastName: "", email: "", role: inviteRoles[0]?.value ?? "dealer_user" });
-      setTimeout(() => { setInvSuccess(false); setShowInvite(false); void fetchUsers(); }, 2000);
+      setShowInvite(false);
+      void fetchUsers();
     } else {
       const json = await res.json() as { error?: string };
       setInvError(json.error ?? "Failed to send invitation");
     }
     setInviting(false);
+  }
+
+  async function resendInvite(inv: PendingInvite) {
+    const res = await fetch(`/api/dealers/${dealerId}/invitations/${inv.id}`, { method: "POST" });
+    const json = await res.json().catch(() => ({})) as { ok?: boolean; emailSent?: boolean; warning?: string; error?: string };
+    if (res.ok) {
+      setInvToast(json.emailSent === false
+        ? { kind: "warning", msg: json.warning ?? `Could not re-send to ${inv.email}.` }
+        : { kind: "success", msg: `Invitation re-sent to ${inv.email}.` });
+      void fetchUsers();
+    } else {
+      setInvToast({ kind: "warning", msg: json.error ?? "Resend failed." });
+    }
+  }
+
+  async function revokeInvite(inv: PendingInvite) {
+    if (!confirm(`Revoke the invitation to ${inv.email}?`)) return;
+    const res = await fetch(`/api/dealers/${dealerId}/invitations/${inv.id}`, { method: "DELETE" });
+    if (res.ok) {
+      setPendingInvites((prev) => prev.filter((p) => p.id !== inv.id));
+      setInvToast({ kind: "success", msg: `Invitation to ${inv.email} revoked.` });
+    } else {
+      setInvToast({ kind: "warning", msg: "Revoke failed." });
+    }
   }
 
   function startEdit(u: DealerUserProfile) {
@@ -191,7 +232,7 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
           <button
             className="btn btn-primary"
             style={{ fontSize: 12, height: 30, padding: "0 12px" }}
-            onClick={() => { setShowInvite(true); setInvSuccess(false); setInvError(null); }}
+            onClick={() => { setShowInvite(true); setInvToast(null); setInvError(null); }}
           >
             + Invite User
           </button>
@@ -202,14 +243,17 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
         <div className="px-5 py-2 text-xs" style={{ background: "#ffebee", color: "var(--error)" }}>{error}</div>
       )}
 
+      {invToast && (
+        <div className="px-5 py-2.5 text-xs flex items-center justify-between"
+          style={{ background: invToast.kind === "success" ? "#e8f5e9" : "#fff8e1", color: invToast.kind === "success" ? "#2e7d32" : "#7a5c00", borderBottom: "1px solid var(--border)" }}>
+          <span>{invToast.kind === "success" ? "✓ " : "⚠ "}{invToast.msg}</span>
+          <button onClick={() => setInvToast(null)} aria-label="Dismiss" style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 700, fontSize: 14, lineHeight: 1 }}>×</button>
+        </div>
+      )}
+
       {showInvite && canInvite && (
         <form onSubmit={(e) => void sendInvite(e)} className="px-5 py-4 space-y-3" style={{ borderBottom: "1px solid var(--border)", background: "#f8f9ff" }}>
           <p className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Invite a new dealer user</p>
-          {invSuccess && (
-            <div className="text-xs px-3 py-2 rounded" style={{ background: "#e8f5e9", color: "#2e7d32" }}>
-              Invitation sent!
-            </div>
-          )}
           {invError && (
             <div className="text-xs px-3 py-2 rounded" style={{ background: "#ffebee", color: "var(--error)" }}>{invError}</div>
           )}
@@ -246,6 +290,31 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
             </button>
           </div>
         </form>
+      )}
+
+      {pendingInvites.length > 0 && (
+        <div style={{ borderBottom: "1px solid var(--border)" }}>
+          <div className="px-5 py-2 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)", background: "var(--bg-subtle)" }}>
+            Pending Invitations ({pendingInvites.length})
+          </div>
+          {pendingInvites.map((inv) => (
+            <div key={inv.id} className="px-5 py-2.5 flex items-center justify-between" style={{ borderTop: "1px solid var(--border)" }}>
+              <div className="text-sm">
+                <span style={{ fontWeight: 500, color: "var(--text-primary)" }}>{inv.first_name} {inv.last_name}</span>
+                <span style={{ color: "var(--text-muted)" }}> · {inv.email} · {roleLabel(inv.role)}</span>
+                <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  Sent {new Date(inv.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · awaiting acceptance
+                </div>
+              </div>
+              {canInvite && (
+                <div className="flex gap-3 items-center">
+                  <button className="btn btn-secondary text-xs" style={{ height: 28, padding: "0 10px" }} onClick={() => void resendInvite(inv)}>Resend</button>
+                  <button className="text-xs" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--error)", fontWeight: 600 }} onClick={() => void revokeInvite(inv)}>Revoke</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       )}
 
       {loading ? (

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
+import { buildInviteEmail } from "@/lib/invite-email";
 import type { ProfileRow } from "@/lib/db";
 
 type Params = { params: { id: string } };
@@ -60,7 +61,18 @@ export async function GET(
     last_sign_in_at: lastSignInById.get(r.id as string) ?? null,
   }));
 
-  return NextResponse.json({ data: enriched });
+  // Pending invitations — created but not yet accepted, not expired. Without
+  // this an invitee is invisible (not a profile yet) until they accept.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: pending } = await (admin as any)
+    .from("invitations")
+    .select("id, email, first_name, last_name, role, created_at, expires_at")
+    .eq("group_id", params.id)
+    .is("accepted_at", null)
+    .gt("expires_at", new Date().toISOString())
+    .order("created_at", { ascending: false });
+
+  return NextResponse.json({ data: enriched, pendingInvitations: pending ?? [] });
 }
 
 /**
@@ -110,16 +122,17 @@ export async function POST(
     .eq("id", params.id)
     .maybeSingle<{ name: string }>();
 
-  // Check if email already registered
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: existingUsers } = await (admin as any)
-    .schema("auth")
-    .from("users")
+  // Check if already registered. NOTE: the auth schema isn't exposed to the data
+  // API (admin.schema("auth") returns a 406, silently null), so the old check
+  // never detected anyone. A profile existing for the email is the reliable,
+  // case-insensitive signal that they already have an account.
+  const { data: existingProfile } = await admin
+    .from("profiles")
     .select("id")
-    .eq("email", email.trim().toLowerCase())
-    .limit(1) as { data: { id: string }[] | null };
+    .ilike("email", email.trim().toLowerCase())
+    .maybeSingle<{ id: string }>();
 
-  if (existingUsers && existingUsers.length > 0) {
+  if (existingProfile) {
     return NextResponse.json({
       error: "This email is already registered.",
     }, { status: 409 });
@@ -151,38 +164,29 @@ export async function POST(
   const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/signup?invite=${inv.token}`;
   const fullName = `${firstName.trim()} ${lastName.trim()}`;
 
+  // Don't swallow send failures — surface emailSent + a warning so the UI can
+  // tell the operator the invite was created but the email didn't go out.
+  // sendMandrillEmail now throws on a rejected/invalid recipient too.
+  let emailSent = true;
+  let warning: string | undefined;
   try {
     await sendMandrillEmail({
       subject: `You've been invited to join ${groupName} on DA Platform`,
       from_email: "noreply@dealeraddendums.com",
       from_name: "DealerAddendums",
       to: [{ email: email.trim(), name: fullName, type: "to" }],
-      html: `
-<div style="font-family: Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; color: #333;">
-  <div style="margin-bottom: 24px;">
-    <img src="${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/images/da-logo.png" alt="DA Platform" width="40" height="40" style="border-radius: 50%;" />
-  </div>
-  <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">You're invited to DA Platform</h2>
-  <p style="margin: 0 0 16px; color: #55595c;">Hi ${firstName.trim()},</p>
-  <p style="margin: 0 0 16px; color: #55595c;">
-    You've been invited to join <strong>${groupName}</strong> on DealerAddendums Platform
-    as a ${role === "group_admin" ? "Group Admin" : "Group User"}.
-    Click the button below to set your password and get started.
-  </p>
-  <a href="${inviteUrl}"
-     style="display: inline-block; background: #1976d2; color: #fff; text-decoration: none;
-            padding: 10px 24px; border-radius: 4px; font-weight: 600; font-size: 14px; margin: 8px 0 24px;">
-    Accept Invitation
-  </a>
-  <p style="color: #78828c; font-size: 12px; margin: 0;">
-    This invitation expires in 7 days. If you did not expect this email, you can safely ignore it.
-  </p>
-</div>
-`,
+      html: buildInviteEmail({
+        firstName: firstName.trim(),
+        orgName: groupName,
+        roleLabel: role === "group_admin" ? "Group Admin" : "Group User",
+        inviteUrl,
+      }),
     });
   } catch (emailErr) {
+    emailSent = false;
+    warning = `Invitation created, but the email could not be delivered: ${emailErr instanceof Error ? emailErr.message : "send failed"}`;
     console.error("[group-invite] Mandrill send failed:", emailErr instanceof Error ? emailErr.message : emailErr);
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, emailSent, ...(warning ? { warning } : {}) });
 }

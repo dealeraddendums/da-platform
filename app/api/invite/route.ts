@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
+import { buildInviteEmail } from "@/lib/invite-email";
 
 const DEALER_ROLES = new Set(["dealer_admin", "dealer_user", "dealer_restricted"]);
 
@@ -94,16 +95,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     dealerName = d?.name ?? null;
   }
 
-  // Check if email already registered in Supabase Auth
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: existingUsers } = await (admin as any)
-    .schema("auth")
-    .from("users")
+  // Check if already registered. (auth schema isn't on the data API — the old
+  // admin.schema("auth") check silently returned null; profiles is the reliable
+  // case-insensitive existence signal.)
+  const { data: existingProfile } = await admin
+    .from("profiles")
     .select("id")
-    .eq("email", email.trim().toLowerCase())
-    .limit(1) as { data: { id: string }[] | null };
+    .ilike("email", email.trim().toLowerCase())
+    .maybeSingle<{ id: string }>();
 
-  if (existingUsers && existingUsers.length > 0) {
+  if (existingProfile) {
     return NextResponse.json({
       error: "This email is already registered. Contact support to add access to multiple dealerships.",
     }, { status: 409 });
@@ -133,39 +134,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/signup?invite=${inv.token}`;
   const fullName = `${firstName.trim()} ${lastName.trim()}`;
+  const roleLabel = role === "dealer_admin" ? "Dealer Admin" : role === "dealer_restricted" ? "Dealer Restricted" : "Dealer User";
 
+  let emailSent = true;
+  let warning: string | undefined;
   try {
     await sendMandrillEmail({
       subject: `You've been invited to join ${dealerName ?? "your dealership"} on DA Platform`,
       from_email: "noreply@dealeraddendums.com",
       from_name: "DealerAddendums",
       to: [{ email: email.trim(), name: fullName, type: "to" }],
-      html: `
-<div style="font-family: Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; color: #333;">
-  <div style="margin-bottom: 24px;">
-    <img src="${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/images/da-logo.png" alt="DA Platform" width="40" height="40" style="border-radius: 50%;" />
-  </div>
-  <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">You're invited to DA Platform</h2>
-  <p style="margin: 0 0 16px; color: #55595c;">Hi ${firstName.trim()},</p>
-  <p style="margin: 0 0 16px; color: #55595c;">
-    You've been invited to join <strong>${dealerName ?? "your dealership"}</strong> on DealerAddendums Platform.
-    Click the button below to set your password and get started.
-  </p>
-  <a href="${inviteUrl}"
-     style="display: inline-block; background: #1976d2; color: #fff; text-decoration: none;
-            padding: 10px 24px; border-radius: 4px; font-weight: 600; font-size: 14px; margin: 8px 0 24px;">
-    Accept Invitation
-  </a>
-  <p style="color: #78828c; font-size: 12px; margin: 0;">
-    This invitation expires in 7 days. If you did not expect this email, you can safely ignore it.
-  </p>
-</div>
-`,
+      html: buildInviteEmail({ firstName: firstName.trim(), orgName: dealerName ?? "your dealership", roleLabel, inviteUrl }),
     });
   } catch (emailErr) {
+    emailSent = false;
+    warning = `Invitation created, but the email could not be delivered: ${emailErr instanceof Error ? emailErr.message : "send failed"}`;
     console.error("[invite] Mandrill send failed:", emailErr instanceof Error ? emailErr.message : emailErr);
-    // Don't fail the request — the invitation record is created. User can resend.
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, emailSent, ...(warning ? { warning } : {}) });
 }
