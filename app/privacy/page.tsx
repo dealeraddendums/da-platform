@@ -6,5 +6,5 @@ export const metadata = {
 };
 
 export default function PrivacyPage() {
-  return <LegalPage file="privacy-policy.md" />;
+  return <LegalPage file="privacy-policy.md" title="Privacy Policy" />;
 }

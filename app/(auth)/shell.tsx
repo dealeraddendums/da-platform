@@ -11,7 +11,7 @@
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "5.0.0";
 const BUILD_NUMBER = process.env.NEXT_PUBLIC_BUILD_NUMBER ?? "209";
 
-const AUTH_CSS = `
+export const AUTH_CSS = `
   :root {
     --da-ink: #0B1220;
     --da-ink-2: #11192B;
@@ -355,9 +355,9 @@ const AUTH_CSS = `
   }
 `;
 
-function MotionGradient() {
+export function MotionGradient() {
   return (
-    <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#0B1220" }}>
+    <div className="lp-backdrop" style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#0B1220" }}>
       <div className="lp-blob lp-blob-a" />
       <div className="lp-blob lp-blob-b" />
       <div className="lp-blob lp-blob-c" />
