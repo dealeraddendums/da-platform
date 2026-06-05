@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
+import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 
 const DEALER_ROLES = new Set(["dealer_admin", "dealer_user", "dealer_restricted"]);
 
@@ -110,6 +111,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }, { status: 409 });
   }
 
+  // One-time setup code — emailed in plaintext, stored only as a hash. The
+  // invitation is consumed (account finalized) only when the invitee submits
+  // this code, so a link-scanner pre-fetching the URL can't consume it.
+  const setupCode = generateSetupCode();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
   // Create invitation (upsert: same email+dealer re-sends invite)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: inv, error: invErr } = await (admin as any)
@@ -123,7 +130,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       dealer_name: dealerName,
       invited_by: claims.sub,
       accepted_at: null,
-      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      expires_at: expiresAt,
+      setup_code_hash: hashSetupCode(setupCode),
+      setup_code_expires_at: expiresAt,
     }, { onConflict: "email,dealer_id", ignoreDuplicates: false })
     .select("token")
     .single() as { data: { token: string } | null; error: { message: string } | null };
@@ -144,7 +153,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       from_email: "noreply@dealeraddendums.com",
       from_name: "DealerAddendums",
       to: [{ email: email.trim(), name: fullName, type: "to" }],
-      html: buildInviteEmail({ firstName: firstName.trim(), orgName: dealerName ?? "your dealership", roleLabel, inviteUrl }),
+      html: buildInviteEmail({ firstName: firstName.trim(), orgName: dealerName ?? "your dealership", roleLabel, inviteUrl, setupCode }),
     });
   } catch (emailErr) {
     emailSent = false;

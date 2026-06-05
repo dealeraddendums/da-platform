@@ -2,30 +2,42 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import { fireProfileSync } from "@/lib/sync-hubspot";
-import { sendOtpCode } from "@/lib/migration-invite";
+import { verifySetupCode } from "@/lib/invite-code";
+import { rateLimit } from "@/lib/rate-limit";
 
 /**
  * POST /api/invite/accept
- * Accept an invitation: create auth user + profile, mark invitation accepted.
- * No auth required — this is called by a new user finishing setup.
+ * Finalize an invitation — SCANNER-PROOF: the account is created and the
+ * invitation is consumed ONLY here, on a human action:
+ *   - { token, code }     → verify the emailed one-time setup code, then finalize.
+ *   - { token, password } → set a password, then finalize.
  *
- * Body: { token, password? }
- *   - password present  → password account; client signs in with the returned
- *     magic-link token_hash.
- *   - password omitted  → passwordless account; we email a 6-digit sign-in code
- *     (the existing /onboard OTP flow) and the client verifies it. Most dealers
- *     are non-technical, so the invite UI lets them choose this path.
+ * Neither loading the invite page nor any GET/HEAD pre-fetch consumes anything.
+ * A mail scanner can pre-touch the link but can't read & type the code, so it
+ * cannot reach this consume step. No auth required (the user has no account yet).
+ *
+ * Idempotent: if a prior partial attempt left a half-created user, finalize
+ * resolves the existing auth user instead of erroring.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  let body: { token?: string; password?: string };
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  if (!rateLimit(`invite-accept:${ip}`, 10, 60_000)) {
+    return NextResponse.json({ error: "Too many attempts — please wait a moment." }, { status: 429 });
+  }
+
+  let body: { token?: string; code?: string; password?: string };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { token, password } = body;
+  const { token, code, password } = body;
   if (!token) return NextResponse.json({ error: "token required" }, { status: 400 });
-  const passwordless = !password;
-  if (!passwordless && password!.length < 6) {
+
+  const usingPassword = !!password;
+  if (!usingPassword && !code) {
+    return NextResponse.json({ error: "A setup code or password is required." }, { status: 400 });
+  }
+  if (usingPassword && password!.length < 6) {
     return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
   }
 
@@ -35,17 +47,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: inv } = await (admin as any)
     .from("invitations")
-    .select("id, email, first_name, last_name, role, dealer_id, group_id, expires_at, accepted_at")
+    .select("id, email, first_name, last_name, role, dealer_id, group_id, expires_at, accepted_at, setup_code_hash, setup_code_expires_at")
     .eq("token", token)
     .maybeSingle() as { data: {
       id: string; email: string; first_name: string; last_name: string;
       role: string; dealer_id: string | null; group_id: string | null;
       expires_at: string; accepted_at: string | null;
+      setup_code_hash: string | null; setup_code_expires_at: string | null;
     } | null };
 
   if (!inv) return NextResponse.json({ error: "Invalid invitation" }, { status: 404 });
-  if (inv.accepted_at) return NextResponse.json({ error: "Invitation already accepted" }, { status: 410 });
-  if (new Date(inv.expires_at) < new Date()) return NextResponse.json({ error: "Invitation expired" }, { status: 410 });
+  if (new Date(inv.expires_at) < new Date()) return NextResponse.json({ error: "This invitation has expired. Ask your administrator to resend it." }, { status: 410 });
+
+  // Code path: verify the one-time setup code (the scanner-proof gate).
+  if (!usingPassword) {
+    const codeExpired = inv.setup_code_expires_at ? new Date(inv.setup_code_expires_at) < new Date() : true;
+    if (!inv.setup_code_hash || codeExpired) {
+      return NextResponse.json({ error: "Your setup code has expired. Use “Resend code” to get a new one." }, { status: 410 });
+    }
+    if (!verifySetupCode(code!.trim(), inv.setup_code_hash)) {
+      return NextResponse.json({ error: "That code is incorrect. Check your email or request a new one." }, { status: 401 });
+    }
+  }
 
   const isGroupInvite = !!inv.group_id && !inv.dealer_id;
 
@@ -62,29 +85,44 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     dealerTextId = dealer.dealer_id;
   }
 
-  // Create auth user (admin API skips email confirmation). Set the role in
-  // app_metadata so the JWT carries it on first sign-in (the user lands AS the
-  // invited role — no leftover impersonation/ghost context). Passwordless
-  // accounts are created with no password and sign in via the emailed OTP code.
+  // ── Create or resolve the auth user (idempotent) ──────────────────────────
+  // Set the role in app_metadata so the JWT carries it on first sign-in (the
+  // user lands AS the invited role — no leftover impersonation/ghost context).
   const fullName = `${inv.first_name} ${inv.last_name}`;
-  const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+  const { data: createData, error: createErr } = await admin.auth.admin.createUser({
     email: inv.email,
-    ...(passwordless ? {} : { password }),
+    ...(usingPassword ? { password } : {}),
     email_confirm: true,
     user_metadata: { full_name: fullName },
     app_metadata: { role: inv.role },
   });
 
-  if (authErr || !authData.user) {
-    return NextResponse.json({ error: authErr?.message ?? "Failed to create account" }, { status: 400 });
+  let userId = createData?.user?.id ?? null;
+
+  // generateLink resolves an already-existing user (a prior partial attempt) and
+  // gives us the magic-link token to sign the user in.
+  const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email: inv.email,
+  });
+  if (linkData?.user?.id) userId = linkData.user.id;
+
+  if (!userId) {
+    console.error("[invite/accept] could not create or resolve user:", createErr?.message ?? linkErr?.message);
+    return NextResponse.json({ error: createErr?.message ?? "Failed to create account" }, { status: 400 });
   }
 
+  // Ensure role + password are applied even when the user already existed.
+  await admin.auth.admin.updateUserById(userId, {
+    app_metadata: { role: inv.role },
+    ...(usingPassword ? { password } : {}),
+  }).catch(() => null);
+
   // Upsert profile — handle_new_user trigger (migration 001) auto-creates a
-  // minimal row on auth.users INSERT with role from app_metadata and no
-  // dealer/group binding, so a plain .insert() races into a primary-key
-  // violation. Upsert by id rewrites the row with the full invite payload.
+  // minimal row on auth.users INSERT, so a plain .insert() races into a
+  // primary-key violation. Upsert by id rewrites the row with the invite payload.
   const { error: profileErr } = await admin.from("profiles").upsert({
-    id: authData.user.id,
+    id: userId,
     email: inv.email,
     full_name: fullName,
     role: inv.role as UserRole,
@@ -94,46 +132,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }, { onConflict: "id" });
 
   if (profileErr) {
-    // Best-effort rollback auth user
-    await admin.auth.admin.deleteUser(authData.user.id).catch(() => null);
     console.error("[invite/accept] profile upsert failed:", profileErr.message);
     return NextResponse.json({ error: "Failed to create profile" }, { status: 500 });
   }
 
-  // Phase 14a — HubSpot Contact upsert for the new user. Fire-and-forget;
-  // if HubSpot is down the invite still succeeds and 14b cron will catch up.
-  fireProfileSync(authData.user.id);
+  // Phase 14a — HubSpot Contact upsert. Fire-and-forget.
+  fireProfileSync(userId);
 
-  // Mark invitation accepted
+  // Consume the invitation: mark accepted and burn the setup code so it can't
+  // be reused. Done only now, after a verified human action.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any).from("invitations").update({ accepted_at: new Date().toISOString() }).eq("id", inv.id);
+  await (admin as any).from("invitations")
+    .update({ accepted_at: new Date().toISOString(), setup_code_hash: null })
+    .eq("id", inv.id);
 
-  // Passwordless: email a 6-digit code; the client collects it and calls
-  // verifyOtp({ email, token, type: "email" }) to establish a real session.
-  if (passwordless) {
-    try {
-      await sendOtpCode(inv.email, { purpose: "onboard", fullName, entityName: "your account" });
-    } catch (e) {
-      console.error("[invite/accept] sendOtpCode failed:", e instanceof Error ? e.message : e);
-      return NextResponse.json({ error: "Account created, but we couldn't email your sign-in code. Please use “Email me a code” on the login page." }, { status: 502 });
-    }
-    return NextResponse.json({ ok: true, passwordless: true, email: inv.email });
-  }
-
-  // Password path: sign the user in via a magic-link token_hash.
-  const { data: signInData, error: signInErr } = await admin.auth.admin.generateLink({
-    type: "magiclink",
-    email: inv.email,
-  });
-
-  if (signInErr || !signInData.properties?.hashed_token) {
-    // Return success anyway — user can log in manually
+  if (!linkData?.properties?.hashed_token) {
+    // Account is finalized; user can sign in manually if the token is missing.
     return NextResponse.json({ ok: true, manualLogin: true });
   }
 
   return NextResponse.json({
     ok: true,
-    tokenHash: signInData.properties.hashed_token,
+    tokenHash: linkData.properties.hashed_token,
     email: inv.email,
   });
 }

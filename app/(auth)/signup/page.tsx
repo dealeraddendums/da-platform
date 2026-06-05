@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { AuthShell } from "../shell";
-import OtpCodeForm from "../OtpCodeForm";
 import PasskeySetup from "../PasskeySetup";
 
 type InviteDetails = {
@@ -54,6 +53,8 @@ function SignupPageInner() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [code, setCode] = useState("");
+  const [resendNotice, setResendNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
@@ -120,28 +121,58 @@ function SignupPageInner() {
     setInviteStep("passkey");
   }
 
-  // "Email me a code" path: accept the invite with NO password — the server
-  // creates the account and emails a one-time sign-in code, then we show the
-  // code-entry form. The OtpCodeForm establishes the real session on verify.
-  async function handleCodeStart() {
+  // Setup-code path. The code was emailed when the invite was created, so this
+  // only consumes the invitation when the human submits it (scanner-proof).
+  async function handleCodeSubmit(e: React.FormEvent) {
+    e.preventDefault();
     setError("");
+    if (!code.trim()) { setError("Enter the setup code from your email."); return; }
     setLoading(true);
 
     const res = await fetch("/api/invite/accept", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: inviteToken }),
+      body: JSON.stringify({ token: inviteToken, code: code.trim() }),
     });
-    const json = await res.json() as { passwordless?: boolean; error?: string };
+    const json = await res.json() as { tokenHash?: string; error?: string };
 
-    if (!res.ok || !json.passwordless) {
-      setError(json.error ?? "Failed to send your sign-in code. Please try again.");
+    if (!res.ok || !json.tokenHash) {
+      setError(json.error ?? "That code didn't work. Check your email or resend a new one.");
       setLoading(false);
       return;
     }
 
+    const supabase = createClient();
+    const { error: otpError } = await supabase.auth.verifyOtp({
+      token_hash: json.tokenHash,
+      type: "magiclink",
+    });
+    if (otpError) {
+      setError(otpError.message);
+      setLoading(false);
+      return;
+    }
+
+    // Signed in. Offer (never require) a passkey before landing on the dashboard.
     setLoading(false);
-    setInviteStep("code");
+    setInviteStep("passkey");
+  }
+
+  // Idempotent, non-consuming: re-emails a fresh setup code.
+  async function handleResend() {
+    setError("");
+    setResendNotice("");
+    try {
+      await fetch("/api/invite/resend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: inviteToken }),
+      });
+    } catch {
+      // resend always reports success to avoid leaking token validity
+    }
+    setCode("");
+    setResendNotice("A new setup code is on its way. It may take a minute to arrive.");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -207,12 +238,13 @@ function SignupPageInner() {
       </div>
     );
 
-    // Step 1 — let the dealer choose how to sign in.
+    // Step 1 — let the dealer choose how to sign in. The setup code is already
+    // in their invite email, so "Enter my setup code" just opens the code form.
     if (inviteStep === "choose") {
       return (
         <AuthShell
           title="Finish setting up your account"
-          subtitle="Choose how you'd like to sign in. You can always change this later."
+          subtitle="We emailed you a setup code. Enter it to get started — no password needed."
         >
           {inviteBadge}
 
@@ -227,19 +259,17 @@ function SignupPageInner() {
             <button
               type="button"
               className="lp-btn lp-btn-primary"
-              disabled={loading}
-              onClick={() => void handleCodeStart()}
+              onClick={() => { setError(""); setInviteStep("code"); }}
             >
-              {loading ? (<><span className="lp-spinner" /> Sending your code…</>) : "Email me a code"}
+              Enter my setup code
             </button>
             <p style={{ margin: "-6px 2px 4px", fontSize: 13, color: "var(--da-text-muted)" }}>
-              We&apos;ll email you a one-time code each time you sign in — nothing to remember.
+              Check the invite email for your 8-digit code. We&apos;ll never ask for a password.
             </p>
 
             <button
               type="button"
               className="lp-btn lp-btn-passkey"
-              disabled={loading}
               onClick={() => { setError(""); setInviteStep("password"); }}
             >
               Set a password instead
@@ -249,22 +279,58 @@ function SignupPageInner() {
       );
     }
 
-    // Step 2a — emailed sign-in code.
+    // Step 2a — enter the emailed setup code (consumed only on submit).
     if (inviteStep === "code") {
       return (
-        <AuthShell title="Enter your code" subtitle="We emailed you a sign-in code to finish setting up your account.">
-          <OtpCodeForm
-            initialEmail={email}
-            resendEndpoint="/api/onboard/resend"
-            onVerified={() => setInviteStep("passkey")}
-            footer={
-              <p style={{ textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
-                <button type="button" className="lp-btn-link" onClick={() => { setError(""); setInviteStep("choose"); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
-                  ← Use a password instead
-                </button>
-              </p>
-            }
-          />
+        <AuthShell title="Enter your setup code" subtitle="Type the 8-digit code from your invite email to finish setting up your account.">
+          {inviteBadge}
+          <form onSubmit={e => void handleCodeSubmit(e)} noValidate style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            <div>
+              <label className="lp-label" htmlFor="inv-email-code">Email address</label>
+              <input id="inv-email-code" className="lp-input" type="email" value={email} readOnly />
+            </div>
+            <div>
+              <label className="lp-label" htmlFor="inv-code">Setup code</label>
+              <input
+                id="inv-code"
+                className="lp-input"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                required
+                placeholder="Code from your email"
+                value={code}
+                onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
+                style={{ fontFamily: "'Courier New', monospace", fontSize: 22, letterSpacing: 8, textAlign: "center" }}
+              />
+            </div>
+
+            {error && (
+              <div role="alert" className="lp-server-error">
+                <IconAlert style={{ marginTop: 2, flexShrink: 0, color: "var(--da-red)" }} />
+                <span>{error}</span>
+              </div>
+            )}
+            {resendNotice && (
+              <div role="status" style={{ fontSize: 13, color: "var(--da-text-soft)" }}>{resendNotice}</div>
+            )}
+
+            <button type="submit" className="lp-btn lp-btn-primary" disabled={loading || code.length === 0}>
+              {loading ? (<><span className="lp-spinner" /> Verifying…</>) : "Verify & Continue"}
+            </button>
+
+            <p style={{ marginTop: 4, textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
+              Didn&apos;t get it?{" "}
+              <button type="button" className="lp-btn-link" onClick={() => void handleResend()} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+                Resend code
+              </button>
+            </p>
+            <p style={{ textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
+              <button type="button" className="lp-btn-link" onClick={() => { setError(""); setResendNotice(""); setInviteStep("choose"); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+                ← Back
+              </button>
+            </p>
+          </form>
         </AuthShell>
       );
     }
@@ -368,8 +434,8 @@ function SignupPageInner() {
           </button>
 
           <p style={{ marginTop: 4, textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
-            <button type="button" className="lp-btn-link" onClick={() => { setError(""); setInviteStep("choose"); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
-              ← Email me a code instead
+            <button type="button" className="lp-btn-link" onClick={() => { setError(""); setInviteStep("code"); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+              ← Use my setup code instead
             </button>
           </p>
         </form>

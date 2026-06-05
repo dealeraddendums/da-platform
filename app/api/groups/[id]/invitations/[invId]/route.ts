@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
+import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 
 type Params = { params: { id: string; invId: string } };
 
@@ -40,10 +41,13 @@ export async function POST(_req: NextRequest, { params }: Params): Promise<NextR
   if (!inv) return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
   if (inv.accepted_at) return NextResponse.json({ error: "Invitation already accepted" }, { status: 409 });
 
-  // Refresh expiry so the resent link is good for another 7 days.
+  // Refresh expiry + issue a fresh setup code so the resend is good for 7 days.
   const newExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const setupCode = generateSetupCode();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any).from("invitations").update({ expires_at: newExpiry }).eq("id", inv.id);
+  await (admin as any).from("invitations")
+    .update({ expires_at: newExpiry, setup_code_hash: hashSetupCode(setupCode), setup_code_expires_at: newExpiry })
+    .eq("id", inv.id);
 
   const { data: group } = await admin.from("groups").select("name").eq("id", params.id).maybeSingle<{ name: string }>();
   const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/signup?invite=${inv.token}`;
@@ -61,6 +65,7 @@ export async function POST(_req: NextRequest, { params }: Params): Promise<NextR
         orgName: group?.name ?? "your group",
         roleLabel: inv.role === "group_admin" ? "Group Admin" : "Group User",
         inviteUrl,
+        setupCode,
       }),
     });
   } catch (emailErr) {

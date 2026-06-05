@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
+import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 
 type Params = { params: { id: string; invId: string } };
 
@@ -44,8 +45,11 @@ export async function POST(_req: NextRequest, { params }: Params): Promise<NextR
   if (inv.accepted_at) return NextResponse.json({ error: "Invitation already accepted" }, { status: 409 });
 
   const newExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const setupCode = generateSetupCode();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any).from("invitations").update({ expires_at: newExpiry }).eq("id", inv.id);
+  await (admin as any).from("invitations")
+    .update({ expires_at: newExpiry, setup_code_hash: hashSetupCode(setupCode), setup_code_expires_at: newExpiry })
+    .eq("id", inv.id);
 
   const { data: dealer } = await admin.from("dealers").select("name").eq("id", params.id).maybeSingle<{ name: string }>();
   const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/signup?invite=${inv.token}`;
@@ -59,7 +63,7 @@ export async function POST(_req: NextRequest, { params }: Params): Promise<NextR
       from_email: "noreply@dealeraddendums.com",
       from_name: "DealerAddendums",
       to: [{ email: inv.email, name: `${inv.first_name} ${inv.last_name}`, type: "to" }],
-      html: buildInviteEmail({ firstName: inv.first_name, orgName: dealer?.name ?? "your dealership", roleLabel, inviteUrl }),
+      html: buildInviteEmail({ firstName: inv.first_name, orgName: dealer?.name ?? "your dealership", roleLabel, inviteUrl, setupCode }),
     });
   } catch (emailErr) {
     emailSent = false;

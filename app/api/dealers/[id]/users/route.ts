@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
+import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 
 type Params = { params: { id: string } };
 
@@ -147,6 +148,8 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     return NextResponse.json({ error: "This email is already registered." }, { status: 409 });
   }
 
+  const setupCode = generateSetupCode();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: inv, error: invErr } = await (admin as any)
     .from("invitations")
@@ -159,7 +162,9 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       group_id: null,
       invited_by: claims.sub,
       accepted_at: null,
-      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      expires_at: expiresAt,
+      setup_code_hash: hashSetupCode(setupCode),
+      setup_code_expires_at: expiresAt,
     }, { onConflict: "email,dealer_id", ignoreDuplicates: false })
     .select("token")
     .single() as { data: { token: string } | null; error: { message: string } | null };
@@ -178,7 +183,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       from_email: "noreply@dealeraddendums.com",
       from_name: "DealerAddendums",
       to: [{ email: email.trim(), name: fullName, type: "to" }],
-      html: buildInviteEmail({ firstName: firstName.trim(), orgName: dealer.name, roleLabel, inviteUrl }),
+      html: buildInviteEmail({ firstName: firstName.trim(), orgName: dealer.name, roleLabel, inviteUrl, setupCode }),
     });
   } catch (mailErr) {
     // Invitation row exists — surface the email failure but return 200 so the

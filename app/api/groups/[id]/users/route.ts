@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
 import { lastSignInByEmail } from "@/lib/last-sign-in";
+import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 import type { ProfileRow } from "@/lib/db";
 
 type Params = { params: { id: string } };
@@ -128,6 +129,12 @@ export async function POST(
     }, { status: 409 });
   }
 
+  // One-time setup code — emailed in plaintext, stored only as a hash. The
+  // invitation is consumed only when the invitee submits this code, so a
+  // link-scanner pre-fetching the URL can't consume it.
+  const setupCode = generateSetupCode();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
   // Create invitation with group_id (no dealer_id)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: inv, error: invErr } = await (admin as any)
@@ -141,7 +148,9 @@ export async function POST(
       dealer_id: null,
       invited_by: claims.sub,
       accepted_at: null,
-      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      expires_at: expiresAt,
+      setup_code_hash: hashSetupCode(setupCode),
+      setup_code_expires_at: expiresAt,
     }, { onConflict: "email,group_id", ignoreDuplicates: false })
     .select("token")
     .single() as { data: { token: string } | null; error: { message: string } | null };
@@ -170,6 +179,7 @@ export async function POST(
         orgName: groupName,
         roleLabel: role === "group_admin" ? "Group Admin" : "Group User",
         inviteUrl,
+        setupCode,
       }),
     });
   } catch (emailErr) {
