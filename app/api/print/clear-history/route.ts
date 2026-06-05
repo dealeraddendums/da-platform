@@ -57,7 +57,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const dealerSlug = Array.from(dealerSlugs)[0];
 
-  if (claims.role === "dealer_admin" || claims.role === "dealer_user") {
+  // Dealer roles and a group_admin acting as a dealer are scoped to their own
+  // dealer (group_admin's claims.dealer_id is the active dealer; null otherwise).
+  if (claims.role === "dealer_admin" || claims.role === "dealer_user" || claims.role === "group_admin") {
     if (claims.dealer_id !== dealerSlug) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

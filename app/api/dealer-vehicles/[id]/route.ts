@@ -5,8 +5,8 @@ import type { DealerVehicleInsert, DealerVehicleRow, VehicleAuditLogInsert } fro
 
 type Params = { params: { id: string } };
 
-function dealerGuard(claims: { role: string; dealer_id: string | null; impersonating_dealer_id: string | null; is_ghost: boolean }) {
-  const isAdmin = (claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id && !claims.is_ghost;
+function dealerGuard(claims: { role: string; dealer_id: string | null; impersonating_dealer_id: string | null; is_ghost: boolean; active_dealer_id: string | null }) {
+  const isAdmin = (claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id && !claims.is_ghost && !claims.active_dealer_id;
   const dealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
   return { isAdmin, dealerId };
 }

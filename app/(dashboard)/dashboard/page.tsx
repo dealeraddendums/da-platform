@@ -125,6 +125,57 @@ function GroupAdminView({
   );
 }
 
+// ── dealer dashboard view ───────────────────────────────────────────────────
+// Shared by a real dealer_admin/dealer_user AND a group_admin who has switched
+// into one of their dealers (active_dealer_id). Stats + inventory, scoped to the
+// dealer's text id; print buttons gated by canPrintForDealer.
+async function DealerDashboardView({ dealerId }: { dealerId: string }) {
+  const admin = createAdminSupabaseClient();
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+  const startOfMonthDate = startOfMonth.toISOString().split("T")[0];
+
+  const [{ count: totalVehiclesCount }, { count: printedMonthCount }, { count: printedLifetimeCount }] = await Promise.all([
+    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId).eq("status", "active"),
+    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId).eq("status", "active")
+      .eq("print_status", 1).gte("print_date", startOfMonthDate),
+    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId).eq("status", "active")
+      .eq("print_status", 1),
+  ]);
+
+  const totalVehicles = totalVehiclesCount ?? 0;
+  const printedThisMonth = printedMonthCount ?? 0;
+  const lifetimePrinted = printedLifetimeCount ?? 0;
+  const unprintedNever = Math.max(0, totalVehicles - lifetimePrinted);
+
+  const dealerStats = [
+    { label: "Total Vehicles",     value: totalVehicles },
+    { label: "Printed This Month", value: printedThisMonth },
+    { label: "Unprinted",          value: unprintedNever },
+  ];
+
+  const printGate = await canPrintForDealer(dealerId);
+
+  return (
+    <div>
+      <PageHeader title="Dashboard" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        {dealerStats.map((s) => (
+          <div key={s.label} className="card p-4">
+            <p style={STAT_LABEL}>{s.label}</p>
+            <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{s.value.toLocaleString()}</p>
+          </div>
+        ))}
+      </div>
+      <ManualVehicleInventory dealerId={dealerId} printGate={printGate} />
+    </div>
+  );
+}
+
 // ── page ──────────────────────────────────────────────────────────────────────
 
 export default async function DashboardPage() {
@@ -135,13 +186,27 @@ export default async function DashboardPage() {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("role, dealer_id, group_id, full_name")
+    .select("role, dealer_id, group_id, full_name, active_dealer_id")
     .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null; group_id: string | null; full_name: string | null }>();
+    .single<{ role: string; dealer_id: string | null; group_id: string | null; full_name: string | null; active_dealer_id: string | null }>();
 
   const role = (profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user") as UserRole;
+
+  // A group_admin who has "Switched to Dealer" (active_dealer_id set) acts as
+  // that dealer — render the dealer dashboard, not the group view. Mirrors the
+  // layout's sidebarRole rule and the resolution in /builder and /users.
+  if (role === "group_admin" && profile?.active_dealer_id) {
+    const { data: activeDlr } = await admin
+      .from("dealers")
+      .select("dealer_id")
+      .eq("id", profile.active_dealer_id)
+      .maybeSingle<{ dealer_id: string }>();
+    if (activeDlr?.dealer_id) {
+      return <DealerDashboardView dealerId={activeDlr.dealer_id} />;
+    }
+  }
 
   // Ghost token is read once at the top so both the dealer-ghost branch
   // (super_admin → dealer view) and the group-ghost branch (super_admin →
@@ -358,55 +423,9 @@ export default async function DashboardPage() {
     );
   }
 
-  // ── Stats — always Supabase ───────────────────────────────────────────────
-  // Source of truth is dealer_vehicles.print_status / print_date so legacy
-  // ETL-printed and platform-printed vehicles are counted uniformly.
-  const startOfMonth = new Date();
-  startOfMonth.setDate(1);
-  startOfMonth.setHours(0, 0, 0, 0);
-  const startOfMonthDate = startOfMonth.toISOString().split("T")[0];
-
-  const [{ count: totalVehiclesCount }, { count: printedMonthCount }, { count: printedLifetimeCount }] = await Promise.all([
-    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId).eq("status", "active"),
-    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId).eq("status", "active")
-      .eq("print_status", 1).gte("print_date", startOfMonthDate),
-    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId).eq("status", "active")
-      .eq("print_status", 1),
-  ]);
-
-  const totalVehicles = totalVehiclesCount ?? 0;
-  const printedThisMonth = printedMonthCount ?? 0;
-  const lifetimePrinted = printedLifetimeCount ?? 0;
-  const unprintedNever = Math.max(0, totalVehicles - lifetimePrinted);
-
-  const dealerStats = [
-    { label: "Total Vehicles",     value: totalVehicles },
-    { label: "Printed This Month", value: printedThisMonth },
-    { label: "Unprinted",          value: unprintedNever },
-  ];
-
-  const statCard = (s: { label: string; value: number }) => (
-    <div key={s.label} className="card p-4">
-      <p style={STAT_LABEL}>{s.label}</p>
-      <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{s.value.toLocaleString()}</p>
-    </div>
-  );
-
-  // Dealer roles: gate the inventory print buttons by the same canPrint
-  // check the server routes enforce. super_admin bypasses (handled
-  // separately above and in enforceCanPrint).
-  const printGate = await canPrintForDealer(dealerId);
-
-  return (
-    <div>
-      <PageHeader title="Dashboard" />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        {dealerStats.map(statCard)}
-      </div>
-      <ManualVehicleInventory dealerId={dealerId} printGate={printGate} />
-    </div>
-  );
+  // Stats + inventory, scoped to the dealer (source of truth is
+  // dealer_vehicles.print_status/print_date so legacy ETL-printed and
+  // platform-printed vehicles count uniformly). Shared with the group_admin
+  // active-dealer branch above.
+  return <DealerDashboardView dealerId={dealerId} />;
 }

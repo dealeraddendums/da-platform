@@ -25,8 +25,10 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   if (!dealerId) {
     return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
   }
+  // dealer roles and a group_admin acting as a dealer are scoped to their own
+  // dealer (group_admin without an active dealer has null dealer_id → rejected).
   if (
-    (claims.role === "dealer_admin" || claims.role === "dealer_user") &&
+    (claims.role === "dealer_admin" || claims.role === "dealer_user" || claims.role === "group_admin") &&
     dealerId !== claims.dealer_id
   ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });

@@ -15,8 +15,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  // Block non-impersonating/non-ghost admins; allow super_admin while impersonating or in ghost mode
-  if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id && !claims.is_ghost) {
+  // Block platform/group admins who aren't scoped to a single dealer. Allowed:
+  // super_admin impersonating or ghosting, and a group_admin who switched into a
+  // dealer (active_dealer_id set → claims.dealer_id is that dealer).
+  if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id && !claims.is_ghost && !claims.active_dealer_id) {
     return NextResponse.json({ error: "Not available for admin roles" }, { status: 403 });
   }
 
@@ -108,7 +110,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id && !claims.is_ghost) {
+  if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id && !claims.is_ghost && !claims.active_dealer_id) {
     return NextResponse.json({ error: "Not available for admin roles" }, { status: 403 });
   }
 

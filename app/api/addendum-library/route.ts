@@ -110,7 +110,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  if (claims.role !== "dealer_admin" && claims.role !== "dealer_user" && claims.role !== "super_admin") {
+  // group_admin is allowed when acting as a dealer: getJwtClaims resolves their
+  // claims.dealer_id to the active dealer (null otherwise → rejected below).
+  if (
+    claims.role !== "dealer_admin" && claims.role !== "dealer_user" &&
+    claims.role !== "super_admin" && claims.role !== "group_admin"
+  ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

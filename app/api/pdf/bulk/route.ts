@@ -282,7 +282,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         if (!dv) { continue; }
 
-        if (claims.role === "dealer_admin" || claims.role === "dealer_user") {
+        // Dealer roles — and a group_admin acting as a dealer — are limited to
+        // their own dealer's vehicles (group_admin's claims.dealer_id is the
+        // active dealer; null without one, so nothing prints).
+        if (claims.role === "dealer_admin" || claims.role === "dealer_user" || claims.role === "group_admin") {
           if (dv.dealer_id !== claims.dealer_id) { continue; }
         }
 

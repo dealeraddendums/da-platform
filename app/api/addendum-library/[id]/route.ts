@@ -35,8 +35,11 @@ export async function PATCH(
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  // dealer roles and a group_admin acting as a dealer may only touch their own
+  // dealer's rows. group_admin without an active dealer has a null dealer_id, so
+  // this rejects them too.
   if (
-    (claims.role === "dealer_admin" || claims.role === "dealer_user") &&
+    (claims.role === "dealer_admin" || claims.role === "dealer_user" || claims.role === "group_admin") &&
     existing.dealer_id !== claims.dealer_id
   ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -111,8 +114,11 @@ export async function DELETE(
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  // dealer roles and a group_admin acting as a dealer may only touch their own
+  // dealer's rows. group_admin without an active dealer has a null dealer_id, so
+  // this rejects them too.
   if (
-    (claims.role === "dealer_admin" || claims.role === "dealer_user") &&
+    (claims.role === "dealer_admin" || claims.role === "dealer_user" || claims.role === "group_admin") &&
     existing.dealer_id !== claims.dealer_id
   ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });

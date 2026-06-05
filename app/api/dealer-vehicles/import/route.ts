@@ -32,7 +32,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const { claims, error } = await requireAuth();
     if (error) return error;
 
-    if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id && !claims.is_ghost) {
+    if ((claims.role === "super_admin" || claims.role === "group_admin") && !claims.impersonating_dealer_id && !claims.is_ghost && !claims.active_dealer_id) {
       return NextResponse.json({ error: "Not available for admin roles" }, { status: 403 });
     }
 

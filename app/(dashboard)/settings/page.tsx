@@ -17,9 +17,9 @@ export default async function SettingsPage() {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("role, dealer_id, group_id")
+    .select("role, dealer_id, group_id, active_dealer_id")
     .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null; group_id: string | null }>();
+    .single<{ role: string; dealer_id: string | null; group_id: string | null; active_dealer_id: string | null }>();
 
   const role = (profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
@@ -32,7 +32,19 @@ export default async function SettingsPage() {
   const ghostDealerId = ghostCtx?.dealer_text_id ?? null;
 
   const isDealer = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";
-  const dealerId = isDealer ? (profile?.dealer_id ?? null) : (ghostDealerId ?? null);
+  let dealerId = isDealer ? (profile?.dealer_id ?? null) : (ghostDealerId ?? null);
+
+  // A group_admin who has switched into a dealer edits that dealer's settings.
+  // SettingsForm already scopes its API calls by dealer_id for group_admin and
+  // the /api/settings route verifies group membership — we just supply the id.
+  if (!dealerId && role === "group_admin" && profile?.active_dealer_id) {
+    const { data: d } = await admin
+      .from("dealers")
+      .select("dealer_id")
+      .eq("id", profile.active_dealer_id)
+      .maybeSingle<{ dealer_id: string }>();
+    dealerId = d?.dealer_id ?? null;
+  }
 
   let initialSettings: DealerSettingsRow | null = null;
   let fixedDealerUuid: string | null = null;
