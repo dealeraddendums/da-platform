@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow } from "@/lib/db";
 import GroupProfileCard, { GroupDealers } from "@/components/GroupProfileCard";
 import GroupOptionsPanel from "@/components/GroupOptionsPanel";
+import GroupImagesPanel from "@/components/GroupImagesPanel";
 
 type Props = { params: { id: string } };
 
@@ -63,6 +64,9 @@ export default async function GroupPage({ params }: Props) {
       />
       {(isSuperAdmin || isGroupAdmin) && (
         <GroupOptionsPanel groupId={params.id} isSuperAdmin={isSuperAdmin} />
+      )}
+      {(isSuperAdmin || isGroupAdmin) && (
+        <GroupImagesPanel groupId={params.id} />
       )}
       {(isSuperAdmin || isGroupAdmin) && (
         <div className="mt-6">

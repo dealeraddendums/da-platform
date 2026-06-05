@@ -47,7 +47,10 @@ export async function GET(
   );
 
   const s3Objects = (result.Contents ?? [])
-    .filter((obj) => obj.Key && /\.(png|jpg|jpeg|gif|webp)$/i.test(obj.Key))
+    // Root-level keys only. Group/dealer-scoped images live under
+    // `group/…` / `dealer/…` prefixes and must never appear in the platform
+    // listing (which would re-tag them as platform on auto-populate).
+    .filter((obj) => obj.Key && !obj.Key.includes("/") && /\.(png|jpg|jpeg|gif|webp)$/i.test(obj.Key))
     .map((obj) => ({
       key: obj.Key!,
       url: `https://${bucket}.s3.${REGION}.amazonaws.com/${obj.Key!}`,

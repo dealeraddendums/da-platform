@@ -1202,8 +1202,14 @@ export type ImageLibraryRow = {
   file_size: number | null;
   uploaded_at: string;
   uploaded_by: string | null;
+  // migration 090 — Platform/Group/Dealer scoping
+  scope: "platform" | "group" | "dealer";
+  group_id: string | null;
+  dealer_id: string | null;
 };
-export type ImageLibraryInsert = Omit<ImageLibraryRow, "id" | "uploaded_at" | "uploaded_by"> & { uploaded_by?: string | null };
+export type ImageLibraryInsert =
+  Omit<ImageLibraryRow, "id" | "uploaded_at" | "uploaded_by" | "scope" | "group_id" | "dealer_id">
+  & { uploaded_by?: string | null; scope?: "platform" | "group" | "dealer"; group_id?: string | null; dealer_id?: string | null };
 export type ImageLibraryUpdate = Partial<ImageLibraryInsert>;
 
 export type StaffProfileRow = {
