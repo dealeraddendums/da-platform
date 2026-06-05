@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -437,8 +437,7 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
         </div>
       )}
 
-      {/* Member dealers */}
-      <GroupDealers groupId={group.id} isSuperAdmin={isSuperAdmin} isGroupAdmin={isGroupAdmin} />
+      {/* Member dealers table is rendered separately in page.tsx (below the tabs). */}
 
       {/* Metadata */}
       {(() => {
@@ -459,13 +458,44 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
 
 // ── Member Dealers section ────────────────────────────────────────────────────
 
-function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string; isSuperAdmin: boolean; isGroupAdmin: boolean }) {
+export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string; isSuperAdmin: boolean; isGroupAdmin: boolean }) {
   const [dealers, setDealers] = useState<DealerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [impersonating, setImpersonating] = useState<string | null>(null);
   const [impersonateError, setImpersonateError] = useState<{ dealerId: string; message: string } | null>(null);
+
+  // Client-side search + sort over the already-loaded dealers (no refetch).
+  type SortCol = "name" | "dealer_id" | "inventory_dealer_id";
+  const [query, setQuery] = useState("");
+  const [sortBy, setSortBy] = useState<SortCol>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  function toggleSort(col: SortCol) {
+    if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortBy(col); setSortDir("asc"); }
+  }
+  const sortIndicator = (col: SortCol) => (sortBy === col ? (sortDir === "asc" ? " ▲" : " ▼") : "");
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const rows = q
+      ? dealers.filter((d) =>
+          decodeHtmlEntities(d.name ?? "").toLowerCase().includes(q) ||
+          (d.dealer_id ?? "").toLowerCase().includes(q) ||
+          (d.inventory_dealer_id ?? "").toLowerCase().includes(q))
+      : dealers.slice();
+    rows.sort((a, b) => {
+      let cmp: number;
+      if (sortBy === "name") {
+        cmp = decodeHtmlEntities(a.name ?? "").localeCompare(decodeHtmlEntities(b.name ?? ""));
+      } else {
+        cmp = String(a[sortBy] ?? "").localeCompare(String(b[sortBy] ?? ""), undefined, { numeric: true, sensitivity: "base" });
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return rows;
+  }, [dealers, query, sortBy, sortDir]);
 
   async function handleImpersonate(d: DealerRow) {
     setImpersonating(d.dealer_id);
@@ -567,6 +597,24 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
         )}
       </div>
 
+      {dealers.length > 0 && (
+        <div className="px-6 py-3 flex items-center gap-3" style={{ borderBottom: "1px solid var(--border)" }}>
+          <input
+            className="input"
+            type="search"
+            placeholder="Search name, dealer ID, or inventory ID…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{ maxWidth: 360, height: 32, fontSize: 13 }}
+          />
+          {query && (
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+              {visible.length} of {dealers.length}
+            </span>
+          )}
+        </div>
+      )}
+
       {showAddForm && (isSuperAdmin || isGroupAdmin) && (
         isSuperAdmin ? (
           <AddDealerToGroup
@@ -599,16 +647,43 @@ function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-              {["Dealer ID", "Name", "Inventory Dealer ID", "Status", "Location", "Controls Templates", "Subscription", "Labels", ""].map((h) => (
-                <th key={h} className="text-left px-4 py-2.5 font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  {h}
-                </th>
-              ))}
+              {(() => {
+                const thStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" };
+                const sortable: { col: SortCol; label: string }[] = [
+                  { col: "dealer_id", label: "Dealer ID" },
+                  { col: "name", label: "Name" },
+                  { col: "inventory_dealer_id", label: "Inventory Dealer ID" },
+                ];
+                const staticCols = ["Status", "Location", "Controls Templates", "Subscription", "Labels", ""];
+                return (
+                  <>
+                    {sortable.map(({ col, label }) => (
+                      <th
+                        key={col}
+                        onClick={() => toggleSort(col)}
+                        className="text-left px-4 py-2.5 font-semibold"
+                        style={{ ...thStyle, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}
+                        title={`Sort by ${label}`}
+                      >
+                        {label}{sortIndicator(col)}
+                      </th>
+                    ))}
+                    {staticCols.map((h) => (
+                      <th key={h} className="text-left px-4 py-2.5 font-semibold" style={thStyle}>{h}</th>
+                    ))}
+                  </>
+                );
+              })()}
             </tr>
           </thead>
           <tbody>
-            {dealers.map((d, i) => (
-              <tr key={d.id} style={{ borderBottom: i < dealers.length - 1 ? "1px solid var(--border)" : "none" }}>
+            {visible.length === 0 && (
+              <tr><td colSpan={9} className="px-4 py-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+                No dealers match &ldquo;{query}&rdquo;.
+              </td></tr>
+            )}
+            {visible.map((d, i) => (
+              <tr key={d.id} style={{ borderBottom: i < visible.length - 1 ? "1px solid var(--border)" : "none" }}>
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--text-muted)" }}>{d.dealer_id}</td>
                 <td className="px-4 py-3 font-medium">
                   <div className="flex items-center gap-1.5 group">

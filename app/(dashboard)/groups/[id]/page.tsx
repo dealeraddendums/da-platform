@@ -3,7 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow } from "@/lib/db";
-import GroupProfileCard from "@/components/GroupProfileCard";
+import GroupProfileCard, { GroupDealers } from "@/components/GroupProfileCard";
 import GroupOptionsPanel from "@/components/GroupOptionsPanel";
 
 type Props = { params: { id: string } };
@@ -63,6 +63,11 @@ export default async function GroupPage({ params }: Props) {
       />
       {(isSuperAdmin || isGroupAdmin) && (
         <GroupOptionsPanel groupId={params.id} isSuperAdmin={isSuperAdmin} />
+      )}
+      {(isSuperAdmin || isGroupAdmin) && (
+        <div className="mt-6">
+          <GroupDealers groupId={params.id} isSuperAdmin={isSuperAdmin} isGroupAdmin={isGroupAdmin} />
+        </div>
       )}
     </div>
   );
