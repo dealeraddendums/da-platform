@@ -3,6 +3,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import { fireProfileSync } from "@/lib/sync-hubspot";
 import { verifySetupCode } from "@/lib/invite-code";
+import { getAuthUserIdByEmail } from "@/lib/last-sign-in";
 import { rateLimit } from "@/lib/rate-limit";
 
 /**
@@ -88,6 +89,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── Create or resolve the auth user (idempotent) ──────────────────────────
   // Set the role in app_metadata so the JWT carries it on first sign-in (the
   // user lands AS the invited role — no leftover impersonation/ghost context).
+  // A brand-new createUser sets role (+ password) in one shot. For an existing
+  // user (a prior partial attempt) we resolve the id and patch role/password.
   const fullName = `${inv.first_name} ${inv.last_name}`;
   const { data: createData, error: createErr } = await admin.auth.admin.createUser({
     email: inv.email,
@@ -98,25 +101,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
 
   let userId = createData?.user?.id ?? null;
-
-  // generateLink resolves an already-existing user (a prior partial attempt) and
-  // gives us the magic-link token to sign the user in.
-  const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
-    type: "magiclink",
-    email: inv.email,
-  });
-  if (linkData?.user?.id) userId = linkData.user.id;
-
   if (!userId) {
-    console.error("[invite/accept] could not create or resolve user:", createErr?.message ?? linkErr?.message);
-    return NextResponse.json({ error: createErr?.message ?? "Failed to create account" }, { status: 400 });
+    // Already registered from a prior attempt — resolve without issuing a token.
+    userId = await getAuthUserIdByEmail(inv.email);
+    if (userId) {
+      await admin.auth.admin.updateUserById(userId, {
+        app_metadata: { role: inv.role },
+        ...(usingPassword ? { password } : {}),
+      }).catch(() => null);
+    }
   }
 
-  // Ensure role + password are applied even when the user already existed.
-  await admin.auth.admin.updateUserById(userId, {
-    app_metadata: { role: inv.role },
-    ...(usingPassword ? { password } : {}),
-  }).catch(() => null);
+  if (!userId) {
+    console.error("[invite/accept] could not create or resolve user:", createErr?.message);
+    return NextResponse.json({ error: createErr?.message ?? "Failed to create account" }, { status: 400 });
+  }
 
   // Upsert profile — handle_new_user trigger (migration 001) auto-creates a
   // minimal row on auth.users INSERT, so a plain .insert() races into a
@@ -146,11 +145,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .update({ accepted_at: new Date().toISOString(), setup_code_hash: null })
     .eq("id", inv.id);
 
-  if (!linkData?.properties?.hashed_token) {
-    // Account is finalized; user can sign in manually if the token is missing.
-    return NextResponse.json({ ok: true, manualLogin: true });
+  // Password path: the client signs in with the password it just set — no token
+  // needed (and issuing one here then setting a password would invalidate it).
+  if (usingPassword) {
+    return NextResponse.json({ ok: true, email: inv.email });
   }
 
+  // Code path: issue the magic-link token LAST (after all user mutations) so it
+  // can't be invalidated, then the client verifies it to establish a session.
+  const { data: linkData } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email: inv.email,
+  });
+  if (!linkData?.properties?.hashed_token) {
+    return NextResponse.json({ ok: true, manualLogin: true });
+  }
   return NextResponse.json({
     ok: true,
     tokenHash: linkData.properties.hashed_token,

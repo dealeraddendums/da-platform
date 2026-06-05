@@ -19,16 +19,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: inv } = await (admin as any)
     .from("invitations")
-    .select("id, email, first_name, last_name, role, dealer_name, expires_at, accepted_at")
+    .select("id, email, first_name, last_name, role, dealer_name, group_id, expires_at, accepted_at")
     .eq("token", token)
     .maybeSingle() as { data: {
       id: string; email: string; first_name: string; last_name: string;
-      role: string; dealer_name: string | null; expires_at: string; accepted_at: string | null;
+      role: string; dealer_name: string | null; group_id: string | null;
+      expires_at: string; accepted_at: string | null;
     } | null };
 
   if (!inv) return NextResponse.json({ error: "Invalid invitation" }, { status: 404 });
   if (inv.accepted_at) return NextResponse.json({ error: "Invitation already accepted" }, { status: 410 });
   if (new Date(inv.expires_at) < new Date()) return NextResponse.json({ error: "Invitation expired" }, { status: 410 });
+
+  // Org name for the "Invited to … as …" badge. Group invites have no
+  // dealer_name, so resolve the group's name instead.
+  let orgName = inv.dealer_name;
+  if (!orgName && inv.group_id) {
+    const { data: g } = await admin.from("groups").select("name").eq("id", inv.group_id).maybeSingle<{ name: string }>();
+    orgName = g?.name ?? null;
+  }
 
   // Wrap in { data: ... } — the signup page reads json.data.* and treats
   // an undefined data field as an invalid invitation. Returning flat
@@ -39,7 +48,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       firstName: inv.first_name,
       lastName: inv.last_name,
       role: inv.role,
-      dealerName: inv.dealer_name,
+      dealerName: orgName ?? "your organization",
     },
   });
 }

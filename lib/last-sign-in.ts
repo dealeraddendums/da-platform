@@ -13,6 +13,25 @@ import { createAdminSupabaseClient } from "@/lib/db";
 let cache: { at: number; map: Map<string, string | null> } | null = null;
 const TTL_MS = 60_000;
 
+/**
+ * Resolve an existing auth user's id by email via the GoTrue admin API. Used by
+ * invite-accept to find a user from a prior partial attempt WITHOUT issuing a
+ * sign-in token (generateLink would issue one that a later password change could
+ * invalidate). Returns null if no such user.
+ */
+export async function getAuthUserIdByEmail(email: string): Promise<string | null> {
+  const admin = createAdminSupabaseClient();
+  const target = email.toLowerCase();
+  for (let page = 1; ; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) { console.error("[get-auth-user-id] listUsers failed:", error.message); return null; }
+    const users = data?.users ?? [];
+    const hit = users.find(u => (u.email ?? "").toLowerCase() === target);
+    if (hit) return hit.id;
+    if (users.length < 1000) return null;
+  }
+}
+
 export async function lastSignInByEmail(): Promise<Map<string, string | null>> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.map;
   const admin = createAdminSupabaseClient();

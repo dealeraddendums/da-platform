@@ -96,22 +96,22 @@ function SignupPageInner() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: inviteToken, password }),
     });
-    const json = await res.json() as { tokenHash?: string; error?: string };
+    const json = await res.json() as { ok?: boolean; error?: string };
 
-    if (!res.ok || !json.tokenHash) {
+    if (!res.ok || !json.ok) {
       setError(json.error ?? "Failed to accept invitation.");
       setLoading(false);
       return;
     }
 
+    // Account finalized with this password — sign in with it directly.
     const supabase = createClient();
-    const { error: otpError } = await supabase.auth.verifyOtp({
-      token_hash: json.tokenHash,
-      type: "magiclink",
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: (email || "").trim().toLowerCase(),
+      password,
     });
-
-    if (otpError) {
-      setError(otpError.message);
+    if (signInError) {
+      setError(signInError.message);
       setLoading(false);
       return;
     }
