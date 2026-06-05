@@ -2,7 +2,7 @@
 
 **Last updated: June 5, 2026**
 
-DealerAddendums Inc. ("us", "we", or "our") operates the DealerAddendums platform at **app.dealeraddendums.com** and the **dealeraddendums.com** website (together, the "Service"). This page explains what information we collect, how we use it, and the choices you have. Terms used here have the same meaning as in our Terms of Use.
+DealerAddendums LLC ("us", "we", or "our") operates the DealerAddendums platform at **app.dealeraddendums.com** and the **dealeraddendums.com** website (together, the "Service"). This page explains what information we collect, how we use it, and the choices you have. Terms used here have the same meaning as in our Terms of Use.
 
 By using the Service, you agree to the collection and use of information in accordance with this policy. We do not sell your personal information, and we share it only as described below.
 
@@ -87,6 +87,6 @@ We may update this Privacy Policy from time to time. Changes are effective when 
 
 If you have any questions about this Privacy Policy, contact us:
 
-- Email: allan@dealeraddendums.com or support@dealeraddendums.com
-- DealerAddendums Inc., Eastsound, WA 98245, USA
+- Email: support@dealeraddendums.com
+- DealerAddendums LLC, Eastsound, WA 98245, USA
 - +1 (801) 415-9435

@@ -2,13 +2,13 @@
 
 **Last updated: June 5, 2026**
 
-Please read these Terms of Use ("Terms") carefully before using the DealerAddendums platform at **app.dealeraddendums.com** and the **dealeraddendums.com** website (together, the "Service"), operated by DealerAddendums Inc. ("us", "we", or "our").
+Please read these Terms of Use ("Terms") carefully before using the DealerAddendums platform at **app.dealeraddendums.com** and the **dealeraddendums.com** website (together, the "Service"), operated by DealerAddendums LLC ("us", "we", or "our").
 
 Your access to and use of the Service is conditioned on your acceptance of and compliance with these Terms. These Terms apply to all visitors, users, and others who access or use the Service. By accessing or using the Service, you agree to be bound by these Terms. If you disagree with any part of the Terms, you do not have permission to access the Service.
 
 ## Accounts
 
-All accounts with DealerAddendums Inc. are month-to-month. There is no long-term contract and no setup fee.
+All accounts with DealerAddendums LLC are month-to-month. There is no long-term contract and no setup fee.
 
 - **Trial accounts** are full-featured accounts with manual data import and management, provided free for a limited evaluation period. A trial is limited by time and/or print volume as shown in the app at signup (currently 30 days or 30 vehicle prints, whichever comes first). When the trial limit is reached, printing is paused until you upgrade to a paid plan.
 - **Paid subscription plans** (such as Manual, Automatic Web, and Automatic DMS) include the trial features plus unlimited vehicle printing, and the automatic plans add automatic inventory import via web feed or DMS integration. Current plan names, prices, and included features are shown in the app and may change with notice as described in "Changes" below.
@@ -24,7 +24,7 @@ You are responsible for safeguarding your account and your sign-in credentials �
 
 ## Compliance is your responsibility
 
-The Service provides tools and templates to help you create vehicle addendums, buyers guides, info sheets, labels, and related materials. You are solely responsible for ensuring that the content, pricing, options, and disclosures you create and print comply with all applicable federal, state, provincial, and local laws and regulations, and with any manufacturer or franchise requirements that apply to you. DealerAddendums Inc. does not provide legal advice and does not warrant that materials produced with the Service satisfy any particular legal or regulatory requirement.
+The Service provides tools and templates to help you create vehicle addendums, buyers guides, info sheets, labels, and related materials. You are solely responsible for ensuring that the content, pricing, options, and disclosures you create and print comply with all applicable federal, state, provincial, and local laws and regulations, and with any manufacturer or franchise requirements that apply to you. DealerAddendums LLC does not provide legal advice and does not warrant that materials produced with the Service satisfy any particular legal or regulatory requirement.
 
 ## Communications
 
@@ -40,7 +40,7 @@ The Service allows you to upload, post, store, share, and otherwise make availab
 
 By providing Content through the Service, you represent and warrant that (i) the Content is yours or you have the right to use it and to grant us the rights and license described in these Terms, and (ii) providing it does not violate the privacy, publicity, intellectual-property, contractual, or other rights of any person or entity. We may terminate the account of anyone found to be infringing a copyright.
 
-You retain your rights to the Content you provide, and you are responsible for protecting those rights. We take no responsibility and assume no liability for Content you or any third party provides through the Service. By providing Content, you grant us a license to use, host, store, reproduce, modify, display, and distribute that Content as needed to operate and provide the Service. DealerAddendums Inc. has the right, but not the obligation, to monitor and edit Content. Content provided by us through the Service is the property of DealerAddendums Inc. or used with permission, and you may not copy, modify, distribute, or reuse it for commercial purposes without our prior written permission.
+You retain your rights to the Content you provide, and you are responsible for protecting those rights. We take no responsibility and assume no liability for Content you or any third party provides through the Service. By providing Content, you grant us a license to use, host, store, reproduce, modify, display, and distribute that Content as needed to operate and provide the Service. DealerAddendums LLC has the right, but not the obligation, to monitor and edit Content. Content provided by us through the Service is the property of DealerAddendums LLC or used with permission, and you may not copy, modify, distribute, or reuse it for commercial purposes without our prior written permission.
 
 ## Your dealership and customer data
 
@@ -52,15 +52,15 @@ The Service may link to or rely on third-party websites or services that we do n
 
 ## Termination
 
-We do not prorate the current invoice for terminated accounts. To stop recurring billing, you may downgrade your account to the Free plan from **My Profile → Billing** once your balance is $0, or you may email a termination request to **allan@dealeraddendums.com**. We may suspend or terminate your account and access to the Service at any time, without prior notice or liability, at our sole discretion, including for any breach of these Terms. Provisions that by their nature should survive termination will survive — including ownership provisions, warranty disclaimers, indemnification, and limitations of liability.
+We do not prorate the current invoice for terminated accounts. To stop recurring billing, you may downgrade your account to the Free plan from **My Profile → Billing** once your balance is $0, or you may email a termination request to **support@dealeraddendums.com**. We may suspend or terminate your account and access to the Service at any time, without prior notice or liability, at our sole discretion, including for any breach of these Terms. Provisions that by their nature should survive termination will survive — including ownership provisions, warranty disclaimers, indemnification, and limitations of liability.
 
 ## Indemnification
 
-You agree to defend, indemnify, and hold harmless DealerAddendums Inc. and its licensees, licensors, employees, contractors, agents, officers, and directors from and against any claims, damages, obligations, losses, liabilities, costs, and expenses (including reasonable attorneys' fees) arising out of or related to (a) your use of and access to the Service, including by anyone using your account; (b) your breach of these Terms; or (c) Content you provide through the Service.
+You agree to defend, indemnify, and hold harmless DealerAddendums LLC and its licensees, licensors, employees, contractors, agents, officers, and directors from and against any claims, damages, obligations, losses, liabilities, costs, and expenses (including reasonable attorneys' fees) arising out of or related to (a) your use of and access to the Service, including by anyone using your account; (b) your breach of these Terms; or (c) Content you provide through the Service.
 
 ## Limitation of liability
 
-In no event shall DealerAddendums Inc., nor its directors, employees, partners, agents, suppliers, or affiliates, be liable for any indirect, incidental, special, consequential, or punitive damages — including loss of profits, data, use, goodwill, or other intangible losses — resulting from (i) your access to, use of, or inability to access or use the Service; (ii) any conduct or content of any third party on the Service; (iii) any content obtained from the Service; or (iv) unauthorized access, use, or alteration of your transmissions or content, whether based on warranty, contract, tort (including negligence), or any other legal theory, whether or not we have been advised of the possibility of such damage.
+In no event shall DealerAddendums LLC, nor its directors, employees, partners, agents, suppliers, or affiliates, be liable for any indirect, incidental, special, consequential, or punitive damages — including loss of profits, data, use, goodwill, or other intangible losses — resulting from (i) your access to, use of, or inability to access or use the Service; (ii) any conduct or content of any third party on the Service; (iii) any content obtained from the Service; or (iv) unauthorized access, use, or alteration of your transmissions or content, whether based on warranty, contract, tort (including negligence), or any other legal theory, whether or not we have been advised of the possibility of such damage.
 
 ## Disclaimer
 
@@ -82,6 +82,6 @@ We reserve the right to modify or replace these Terms at any time at our sole di
 
 If you have any questions about these Terms, contact us:
 
-- Email: allan@dealeraddendums.com or support@dealeraddendums.com
-- DealerAddendums Inc., Eastsound, WA 98245, USA
+- Email: support@dealeraddendums.com
+- DealerAddendums LLC, Eastsound, WA 98245, USA
 - +1 (801) 415-9435
