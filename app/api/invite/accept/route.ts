@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import { fireProfileSync } from "@/lib/sync-hubspot";
+import { sendOtpCode } from "@/lib/migration-invite";
 
 /**
  * POST /api/invite/accept
  * Accept an invitation: create auth user + profile, mark invitation accepted.
- * No auth required — this is called by a new user setting their password.
- * Body: { token, password }
+ * No auth required — this is called by a new user finishing setup.
+ *
+ * Body: { token, password? }
+ *   - password present  → password account; client signs in with the returned
+ *     magic-link token_hash.
+ *   - password omitted  → passwordless account; we email a 6-digit sign-in code
+ *     (the existing /onboard OTP flow) and the client verifies it. Most dealers
+ *     are non-technical, so the invite UI lets them choose this path.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: { token?: string; password?: string };
@@ -16,9 +23,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const { token, password } = body;
-  if (!token)    return NextResponse.json({ error: "token required" }, { status: 400 });
-  if (!password) return NextResponse.json({ error: "password required" }, { status: 400 });
-  if (password.length < 6) return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
+  if (!token) return NextResponse.json({ error: "token required" }, { status: 400 });
+  const passwordless = !password;
+  if (!passwordless && password!.length < 6) {
+    return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
+  }
 
   const admin = createAdminSupabaseClient();
 
@@ -53,13 +62,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     dealerTextId = dealer.dealer_id;
   }
 
-  // Create auth user (admin API skips email confirmation)
+  // Create auth user (admin API skips email confirmation). Set the role in
+  // app_metadata so the JWT carries it on first sign-in (the user lands AS the
+  // invited role — no leftover impersonation/ghost context). Passwordless
+  // accounts are created with no password and sign in via the emailed OTP code.
   const fullName = `${inv.first_name} ${inv.last_name}`;
   const { data: authData, error: authErr } = await admin.auth.admin.createUser({
     email: inv.email,
-    password,
+    ...(passwordless ? {} : { password }),
     email_confirm: true,
     user_metadata: { full_name: fullName },
+    app_metadata: { role: inv.role },
   });
 
   if (authErr || !authData.user) {
@@ -95,7 +108,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (admin as any).from("invitations").update({ accepted_at: new Date().toISOString() }).eq("id", inv.id);
 
-  // Sign the user in and return session tokens
+  // Passwordless: email a 6-digit code; the client collects it and calls
+  // verifyOtp({ email, token, type: "email" }) to establish a real session.
+  if (passwordless) {
+    try {
+      await sendOtpCode(inv.email, { purpose: "onboard", fullName, entityName: "your account" });
+    } catch (e) {
+      console.error("[invite/accept] sendOtpCode failed:", e instanceof Error ? e.message : e);
+      return NextResponse.json({ error: "Account created, but we couldn't email your sign-in code. Please use “Email me a code” on the login page." }, { status: 502 });
+    }
+    return NextResponse.json({ ok: true, passwordless: true, email: inv.email });
+  }
+
+  // Password path: sign the user in via a magic-link token_hash.
   const { data: signInData, error: signInErr } = await admin.auth.admin.generateLink({
     type: "magiclink",
     email: inv.email,

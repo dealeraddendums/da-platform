@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
+import { lastSignInByEmail } from "@/lib/last-sign-in";
 import type { ProfileRow } from "@/lib/db";
 
 type Params = { params: { id: string } };
@@ -40,25 +41,14 @@ export async function GET(
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
 
-  // profiles.last_login is a custom column the platform never wired into the
-  // sign-in path, so it always reads NULL. Supabase Auth maintains
-  // auth.users.last_sign_in_at automatically — read it directly via the
-  // admin schema and merge it in.
-  const ids = (data ?? []).map(r => r.id as string);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: authRows } = ids.length > 0
-    ? await (admin as any)
-        .schema("auth")
-        .from("users")
-        .select("id, last_sign_in_at")
-        .in("id", ids) as { data: Array<{ id: string; last_sign_in_at: string | null }> | null }
-    : { data: [] as Array<{ id: string; last_sign_in_at: string | null }> };
-  const lastSignInById = new Map<string, string | null>();
-  for (const r of authRows ?? []) lastSignInById.set(r.id, r.last_sign_in_at ?? null);
-
+  // Supabase Auth maintains auth.users.last_sign_in_at, but the `auth` schema
+  // isn't exposed to PostgREST (admin.schema("auth") returns nothing), and
+  // matching by profiles.id misses ETL/legacy profiles whose id != auth id.
+  // Resolve via the GoTrue admin API, keyed by EMAIL.
+  const lastSignIn = await lastSignInByEmail();
   const enriched = (data ?? []).map(r => ({
     ...r,
-    last_sign_in_at: lastSignInById.get(r.id as string) ?? null,
+    last_sign_in_at: lastSignIn.get((r.email ?? "").toLowerCase()) ?? null,
   }));
 
   // Pending invitations — created but not yet accepted, not expired. Without

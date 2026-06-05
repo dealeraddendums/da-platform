@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { lastSignInByEmail } from "@/lib/last-sign-in";
 import type { UserRole } from "@/lib/db";
 
 const DEALER_ROLES: UserRole[] = ["dealer_admin", "dealer_user", "dealer_restricted"];
@@ -82,22 +83,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
 
     const rows = profiles ?? [];
-    const userIds = rows.map(r => r.id);
 
-    type AuthUserRow = { id: string; last_sign_in_at: string | null };
-    const authUsersRes = userIds.length > 0
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ? await ((admin as any).schema("auth").from("users").select("id, last_sign_in_at").in("id", userIds) as Promise<{ data: AuthUserRow[] | null }>)
-      : { data: [] as AuthUserRow[] };
-
-    const lastSignInMap = new Map((authUsersRes.data ?? []).map(u => [u.id, u.last_sign_in_at]));
+    const lastSignIn = await lastSignInByEmail();
 
     const users = rows.map(p => ({
       ...p,
       group_id:           null,
       dealer_name:        null,
       group_name:         null,
-      last_sign_in_at:    lastSignInMap.get(p.id) ?? null,
+      last_sign_in_at:    lastSignIn.get((p.email ?? "").toLowerCase()) ?? null,
       hubspot_contact_id: null,
     }));
 
@@ -146,12 +140,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ? await admin.from("dealers").select("dealer_id, name").in("dealer_id", dealerIds)
       : { data: [] as { dealer_id: string; name: string }[] };
     const dealerMap = new Map((dealerRows ?? []).map(d => [d.dealer_id, d.name]));
+    const lastSignIn = await lastSignInByEmail();
 
     const users = rows.map(p => ({
       ...p,
       dealer_name: p.dealer_id ? (dealerMap.get(p.dealer_id) ?? null) : null,
       group_name:  null,
-      last_sign_in_at: null,
+      last_sign_in_at: lastSignIn.get((p.email ?? "").toLowerCase()) ?? null,
       hubspot_contact_id: null,
     }));
 
@@ -185,15 +180,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const rows = profiles ?? [];
 
-  const userIds   = rows.map(r => r.id);
   const dealerIds = Array.from(new Set(rows.filter(p => p.dealer_id).map(p => p.dealer_id as string)));
   const groupIds  = Array.from(new Set(rows.filter(p => p.group_id).map(p => p.group_id  as string)));
-
-  type AuthUserRow = { id: string; last_sign_in_at: string | null };
-  const authUsersQuery = userIds.length > 0
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ? (admin as any).schema("auth").from("users").select("id, last_sign_in_at").in("id", userIds) as Promise<{ data: AuthUserRow[] | null }>
-    : Promise.resolve({ data: [] as AuthUserRow[] });
 
   // hubspot_contact_id is stored directly in the Supabase profiles table
   const hubspotContactMap = new Map(
@@ -202,25 +190,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .map(p => [p.email!.toLowerCase(), p.hubspot_contact_id as unknown as number])
   );
 
-  const [dealerRes, groupRes, authUsersRes] = await Promise.all([
+  const [dealerRes, groupRes, lastSignIn] = await Promise.all([
     dealerIds.length > 0
       ? admin.from("dealers").select("dealer_id, name").in("dealer_id", dealerIds)
       : Promise.resolve({ data: [] as { dealer_id: string; name: string }[] }),
     groupIds.length > 0
       ? admin.from("groups").select("id, name").in("id", groupIds)
       : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-    authUsersQuery,
+    lastSignInByEmail(),
   ]);
 
-  const dealerMap     = new Map((dealerRes.data     ?? []).map(d => [d.dealer_id, d.name]));
-  const groupMap      = new Map((groupRes.data      ?? []).map(g => [g.id,        g.name]));
-  const lastSignInMap = new Map((authUsersRes.data   ?? []).map(u => [u.id,        u.last_sign_in_at]));
+  const dealerMap = new Map((dealerRes.data ?? []).map(d => [d.dealer_id, d.name]));
+  const groupMap  = new Map((groupRes.data  ?? []).map(g => [g.id,        g.name]));
 
   const users = rows.map(p => ({
     ...p,
     dealer_name:        p.dealer_id ? (dealerMap.get(p.dealer_id) ?? null) : null,
     group_name:         p.group_id  ? (groupMap.get(p.group_id)   ?? null) : null,
-    last_sign_in_at:    lastSignInMap.get(p.id) ?? null,
+    last_sign_in_at:    lastSignIn.get((p.email ?? "").toLowerCase()) ?? null,
     hubspot_contact_id: hubspotContactMap.get(p.email?.toLowerCase() ?? "") ?? null,
   }));
 
