@@ -1,0 +1,26 @@
+name: Billing Link Worklist (read-only)
+
+# Manual one-shot. Produces the two human-decision slices (Greenway collisions +
+# self-billed 1:1 soft candidates) on the prod self-hosted runner. No DB writes.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: billing-worklist
+  cancel-in-progress: false
+
+jobs:
+  worklist:
+    runs-on: self-hosted
+    steps:
+      - name: Run read-only billing worklist on prod
+        run: |
+          set -e
+          export PATH="/usr/bin:/usr/local/bin:$PATH"
+          cd /var/www/da-platform
+          git fetch origin main
+          git checkout origin/main -- scripts/billing-link-worklist.ts
+          echo "===== WORKLIST OUTPUT ====="
+          npx tsx scripts/billing-link-worklist.ts
+          echo "===== CSV: collisions ====="; cat worklist-collisions.csv || true
+          echo "===== CSV: soft 1:1 ====="; cat worklist-soft-1to1.csv || true
