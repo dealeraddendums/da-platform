@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 type Params = { params: { id: string } };
 
@@ -8,7 +9,9 @@ type Params = { params: { id: string } };
 export async function PATCH(req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
-  if (claims.role === "dealer_user" || claims.role === "group_admin") {
+  // Write action: dealer_user / dealer_restricted are read-only. dealer_admin,
+  // a switched-in group_admin (active dealer), and super_admin may edit.
+  if (claims.role === "dealer_user" || claims.role === "dealer_restricted") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -20,9 +23,9 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     .maybeSingle();
 
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (claims.role === "dealer_admin" && existing.dealer_id !== claims.dealer_id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // Authorize against the row's dealer: dealer_admin own, group_admin in-group, super_admin any.
+  const authz = await authorizeDealerAction(claims, existing.dealer_id as string);
+  if (!authz.ok) return authz.response;
 
   let body: { name?: string; width_in?: number; height_in?: number; background_url?: string | null; doc_type?: string };
   try { body = await req.json(); } catch {
@@ -53,7 +56,9 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
 export async function DELETE(_req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
-  if (claims.role === "dealer_user" || claims.role === "group_admin") {
+  // Write action: dealer_user / dealer_restricted are read-only. dealer_admin,
+  // a switched-in group_admin (active dealer), and super_admin may delete.
+  if (claims.role === "dealer_user" || claims.role === "dealer_restricted") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -65,9 +70,9 @@ export async function DELETE(_req: NextRequest, { params }: Params): Promise<Nex
     .maybeSingle();
 
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (claims.role === "dealer_admin" && existing.dealer_id !== claims.dealer_id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // Authorize against the row's dealer: dealer_admin own, group_admin in-group, super_admin any.
+  const authz = await authorizeDealerAction(claims, existing.dealer_id as string);
+  if (!authz.ok) return authz.response;
 
   await admin.from("dealer_custom_sizes").delete().eq("id", params.id);
   return NextResponse.json({ ok: true });

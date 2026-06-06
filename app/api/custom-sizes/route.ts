@@ -2,37 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerCustomSizeRow } from "@/lib/db";
-
-async function resolveDealerId(req: NextRequest, claims: { role: string; dealer_id?: string | null }): Promise<string | null> {
-  // Dealer roles are pinned to their own dealer; everyone else supplies ?dealer_id=
-  // (group_admin is group-checked in GET, super_admin is unrestricted).
-  if (claims.role === "dealer_admin" || claims.role === "dealer_user") return claims.dealer_id ?? null;
-  const param = req.nextUrl.searchParams.get("dealer_id");
-  return param ?? null;
-}
+import { resolveDealerForRequest } from "@/lib/dealer-authz";
 
 /** GET /api/custom-sizes?dealer_id= — list dealer's custom sizes */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  const dealerId = await resolveDealerId(req, claims);
-  if (!dealerId) return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
+  const authz = await resolveDealerForRequest(claims, req.nextUrl.searchParams.get("dealer_id"));
+  if (!authz.ok) return authz.response;
+  const dealerId = authz.dealerId;
 
   const admin = createAdminSupabaseClient();
-
-  // group_admin may only read dealers in their own group (super_admin bypasses).
-  if (claims.role === "group_admin") {
-    const { data: dealer } = await admin
-      .from("dealers")
-      .select("group_id")
-      .eq("dealer_id", dealerId)
-      .maybeSingle<{ group_id: string | null }>();
-    if (!dealer || dealer.group_id !== claims.group_id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
-
   const { data, error: dbErr } = await admin
     .from("dealer_custom_sizes")
     .select("*")
@@ -50,7 +31,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
-  if (claims.role === "dealer_user" || claims.role === "group_admin") {
+  // Write action: dealer_user / dealer_restricted are read-only. dealer_admin,
+  // a switched-in group_admin (active dealer), and super_admin may create.
+  if (claims.role === "dealer_user" || claims.role === "dealer_restricted") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -70,10 +53,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "width_in must be between 0 and 24 inches" }, { status: 400 });
   }
 
-  const dealerId = claims.role === "dealer_admin"
-    ? (claims.dealer_id ?? "")
-    : (body.dealer_id ?? "");
-  if (!dealerId) return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
+  // dealer_admin → own; group_admin → active dealer (group-verified); super_admin → body.dealer_id.
+  const authz = await resolveDealerForRequest(claims, body.dealer_id);
+  if (!authz.ok) return authz.response;
+  const dealerId = authz.dealerId;
 
   const admin = createAdminSupabaseClient();
   const { data, error: dbErr } = await admin

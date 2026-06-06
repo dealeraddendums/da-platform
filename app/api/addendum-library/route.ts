@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { AddendumLibraryRow, VehicleOptionRow } from "@/lib/db";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 /**
  * GET /api/addendum-library?dealer_id=XXX&page=1&per_page=25
@@ -12,31 +13,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (error) return error;
 
   const url = req.nextUrl;
-  const dealerId = url.searchParams.get("dealer_id") ?? claims.dealer_id;
-  if (!dealerId) {
-    return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
-  }
-
-  // Scope check: non-admins can only fetch their own dealer
-  if (
-    (claims.role === "dealer_admin" || claims.role === "dealer_user") &&
-    claims.dealer_id !== dealerId
-  ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  // group_admin may only read dealers in their own group (super_admin bypasses).
-  if (claims.role === "group_admin") {
-    const scopeAdmin = createAdminSupabaseClient();
-    const { data: dealer } = await scopeAdmin
-      .from("dealers")
-      .select("group_id")
-      .eq("dealer_id", dealerId)
-      .maybeSingle<{ group_id: string | null }>();
-    if (!dealer || dealer.group_id !== claims.group_id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  // dealer roles → own; group_admin → in-group; super_admin → any. Falls back to
+  // the caller's effective dealer when no ?dealer_id= is supplied.
+  const authz = await authorizeDealerAction(claims, url.searchParams.get("dealer_id") ?? claims.dealer_id);
+  if (!authz.ok) return authz.response;
+  const dealerId = authz.dealerId;
 
   const page = parseInt(url.searchParams.get("page") ?? "1", 10);
   const perPage = Math.min(parseInt(url.searchParams.get("per_page") ?? "25", 10), 100);

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 // DA Platform SKU -> da-billing labelType slug. da-billing's price
 // resolver keys off these slugs (size + finish), not our SKUs or the
@@ -94,7 +95,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     dealerUuid = drow?.id ?? null;
   } else if (claims.role === 'super_admin' || claims.role === 'group_admin') {
     const param = req.nextUrl.searchParams.get('dealer_id');
-    if (param) dealerUuid = param;
+    if (param) {
+      // group_admin may only read a dealer (by UUID) in their own group.
+      if (claims.role === 'group_admin') {
+        const { data: drow } = await admin
+          .from('dealers')
+          .select('group_id')
+          .eq('id', param)
+          .maybeSingle<{ group_id: string | null }>();
+        if (!drow || drow.group_id !== claims.group_id) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+      }
+      dealerUuid = param;
+    }
   }
 
   if (!dealerUuid) {
@@ -150,9 +164,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // for the Orders tab.
   const { data: dealerCfg } = await admin
     .from('dealers')
-    .select('name, primary_contact, primary_contact_email, labels_billed_to, group_id, billing_customer_id, internal_id')
+    .select('dealer_id, name, primary_contact, primary_contact_email, labels_billed_to, group_id, billing_customer_id, internal_id')
     .eq('id', dealerId)
     .maybeSingle<{
+      dealer_id: string;
       name: string;
       primary_contact: string | null;
       primary_contact_email: string | null;
@@ -161,6 +176,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       billing_customer_id: string | null;
       internal_id: string | null;
     }>();
+
+  // Authorize the acting user against the target dealer: dealer roles → own,
+  // group_admin → in-group, super_admin → any. (Previously the body's dealerId
+  // was unverified for every role.)
+  const labelsAuthz = await authorizeDealerAction(claims, dealerCfg?.dealer_id ?? null);
+  if (!labelsAuthz.ok) return labelsAuthz.response;
+
   const labelsBilledTo: 'dealer' | 'group' = dealerCfg?.labels_billed_to === 'group' ? 'group' : 'dealer';
   const billedToGroupId = labelsBilledTo === 'group' ? (dealerCfg?.group_id ?? null) : null;
 

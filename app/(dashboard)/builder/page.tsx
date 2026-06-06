@@ -98,10 +98,12 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
     phone: dealerData.phone ?? null,
   } : undefined;
 
-  // dealer_admin can add custom sizes (POST /api/custom-sizes already
-  // permits them and auto-scopes to claims.dealer_id). dealer_user +
-  // group_admin stay excluded to match the API's 403. canAdminUpload
-  // remains super_admin-only — that gates the platform background
+  // Custom sizes: dealer_admin (own dealer), super_admin, and a switched-in
+  // group_admin (active_dealer_id set → acting as that in-group dealer, which
+  // POST /api/custom-sizes now authorizes). dealer_user stays excluded.
+  // canAdminUpload remains super_admin-only — that gates the platform background
   // library, a separate concern from dealer-scoped sizes.
-  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={role === 'super_admin' || role === 'dealer_admin'} canAdminUpload={role === 'super_admin'} />;
+  const canAddCustomSize = role === 'super_admin' || role === 'dealer_admin'
+    || (isGroupAdmin && !!profile?.active_dealer_id);
+  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={canAddCustomSize} canAdminUpload={role === 'super_admin'} />;
 }

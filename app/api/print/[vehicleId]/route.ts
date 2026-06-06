@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { AddendumHistoryInsert } from "@/lib/db";
 import { enforceCanPrint } from "@/lib/print-eligibility";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 type Params = { params: { vehicleId: string } };
 
@@ -47,12 +48,10 @@ export async function POST(
 
   const dealerId = dv.dealer_id;
 
-  if (
-    (claims.role === "dealer_admin" || claims.role === "dealer_user") &&
-    claims.dealer_id !== dealerId
-  ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // dealer roles → own; group_admin → in-group (the dealer they're switched into);
+  // super_admin → any. Previously group_admin fell through with no group check.
+  const authz = await authorizeDealerAction(claims, dealerId);
+  if (!authz.ok) return authz.response;
 
   // Print-eligibility gate (super_admin bypasses). Blocks Free / Downgraded
   // and trial-over-allowance dealers with a 403 + the canonical upgrade
@@ -124,12 +123,9 @@ export async function GET(
     return NextResponse.json({ error: "Vehicle not found" }, { status: 404 });
   }
 
-  if (
-    (claims.role === "dealer_admin" || claims.role === "dealer_user") &&
-    claims.dealer_id !== dv.dealer_id
-  ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // dealer roles → own; group_admin → in-group; super_admin → any.
+  const authz = await authorizeDealerAction(claims, dv.dealer_id as string);
+  if (!authz.ok) return authz.response;
 
   const { data, error: err } = await admin
     .from("print_history")

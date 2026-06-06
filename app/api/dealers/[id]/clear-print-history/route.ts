@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { VehicleAuditLogInsert } from "@/lib/db";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 /**
  * POST /api/dealers/[dealerId]/clear-print-history
  * Deletes print_history and addendum_data for active vehicles of a dealer.
- * dealer_admin: own dealer only. super_admin: any dealer.
+ * dealer_admin: own dealer. super_admin: any. group_admin: a dealer in their group
+ * (the member dealer they're switched into).
  */
 export async function POST(
   req: NextRequest,
@@ -18,14 +20,9 @@ export async function POST(
   const dealerId = params.id;
   if (!dealerId) return NextResponse.json({ error: "dealerId required" }, { status: 400 });
 
-  // dealer_admin can only clear their own dealer
-  if (claims.role === "dealer_admin" || claims.role === "dealer_user") {
-    if (claims.dealer_id !== dealerId) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-  } else if (claims.role !== "super_admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // dealer_admin/dealer_user → own; group_admin → in-group; super_admin → any.
+  const authz = await authorizeDealerAction(claims, dealerId);
+  if (!authz.ok) return authz.response;
 
   const admin = createAdminSupabaseClient();
 

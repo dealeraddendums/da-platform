@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { uploadLogo } from "@/lib/s3-upload";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 import sharp from "sharp";
 
 type Params = { params: { id: string } };
@@ -32,10 +33,9 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
 
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
 
-  const isDealer = claims.role === "dealer_admin" || claims.role === "dealer_user";
-  if (isDealer && claims.dealer_id !== dealer.dealer_id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // dealer roles → own; group_admin → in-group; super_admin → any.
+  const authz = await authorizeDealerAction(claims, dealer.dealer_id as string);
+  if (!authz.ok) return authz.response;
 
   return NextResponse.json({ logo_url: dealer.logo_url ?? null });
 }
@@ -62,10 +62,9 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
   }
 
-  const isDealer = claims.role === "dealer_admin" || claims.role === "dealer_user";
-  if (isDealer && claims.dealer_id !== dealer.dealer_id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // dealer roles → own; group_admin → in-group; super_admin → any.
+  const authz = await authorizeDealerAction(claims, dealer.dealer_id as string);
+  if (!authz.ok) return authz.response;
 
   let formData: FormData;
   try {
@@ -146,10 +145,9 @@ export async function DELETE(_req: NextRequest, { params }: Params): Promise<Nex
     return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
   }
 
-  const isDealer = claims.role === "dealer_admin" || claims.role === "dealer_user";
-  if (isDealer && claims.dealer_id !== dealer.dealer_id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // dealer roles → own; group_admin → in-group; super_admin → any.
+  const authz = await authorizeDealerAction(claims, dealer.dealer_id as string);
+  if (!authz.ok) return authz.response;
 
   await admin.from("dealers").update({ logo_url: null }).eq("id", dealer.id);
   return NextResponse.json({ ok: true });

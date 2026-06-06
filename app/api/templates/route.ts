@@ -1,47 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import type { JwtClaims } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-
-async function resolveDealerId(
-  req: NextRequest,
-  claims: JwtClaims
-): Promise<{ dealerId: string } | { dealerError: NextResponse }> {
-  if (claims.role === "dealer_admin" || claims.role === "dealer_user") {
-    if (!claims.dealer_id) {
-      return { dealerError: NextResponse.json({ error: "No dealer assigned" }, { status: 403 }) };
-    }
-    return { dealerId: claims.dealer_id };
-  }
-  // Ghost mode: super_admin browsing in a dealer context via ghost cookie
-  if (claims.role === "super_admin" && claims.dealer_id) {
-    return { dealerId: claims.dealer_id };
-  }
-  // group_admin acting as a member dealer: getJwtClaims resolves claims.dealer_id
-  // from the selected active_dealer_id (group-verified when chosen). Mirror the
-  // super_admin ghost branch and use it so the Builder save works without a
-  // ?dealer_id= param, re-checking group ownership defensively.
-  if (claims.role === "group_admin" && claims.dealer_id) {
-    const admin = createAdminSupabaseClient();
-    const { data: dealer } = await admin.from("dealers").select("group_id").eq("dealer_id", claims.dealer_id).single();
-    if (!dealer || dealer.group_id !== claims.group_id) {
-      return { dealerError: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
-    }
-    return { dealerId: claims.dealer_id };
-  }
-  const paramId = req.nextUrl.searchParams.get("dealer_id");
-  if (!paramId) {
-    return { dealerError: NextResponse.json({ error: "dealer_id param required" }, { status: 400 }) };
-  }
-  if (claims.role === "group_admin") {
-    const admin = createAdminSupabaseClient();
-    const { data: dealer } = await admin.from("dealers").select("group_id").eq("dealer_id", paramId).single();
-    if (!dealer || dealer.group_id !== claims.group_id) {
-      return { dealerError: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
-    }
-  }
-  return { dealerId: paramId };
-}
+import { resolveDealerForRequest } from "@/lib/dealer-authz";
 
 /**
  * GET /api/templates?dealer_id=xxx
@@ -55,8 +15,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  const resolved = await resolveDealerId(req, claims);
-  if ("dealerError" in resolved) return resolved.dealerError;
+  const resolved = await resolveDealerForRequest(claims, req.nextUrl.searchParams.get("dealer_id"));
+  if (!resolved.ok) return resolved.response;
   const { dealerId } = resolved;
 
   const admin = createAdminSupabaseClient();
@@ -145,8 +105,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const resolved = await resolveDealerId(req, claims);
-  if ("dealerError" in resolved) return resolved.dealerError;
+  const resolved = await resolveDealerForRequest(claims, req.nextUrl.searchParams.get("dealer_id"));
+  if (!resolved.ok) return resolved.response;
   const { dealerId } = resolved;
 
   let body: { name?: string; document_type?: string; vehicle_types?: string[]; template_json?: Record<string, unknown> };

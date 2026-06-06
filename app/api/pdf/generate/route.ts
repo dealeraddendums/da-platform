@@ -7,6 +7,7 @@ import { signPdfKey, buildPdfKey } from "@/lib/s3-upload";
 import { useService as usePdfService, renderViaService, enqueueGenerate, awaitJobAndFetch, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import { enforceCanPrint } from "@/lib/print-eligibility";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 type BgOption = { option_name: string; option_price?: string; description?: string | null; required?: boolean };
 
@@ -215,12 +216,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "Vehicle not found in dealer inventory" }, { status: 404 });
     }
 
-    const effectiveDealerId = (claims as Record<string, unknown>).impersonating_dealer_id as string | null
-      ?? claims.dealer_id;
-    const isDealer = claims.role === "dealer_admin" || claims.role === "dealer_user";
-    if (isDealer && effectiveDealerId && dv.dealer_id !== effectiveDealerId) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    // dealer roles → own; group_admin → in-group (dealer they're switched into);
+    // super_admin → any. Previously group_admin fell through with no group check.
+    const authz = await authorizeDealerAction(claims, dv.dealer_id as string);
+    if (!authz.ok) return authz.response;
 
     // Print-eligibility gate (super_admin bypasses).
     const blocked = await enforceCanPrint(dv.dealer_id, claims);
