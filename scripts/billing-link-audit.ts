@@ -130,45 +130,54 @@ async function platAll(table: string, cols: string): Promise<any[]> {
     if (hit) console.log(`\n[ids] ${hit.e.name}:`, { internal_id: hit.e.internal_id, legacy_id: hit.e.legacy_id, billing_id: hit.e.billing_id, template_id: hit.e.template_id, billing_customer_id: hit.e.billing_customer_id });
   }
 
-  // candidate platform "client id" fields (FreshBooks/Aurora legacy)
-  const platClientId = (e: any) =>
-    e.internal_id ?? e.legacy_id ?? e.legacy_group_id ?? e.aurora_id ?? e.freshbooks_id ?? null;
+  // Primary backfill key = platform billing_id == da-billing customer.id (UUID),
+  // confirmed exact + near-unique by the probe above. email/name are recorded only
+  // as soft signals (NOT used for backfill — too many collisions).
+  // billing_id collisions (same da customer claimed by >1 platform entity) → flag.
+  const billingIdCount = new Map<string, number>();
+  for (const e of [...groups, ...dealers]) {
+    if (e.billing_id && custById.has(e.billing_id)) billingIdCount.set(e.billing_id, (billingIdCount.get(e.billing_id) ?? 0) + 1);
+  }
 
-  type Cat = "synced" | "link-missing" | "genuinely-new" | "mismatch-orphan";
+  type Cat = "synced" | "link-missing" | "link-missing-collision" | "genuinely-new" | "mismatch-orphan";
   const rows: any[] = [];
-  const keyHits = { link: 0, clientId: 0, email: 0, name: 0 };
 
   function classify(kind: "group" | "dealer", e: any) {
     const pid = e.id;
-    const cid = platClientId(e);
     const link = e.billing_customer_id as string | null;
+    const billingId = e.billing_id as string | null;
     const email = kind === "dealer" ? e.primary_contact_email : (e.billing_email ?? e.email);
     const name = e.name;
     const createdAt = e.created_at ?? null;
 
-    // match by each key independently (for match-rate reporting)
-    const mLink = link && custById.has(link) ? custById.get(link) : null;
-    const mClient = cid != null && byClientId.has(String(cid)) ? byClientId.get(String(cid)) : null;
+    const linkCust = link && custById.has(link) ? custById.get(link) : null;
+    const billCust = billingId && custById.has(billingId) ? custById.get(billingId) : null;
     const mEmail = email && byEmail.has(norm(email)) ? byEmail.get(norm(email)) : null;
     const mName = name && byCompanyName.has(norm(name)) ? byCompanyName.get(norm(name)) : null;
-    if (mLink) keyHits.link++;
-    if (mClient) keyHits.clientId++;
-    if (mEmail) keyHits.email++;
-    if (mName) keyHits.name++;
-
-    // best match for backfill (priority: clientId > email > name)
-    const best = mClient ?? mEmail ?? mName ?? null;
-    const matchKey = mClient ? "clientId" : mEmail ? "email" : mName ? "name" : "";
 
     let cat: Cat;
-    if (link) cat = mLink ? "synced" : "mismatch-orphan";
-    else if (best) cat = "link-missing";
-    else cat = "genuinely-new";
+    let matchKey = "";
+    let matched = "";
+    if (link) {
+      cat = linkCust ? "synced" : "mismatch-orphan";
+      matchKey = linkCust ? "billing_customer_id" : "";
+      matched = link;
+    } else if (billCust) {
+      const collides = (billingIdCount.get(billingId!) ?? 0) > 1;
+      cat = collides ? "link-missing-collision" : "link-missing";
+      matchKey = "billing_id";
+      matched = billingId!;
+    } else {
+      cat = "genuinely-new";
+      matched = "";
+    }
 
     rows.push({
-      kind, name, platform_id: pid, client_id: cid ?? "", billing_customer_id: link ?? "",
-      matched_dabilling_id: (mLink ?? best)?.id ?? "", da_client_id: clientIdByCustomer.get((mLink ?? best)?.id) ?? "",
-      email: email ?? "", category: cat, match_key: link ? (mLink ? "link" : "") : matchKey, created_at: createdAt ?? "",
+      kind, name, platform_id: pid, internal_id: e.internal_id ?? "", billing_id: billingId ?? "",
+      billing_customer_id: link ?? "", matched_dabilling_id: matched,
+      da_client_id: clientIdByCustomer.get(matched) ?? "", email: email ?? "",
+      soft_email_match: mEmail?.id ?? "", soft_name_match: mName?.id ?? "",
+      category: cat, match_key: matchKey, account_type: e.account_type ?? "", created_at: createdAt ?? "",
     });
   }
 
@@ -178,29 +187,36 @@ async function platAll(table: string, cols: string): Promise<any[]> {
   const tally = (kind: string) => {
     const r = rows.filter((x) => kind === "all" || x.kind === kind);
     const c = (k: string) => r.filter((x) => x.category === k).length;
-    return { total: r.length, synced: c("synced"), linkMissing: c("link-missing"), new: c("genuinely-new"), mismatch: c("mismatch-orphan") };
+    // genuinely-new split: does a soft email/name signal exist (worth manual review) or none?
+    const newRows = r.filter((x) => x.category === "genuinely-new");
+    return {
+      total: r.length, synced: c("synced"),
+      linkMissing_billingId: c("link-missing"), linkMissing_collision: c("link-missing-collision"),
+      new_noMatch: newRows.filter((x) => !x.soft_email_match && !x.soft_name_match).length,
+      new_softSignal: newRows.filter((x) => x.soft_email_match || x.soft_name_match).length,
+      mismatch: c("mismatch-orphan"),
+    };
   };
 
-  console.log("=== Categories ===");
+  console.log("\n=== Categories (primary key = billing_id → da-billing customer.id) ===");
   for (const k of ["group", "dealer", "all"]) console.table({ [k]: tally(k) });
 
-  console.log("\n=== Match rate per key (platform entities resolving to a da-billing customer) ===");
-  const N = rows.length;
-  for (const [k, v] of Object.entries(keyHits)) console.log(`  ${k.padEnd(10)} ${v}/${N}  (${((v / N) * 100).toFixed(1)}%)`);
-
-  // orphans: da-billing customers with no platform match by any key
+  // orphans: active da-billing customers not linked by any platform billing_id
   const matchedBillIds = new Set(rows.map((r) => r.matched_dabilling_id).filter(Boolean));
   const orphanCustomers = customers.filter((c) => !c.archived && !matchedBillIds.has(c.id));
-  console.log(`\nda-billing active customers with NO platform match: ${orphanCustomers.length}`);
+  console.log(`\nactive da-billing customers NOT linked from any platform billing_id: ${orphanCustomers.length} (of ${customers.filter(c=>!c.archived).length} active) — expected (member dealers bill via group template + zombies)`);
+
+  // billing_id collisions (must be resolved manually before backfill)
+  const collisionRows = rows.filter((r) => r.category === "link-missing-collision");
+  console.log(`\nbilling_id COLLISIONS (>1 platform entity → same da customer): ${collisionRows.length}`);
+  for (const r of collisionRows) console.log(`   ${r.kind} "${r.name}" (${r.platform_id}) → ${r.matched_dabilling_id}`);
 
   // Dealer General spotlight
   const dg = rows.find((r) => norm(r.name).includes("dealergeneral"));
-  console.log("\n=== Dealer General ===", dg ?? "(not found by name)");
-  const dgCust = customers.find((c) => norm(c.company).includes("dealergeneral") || norm(c.name).includes("dealergeneral"));
-  if (dgCust) console.log("  da-billing customer:", { id: dgCust.id, company: dgCust.company, clientId: clientIdByCustomer.get(dgCust.id), discount: dgCust.subscriptionDiscount, archived: dgCust.archived });
+  console.log("\n=== Dealer General ===", dg ?? "(not found)");
 
   // CSV (gitignored: *.csv)
-  const headers = ["kind","name","platform_id","client_id","billing_customer_id","matched_dabilling_id","da_client_id","email","category","match_key","created_at"];
+  const headers = ["kind","name","platform_id","internal_id","billing_id","billing_customer_id","matched_dabilling_id","da_client_id","email","soft_email_match","soft_name_match","category","match_key","account_type","created_at"];
   const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const csv = [headers.join(","), ...rows.map((r) => headers.map((h) => esc(r[h])).join(","))].join("\n");
   const { writeFileSync } = await import("node:fs");
