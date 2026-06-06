@@ -16,6 +16,51 @@ export function hubspotConfigured(): boolean {
   return Boolean(process.env.HUBSPOT_PRIVATE_APP_TOKEN);
 }
 
+/**
+ * Create a Note (engagement) and associate it to a Contact and (optionally) a
+ * Company. Used to log a full Help conversation transcript on close — one note
+ * per conversation, not per message. Throws on failure (caller logs to
+ * hubspot_sync_errors). Default HubSpot association type ids: note→contact 202,
+ * note→company 190.
+ */
+export async function createConversationNote(args: {
+  contactId: string;
+  companyId?: string | null;
+  body: string;
+}): Promise<{ id: string }> {
+  const associations: unknown[] = [
+    { to: { id: args.contactId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 202 }] },
+  ];
+  if (args.companyId) {
+    associations.push({ to: { id: args.companyId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 190 }] });
+  }
+  const res = await fetch(`${BASE}/objects/notes`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      properties: { hs_timestamp: new Date().toISOString(), hs_note_body: args.body.slice(0, 65000) },
+      associations,
+    }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new HubspotError(res.status, `createConversationNote ${res.status}`, text);
+  return { id: (JSON.parse(text) as { id: string }).id };
+}
+
+/**
+ * Update an existing conversation Note's body (upsert path — captures
+ * reopen-and-continue without creating a second note). Associations are
+ * unchanged; we only refresh hs_note_body. Throws on failure.
+ */
+export async function updateConversationNote(noteId: string, body: string): Promise<void> {
+  const res = await fetch(`${BASE}/objects/notes/${encodeURIComponent(noteId)}`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ properties: { hs_note_body: body.slice(0, 65000) } }),
+  });
+  if (!res.ok) throw new HubspotError(res.status, `updateConversationNote ${noteId} ${res.status}`, await readBody(res));
+}
+
 function authHeaders(extra: Record<string, string> = {}): HeadersInit {
   const tok = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
   if (!tok) throw new Error("HUBSPOT_PRIVATE_APP_TOKEN not set");

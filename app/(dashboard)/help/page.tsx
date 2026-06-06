@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import DOMPurify from "isomorphic-dompurify";
+import { sanitizeHelpHtml } from "@/lib/help-sanitize";
 import { PageHeader } from "@/components/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -85,7 +85,7 @@ function Guides() {
         <div style={{ fontSize: 12, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>{open.category}</div>
         <h2 style={{ fontSize: 22, fontWeight: 700, color: "#2a2b3c", margin: "0 0 16px" }}>{open.title}</h2>
         <div style={{ fontSize: 14, lineHeight: 1.65, color: "#33363d" }}
-          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(open.body) }} />
+          dangerouslySetInnerHTML={{ __html: sanitizeHelpHtml(open.body) }} />
         {open.image_urls?.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 18 }}>
             {open.image_urls.map((u) => (

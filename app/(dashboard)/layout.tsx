@@ -9,6 +9,7 @@ import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import MainContent from "@/components/MainContent";
+import HelpWidget from "@/components/HelpWidget";
 import { BuilderBreadcrumbProvider } from "@/contexts/BuilderBreadcrumb";
 
 export default async function DashboardLayout({
@@ -146,6 +147,8 @@ export default async function DashboardLayout({
           <MainContent>{children}</MainContent>
         </BuilderBreadcrumbProvider>
       </div>
+      {/* Global Help/Support widget — every authenticated page; own-data-only assistant. */}
+      <HelpWidget />
     </div>
   );
 }
