@@ -36,7 +36,11 @@ export default function HelpPage() {
           </button>
         ))}
       </div>
-      {tab === "guides" ? <Guides /> : <Assistant />}
+      {/* White card so the (dark) guide/assistant text is readable on the dark
+          dashboard background, matching other dashboard pages. */}
+      <div className="card" style={{ padding: 24 }}>
+        {tab === "guides" ? <Guides /> : <Assistant />}
+      </div>
     </div>
   );
 }

@@ -1,0 +1,24 @@
+name: Help Assistant Smoke (read-only)
+
+# Manual one-shot. Runs the read-only Help-assistant verification on the prod
+# self-hosted runner (where the live env + DB live). No writes; a few Haiku calls.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: help-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: self-hosted
+    steps:
+      - name: Run help-assistant smoke on prod
+        run: |
+          set -e
+          export PATH="/usr/bin:/usr/local/bin:$PATH"
+          cd /var/www/da-platform
+          git fetch origin main
+          git checkout origin/main -- scripts/help-assistant-smoke.ts
+          echo "===== HELP SMOKE ====="
+          npx tsx scripts/help-assistant-smoke.ts
