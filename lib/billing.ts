@@ -129,6 +129,41 @@ export async function getCustomer(customerId: string): Promise<BillingCustomerDe
 }
 
 /**
+ * Link-don't-duplicate guard: returns true if `customerId` still resolves to a
+ * da-billing customer. Migrated platform rows already carry the da-billing
+ * customer UUID in `billing_id`; before creating a new customer, callers check
+ * this and LINK the existing one instead (avoids duplicating ~1.8k customers).
+ * A transient da-billing error throws (caller decides); a clean 404 → false.
+ */
+export async function customerExists(customerId: string | null | undefined): Promise<boolean> {
+  if (!customerId) return false;
+  return (await getCustomer(customerId)) != null;
+}
+
+export interface BillingCustomerMatch { id: string; name?: string; company?: string; email?: string; }
+
+/**
+ * Soft-match lookup: active da-billing customers whose company/name/email contain
+ * `query` (da-billing's GET /customers?search= is a case-insensitive substring
+ * match). Used by the create-customer guard to surface a *possible* existing
+ * customer for manual review — NOT for auto-linking (email/company is collision-
+ * prone; only the exact billing_id link is auto-applied).
+ */
+export async function searchCustomers(query: string): Promise<BillingCustomerMatch[]> {
+  const q = (query ?? "").trim();
+  if (!q) return [];
+  const res = await fetch(`${BASE}/customers?search=${encodeURIComponent(q)}&status=active&pageSize=200`, { headers: authHeaders() });
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `searchCustomers ${res.status}`, text);
+  try {
+    const parsed = JSON.parse(text) as { customers?: BillingCustomerMatch[] } | BillingCustomerMatch[];
+    return Array.isArray(parsed) ? parsed : (parsed.customers ?? []);
+  } catch (err) {
+    throw new BillingError(res.status, `searchCustomers parse: ${(err as Error).message}`, text);
+  }
+}
+
+/**
  * Update contact fields on a da-billing customer. Only fields explicitly
  * passed are forwarded — partial update semantics. Returns the updated
  * customer record from da-billing.

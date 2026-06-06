@@ -215,6 +215,15 @@ async function platAll(table: string, cols: string): Promise<any[]> {
   const dg = rows.find((r) => norm(r.name).includes("dealergeneral"));
   console.log("\n=== Dealer General ===", dg ?? "(not found)");
 
+  // (b) review slices: genuinely-new groups + soft-signal entities (no billing_id
+  // link, but an email/name match to an existing customer → manual review).
+  const newGroups = rows.filter((r) => r.kind === "group" && r.category === "genuinely-new");
+  const softSignal = rows.filter((r) => r.category === "genuinely-new" && (r.soft_email_match || r.soft_name_match));
+  console.log(`\n=== (b) GENUINELY-NEW GROUPS (${newGroups.length}) — would create on demand ===`);
+  for (const r of newGroups) console.log(`   ${r.name} | acct=${r.account_type || "-"} | email=${r.email || "-"} | soft: email=${r.soft_email_match || "-"} name=${r.soft_name_match || "-"}`);
+  console.log(`\n=== (b) SOFT-SIGNAL entities (${softSignal.length}) — new but email/name matches an existing da-billing customer; sample 50 ===`);
+  for (const r of softSignal.slice(0, 50)) console.log(`   ${r.kind} "${r.name}" | email=${r.email || "-"} → candidate ${r.soft_email_match || r.soft_name_match}`);
+
   // CSV (gitignored: *.csv)
   const headers = ["kind","name","platform_id","internal_id","billing_id","billing_customer_id","matched_dabilling_id","da_client_id","email","soft_email_match","soft_name_match","category","match_key","account_type","created_at"];
   const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;

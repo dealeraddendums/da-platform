@@ -15,6 +15,7 @@ import {
   appendToTemplate,
   archiveCustomer,
   createCustomer,
+  customerExists,
   deleteTemplate,
   getTemplate,
   putTemplate,
@@ -53,6 +54,7 @@ interface GroupSnap {
   id: string;
   name: string;
   billing_customer_id: string | null;
+  billing_id: string | null;
 }
 
 function dealerCustomerKey(d: DealerSnap): string | null {
@@ -64,6 +66,14 @@ async function ensureGroupCustomer(
   group: GroupSnap,
 ): Promise<string | null> {
   if (group.billing_customer_id) return group.billing_customer_id;
+  // Link-don't-duplicate: a migrated group already carries its da-billing
+  // customer UUID in billing_id. If it still resolves, link it instead of
+  // creating a duplicate.
+  if (group.billing_id && (await customerExists(group.billing_id))) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any).from("groups").update({ billing_customer_id: group.billing_id }).eq("id", group.id);
+    return group.billing_id;
+  }
   const created = await createCustomer({
     name: group.name,
     company: group.name,
@@ -100,7 +110,7 @@ export async function cascadeOnGroupAssign(args: {
       .maybeSingle<DealerSnap>(),
     admin
       .from("groups")
-      .select("id, name, billing_customer_id")
+      .select("id, name, billing_customer_id, billing_id")
       .eq("id", args.groupId)
       .maybeSingle<GroupSnap>(),
   ]);
@@ -211,7 +221,7 @@ export async function cascadeOnGroupUnassign(args: {
       .maybeSingle<{ internal_id: string | null }>(),
     admin
       .from("groups")
-      .select("id, name, billing_customer_id")
+      .select("id, name, billing_customer_id, billing_id")
       .eq("id", args.groupId)
       .maybeSingle<GroupSnap>(),
   ]);
@@ -310,7 +320,7 @@ export async function cascadeSuperAdminGroupAssign(args: {
       .maybeSingle<SuperAdminAssignDealer>(),
     admin
       .from("groups")
-      .select("id, name, billing_customer_id")
+      .select("id, name, billing_customer_id, billing_id")
       .eq("id", args.groupId)
       .maybeSingle<GroupSnap>(),
   ]);

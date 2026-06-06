@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { createCustomer, billingConfigured } from "@/lib/billing";
+import { createCustomer, customerExists, searchCustomers, billingConfigured } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,6 +17,10 @@ interface CreateBody {
   state?: string;
   zip?: string;
   country?: string;
+  // Soft-match resolution: operator confirms a surfaced candidate to link, or
+  // overrides the soft-match block to create a new customer anyway.
+  linkCustomerId?: string;
+  forceCreate?: boolean;
 }
 
 /**
@@ -55,7 +59,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
   const { data: group } = await admin
     .from("groups")
     .select(
-      "id, name, billing_customer_id, " +
+      "id, name, billing_customer_id, billing_id, " +
       "primary_contact, primary_contact_email, " +
       "billing_contact, billing_email, billing_phone, " +
       "billing_address, billing_city, billing_state, billing_zip, billing_country, " +
@@ -66,6 +70,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       id: string;
       name: string;
       billing_customer_id: string | null;
+      billing_id: string | null;
       primary_contact: string | null;
       primary_contact_email: string | null;
       billing_contact: string | null;
@@ -86,6 +91,44 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
 
   if (group.billing_customer_id) {
     return NextResponse.json({ ok: true, billing_customer_id: group.billing_customer_id, created: false });
+  }
+
+  // Link-don't-duplicate: a migrated group already carries its da-billing customer
+  // UUID in billing_id. If it still resolves, LINK it instead of creating a dup.
+  if (group.billing_id && (await customerExists(group.billing_id))) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: linkErr } = await (admin as any)
+      .from("groups").update({ billing_customer_id: group.billing_id }).eq("id", group.id);
+    if (linkErr) return NextResponse.json({ error: `Link failed: ${linkErr.message}` }, { status: 500 });
+    return NextResponse.json({ ok: true, billing_customer_id: group.billing_id, created: false, linked: true });
+  }
+
+  // Operator confirmed a soft-match candidate → link it (after verifying it exists).
+  if (body.linkCustomerId) {
+    if (!(await customerExists(body.linkCustomerId))) {
+      return NextResponse.json({ error: "linkCustomerId not found in da-billing" }, { status: 400 });
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: linkErr } = await (admin as any)
+      .from("groups").update({ billing_customer_id: body.linkCustomerId }).eq("id", group.id);
+    if (linkErr) return NextResponse.json({ error: `Link failed: ${linkErr.message}` }, { status: 500 });
+    return NextResponse.json({ ok: true, billing_customer_id: body.linkCustomerId, created: false, linked: true });
+  }
+
+  // Soft-match guard: no exact billing_id link. If an active da-billing customer
+  // matches this group's email, BLOCK auto-create and surface candidates for
+  // review (email/company is collision-prone — never auto-linked). The operator
+  // links one via linkCustomerId or overrides with forceCreate.
+  const searchEmail = (body.email?.trim() || group.billing_email || group.primary_contact_email || "").trim();
+  if (!body.forceCreate && searchEmail) {
+    const candidates = (await searchCustomers(searchEmail)).filter((c) => c.id);
+    if (candidates.length > 0) {
+      return NextResponse.json({
+        error: "possible_existing_customer",
+        message: `Found ${candidates.length} active da-billing customer(s) matching "${searchEmail}". Confirm one to link (linkCustomerId) or pass forceCreate to make a new customer.`,
+        candidates: candidates.slice(0, 10).map((c) => ({ id: c.id, company: c.company ?? c.name ?? null, email: c.email ?? null })),
+      }, { status: 409 });
+    }
   }
 
   // Resolve each field with this fallback order:
