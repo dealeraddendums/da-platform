@@ -2505,6 +2505,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
             <div key={k}>
               <div style={{ fontSize: 10, color: '#55595c', marginBottom: 3 }}>{k.toUpperCase()}</div>
               <input type="number" value={Math.round(w[k])} onChange={e => fp(k, +e.target.value)}
+                step={SNAP} min={k === 'w' ? MIN_W : k === 'h' ? MIN_H : 0}
                 style={{ width: '100%', padding: '4px 5px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box' }} />
             </div>
           ))}
