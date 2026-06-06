@@ -25,6 +25,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // group_admin may only read dealers in their own group (super_admin bypasses).
+  if (claims.role === "group_admin") {
+    const scopeAdmin = createAdminSupabaseClient();
+    const { data: dealer } = await scopeAdmin
+      .from("dealers")
+      .select("group_id")
+      .eq("dealer_id", dealerId)
+      .maybeSingle<{ group_id: string | null }>();
+    if (!dealer || dealer.group_id !== claims.group_id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  }
+
   const page = parseInt(url.searchParams.get("page") ?? "1", 10);
   const perPage = Math.min(parseInt(url.searchParams.get("per_page") ?? "25", 10), 100);
   const from = (page - 1) * perPage;

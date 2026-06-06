@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { createAdminSupabaseClient } from "@/lib/db";
 import { getGroupOptionsForDealer } from "@/lib/options-engine";
 
 /**
@@ -22,11 +23,21 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  // Scope check: dealers can only read their own corporate products;
-  // super_admin/group_admin can read any.
+  // Scope check: dealers can only read their own corporate products; a group_admin
+  // can read only dealers in their own group; super_admin can read any.
   if (claims.role === "dealer_admin" || claims.role === "dealer_user") {
     const myDealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
     if (!myDealerId || myDealerId !== params.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  } else if (claims.role === "group_admin") {
+    const admin = createAdminSupabaseClient();
+    const { data: dealer } = await admin
+      .from("dealers")
+      .select("group_id")
+      .eq("dealer_id", params.id)
+      .maybeSingle<{ group_id: string | null }>();
+    if (!dealer || dealer.group_id !== claims.group_id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
   }

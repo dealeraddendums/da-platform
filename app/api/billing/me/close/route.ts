@@ -33,10 +33,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  // dealer_admin closes their own account; super_admin can close any
-  // (typically while ghosting). Everyone else is denied — dealer_user
-  // and group_admin both read-only here.
-  if (claims.role !== "dealer_admin" && claims.role !== "super_admin") {
+  // dealer_admin closes their own account; super_admin can close any (typically
+  // while ghosting); group_admin can close a member dealer they're switched into
+  // (active dealer, group-verified below). dealer_user is read-only here.
+  if (claims.role !== "dealer_admin" && claims.role !== "super_admin" && claims.role !== "group_admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -55,6 +55,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let dealerTextId: string | null = null;
   if (claims.role === "dealer_admin") {
     dealerTextId = claims.dealer_id ?? null;
+  } else if (claims.role === "group_admin") {
+    // Only the active (switched-into) member dealer; group-verified after fetch.
+    dealerTextId = claims.dealer_id ?? null;
   } else {
     // super_admin: ghost-mode dealer_id (claims.dealer_id) OR ?dealer_id= override
     const param = req.nextUrl.searchParams.get("dealer_id");
@@ -66,7 +69,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, billing_customer_id, internal_id, account_type")
+    .select("id, dealer_id, name, billing_customer_id, internal_id, account_type, group_id")
     .eq("dealer_id", dealerTextId)
     .maybeSingle<{
       id: string;
@@ -75,9 +78,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       billing_customer_id: string | null;
       internal_id: string | null;
       account_type: string | null;
+      group_id: string | null;
     }>();
   if (!dealer) {
     return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
+  }
+
+  // group_admin may only close a dealer in their own group (the active dealer).
+  if (claims.role === "group_admin" && dealer.group_id !== claims.group_id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // ── $0 balance gate ─────────────────────────────────────────────────────

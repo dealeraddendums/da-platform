@@ -72,6 +72,21 @@ async function resolveDealerId(
   if (claims.role === "super_admin" && claims.dealer_id) {
     return { dealerTextId: claims.dealer_id };
   }
+  // group_admin managing a member dealer's billing while switched in: claims.dealer_id
+  // is the selected active dealer (group-verified at selection). Honor it with a
+  // defensive group re-check so the dealer-context Billing tab works without a param.
+  if (claims.role === "group_admin" && claims.dealer_id) {
+    const admin = createAdminSupabaseClient();
+    const { data: dealer } = await admin
+      .from("dealers")
+      .select("group_id")
+      .eq("dealer_id", claims.dealer_id)
+      .maybeSingle<{ group_id: string | null }>();
+    if (!dealer || dealer.group_id !== claims.group_id) {
+      return { dealerError: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+    }
+    return { dealerTextId: claims.dealer_id };
+  }
   const param = req.nextUrl.searchParams.get("dealer_id");
   if (!param) {
     return { dealerError: NextResponse.json({ error: "dealer_id param required" }, { status: 400 }) };

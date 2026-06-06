@@ -4,7 +4,9 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerCustomSizeRow } from "@/lib/db";
 
 async function resolveDealerId(req: NextRequest, claims: { role: string; dealer_id?: string | null }): Promise<string | null> {
-  if (claims.role === "dealer_admin") return claims.dealer_id ?? null;
+  // Dealer roles are pinned to their own dealer; everyone else supplies ?dealer_id=
+  // (group_admin is group-checked in GET, super_admin is unrestricted).
+  if (claims.role === "dealer_admin" || claims.role === "dealer_user") return claims.dealer_id ?? null;
   const param = req.nextUrl.searchParams.get("dealer_id");
   return param ?? null;
 }
@@ -18,6 +20,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!dealerId) return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
 
   const admin = createAdminSupabaseClient();
+
+  // group_admin may only read dealers in their own group (super_admin bypasses).
+  if (claims.role === "group_admin") {
+    const { data: dealer } = await admin
+      .from("dealers")
+      .select("group_id")
+      .eq("dealer_id", dealerId)
+      .maybeSingle<{ group_id: string | null }>();
+    if (!dealer || dealer.group_id !== claims.group_id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  }
+
   const { data, error: dbErr } = await admin
     .from("dealer_custom_sizes")
     .select("*")

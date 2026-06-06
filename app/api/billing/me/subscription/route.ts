@@ -73,6 +73,19 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   let dealerTextId: string | null = null;
   if (claims.role === "dealer_admin") {
     dealerTextId = claims.dealer_id;
+  } else if (claims.role === "group_admin" && claims.dealer_id) {
+    // group_admin managing a member dealer's billing while switched in: honor the
+    // active dealer (claims.dealer_id) with a defensive group re-check, so the
+    // dealer-context Billing tab works without a ?dealer_id= param.
+    const { data: chk } = await admin
+      .from("dealers")
+      .select("group_id")
+      .eq("dealer_id", claims.dealer_id)
+      .maybeSingle<{ group_id: string | null }>();
+    if (!chk || chk.group_id !== claims.group_id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    dealerTextId = claims.dealer_id;
   } else {
     const param = req.nextUrl.searchParams.get("dealer_id");
     if (!param) return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
