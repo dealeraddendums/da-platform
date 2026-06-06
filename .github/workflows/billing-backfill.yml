@@ -1,0 +1,36 @@
+name: Billing Link Backfill
+
+# Copies platform billing_id → billing_customer_id for the clean link-missing set
+# (docs/platform-billing-link-sync.md). DRY-RUN by default; a real write requires
+# mode=write. Idempotent + collision-excluded. Runs on the prod self-hosted runner.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run (default, read-only) or write"
+        type: choice
+        options: [dry-run, write]
+        default: dry-run
+
+concurrency:
+  group: billing-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: self-hosted
+    steps:
+      - name: Run billing-link backfill (${{ inputs.mode }})
+        run: |
+          set -e
+          export PATH="/usr/bin:/usr/local/bin:$PATH"
+          cd /var/www/da-platform
+          git fetch origin main
+          git checkout origin/main -- scripts/billing-link-backfill.ts
+          if [ "${{ inputs.mode }}" = "write" ]; then
+            echo "===== BACKFILL (WRITE) ====="
+            npx tsx scripts/billing-link-backfill.ts --write
+          else
+            echo "===== BACKFILL (DRY-RUN) ====="
+            npx tsx scripts/billing-link-backfill.ts
+          fi
