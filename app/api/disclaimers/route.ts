@@ -25,6 +25,18 @@ async function resolveDealerId(
   if (claims.role === "super_admin" && claims.dealer_id) {
     return { dealerId: claims.dealer_id };
   }
+  // group_admin acting as a member dealer: getJwtClaims resolves claims.dealer_id
+  // from the selected active_dealer_id (group-verified when chosen). Mirror the
+  // super_admin ghost branch and use it so the Builder loads disclaimers without
+  // a ?dealer_id= param, re-checking group ownership defensively.
+  if (claims.role === "group_admin" && claims.dealer_id) {
+    const admin = createAdminSupabaseClient();
+    const { data: dealer } = await admin.from("dealers").select("group_id").eq("dealer_id", claims.dealer_id).single();
+    if (!dealer || dealer.group_id !== claims.group_id) {
+      return { dealerError: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+    }
+    return { dealerId: claims.dealer_id };
+  }
   const paramId = req.nextUrl.searchParams.get("dealer_id");
   if (!paramId) {
     return { dealerError: NextResponse.json({ error: "dealer_id param required" }, { status: 400 }) };

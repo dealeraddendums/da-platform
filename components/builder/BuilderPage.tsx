@@ -661,7 +661,10 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     // Load effective group disclaimers for this dealer once on mount. Cached
     // on disclaimersRef and re-applied to Disclaimer widgets at every load /
     // paper-switch path.
-    const dqs = vehicle?.dealer_id ? `?dealer_id=${encodeURIComponent(vehicle.dealer_id)}` : '';
+    // Use the active dealer (dealerId prop) so the blank builder works for a
+    // group_admin-as-dealer too, not just the vehicle builder (vehicle.dealer_id).
+    const eid = dealerId ?? vehicle?.dealer_id ?? null;
+    const dqs = eid ? `?dealer_id=${encodeURIComponent(eid)}` : '';
     fetch(`/api/disclaimers${dqs}`)
       .then(r => r.ok ? r.json() : null)
       .then((j: { data?: Array<{ text: string; locked: boolean }> } | null) => {
