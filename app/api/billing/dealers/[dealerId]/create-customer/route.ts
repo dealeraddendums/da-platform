@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSuperAdmin } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { createCustomer, customerExists, searchCustomers, billingConfigured } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
@@ -18,11 +19,15 @@ type Params = { params: { dealerId: string } };
  * stores the returned id in dealers.billing_customer_id.
  *
  * No-ops (returns the existing id) if billing_customer_id is already set.
- * Super admin only.
+ * super_admin (any), a switched-in group_admin (in-group), or dealer_admin (own)
+ * may create/link; dealer_user / dealer_restricted are read-only.
  */
 export async function POST(req: NextRequest, { params }: Params): Promise<NextResponse> {
-  const { error } = await requireSuperAdmin();
+  const { claims, error } = await requireAuth();
   if (error) return error;
+  if (claims.role === "dealer_user" || claims.role === "dealer_restricted") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   if (!billingConfigured()) return NextResponse.json({ error: "Billing not configured" }, { status: 500 });
 
   let body: { linkCustomerId?: string; forceCreate?: boolean } = {};
@@ -32,12 +37,13 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
   const { data: dealer } = await admin
     .from("dealers")
     .select(
-      "id, name, billing_customer_id, billing_id, primary_contact, primary_contact_email, " +
+      "id, dealer_id, name, billing_customer_id, billing_id, primary_contact, primary_contact_email, " +
       "phone, address, city, state, zip, country"
     )
     .eq("id", params.dealerId)
     .maybeSingle<{
       id: string;
+      dealer_id: string;
       name: string;
       billing_customer_id: string | null;
       billing_id: string | null;
@@ -51,6 +57,10 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       country: string | null;
     }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
+
+  // Dealer scope: dealer_admin → own; group_admin → in-group; super_admin → any.
+  const dealerAz = await authorizeDealerAction(claims, dealer.dealer_id);
+  if (!dealerAz.ok) return dealerAz.response;
 
   if (dealer.billing_customer_id) {
     return NextResponse.json({ ok: true, billing_customer_id: dealer.billing_customer_id, created: false });

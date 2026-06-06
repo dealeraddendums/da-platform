@@ -71,6 +71,8 @@ export default function GroupBillingTab({ groupId }: { groupId: string }) {
   const [editing, setEditing] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [candidates, setCandidates] = useState<Array<{ id: string; company: string | null; email: string | null }> | null>(null);
+  const [lastValues, setLastValues] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -94,21 +96,35 @@ export default function GroupBillingTab({ groupId }: { groupId: string }) {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  async function createCustomerWith(payload: Record<string, string>) {
+  async function createCustomerWith(payload: Record<string, string | boolean>) {
     setCreating(true);
     setToast(null);
+    // Remember the form values (not the control flags) so "create new instead"
+    // can re-submit the operator's edits alongside forceCreate.
+    if (!payload.linkCustomerId && !payload.forceCreate) {
+      setLastValues(Object.fromEntries(Object.entries(payload).filter(([, v]) => typeof v === "string")) as Record<string, string>);
+    }
     try {
       const res = await fetch(`/api/billing/groups/${encodeURIComponent(groupId)}/create-customer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const j = await res.json().catch(() => ({})) as { error?: string };
+      const j = await res.json().catch(() => ({})) as {
+        error?: string; message?: string; linked?: boolean;
+        candidates?: Array<{ id: string; company: string | null; email: string | null }>;
+      };
+      if (res.status === 409 && j.error === "possible_existing_customer") {
+        setCandidates(j.candidates ?? []);
+        setToast(j.message ?? "Possible existing customer — review below.");
+        return;
+      }
       if (!res.ok) {
         setToast(j.error ?? `Failed (${res.status})`);
         return;
       }
-      setToast("✓ Billing account created");
+      setCandidates(null);
+      setToast(j.linked ? "✓ Linked existing billing account" : "✓ Billing account created");
       await refresh();
     } finally {
       setCreating(false);
@@ -142,8 +158,36 @@ export default function GroupBillingTab({ groupId }: { groupId: string }) {
         </div>
       )}
 
+      {/* ── Candidate picker (after a 409 possible_existing_customer) ────── */}
+      {!data.group.billing_customer_id && candidates && candidates.length > 0 && (
+        <div style={{ padding: 20, background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 6 }}>
+          <div style={{ fontWeight: 600, fontSize: 15, color: "#7a5c00", marginBottom: 6 }}>Possible existing customer</div>
+          <div style={{ fontSize: 13, color: "#7a5c00", marginBottom: 12, lineHeight: 1.5 }}>
+            A matching billing customer may already exist. Link it instead of creating a duplicate:
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+            {candidates.map((c) => (
+              <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "8px 12px", background: "#fff", border: "1px solid #ffe082", borderRadius: 4 }}>
+                <div style={{ fontSize: 13, color: "#333", minWidth: 0 }}>
+                  <div style={{ fontWeight: 600 }}>{c.company ?? "(no name)"}</div>
+                  <div style={{ color: "#78828c", fontSize: 12 }}>{c.email ?? ""} · <span style={{ fontFamily: "monospace" }}>{c.id}</span></div>
+                </div>
+                <button onClick={() => void createCustomerWith({ linkCustomerId: c.id })} disabled={creating}
+                  style={{ flexShrink: 0, padding: "6px 12px", background: "#2e7d32", color: "#fff", border: "none", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: creating ? "wait" : "pointer", fontFamily: "inherit", opacity: creating ? 0.6 : 1 }}>
+                  Link this customer
+                </button>
+              </div>
+            ))}
+          </div>
+          <button onClick={() => void createCustomerWith({ ...lastValues, forceCreate: true })} disabled={creating}
+            style={{ padding: "7px 14px", background: "#fff", color: "#7a5c00", border: "1px solid #ffb300", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: creating ? "wait" : "pointer", fontFamily: "inherit", opacity: creating ? 0.6 : 1 }}>
+            None of these — create a new customer
+          </button>
+        </div>
+      )}
+
       {/* ── No customer warning + pre-populated create form ─────────────── */}
-      {!data.group.billing_customer_id && (
+      {!data.group.billing_customer_id && !(candidates && candidates.length > 0) && (
         <CreateCustomerCard
           defaults={data.defaults}
           creating={creating}
