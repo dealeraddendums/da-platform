@@ -3,7 +3,8 @@
 // Spec: docs/dealer-self-close-account.md. Reuses the Downgraded +
 // 60-day archive plumbing already shipped (b822b86). Flow:
 //   1. Auth: dealer_admin → own dealer; super_admin → any (ghost or
-//      ?dealer_id=). dealer_user / group_admin denied.
+//      ?dealer_id=); group_admin → the member dealer they're switched into
+//      (active dealer, group-verified). dealer_user denied.
 //   2. Re-check $0 balance server-side via the same listInvoices the
 //      BillingTab reads. Pending + overdue invoices → 409 with the
 //      outstanding amount + count so the UI's pay-first message stays
