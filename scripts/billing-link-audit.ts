@@ -98,6 +98,38 @@ async function platAll(table: string, cols: string): Promise<any[]> {
   console.log(`\nda-billing: ${customers.length} customers (${customers.filter(c=>!c.archived).length} active), ${templates.length} templates, ${byClientId.size} with a parsed ClientID`);
   console.log(`platform: ${groups.length} groups, ${dealers.length} dealers\n`);
 
+  // ── Match-key probe: test every candidate key independently, with collision
+  //    counts (a key is only safe to backfill on if it's near-unique). ────────
+  const emailOf = (kind: string, e: any) => (kind === "dealer" ? e.primary_contact_email : (e.billing_email ?? e.email)) || null;
+  const platEntities = [
+    ...groups.map((g) => ({ kind: "group" as const, e: g })),
+    ...dealers.map((d) => ({ kind: "dealer" as const, e: d })),
+  ];
+  const candidateKeys: Record<string, (x: { kind: string; e: any }) => any> = {
+    "billing_customer_id→id": ({ e }) => (e.billing_customer_id && custById.has(e.billing_customer_id) ? e.billing_customer_id : null),
+    "template_id→id":         ({ e }) => (e.template_id && custById.has(e.template_id) ? e.template_id : null),
+    "billing_id→id(uuid)":    ({ e }) => (e.billing_id && custById.has(e.billing_id) ? e.billing_id : null),
+    "billing_id→ClientID":    ({ e }) => (e.billing_id != null && byClientId.has(String(e.billing_id)) ? byClientId.get(String(e.billing_id)).id : null),
+    "internal_id→ClientID":   ({ e }) => (e.internal_id != null && byClientId.has(String(e.internal_id)) ? byClientId.get(String(e.internal_id)).id : null),
+    "legacy_id→ClientID":     ({ e }) => (e.legacy_id != null && byClientId.has(String(e.legacy_id)) ? byClientId.get(String(e.legacy_id)).id : null),
+    "email":                  (x) => { const m = byEmail.get(norm(emailOf(x.kind, x.e))); return m ? m.id : null; },
+    "name/company":           (x) => { const m = byCompanyName.get(norm(x.e.name)); return m ? m.id : null; },
+  };
+  console.log("\n=== Match-key probe (hits = platform entities matched; collisions = da-billing customers claimed by >1 platform entity) ===");
+  for (const [label, fn] of Object.entries(candidateKeys)) {
+    const billCounts = new Map<string, number>();
+    let hits = 0;
+    for (const x of platEntities) { const id = fn(x); if (id) { hits++; billCounts.set(id, (billCounts.get(id) ?? 0) + 1); } }
+    const collisions = Array.from(billCounts.values()).filter((n) => n > 1).length;
+    console.log(`  ${label.padEnd(24)} hits ${String(hits).padStart(4)}/${platEntities.length}  (${((hits/platEntities.length)*100).toFixed(1)}%)  | da-billing customers claimed >1×: ${collisions}`);
+  }
+
+  // Raw id-field dump for known accounts (where does ClientID 297 live?).
+  for (const nm of ["dealer general", "h&h automotive"]) {
+    const hit = platEntities.find((x) => norm(x.e.name) === norm(nm) || norm(x.e.name).includes(norm(nm)));
+    if (hit) console.log(`\n[ids] ${hit.e.name}:`, { internal_id: hit.e.internal_id, legacy_id: hit.e.legacy_id, billing_id: hit.e.billing_id, template_id: hit.e.template_id, billing_customer_id: hit.e.billing_customer_id });
+  }
+
   // candidate platform "client id" fields (FreshBooks/Aurora legacy)
   const platClientId = (e: any) =>
     e.internal_id ?? e.legacy_id ?? e.legacy_group_id ?? e.aurora_id ?? e.freshbooks_id ?? null;
