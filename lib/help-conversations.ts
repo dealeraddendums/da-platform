@@ -27,12 +27,49 @@ export async function createConversation(claims: JwtClaims, dealerId: string | n
   return data?.id ?? null;
 }
 
+/** True only for the support team (super_admin) — gates the review surface. */
+export function canReviewConversations(claims: JwtClaims): boolean {
+  return claims.role === "super_admin";
+}
+
 /** Confirm a conversation belongs to this user (own-data guard for follow-ups). */
-export async function ownsConversation(conversationId: string, claims: JwtClaims): Promise<boolean> {
+export async function ownsConversation(
+  conversationId: string,
+  claims: JwtClaims,
+  admin: any = createAdminSupabaseClient(),
+): Promise<boolean> {
   if (claims.role === "super_admin") return true;
-  const admin = createAdminSupabaseClient();
-  const { data } = await (admin as any).from("help_conversations").select("user_id").eq("id", conversationId).maybeSingle();
+  const { data } = await admin.from("help_conversations").select("user_id").eq("id", conversationId).maybeSingle();
   return !!data && data.user_id === claims.sub;
+}
+
+/**
+ * List conversations for the caller. super_admin gets the review queue (optional
+ * status/flagged filters); every other role is HARD-SCOPED to their own
+ * (user_id = claims.sub) so a dealer can never read another dealer's threads.
+ * `admin` is an injection seam for tests.
+ */
+export async function listConversations(
+  claims: JwtClaims,
+  opts: { status?: string | null; flagged?: boolean },
+  admin: any = createAdminSupabaseClient(),
+): Promise<{ data: unknown[]; error: { message: string } | null }> {
+  let q = admin
+    .from("help_conversations")
+    .select("id, user_id, dealer_id, role, status, flagged, escalated_at, resolved_at, hubspot_logged_at, created_at, updated_at")
+    .order("flagged", { ascending: false })
+    .order("updated_at", { ascending: false })
+    .limit(200);
+
+  if (canReviewConversations(claims)) {
+    if (opts.status && ["open", "escalated", "resolved"].includes(opts.status)) q = q.eq("status", opts.status);
+    if (opts.flagged) q = q.eq("flagged", true);
+  } else {
+    q = q.eq("user_id", claims.sub);
+  }
+
+  const { data, error } = await q;
+  return { data: data ?? [], error: error ?? null };
 }
 
 export async function appendMessage(conversationId: string, role: "user" | "assistant" | "agent", content: string): Promise<string | null> {

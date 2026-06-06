@@ -1,0 +1,44 @@
+name: Help/Support Verification
+
+# Manual one-shot on the prod self-hosted runner. Always runs the deterministic
+# unit harness; runs the prod smoke (chat + HubSpot upsert) against the QA/TEST
+# dealer only when the QA inputs are supplied. Never touches a real dealer's data.
+on:
+  workflow_dispatch:
+    inputs:
+      qa_dealer_id:
+        description: "QA/TEST dealer_id (text). Required for the chat + HubSpot smoke."
+        required: false
+        default: ""
+      qa_user_id:
+        description: "QA/TEST user id (profiles.id) whose profile points at the TEST HubSpot contact."
+        required: false
+        default: ""
+      qa_test_hubspot_contact_id:
+        description: "TEST HubSpot contact id. Safety gate: must match the QA user's profile.hubspot_contact_id."
+        required: false
+        default: ""
+
+concurrency:
+  group: help-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: self-hosted
+    steps:
+      - name: Help/Support verification on prod
+        env:
+          QA_DEALER_ID: ${{ inputs.qa_dealer_id }}
+          QA_USER_ID: ${{ inputs.qa_user_id }}
+          QA_TEST_HUBSPOT_CONTACT_ID: ${{ inputs.qa_test_hubspot_contact_id }}
+        run: |
+          set -e
+          export PATH="/usr/bin:/usr/local/bin:$PATH"
+          cd /var/www/da-platform
+          git fetch origin main
+          git checkout origin/main -- scripts/help-verify-unit.ts scripts/help-verify-smoke.ts
+          echo "===== UNIT (deterministic, no DB) ====="
+          npx tsx scripts/help-verify-unit.ts
+          echo "===== PROD SMOKE (QA dealer only) ====="
+          npx tsx scripts/help-verify-smoke.ts

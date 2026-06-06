@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { ownsConversation, setFeedback, escalateConversation, logConversationToHubspot } from "@/lib/help-conversations";
+import { ownsConversation, setFeedback, escalateConversation, logConversationToHubspot, canReviewConversations } from "@/lib/help-conversations";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Params = { params: { id: string } };
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
 export async function PATCH(req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
-  if (claims.role !== "super_admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!canReviewConversations(claims)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   let body: { status?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
+    "test:help": "tsx scripts/help-verify-unit.ts",
     "sync:nhtsa": "npx tsx scripts/sync-nhtsa.ts",
     "import:addendum-history": "npx tsx scripts/import-addendum-history.ts",
     "import:dealers": "npx tsx scripts/import-dealers.ts",

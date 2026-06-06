@@ -16,8 +16,17 @@ import {
 } from "@/lib/print-eligibility";
 import { htmlToText, type RetrievedArticle } from "@/lib/help-knowledge";
 
-/** Build the dealer-safe context block for the prompt (own/active dealer only). */
-export async function buildDealerContext(claims: JwtClaims): Promise<string> {
+/**
+ * Build the dealer-safe context block for the prompt (own/active dealer only).
+ *
+ * The effective dealer is resolved ONLY from `claims` (never a request-supplied
+ * id) — that own-data-only guarantee is the security property. `admin` is an
+ * injection seam for tests; production uses the default service-role client.
+ */
+export async function buildDealerContext(
+  claims: JwtClaims,
+  admin: ReturnType<typeof createAdminSupabaseClient> = createAdminSupabaseClient(),
+): Promise<string> {
   const role = claims.role;
   const lines: string[] = [`Role: ${role}${claims.group_id ? " (in a dealer group)" : ""}`];
 
@@ -31,7 +40,6 @@ export async function buildDealerContext(claims: JwtClaims): Promise<string> {
     return lines.join("\n");
   }
 
-  const admin = createAdminSupabaseClient();
   const { data: dealer } = await admin
     .from("dealers")
     .select("name, account_type, created_at, downgraded_at, subscription_billed_to, group_controls_templates")
