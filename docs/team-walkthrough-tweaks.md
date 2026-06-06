@@ -16,10 +16,21 @@ remove button. Add a hover tooltip explaining why.
 ## #2 — Bulk "Clear Print History" for selected vehicles
 On the dashboard inventory list, add a **Clear Print History ({n})** button to the
 bulk-action bar next to Print Now / Info Sheet / Buyer Guide / Delete.
-- UI: `components/VehicleInventory.tsx` — bulk bar at ~lines 317–349 (uses
-  `checkedIds`). Add the button (style it like the others; not red — it's not a
-  delete). Show a **confirmation dialog** ("Clear print history for N vehicles?")
-  since it's bulk + not easily undone.
+- UI: **the dashboard inventory list is rendered by
+  `components/ManualVehicleInventory.tsx`** (`app/(dashboard)/dashboard/page.tsx`
+  → `<ManualVehicleInventory>`), NOT `VehicleInventory.tsx`. Add the button to
+  ManualVehicleInventory's bulk bar (the row with Print Now / Info Sheet / Buyer
+  Guide / Delete; uses `checkedIds: Set<string>`). Style it like the others but
+  **not red** (it's not a delete) — white bg + border + dark text reads as a
+  secondary action. Show a **confirmation dialog** ("Clear print history and
+  saved products for N vehicles? This can't be undone.") since it's bulk + not
+  easily undone.
+  > ⚠️ **Post-ship correction (2026-06-02):** `ad9368d` added this button +
+  > handler to `VehicleInventory.tsx` instead — which the dashboard does not
+  > render — so it never appeared there. Reference impl to port:
+  > `VehicleInventory.tsx` handler ~118–147, button ~393–402. Watch the id
+  > shape: ManualVehicleInventory ids are strings (VehicleInventory's are
+  > numbers); confirm they match the route's `.in("vehicle_id", …)`.
 - Backend: new `POST /api/print/clear-history` taking `{ vehicleIds: string[] }`,
   mirroring the per-dealer logic in `app/api/dealers/[id]/clear-print-history/route.ts`
   but scoped to the selected ids:

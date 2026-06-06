@@ -22,3 +22,7 @@ tsconfig.tsbuildinfo
 # Box JWT app config (server-only, never in git)
 box-config.json
 box-private-key.pem
+
+# Data exports (HubSpot/CRM contact dumps etc. — may contain PII, never in git)
+*.xlsx
+*.csv

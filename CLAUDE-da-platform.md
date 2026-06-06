@@ -436,7 +436,7 @@ Super Admin can assign an existing standalone dealer to a group from the dealer 
 
 ## Migration Status
 
-Current highest migration: **081**
+Current highest migration: **090**
 
 Recent migrations:
 - 071 `dealer_inventory_provider` — track CDK/Tekion/manual feed source per dealer
@@ -457,7 +457,72 @@ Recent migrations:
 - 077 `invitations_unique_indexes_non_partial` — revised non-partial unique indexes on invitations (supersedes 076)
 - 078 `qa_test_items_email_fix` — idempotent UPDATE fixing truncated `@test` → `@test.dealeraddendums.com` in `qa_test_items.steps`; migrations 074+075 also corrected in source
 - 079–081 — (check repo for details; added during QA session 2026-05-28)
+- 082 `hubspot_sync_errors` — Phase 14 sync error log
+- 083 `dealers_downgraded_inactivated` — `downgraded_at` / archive columns (self-close + Downgraded lifecycle)
+- 084 `dealer_custom_sizes_doc_type` — landscape / custom-size `doc_type`
+- 085 `account_closures` — dealer self-close reason log
+- 086 `label_orders_ordered_by_name` — snapshot of who placed each label order
+- 087 `self_serve_acquisition` — self-serve signup: dealer acquisition/attribution columns (utm/gclid/referrer/landing) + `POST /api/self-serve/signup`
+- 088 `lock_team_super_admin` — `enforce_team_super_admin()` BEFORE INSERT/UPDATE trigger on `profiles` pins `allan/alex/claire/marlena/carol@dealeraddendums.com` to `super_admin` regardless of writer (ETL-proof). To change the team list, edit the email array via a new migration.
+- 089 `invitation_setup_codes` — `setup_code_hash` + `setup_code_expires_at` on `invitations` (scanner-proof typed-code invite acceptance)
+- 090 `image_library_scope` — `scope` ('platform'|'group'|'dealer') + `group_id` + `dealer_id` on `image_library` (dealer/group/platform-scoped Builder images; RLS read = platform OR own-group OR own-dealer, write role-bounded)
 
+
+## 2026-06-05 — Session shipped (features + fixes)
+
+Specs in `docs/`; all verified by Claude Code. Commits `8e9a93b` (ETL) · `ca65353` + `3354daa` (invite/auth) · `9b2d052` (scoped images) · `ec3f379` (spinner) · `313d9fc` (template-save) · legal `54922b6`/`45282be`/`77da13b`.
+
+### Dealer/group-scoped Builder images (`docs/builder-scoped-images.md`) — migration 090
+- `image_library` gained `scope` ('platform'|'group'|'dealer') + `group_id` + `dealer_id`. The "Choose Background" picker shows **Platform** / **{Group} Library** / **My Images**; scope-aware Upload for dealer_admin + group_admin; per-image delete limited to the caller's scope; scoped S3 key prefixes; enforced on the API (`getJwtClaims`) **and** RLS. New Group Image Library panel on the group page. Commit `9b2d052`.
+
+### Legal pages — Terms of Use + Privacy Policy (`docs/legal/*.md`, `docs/legal-pages-styling.md`)
+- Rewritten for the current platform; public `/terms` + `/privacy` on DA Platform (`54922b6`) and the marketing site (`45282be`/`77da13b`), rendered from **byte-identical** markdown (re-sync on any edit). Branded `LegalShell` (login logo + gradient + white sheet) with a **Download PDF** (print-to-PDF). Entity **DealerAddendums LLC**, governing law **Delaware**, contact **support@dealeraddendums.com** only; includes a "we do not access customer / sale / card data" clause + named sub-processors. **Pending:** legal-counsel review + marketing DNS cutover (`dealeraddendums.com/terms` goes live at cutover).
+
+### Builder Position & Size spinner fix (`ec3f379`)
+- X/Y/W/H number inputs set `step={SNAP}` (4px grid) + `min`; the spinner arrows now move the widget one grid cell (a default +1 step previously snapped right back via `snapV`).
+
+### group_admin template-save — active-dealer (`docs/group-admin-template-save.md`, `313d9fc`)
+- `resolveDealerId` (`app/api/templates/route.ts`) + `/api/settings` now honor a group_admin's **active dealer** (`claims.dealer_id`, with a defensive `group_id` re-check) instead of 400ing on a missing `?dealer_id`; the Builder save also passes the param. `PATCH /api/templates/[id]` already authorized via `fetchAndAuthorize` and was left unchanged. A group_admin switched into a member dealer can now Save a dealer template and set its default. Same active-dealer-context theme as `group-admin-active-dealer-scoping.md` (Dashboard/Products).
+
+### DA Legacy ETL — Profiles job is now a no-op (`da-legacy-etl/docs/profiles-no-overwrite.md`)
+- The daily Profiles job (Job 3) upserted `role` by email; `mapRole` only knew Aurora `GroupAdmin`, so `RootAdmin`/`DealerAdmin`/`DealerAdminRestricted` all collapsed to `dealer_user` — silently demoting anyone promoted in Supabase. Job is now a **no-op** (Supabase = source of truth for profiles; it can't create profiles anyway — `profiles.id` = auth UUID, ETL must never create auth users). `mapRole` corrected but **inert** while the job is a no-op. Audit: ~2,174 profiles sat above the broken map, but the app resolves `profiles.role` **by auth UUID**, so demotions only bit single-row users — only Robert confirmed; the 4 team super_admins were already protected by the migration-088 trigger.
+
+### Group bill-to — one-time backfill (`docs/group-billing-backfill.md`)
+- App reads migration-067 `dealers.subscription_billed_to` / `labels_billed_to` (default `'dealer'`); 067 never backfilled them and the ETL syncs no bill-to → every group dealer showed Dealer/Dealer. Backfilled **856 group dealers** from Aurora `dealer_dim.SUB_BILLING_TO` (subscription) / `BILLING_TO` (labels), `group_id IS NOT NULL` only. **Not** added to the ETL (one-time; new platform is source of truth). **Deferred — Step 3:** 128 group-billed groups still lack `groups.billing_customer_id` (only 2 have one); until created, group-billed charges rely on the lazy create-on-next-event path in `lib/group-billing-cascade.ts`.
+
+### Group member table + Users tab (`docs/group-member-table-ux.md`, `docs/user-invite-feedback.md`)
+- Member Dealers list sortable + searchable by Name / Dealer ID / Inventory Dealer ID (client-side); the Users/Billing/Corporate Products/Disclaimers/Templates tabs render **above** the member list. Group/dealer Users tabs now show an "invitation sent" toast + a **Pending Invitations** section (resend/revoke).
+
+### "Last sign in" fix (`docs/invite-auth-and-last-signin.md` Part B)
+- `auth` schema isn't exposed to PostgREST, so `admin.schema("auth").from("users")` returned nothing → every row showed "Never." New `lib/last-sign-in.ts` (`lastSignInByEmail()`, paginates the GoTrue admin API, 60s cache); group Users + all 3 branches of `/api/users` resolve last-sign-in **by email**.
+
+### Scanner-proof invite acceptance (`docs/scanner-proof-invite.md`, `docs/invite-auth-and-last-signin.md` Part A)
+- The invite email led with a clickable link and the passwordless branch consumed the invitation at code-**send** time → dealership **Barracuda** link-scanners (empty-UA HEAD+GET on the invite URL, confirmed in access logs) consumed invites before the human → "Invitation already accepted." Migration **089** + `lib/invite-code.ts` (8-digit, SHA-256, constant-time) + `lib/invite-email.ts` (email **leads with the code**; link inert). `/api/invite/accept` rewritten to consume the invitation **only on a human action** (code-verify or password-submit), set `app_metadata.role`, resolve the auth user idempotently; `/api/invite/resend` is non-consuming. `/signup?invite=` is a state machine: choose → code | password → passkey (skippable, explainer) → dashboard. Dealer chooses **code or password**; passkey never required. (Password path signs in with `signInWithPassword`; code path issues its magic-link token last so setting the password can't invalidate it — the 3354daa fix.)
+
+
+## 2026-06-02 — Session shipped (features + fixes)
+
+Specs in `docs/` (`_build-queue.md` indexes them); all verified by Claude Code. Commit refs to be backfilled.
+
+### Account lifecycle + print-eligibility (`docs/print-eligibility-free-expired.md`, `docs/dealer-self-close-account.md`)
+- **States:** **Trial** = default for new dealers (allowance 30 days OR 30 lifetime prints since `created_at`; over → Trial Expired) · **Paid** (always prints) · **Free/Downgraded** = reached ONLY by downgrading from paid; can log in but cannot print; 60-day grace then archived. "Free Expired" folds into Downgraded — no separate HubSpot stage.
+- **`lib/print-eligibility.ts`** is the single source of truth: `canPrint`, `isOverAllowance` (30d OR 30 prints), `enforceCanPrint` (super_admin bypasses). 403-enforced in all four print routes (`api/pdf/generate`, `api/pdf/bulk`, `api/print/bulk`, `api/print/[vehicleId]`); inventory Print buttons disable + tooltip when blocked. The SAME `isOverAllowance` drives the HubSpot lifecycle derivation in `lib/sync-hubspot.ts`.
+- **Dealer self-close** `POST /api/billing/me/close`: $0-balance gate (409 `balance_due`) → `deleteTemplate` stops recurring billing now (NOT `archiveCustomer`) → `account_type='Free'` + `downgraded_at`, stays `active` → `account_closures` row → HubSpot Downgraded via `fireDealerReliable`. Migration `085`. "Free — $0/mo" option in the BillingTab plan picker. Re-open = re-subscribe (`/api/billing/me/subscription` PATCH); +60-day archive = existing `archive-downgraded` cron.
+
+### Group-ghost scoping fix (`docs/group-ghost-dashboard-dealers-scoping.md`)
+`dashboard/page.tsx` + `dealers/page.tsx` now route a super_admin group-ghost (`ghostCtx.group_id`, no `dealer_text_id`) into the existing `group_admin` branches — "ghost as group" shows the group's dealers/stats/map/activity, not platform-wide. Real group_admin logins were already correct.
+
+### Builder — Custom Size for dealers (`docs/builder-custom-size-for-dealers.md`)
+`builder/page.tsx` `canAddCustomSize` is now `super_admin || dealer_admin` (the API `POST /api/custom-sizes` already permitted dealer_admin; it was only a UI gate).
+
+### Product names — safe rich text + images (`docs/product-image-names.md`)
+Names render through a sanitized **`<RichName>`** renderer (`lib/product-name.tsx`): inline styling (`<span style="color">`, b/i/u…) renders, embedded `<img>` shows a size-constrained thumbnail + alt/filename label, dangerous HTML stripped. Image insert now writes an `alt`. **Descriptions routed through the same sanitizer** (new HTML-sanitizer dependency). Sites: options table, Add-from-Library modal, AddendumEditor, + a preview under the Configure Product ITEM NAME input.
+
+### Smaller items
+- **Order history "Ordered By"** (`docs/order-history-ordered-by.md`): migration `086` adds `label_orders.ordered_by_name`; POST persists, GET selects, new column on My Profile → Orders.
+- **Graphical printer-nudge** (`docs/printer-nudge-graphical.md`): `SettingsForm.tsx` Printer Nudge Margins → arrow-pad + live page preview; `nudge_*` data/save unchanged.
+- **Tire loader** (`docs/multi-print-tire-loader.md`): `PdfBuildingOverlay.tsx` uses `public/datire_loader.svg` (self-animating SMIL) for the multi-print overlay.
+- **Walkthrough tweaks #1–#4** (`docs/team-walkthrough-tweaks.md`): lock-icon tooltip; bulk Clear Print History (now in `ManualVehicleInventory.tsx`); readable dealer-profile header buttons; consistent blue/white Configure-Product toggles.
 
 ## QA Bug Fix History
 

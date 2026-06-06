@@ -4,11 +4,27 @@
 > docs live in `da-platform/docs/`. Every open item says "stop for review before
 > deploy." Keep this updated as items ship.
 
-## ▶️ Next session (2026-06-03)
-- **Backfill** the seven 2026-06-02 commit refs (in the Shipped block below + in `CLAUDE-da-platform.md`) once CC reports them.
-- **Verify during team testing:** `alt` actually written on new image inserts · red-M span / logo still renders on the printed PDF · order-history names on the 2 existing rows · ghost-as-group **Live Activity feed** limited to the group.
-- **Open bug to spec:** Addendum page ignores `?type=infosheet` / `?type=buyer_guide` from the Bulk buttons (root `CLAUDE.md` → Active Issues).
-- **Operator (manual):** HubSpot dup triage + re-enable Alex's lifecycle workflows — see "Operator-side follow-ups" at the bottom.
+## ▶️ Next session
+- **DEFERRED — Step 3, group da-billing customers.** The bill-to backfill flipped 627+ dealers
+  to group-billed across **128 groups with no `groups.billing_customer_id`** (only 2 had one).
+  Allan deferred while testing. When ready: split the 128 into real dealer-groups vs
+  resellers/vendors (same Aurora signal as the profiles cleanup), create customers for the real
+  groups, leave resellers to the lazy create-on-next-event path in `group-billing-cascade.ts`.
+- **Confirm deploy — group_admin active-dealer scoping (Dashboard/Products)**
+  (`group-admin-active-dealer-scoping.md`, #71). Specced; the template-save sibling shipped
+  (`313d9fc`) — confirm the Dashboard/Products page scoping deployed too.
+- **Route-audit sweep** — grep the remaining Builder write paths a group_admin-as-dealer hits
+  (disclaimers, options/products, custom sizes, image uploads) for the same "`?dealer_id`
+  required → 400/403 for group_admin" pattern; fix any found (same shape as the template-save fix).
+- **Legal pages:** final legal-counsel review before treating as binding; **marketing DNS
+  cutover** — the new `/terms` + `/privacy` are live on the app and staged on the marketing box
+  (`dealeraddendums.com/terms` goes live at cutover).
+- **Verify in the wild:** the scanner-proof invite holds against a real dealership Barracuda;
+  group_admin-as-dealer template save (`313d9fc`).
+- **Open bug to spec:** Addendum page ignores `?type=infosheet` / `?type=buyer_guide` from the
+  Bulk buttons (root `CLAUDE.md` → Active Issues).
+- **Operator (manual):** HubSpot dup triage + re-enable Alex's lifecycle workflows — see
+  "Operator-side follow-ups" at the bottom.
 
 ## ✅ Shipped (for context)
 - **PDF per-vehicle fix** — flat `{VIN}.pdf` keys + bulk per-vehicle upload + nested
@@ -105,10 +121,85 @@
   downgrade PATCH that bounced back to `super_admin`. **To add/remove a team
   member: edit the email array in the function via a new migration.**
 
-## ✅ Queue clear (2026-06-02)
+### Shipped 2026-06-05 (session — verified by Claude Code; commits 8e9a93b · ca65353 · 3354daa, bill-to + member-table refs TBD)
+- **ETL Profiles job → no-op + mapRole fix + demotion audit.** `da-legacy-etl`
+  `src/jobs/profiles.ts`, commit `8e9a93b`. Root cause: the daily Profiles job upserted
+  `role` by email, and `mapRole` only recognized Aurora `GroupAdmin` — `RootAdmin` /
+  `DealerAdmin` / `DealerAdminRestricted` all collapsed to `dealer_user`, silently demoting
+  promoted users (Robert: manual group_admin → reset). Fix: job is now a **no-op** (Supabase
+  is source of truth for profiles; it can't create profiles anyway — `profiles.id` = auth
+  UUID, ETL must not create auth users). `mapRole` also corrected (Root→super_admin,
+  Dealer→dealer_admin, DealerAdminRestricted→dealer_restricted) but **inert** while the job
+  is a no-op. Audit: ~2,174 profiles sat above the broken map, but the app reads
+  `profiles.role` **by auth UUID** so demotions only bit single-row users — **only Robert
+  confirmed**; the 4 team super_admins were already protected by the migration-088 trigger.
+  `da-legacy-etl/docs/profiles-no-overwrite.md`.
+- **Group bill-to backfill (one-time).** `group-billing-backfill.md`. The app reads the
+  migration-067 columns `dealers.subscription_billed_to` / `labels_billed_to` (default
+  `'dealer'`); 067 never backfilled them and the ETL syncs no bill-to → every group dealer
+  showed Dealer/Dealer. Backfilled **856 group dealers** from Aurora
+  `dealer_dim.SUB_BILLING_TO` (subscription) / `BILLING_TO` (labels), `group_id IS NOT NULL`
+  only (standalone dealers untouched). **Not** added to the ETL (one-time; new platform is
+  source of truth). **Step 3 (group da-billing customers) DEFERRED — see Next session.**
+- **Group member table — sort + search + layout.** `group-member-table-ux.md`. Member
+  Dealers list is sortable + searchable by Name / Dealer ID / Inventory Dealer ID
+  (client-side); the Users/Billing/Corporate Products/Disclaimers/Templates tabs now render
+  **above** the (long) member list.
+- **User-invite feedback + Pending Invitations.** `user-invite-feedback.md`. Group (+ dealer)
+  Users tabs show an "Invitation sent" toast and a **Pending Invitations** section
+  (resend/revoke) so an invite is no longer invisible until accepted.
+- **"Last sign in: Never" fix.** `invite-auth-and-last-signin.md` (Part B). `auth` schema
+  isn't exposed to PostgREST, so `admin.schema("auth").from("users")` returned nothing and
+  every row fell back to "Never." New `lib/last-sign-in.ts` (`lastSignInByEmail()`, paginates
+  the GoTrue admin API, 60s cache); group Users + all 3 branches of `/api/users` resolve
+  last-sign-in **by email**.
+- **Invite auth model + scanner-proof acceptance.** `invite-auth-and-last-signin.md` (Part A)
+  + `scanner-proof-invite.md`. Commits `ca65353` (auth model + last-sign-in) and `3354daa`
+  (sign-in + group-name badge fix). Migration **089** (`setup_code_hash`,
+  `setup_code_expires_at` on `invitations`; applied via Supabase SQL editor). New
+  `lib/invite-code.ts` (8-digit code, SHA-256, constant-time verify) + `lib/invite-email.ts`
+  (email **leads with the code**, link is inert). `/api/invite/accept` rewritten to consume
+  the invitation **only on a human action** (code-verify or password-submit) — never on
+  link-load or code-send — sets `app_metadata.role`, idempotent user resolution;
+  `/api/invite/resend` (non-consuming). `/signup?invite=` is a state machine: choose →
+  code | password → passkey (skippable) → dashboard. Closes the recurring **Barracuda
+  link-scanner** consumption (empty-UA HEAD+GET on the invite URL confirmed in access logs).
+  Dealer choice: code **or** password; passkey offered with a plain-English explainer, never
+  required.
 
-All planning-session specs (2026-05-30 / 06-01 / 06-02) are shipped — see **Shipped**
-above. New items get appended here as Allan sends them.
+### Shipped 2026-06-05 (cont. — commits `9b2d052` · `ec3f379` · `313d9fc` + legal `54922b6`/`45282be`/`77da13b`)
+- **Dealer/group-scoped Builder images.** `builder-scoped-images.md`. Commit `9b2d052`,
+  **migration 090** (`scope`/`group_id`/`dealer_id` on `image_library`). Three tiers in the
+  "Choose Background" picker — **Platform** (all) / **{Group} Library** (group_admin-managed,
+  all member dealers) / **My Images** (dealer-private); scope-aware Upload for dealer_admin +
+  group_admin; per-image delete limited to the caller's scope; scoped S3 key prefixes; scope
+  enforced on both the API (`getJwtClaims`) and RLS. New Group Image Library panel on the group
+  page.
+- **Legal pages — Terms of Use + Privacy Policy.** Canonical `docs/legal/*.md` +
+  `legal-pages-styling.md`. Rewritten for the current platform (Trial/Paid/Free lifecycle,
+  passwordless, "we don't access customer/sale/card data," named sub-processors). Public
+  `/terms` + `/privacy` on **DA Platform** (`54922b6`) and the **marketing site**
+  (`45282be`/`77da13b`), rendered from byte-identical markdown. Branded: real login logo,
+  login-style gradient, white document sheet, **Download PDF** (print-to-PDF), **← Back to sign
+  in**. Entity **DealerAddendums LLC**, governing law **Delaware**, contact
+  **support@dealeraddendums.com** only. ⚠️ Marketing copies must be re-synced from canonical on
+  any edit. Pending: legal-counsel review + marketing DNS cutover.
+- **Builder Position & Size spinner fix.** Commit `ec3f379`. X/Y/W/H inputs now `step={SNAP}`
+  (4px grid) + `min` — the spinner arrows move the widget by one grid cell (a default +1 step
+  previously snapped straight back via `snapV`).
+- **group_admin template-save (active-dealer).** `group-admin-template-save.md`. Commit
+  `313d9fc`. `resolveDealerId` (`/api/templates`) + `/api/settings` now honor a group_admin's
+  **active dealer** (`claims.dealer_id`, group-verified) instead of 400ing on a missing
+  `?dealer_id`; the Builder save also passes the param. `PATCH /api/templates/[id]` already
+  authorized via `fetchAndAuthorize` (left unchanged). A group_admin switched into a member
+  dealer can now Save a dealer template + set its default.
+
+## ✅ Queue clear (2026-06-05)
+
+All planning-session specs through 2026-06-05 are shipped — see **Shipped** above. Open items
+live under **Next session**: Step 3 (group da-billing customers, deferred), confirm the
+Dashboard/Products active-dealer scoping deploy, the Builder write-path route-audit sweep, and
+the legal-counsel review + marketing DNS cutover. New items get appended here as Allan sends them.
 
 ## Key cross-dependencies (resolved)
 - Shared "over-allowance" predicate (30 days OR 30 lifetime prints, since
