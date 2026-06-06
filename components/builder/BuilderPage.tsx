@@ -1040,14 +1040,18 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       let savedId: string | null = null;
       let wasUpdate = false;
 
+      // Pass the active dealer so a group_admin-as-dealer save resolves server-side
+      // even without relying on the claims fallback (mirrors the list GET above).
+      const dqs = effectiveDealerId ? `?dealer_id=${encodeURIComponent(effectiveDealerId)}` : '';
+
       if (existingId) {
-        const r = await fetch(`/api/templates/${existingId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const r = await fetch(`/api/templates/${existingId}${dqs}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!r.ok) { showToast('Save failed — try again'); return; }
         const { data } = await r.json() as { data?: { id: string } };
         savedId = data?.id ?? existingId;
         wasUpdate = true;
       } else {
-        const r = await fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const r = await fetch(`/api/templates${dqs}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!r.ok) { showToast('Save failed — try again'); return; }
         const { data: savedData } = await r.json() as { data?: { id: string } };
         savedId = savedData?.id ?? null;
