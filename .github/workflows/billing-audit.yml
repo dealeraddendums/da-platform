@@ -1,0 +1,30 @@
+name: Billing Link Audit (read-only)
+
+# Manual one-shot. Runs the READ-ONLY platform↔da-billing link audit
+# (scripts/billing-link-audit.ts) on the production self-hosted runner, where the
+# live platform + da-billing env vars are present. No DB writes — SELECT/GET only.
+on:
+  workflow_dispatch:
+
+# Don't contend with deploys.
+concurrency:
+  group: billing-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: self-hosted
+    steps:
+      - name: Run read-only billing-link audit on prod
+        run: |
+          set -e
+          export PATH="/usr/bin:/usr/local/bin:$PATH"
+          cd /var/www/da-platform
+          # Make sure the latest audit script is present without disturbing the
+          # running app (single-file checkout, not a reset/build/restart).
+          git fetch origin main
+          git checkout origin/main -- scripts/billing-link-audit.ts
+          echo "===== AUDIT OUTPUT ====="
+          npx tsx scripts/billing-link-audit.ts
+          echo "===== CSV (billing-link-audit.csv) ====="
+          cat billing-link-audit.csv || echo "(no CSV produced)"
