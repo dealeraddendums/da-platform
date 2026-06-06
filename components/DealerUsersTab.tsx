@@ -45,12 +45,15 @@ function roleLabel(role: string): string {
 }
 
 export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Props) {
-  const canInvite = viewerRole === "super_admin" || viewerRole === "dealer_admin";
-  const canEdit   = viewerRole === "super_admin" || viewerRole === "dealer_admin";
+  // A group_admin managing an in-group dealer has dealer_admin parity here (the
+  // page only renders this tab for an in-group dealer; the API group-verifies).
+  // Delete + impersonate stay super_admin-only (a dealer_admin can't either).
+  const canInvite = viewerRole === "super_admin" || viewerRole === "dealer_admin" || viewerRole === "group_admin";
+  const canEdit   = viewerRole === "super_admin" || viewerRole === "dealer_admin" || viewerRole === "group_admin";
   const canDelete = viewerRole === "super_admin";
   const canImpersonate = viewerRole === "super_admin";
 
-  // Allow dealer_admin to invite the two non-admin roles only.
+  // Allow dealer_admin / group_admin to invite the two non-admin roles only.
   const inviteRoles: { value: string; label: string }[] = viewerRole === "super_admin"
     ? [
         { value: "dealer_admin",      label: "Dealer Admin" },

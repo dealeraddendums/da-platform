@@ -4,26 +4,24 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 type Params = { params: { id: string; invId: string } };
 
-// super_admin (any dealer) or dealer_admin (own dealer only). Mirrors the
+// super_admin (any) / dealer_admin (own) / group_admin (in-group). Mirrors the
 // invite-creation guards in POST /api/dealers/[id]/users.
 async function authorizeDealer(dealerUuid: string) {
   const { claims, error } = await requireAuth();
   if (error) return { error };
-  if (claims.role !== "super_admin" && claims.role !== "dealer_admin") {
+  if (claims.role === "dealer_user" || claims.role === "dealer_restricted") {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
-  if (claims.role === "dealer_admin") {
-    const admin = createAdminSupabaseClient();
-    const { data: d } = await admin
-      .from("dealers").select("dealer_id").eq("id", dealerUuid)
-      .maybeSingle<{ dealer_id: string }>();
-    if (!d || d.dealer_id !== claims.dealer_id) {
-      return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
-    }
-  }
+  const admin = createAdminSupabaseClient();
+  const { data: d } = await admin
+    .from("dealers").select("dealer_id").eq("id", dealerUuid)
+    .maybeSingle<{ dealer_id: string }>();
+  const authz = await authorizeDealerAction(claims, d?.dealer_id ?? null);
+  if (!authz.ok) return { error: authz.response };
   return { error: null as null };
 }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole, ProfileRow } from "@/lib/db";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 type Params = { params: { id: string; userId: string } };
 
@@ -13,15 +14,17 @@ const DEALER_ROLES = new Set<UserRole>(["dealer_admin", "dealer_user", "dealer_r
  *
  * Auth:
  *   - super_admin: any dealer
- *   - dealer_admin: their own dealer only, cannot promote anyone to
- *     dealer_admin (mirrors the invite restriction)
- *   - everyone else: 403 (group_admin is view-only on this list)
+ *   - dealer_admin / group_admin (in-group): their dealer only, cannot promote
+ *     anyone to dealer_admin (mirrors the invite restriction)
+ *   - dealer_user / dealer_restricted: 403
  */
 export async function PATCH(req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  if (claims.role !== "super_admin" && claims.role !== "dealer_admin") {
+  // Write action: only admins of the dealer may edit users. Dealer-scope is
+  // verified against the resolved dealer below.
+  if (claims.role === "dealer_user" || claims.role === "dealer_restricted") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -38,7 +41,7 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     if (!DEALER_ROLES.has(body.role as UserRole)) {
       return NextResponse.json({ error: "Role must be dealer_admin, dealer_user, or dealer_restricted" }, { status: 400 });
     }
-    if (claims.role === "dealer_admin" && body.role === "dealer_admin") {
+    if (claims.role !== "super_admin" && body.role === "dealer_admin") {
       return NextResponse.json({ error: "Only super_admin can promote to dealer_admin" }, { status: 403 });
     }
     patch.role = body.role as UserRole;
@@ -52,9 +55,9 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     .maybeSingle<{ id: string; dealer_id: string }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
 
-  if (claims.role === "dealer_admin" && dealer.dealer_id !== claims.dealer_id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // Dealer scope: dealer_admin → own; group_admin → in-group; super_admin → any.
+  const authz = await authorizeDealerAction(claims, dealer.dealer_id);
+  if (!authz.ok) return authz.response;
 
   const { data: profile } = await admin
     .from("profiles")

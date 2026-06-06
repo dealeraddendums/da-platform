@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 type Params = { params: { id: string } };
 
@@ -96,14 +97,17 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
  * Auth:
  *   - super_admin: any dealer
  *   - dealer_admin: their own dealer only
- *   - group_admin / dealer_user: 403 (group_admin can view but not invite
- *     on a specific dealer's user list per spec)
+ *   - group_admin: dealers in their group (the member dealer they manage) —
+ *     full dealer_admin parity, including inviting that dealer's users
+ *   - dealer_user / dealer_restricted: 403
  */
 export async function POST(req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  if (claims.role !== "super_admin" && claims.role !== "dealer_admin") {
+  // Write action: only admins of the dealer may invite. Dealer-scope (own /
+  // in-group / any) is verified against the resolved dealer below.
+  if (claims.role === "dealer_user" || claims.role === "dealer_restricted") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -128,11 +132,12 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     .maybeSingle<{ id: string; dealer_id: string; name: string }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
 
-  if (claims.role === "dealer_admin" && dealer.dealer_id !== claims.dealer_id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-  // dealer_admin cannot create another dealer_admin
-  if (claims.role === "dealer_admin" && role === "dealer_admin") {
+  // Dealer scope: dealer_admin → own; group_admin → in-group; super_admin → any.
+  const authz = await authorizeDealerAction(claims, dealer.dealer_id);
+  if (!authz.ok) return authz.response;
+  // Only super_admin may mint another dealer_admin (dealer_admin and a
+  // group_admin-as-dealer_admin are both barred).
+  if (claims.role !== "super_admin" && role === "dealer_admin") {
     return NextResponse.json({ error: "Only super_admin can invite another dealer_admin" }, { status: 403 });
   }
 

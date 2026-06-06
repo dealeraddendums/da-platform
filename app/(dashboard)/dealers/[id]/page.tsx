@@ -46,12 +46,18 @@ export default async function DealerPage({ params }: Props) {
     ? ((rawDealer as Record<string, unknown>).groups as { id: string; name: string } | null)
     : null;
 
-  // dealer_admin / dealer_user may only view their own dealer
-  if (!isSuperAdmin && role !== "group_admin") {
+  // Access: dealer_admin / dealer_user may only view their own dealer; a
+  // group_admin only dealers in their own group.
+  const groupAdminInGroup = isGroupAdmin && group?.id === profile?.group_id;
+  if (isGroupAdmin) {
+    if (!groupAdminInGroup) redirect("/dealers");
+  } else if (!isSuperAdmin) {
     if (profile?.dealer_id !== dealer.dealer_id) redirect("/dealers");
   }
 
-  const canEdit = isSuperAdmin || isDealerAdmin;
+  // A group_admin managing an in-group dealer has full dealer_admin parity,
+  // including editing the dealer profile.
+  const canEdit = isSuperAdmin || isDealerAdmin || groupAdminInGroup;
 
   // Read hubspot_company_id directly from Supabase dealers table
   const hubspotCompanyId = dealer.hubspot_company_id
