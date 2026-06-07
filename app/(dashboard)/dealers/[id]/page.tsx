@@ -36,14 +36,14 @@ export default async function DealerPage({ params }: Props) {
 
   const { data: rawDealer } = await admin
     .from("dealers")
-    .select("*, groups(id, name)")
+    .select("*, groups(id, name, etl_locked)")
     .eq("id", params.id)
     .single();
   const dealer = rawDealer as DealerRow | null;
   if (!dealer) notFound();
 
   const group = rawDealer
-    ? ((rawDealer as Record<string, unknown>).groups as { id: string; name: string } | null)
+    ? ((rawDealer as Record<string, unknown>).groups as { id: string; name: string; etl_locked?: boolean } | null)
     : null;
 
   // Access: dealer_admin / dealer_user may only view their own dealer; a
@@ -77,6 +77,17 @@ export default async function DealerPage({ params }: Props) {
     availableGroups = (groupRows ?? []) as { id: string; name: string }[];
   }
 
+  // Resolve who froze this dealer's own ETL lock → display name for the badge.
+  let etlLockedByName: string | null = null;
+  if (dealer.etl_locked && dealer.etl_locked_by) {
+    const { data: locker } = await admin
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", dealer.etl_locked_by)
+      .maybeSingle<{ full_name: string | null; email: string | null }>();
+    etlLockedByName = locker?.full_name || locker?.email || null;
+  }
+
   return (
     <div>
       {isSuperAdmin && (
@@ -96,6 +107,7 @@ export default async function DealerPage({ params }: Props) {
             isGroupAdmin={isGroupAdmin && group?.id === profile?.group_id}
             availableGroups={availableGroups}
             hubspotCompanyId={hubspotCompanyId}
+            etlLockedByName={etlLockedByName}
           />
         }
         users={

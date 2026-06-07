@@ -46,6 +46,24 @@ export default async function GroupPage({ params }: Props) {
     ? parseInt(group.hubspot_company_id, 10) || null
     : null;
 
+  // Member-dealer count for the ETL-freeze blast-radius confirm (the lock
+  // cascades to all members, active or not).
+  const { count: memberCount } = await admin
+    .from("dealers")
+    .select("id", { count: "exact", head: true })
+    .eq("group_id", params.id);
+
+  // Resolve who froze this group's ETL sync → display name for the badge.
+  let etlLockedByName: string | null = null;
+  if (group.etl_locked && group.etl_locked_by) {
+    const { data: locker } = await admin
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", group.etl_locked_by)
+      .maybeSingle<{ full_name: string | null; email: string | null }>();
+    etlLockedByName = locker?.full_name || locker?.email || null;
+  }
+
   return (
     <div>
       {isSuperAdmin && (
@@ -61,6 +79,8 @@ export default async function GroupPage({ params }: Props) {
         isSuperAdmin={isSuperAdmin}
         isGroupAdmin={isGroupAdmin}
         hubspotCompanyId={hubspotCompanyId}
+        memberCount={memberCount ?? 0}
+        etlLockedByName={etlLockedByName}
       />
       {(isSuperAdmin || isGroupAdmin) && (
         <GroupOptionsPanel groupId={params.id} isSuperAdmin={isSuperAdmin} />

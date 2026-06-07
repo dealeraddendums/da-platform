@@ -12,9 +12,12 @@ import { DMS_PROVIDERS, OTHER_PROVIDERS, isDmsProvider } from "@/lib/inventory-p
 
 type Props = {
   dealer: DealerRow;
-  group: { id: string; name: string } | null;
+  group: { id: string; name: string; etl_locked?: boolean } | null;
   canEdit: boolean;
   isSuperAdmin: boolean;
+  /** Display name of the super_admin who set the dealer's own ETL lock
+   *  (resolved server-side from etl_locked_by). For the badge tooltip. */
+  etlLockedByName?: string | null;
   /** True when the viewer is a group_admin of this dealer's group.
    *  Used to expose the inventory_provider / inventory_dealer_id pencil
    *  edits without granting access to the full Edit Profile flow. */
@@ -95,7 +98,7 @@ function dealerToForm(d: DealerRow): FormData {
   };
 }
 
-export default function DealerProfileCard({ dealer: initialDealer, group, canEdit, isSuperAdmin, isGroupAdmin = false, availableGroups = [], hubspotCompanyId }: Props) {
+export default function DealerProfileCard({ dealer: initialDealer, group, canEdit, isSuperAdmin, isGroupAdmin = false, availableGroups = [], hubspotCompanyId, etlLockedByName }: Props) {
   const canEditInventory = isSuperAdmin || isGroupAdmin;
   const router = useRouter();
   const [dealer, setDealer] = useState(initialDealer);
@@ -230,6 +233,43 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
     }
     setTestToggling(false);
   }
+
+  // DA Legacy ETL config-lock (migration 094). Effective lock cascades from the
+  // group: a dealer is frozen if its own flag OR its group's flag is set.
+  const ETL_DEFAULT_REASON = "Live on new platform (limited/parallel)";
+  const groupFrozen = !!group?.etl_locked;
+  const frozenViaGroup = !dealer.etl_locked && groupFrozen;
+  const etlEffectiveLocked = dealer.etl_locked || groupFrozen;
+  const [etlToggling, setEtlToggling] = useState(false);
+
+  async function toggleEtlLock() {
+    if (frozenViaGroup) return; // controlled at the group level
+    const turningOn = !dealer.etl_locked;
+    let reason: string | undefined;
+    if (turningOn) {
+      if (!confirm("Freeze legacy ETL sync for this dealer? The nightly Aurora sync will stop overwriting this account's config — its in-platform edits are preserved. (Print history still syncs.)")) return;
+      const r = window.prompt("Reason (optional):", ETL_DEFAULT_REASON);
+      if (r === null) return; // prompt cancelled → abort
+      reason = r.trim() || ETL_DEFAULT_REASON;
+    } else {
+      if (!confirm("Resume legacy sync? On the next run, Aurora will overwrite any in-platform edits to this account again.")) return;
+    }
+    setEtlToggling(true);
+    const res = await fetch(`/api/dealers/${dealer.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(turningOn ? { etl_locked: true, etl_locked_reason: reason } : { etl_locked: false }),
+    });
+    if (res.ok) {
+      const json = (await res.json()) as { data: DealerRow };
+      setDealer(json.data);
+    }
+    setEtlToggling(false);
+  }
+
+  const etlTooltip = frozenViaGroup
+    ? `Frozen via group: ${group?.name}`
+    : `Frozen${etlLockedByName ? ` by ${etlLockedByName}` : ""}${dealer.etl_locked_at ? ` on ${formatCreatedDate(dealer.etl_locked_at)}` : ""}${dealer.etl_locked_reason ? ` — ${dealer.etl_locked_reason}` : ""}`;
 
   async function openDeleteModal() {
     setShowDeleteModal(true);
@@ -401,6 +441,15 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                 title="Test account — eligible for permanent deletion"
               >
                 TEST
+              </span>
+            )}
+            {etlEffectiveLocked && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5"
+                style={{ background: "#78828c", color: "#fff", borderRadius: 20 }}
+                title={etlTooltip}
+              >
+                ETL Frozen{frozenViaGroup ? " (group)" : ""}
               </span>
             )}
             {hubspotCompanyId && (
@@ -946,6 +995,33 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                   />
                   <span className="text-sm font-medium" style={{ color: dealer.is_test ? "#ffa500" : "var(--text-muted)" }}>
                     {testToggling ? "…" : dealer.is_test ? "TEST" : "Off"}
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {/* Freeze legacy ETL sync — super_admin only (migration 094). */}
+            {isSuperAdmin && (
+              <div className="flex items-start justify-between gap-4">
+                <div style={{ flexShrink: 0 }}>
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Freeze legacy ETL sync</span>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                    When on, the nightly legacy sync won&apos;t overwrite this account from Aurora — the dealer is managing it in the new platform. Print history still syncs.
+                    {frozenViaGroup && (
+                      <><br /><span style={{ color: "#78828c", fontWeight: 600 }}>Frozen via group: {group?.name}</span> — manage at the group.</>
+                    )}
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
+                  <input
+                    type="checkbox"
+                    checked={etlEffectiveLocked}
+                    disabled={etlToggling || editing || frozenViaGroup}
+                    onChange={() => void toggleEtlLock()}
+                    style={{ cursor: frozenViaGroup ? "not-allowed" : etlToggling ? "wait" : "pointer" }}
+                  />
+                  <span className="text-sm font-medium" style={{ color: etlEffectiveLocked ? "#78828c" : "var(--text-muted)" }}>
+                    {etlToggling ? "…" : etlEffectiveLocked ? "FROZEN" : "Off"}
                   </span>
                 </label>
               </div>

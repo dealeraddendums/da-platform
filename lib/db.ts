@@ -75,6 +75,11 @@ export type GroupRow = {
   name: string;
   active: boolean;
   is_test: boolean;
+  /** Migration 094 — DA Legacy ETL config-lock (group cascades to members). */
+  etl_locked: boolean;
+  etl_locked_at: string | null;
+  etl_locked_reason: string | null;
+  etl_locked_by: string | null;
   account_type: string;
   internal_id: string | null;
   legacy_id: number | null;
@@ -146,6 +151,10 @@ export type GroupUpdate = {
   name?: string;
   active?: boolean;
   is_test?: boolean;
+  etl_locked?: boolean;
+  etl_locked_at?: string | null;
+  etl_locked_reason?: string | null;
+  etl_locked_by?: string | null;
   account_type?: string;
   primary_contact?: string | null;
   primary_contact_email?: string | null;
@@ -187,6 +196,11 @@ export type DealerRow = {
   name: string;
   active: boolean;
   is_test: boolean;
+  /** Migration 094 — DA Legacy ETL config-lock. Effective lock = this OR group's. */
+  etl_locked: boolean;
+  etl_locked_at: string | null;
+  etl_locked_reason: string | null;
+  etl_locked_by: string | null;
   account_type: string;
   group_id: string | null;
   dealer_group_legacy: string | null;
@@ -257,6 +271,10 @@ type DealerInsert = {
   legacy_id?: number | null;
   active?: boolean;
   is_test?: boolean;
+  etl_locked?: boolean;
+  etl_locked_at?: string | null;
+  etl_locked_reason?: string | null;
+  etl_locked_by?: string | null;
   account_type?: string;
   group_id?: string | null;
   subscription_billed_to?: "dealer" | "group";
@@ -319,6 +337,10 @@ export type DealerUpdate = {
   inventory_provider_is_dms?: boolean;
   active?: boolean;
   is_test?: boolean;
+  etl_locked?: boolean;
+  etl_locked_at?: string | null;
+  etl_locked_reason?: string | null;
+  etl_locked_by?: string | null;
   account_type?: string;
   group_id?: string | null;
   subscription_billed_to?: "dealer" | "group";

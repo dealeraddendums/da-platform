@@ -15,6 +15,10 @@ type Props = {
   isSuperAdmin: boolean;
   isGroupAdmin?: boolean;
   hubspotCompanyId?: number | null;
+  /** Active member-dealer count — shown in the ETL-freeze blast-radius confirm. */
+  memberCount?: number;
+  /** Display name of the super_admin who froze ETL sync (from etl_locked_by). */
+  etlLockedByName?: string | null;
 };
 
 type FormData = {
@@ -70,7 +74,7 @@ function HubSpotPill({ href }: { href: string }) {
   );
 }
 
-export default function GroupProfileCard({ group: initialGroup, canEdit, isSuperAdmin, isGroupAdmin = false, hubspotCompanyId }: Props) {
+export default function GroupProfileCard({ group: initialGroup, canEdit, isSuperAdmin, isGroupAdmin = false, hubspotCompanyId, memberCount, etlLockedByName }: Props) {
   const router = useRouter();
   const [group, setGroup] = useState(initialGroup);
   const [editing, setEditing] = useState(false);
@@ -165,6 +169,37 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
     setTestToggling(false);
   }
 
+  // DA Legacy ETL config-lock (migration 094) — cascades to all member dealers.
+  const ETL_DEFAULT_REASON = "Live on new platform (limited/parallel)";
+  const [etlToggling, setEtlToggling] = useState(false);
+
+  async function toggleEtlLock() {
+    const turningOn = !group.etl_locked;
+    let reason: string | undefined;
+    if (turningOn) {
+      const n = memberCount ?? 0;
+      if (!confirm(`This freezes legacy sync for all ${n} dealer${n === 1 ? "" : "s"} in ${group.name}. Edits they make in the new platform will be preserved; legacy print activity still syncs.`)) return;
+      const r = window.prompt("Reason (optional):", ETL_DEFAULT_REASON);
+      if (r === null) return;
+      reason = r.trim() || ETL_DEFAULT_REASON;
+    } else {
+      if (!confirm("Resume legacy sync for this group? On the next run, Aurora will overwrite in-platform edits to the group and its member dealers again.")) return;
+    }
+    setEtlToggling(true);
+    const res = await fetch(`/api/groups/${group.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(turningOn ? { etl_locked: true, etl_locked_reason: reason } : { etl_locked: false }),
+    });
+    if (res.ok) {
+      const json = (await res.json()) as { data: GroupRow };
+      setGroup(json.data);
+    }
+    setEtlToggling(false);
+  }
+
+  const etlTooltip = `Frozen${etlLockedByName ? ` by ${etlLockedByName}` : ""}${group.etl_locked_at ? ` on ${formatCreatedDate(group.etl_locked_at)}` : ""}${group.etl_locked_reason ? ` — ${group.etl_locked_reason}` : ""}`;
+
   async function openDeleteModal() {
     setShowDeleteModal(true);
     setDeleteConfirmName("");
@@ -228,6 +263,15 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
                 title="Test account — eligible for permanent deletion"
               >
                 TEST
+              </span>
+            )}
+            {group.etl_locked && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5"
+                style={{ background: "#78828c", color: "#fff", borderRadius: 20 }}
+                title={etlTooltip}
+              >
+                ETL Frozen
               </span>
             )}
             {hubspotCompanyId && (
@@ -314,6 +358,30 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
                   />
                   <span className="text-sm font-medium" style={{ color: group.is_test ? "#ffa500" : "var(--text-muted)" }}>
                     {testToggling ? "…" : group.is_test ? "TEST" : "Off"}
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {/* Freeze legacy ETL sync — super_admin only (migration 094). Cascades to all members. */}
+            {isSuperAdmin && (
+              <div className="flex items-start justify-between gap-4">
+                <div style={{ flexShrink: 0 }}>
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Freeze legacy ETL sync</span>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                    When on, the nightly legacy sync won&apos;t overwrite this group <strong>or its {memberCount ?? 0} member dealer{(memberCount ?? 0) === 1 ? "" : "s"}</strong> from Aurora. Print history still syncs.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
+                  <input
+                    type="checkbox"
+                    checked={group.etl_locked}
+                    disabled={etlToggling || editing}
+                    onChange={() => void toggleEtlLock()}
+                    style={{ cursor: etlToggling ? "wait" : "pointer" }}
+                  />
+                  <span className="text-sm font-medium" style={{ color: group.etl_locked ? "#78828c" : "var(--text-muted)" }}>
+                    {etlToggling ? "…" : group.etl_locked ? "FROZEN" : "Off"}
                   </span>
                 </label>
               </div>

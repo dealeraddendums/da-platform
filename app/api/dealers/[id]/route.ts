@@ -119,6 +119,15 @@ export async function PATCH(
   if (body.name !== undefined) patch.name = body.name;
   if (body.active !== undefined && claims.role === "super_admin") patch.active = body.active;
   if (body.is_test !== undefined && claims.role === "super_admin") patch.is_test = body.is_test;
+  // DA Legacy ETL config-lock (migration 094) — super_admin only. A forged
+  // etl_locked from dealer_admin/group_admin never reaches here (group_admin is
+  // whitelist-rejected above; dealer_admin's value is simply not copied).
+  if (body.etl_locked !== undefined && claims.role === "super_admin") {
+    patch.etl_locked = body.etl_locked;
+    patch.etl_locked_at = body.etl_locked ? new Date().toISOString() : null;
+    patch.etl_locked_by = body.etl_locked ? claims.sub : null;
+    patch.etl_locked_reason = body.etl_locked ? (body.etl_locked_reason ?? null) : null;
+  }
   if (body.group_id !== undefined && claims.role === "super_admin") patch.group_id = body.group_id;
   // account_type drives the HubSpot subscription_type + lifecyclestage —
   // super_admin only. Free downgrades and Manual/Auto-Web/Auto-DMS upgrades

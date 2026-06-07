@@ -81,6 +81,15 @@ export async function PATCH(
   if (body.country !== undefined) patch.country = body.country;
   if (body.active !== undefined && claims.role === "super_admin") patch.active = body.active;
   if (body.is_test !== undefined && claims.role === "super_admin") patch.is_test = body.is_test;
+  // DA Legacy ETL config-lock (migration 094) — super_admin only; cascades to
+  // all member dealers. group_admin can edit name/contact, never this: a forged
+  // etl_locked from group_admin is simply not copied into the patch.
+  if (body.etl_locked !== undefined && claims.role === "super_admin") {
+    patch.etl_locked = body.etl_locked;
+    patch.etl_locked_at = body.etl_locked ? new Date().toISOString() : null;
+    patch.etl_locked_by = body.etl_locked ? claims.sub : null;
+    patch.etl_locked_reason = body.etl_locked ? (body.etl_locked_reason ?? null) : null;
+  }
 
   const admin = createAdminSupabaseClient();
   const { data, error: dbError } = await admin

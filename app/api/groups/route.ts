@@ -95,7 +95,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     username?: string;
     password?: string;
     sendNotify?: boolean;
-  } & GroupUpdate;
+    // etl_locked is a post-hoc super_admin toggle (PATCH only), never set at
+    // create — excluded so it doesn't flow into the insert payload (the
+    // generated Supabase types don't carry it until regenerated).
+  } & Omit<GroupUpdate, "etl_locked" | "etl_locked_at" | "etl_locked_reason" | "etl_locked_by">;
   try {
     body = (await req.json()) as typeof body;
   } catch {
