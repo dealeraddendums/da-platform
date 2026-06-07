@@ -6,7 +6,6 @@ import { sendMandrillEmail } from "@/lib/mandrill";
 import {
   createCustomer,
   createTemplate,
-  lookupPrice,
   subscriptionDescriptorFor,
   firstOfNextMonthIso,
   billingConfigured,
@@ -90,28 +89,23 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
 
   await runSync(
     async () => {
-      const price = await lookupPrice(descriptor.key);
-      if (price == null) {
-        throw new Error(`No da-billing price entry for "${descriptor.key}"`);
-      }
       // Build the template's product list. Subscription line first; if
       // the dealer is on sub-auto-dms, append the one-time DMS Setup
       // Charge tagged with "<internal_id>::dms-setup" so it can be
       // detected and removed in lockstep with the dealer if needed.
+      // NO price is sent — da-billing is the sole price authority and
+      // canonicalizes sub-*/dms-setup server-side (see billing-price-integrity).
       const products: BillingProduct[] = [{
         productId: descriptor.key,
         name: descriptor.name,
         quantity: 1,
-        price,
         lineItemDescription: `${args.dealerInternalId}::${args.dealerName}`,
       }];
       if (descriptor.key === "sub-auto-dms") {
-        const setupPrice = (await lookupPrice("dms-setup")) ?? 0;
         products.push({
           productId: "dms-setup",
           name: "One Time DMS Setup Charge",
           quantity: 1,
-          price: setupPrice,
           lineItemDescription: `${args.dealerInternalId}::dms-setup`,
         });
       }

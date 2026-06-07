@@ -7,7 +7,6 @@ import {
   createCustomer,
   createTemplate,
   firstOfNextMonthIso,
-  lookupPrice,
   subscriptionDescriptorFor,
   billingConfigured,
   type BillingProduct,
@@ -128,20 +127,13 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   const isConversion = !dealer.billing_customer_id && dealer.legacy_id == null;
   const customerKey = dealer.billing_customer_id ?? dealer.internal_id;
 
-  // Look up the new price; abort if /pricing doesn't have an entry.
-  const newPrice = await lookupPrice(descriptor.key);
-  if (newPrice == null) {
-    return NextResponse.json(
-      { error: `No da-billing price entry for "${descriptor.key}". Update Settings → Pricing in da-billing first.` },
-      { status: 409 },
-    );
-  }
-
+  // No price is sent — da-billing is the sole price authority and canonicalizes
+  // sub-*/dms-setup server-side; discounts apply via subscriptionDiscount.
+  // See docs/billing-price-integrity.md.
   const newSubLine: BillingProduct = {
     productId: descriptor.key,
     name: descriptor.name,
     quantity: 1,
-    price: newPrice,
     lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
   };
 
@@ -166,12 +158,10 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       || (p as BillingProduct & { lineItemDescription?: string }).lineItemDescription === `${dealer.internal_id}::dms-setup`
     );
     if (!hasSetup) {
-      const setupPrice = (await lookupPrice("dms-setup")) ?? 0;
       merged.push({
         productId: "dms-setup",
         name: "One Time DMS Setup Charge",
         quantity: 1,
-        price: setupPrice,
         lineItemDescription: `${dealer.internal_id}::dms-setup`,
       } as BillingProduct & { lineItemDescription: string });
     }
@@ -222,7 +212,6 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     ok: true,
     tier: descriptor.key,
     name: descriptor.name,
-    price: newPrice,
     customerId: effectiveCustomerKey,
     converted: isConversion,
   });

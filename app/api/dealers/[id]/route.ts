@@ -343,8 +343,12 @@ export async function PATCH(
         const tmpl = await getTemplate(ownCustomerId);
         if (!tmpl) return;
         const rewritten = tmpl.products.map(p => {
+          // Strip any stored price so the rename re-save never re-persists a
+          // stale value — da-billing is the sole price authority and
+          // re-canonicalizes (docs/billing-price-integrity.md).
+          const { price: _drop, ...rest } = p;
           const next = rewriteLineItemDealerName(p.lineItemDescription, null, newName);
-          return next == null ? p : { ...p, lineItemDescription: next };
+          return next == null ? rest : { ...rest, lineItemDescription: next };
         });
         await putTemplate(ownCustomerId, rewritten);
       }, { event: "billing.dealer.rename", dealerId: dealerUuid, payload: { customerId: ownCustomerId, newName } });
@@ -363,10 +367,11 @@ export async function PATCH(
         if (!tmpl) return;
         let mutated = false;
         const rewritten = tmpl.products.map(p => {
+          const { price: _drop, ...rest } = p; // strip stale price; da-billing re-canonicalizes
           const next = rewriteLineItemDealerName(p.lineItemDescription, internalId, newName);
-          if (next == null) return p;
+          if (next == null) return rest;
           mutated = true;
-          return { ...p, lineItemDescription: next };
+          return { ...rest, lineItemDescription: next };
         });
         if (mutated) await putTemplate(groupCustomerId, rewritten);
       }, { event: "billing.dealer.rename.group_template", dealerId: dealerUuid, payload: { groupId: groupIdForBilling, internalId, newName } });
