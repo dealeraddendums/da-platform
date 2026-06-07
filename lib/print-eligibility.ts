@@ -16,6 +16,7 @@
 import { NextResponse } from "next/server";
 import { normalizeSubscriptionType, isPayingAccount } from "@/lib/hubspot";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { billingConfigured, getBillingStatus } from "@/lib/billing";
 
 export const TRIAL_DAYS_CAP = 30;
 export const TRIAL_PRINTS_CAP = 30;
@@ -67,7 +68,11 @@ export function isOverAllowance(d: { created_at?: string | null; lifetime_prints
   return ageDays > TRIAL_DAYS_CAP || prints > TRIAL_PRINTS_CAP;
 }
 
-export type CanPrintReason = "trial_expired" | "free_downgraded";
+export type CanPrintReason = "trial_expired" | "free_downgraded" | "past_due";
+
+/** Verbatim copy for the past-due 403 + the disabled-button tooltip. */
+export const PAST_DUE_MESSAGE =
+  "Printing is paused — there's a past-due balance on this account (or your group's). Settle the outstanding invoice(s) to resume.";
 
 export interface CanPrintResult {
   ok: boolean;
@@ -95,19 +100,77 @@ export function canPrint(d: DealerEligibility): CanPrintResult {
   };
 }
 
+// ── Past-due billing gate ────────────────────────────────────────────────────
+//
+// A dealer can't print when the responsible billing customer is past due in
+// da-billing. Short-TTL cache so the gate isn't a per-print round-trip; FAIL
+// OPEN on any da-billing error (never block a paying dealer on a service hiccup).
+
+const BILLING_TTL_MS = 20 * 60 * 1000; // 20 min
+const billingPastDueCache = new Map<string, { pastDue: boolean; at: number }>();
+
+/** Cached past_due read for one da-billing customer. Fail-open (false) on error
+ *  — and the failure is NOT cached, so it retries on the next call. */
+async function customerPastDue(customerId: string): Promise<boolean> {
+  const hit = billingPastDueCache.get(customerId);
+  if (hit && Date.now() - hit.at < BILLING_TTL_MS) return hit.pastDue;
+  try {
+    const status = await getBillingStatus(customerId);
+    const pastDue = status?.past_due === true;
+    billingPastDueCache.set(customerId, { pastDue, at: Date.now() });
+    return pastDue;
+  } catch {
+    return false; // FAIL OPEN
+  }
+}
+
+/**
+ * Is the dealer blocked by a past-due balance? Resolves the *responsible* payer:
+ * a group-billed dealer (subscription_billed_to='group') is gated on its GROUP's
+ * da-billing customer; a self/dealer-billed dealer on its own. Fail-open when
+ * billing isn't configured or no da-billing customer resolves (can't confirm
+ * past_due → allow).
+ */
+async function dealerPastDue(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  d: { subscription_billed_to: string | null; billing_customer_id: string | null; group_id: string | null },
+): Promise<boolean> {
+  if (!billingConfigured()) return false;
+  let customerId: string | null;
+  if (d.subscription_billed_to === "group" && d.group_id) {
+    const { data: g } = await admin
+      .from("groups")
+      .select("billing_customer_id")
+      .eq("id", d.group_id)
+      .maybeSingle<{ billing_customer_id: string | null }>();
+    customerId = g?.billing_customer_id ?? null;
+  } else {
+    customerId = d.billing_customer_id ?? null;
+  }
+  if (!customerId) return false; // no resolvable payer → can't confirm → allow
+  return customerPastDue(customerId);
+}
+
 /**
  * Resolve canPrint for a dealer from its text id — looks up account_type,
- * created_at, and lifetime print count from print_history. Used by both
- * the server-route gate (enforceCanPrint) and server-rendered pages that
- * need to pass the result into a client component for the UI gate.
+ * created_at, and lifetime print count from print_history, applies the
+ * Trial/Free gate, then (if that passes) the past-due billing gate. Used by
+ * both the server-route gate (enforceCanPrint) and server-rendered pages that
+ * pass the result into a client component for the UI gate.
  */
 export async function canPrintForDealer(dealerTextId: string): Promise<CanPrintResult> {
   const admin = createAdminSupabaseClient();
   const { data: dealer } = await admin
     .from("dealers")
-    .select("account_type, created_at")
+    .select("account_type, created_at, subscription_billed_to, billing_customer_id, group_id")
     .eq("dealer_id", dealerTextId)
-    .maybeSingle<{ account_type: string | null; created_at: string | null }>();
+    .maybeSingle<{
+      account_type: string | null;
+      created_at: string | null;
+      subscription_billed_to: string | null;
+      billing_customer_id: string | null;
+      group_id: string | null;
+    }>();
 
   // Unknown dealer — be permissive; route-level 404s handle the actual error
   // path. Returning ok=true here means the UI shows the buttons enabled,
@@ -119,11 +182,21 @@ export async function canPrintForDealer(dealerTextId: string): Promise<CanPrintR
     .select("id", { count: "exact", head: true })
     .eq("dealer_id", dealerTextId);
 
-  return canPrint({
+  // Trial/Free gate (pure) — any block here wins; no need to hit da-billing.
+  const base = canPrint({
     account_type: dealer.account_type,
     created_at: dealer.created_at,
     lifetime_prints: lifetimePrints ?? 0,
   });
+  if (!base.ok) return base;
+
+  // Past-due gate stacks on top: a paying, in-allowance dealer is still blocked
+  // when its (or its group's) balance is past due.
+  if (await dealerPastDue(admin, dealer)) {
+    return { ok: false, reason: "past_due", message: PAST_DUE_MESSAGE };
+  }
+
+  return { ok: true };
 }
 
 /**

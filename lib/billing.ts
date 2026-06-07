@@ -457,6 +457,37 @@ export async function listInvoices(customerId: string): Promise<ListInvoicesResu
   }
 }
 
+// ── Billing status (past-due print lock) ────────────────────────────────────
+
+export interface BillingStatus {
+  past_due: boolean;
+  outstanding_balance: number;
+  oldest_overdue_date: string | null;
+  overdue_days: number;
+}
+
+/**
+ * GET /customers/{id}/billing-status — da-billing's authoritative past-due read,
+ * computed against the customer's per-customer Overdue Days grace. Used by the
+ * print gate (lib/print-eligibility.ts). Returns null on 404 (no such customer).
+ * Throws on any other error so the caller can FAIL OPEN (never block a paying
+ * dealer on a billing-service hiccup).
+ */
+export async function getBillingStatus(customerId: string): Promise<BillingStatus | null> {
+  const res = await fetch(`${BASE}/customers/${encodeURIComponent(customerId)}/billing-status`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+  if (res.status === 404) return null;
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `getBillingStatus ${res.status}`, text);
+  try {
+    return JSON.parse(text) as BillingStatus;
+  } catch (err) {
+    throw new BillingError(res.status, `getBillingStatus parse: ${(err as Error).message}`, text);
+  }
+}
+
 export async function lookupPrice(productKey: string): Promise<number | null> {
   const entries = await getPricing();
   const match = entries.find(e => e.name.toLowerCase() === productKey.toLowerCase());

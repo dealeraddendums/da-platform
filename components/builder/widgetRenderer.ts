@@ -1,6 +1,17 @@
 import { IB_DEFAULT, VEHICLE_PHOTO_COMING_SOON } from './constants';
+import { sanitizeProductHtml } from '@/lib/product-name';
 
 type D = Record<string, unknown>;
+
+// Repair + allowlist dealer-authored rich text before it's interpolated raw
+// into the addendum HTML. DOMPurify re-serializes to well-formed markup, so a
+// malformed/typo'd tag (e.g. the "</b?>" that garbled a template) degrades
+// gracefully instead of leaving an open tag that bleeds into the rest of the
+// layout. Allowed inline formatting is preserved; disallowed tags are dropped
+// but their text kept. Identical on the Builder canvas and the print path.
+function rich(v: unknown): string {
+  return sanitizeProductHtml(v == null ? '' : String(v));
+}
 
 function looksLikeHtml(s: string): boolean {
   return /<[a-z][^>]*>/i.test(s);
@@ -10,7 +21,7 @@ function renderDescription(desc: string, fontPx: number): string {
   if (!desc) return '';
   const baseStyle = `font-size:${fontPx}px;color:#666;padding-left:8px;margin-top:1px`;
   if (looksLikeHtml(desc)) {
-    return `<div class="description-html" style="${baseStyle}">${desc}</div>`;
+    return `<div class="description-html" style="${baseStyle}">${sanitizeProductHtml(desc)}</div>`;
   }
   // Escape plain text to keep parity with previous behavior.
   const escaped = desc.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -36,7 +47,7 @@ function renderProductRow(
   const spacerAbove = spacesPx > 0 ? `<div style="height:${spacesPx}px"></div>` : '';
   const sepAbove = it.separator_above ? `<hr style="border:none;border-top:1px solid #1a1916;margin:4px 0"/>` : '';
   const sepBelow = it.separator_below ? `<hr style="border:none;border-top:1px solid #1a1916;margin:4px 0"/>` : '';
-  const row = `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0;line-height:${ls}"><div><div style="font-size:${sz}px;font-weight:700;color:#333">${it.name}</div>${renderDescription(it.desc, szm)}</div><div style="font-size:${sz}px;font-weight:700;color:#333;font-family:monospace;white-space:nowrap;${pricePadding};flex-shrink:0">${it.price}</div></div>`;
+  const row = `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid #f0f0f0;line-height:${ls}"><div><div style="font-size:${sz}px;font-weight:700;color:#333">${rich(it.name)}</div>${renderDescription(it.desc, szm)}</div><div style="font-size:${sz}px;font-weight:700;color:#333;font-family:monospace;white-space:nowrap;${pricePadding};flex-shrink:0">${it.price}</div></div>`;
   return `${spacerAbove}${sepAbove}${row}${sepBelow}`;
 }
 
@@ -102,7 +113,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const ls = (d.lineSpacing as number) || 1.2;
     type OptItem = { name: string; desc: string; price: string; separator_above?: boolean; separator_below?: boolean; spaces?: number };
     const items = (d.items as OptItem[]) || [];
-    return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div>${items.map(it =>
+    return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${rich(d.sectionLabel)}</div>${items.map(it =>
       renderProductRow(it, sz, szm, ls)
     ).join('')}</div>`;
   }
@@ -114,9 +125,9 @@ export function renderW(type: string, d: D, fontScale: number): string {
     type OptItem = { name: string; desc: string; price: string; separator_above?: boolean; separator_below?: boolean; spaces?: number };
     const items = (d.items as OptItem[]) || [];
     if (items.length === 0) {
-      return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div><div style="font-size:${szm}px;color:#bbb;font-style:italic">Suggested products will appear here at print time.</div></div>`;
+      return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${rich(d.sectionLabel)}</div><div style="font-size:${szm}px;color:#bbb;font-style:italic">Suggested products will appear here at print time.</div></div>`;
     }
-    return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${d.sectionLabel}</div>${items.map(it =>
+    return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${rich(d.sectionLabel)}</div>${items.map(it =>
       renderProductRow(it, sz, szm, ls)
     ).join('')}</div>`;
   }
@@ -164,7 +175,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
       .replace(/\n/g, '<br>')
       .replace(/\{\{([^}]+)\}\}/g, (_, key: string) =>
         `<em style="color:#bbb;font-style:italic">[${key.trim()}]</em>`);
-    return `<div style="padding:4px 0"><div style="font-size:${d.fs || 10}px;text-align:${ta};color:#555;line-height:${lh}">${html}</div></div>`;
+    return `<div style="padding:4px 0"><div style="font-size:${d.fs || 10}px;text-align:${ta};color:#555;line-height:${lh}">${sanitizeProductHtml(html)}</div></div>`;
   }
 
   if (type === 'sigline') {
