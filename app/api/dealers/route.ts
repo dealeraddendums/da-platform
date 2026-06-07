@@ -17,6 +17,7 @@ import { fireDealerCreateReliable, fireProfileSync } from "@/lib/sync-hubspot";
 import { fireGroupAssignCascade } from "@/lib/group-billing-cascade";
 import { createDealerFolder, boxConfigured } from "@/lib/box";
 import { seedTrialSampleData } from "@/lib/provisioning";
+import { SOURCE_FORM } from "@/lib/hubspot";
 
 interface NewBillingCustomerArgs {
   adminClient: ReturnType<typeof createAdminSupabaseClient>;
@@ -499,7 +500,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Phase 5). A silent miss means the dealer's onboarding never
   // starts — held to a higher bar than the general fire-and-forget
   // update path. Still doesn't block the HTTP response.
-  fireDealerCreateReliable(createdDealerId);
+  // source_form (create-only) by who's adding the dealer: a group_admin adding
+  // a member dealer → "New Dealer Add by Group"; an operator → "…by DA Admin".
+  fireDealerCreateReliable(
+    createdDealerId,
+    claims.role === "group_admin" ? SOURCE_FORM.DEALER_BY_GROUP : SOURCE_FORM.DEALER_BY_ADMIN,
+  );
 
   // Seed sample data for an admin-created STANDALONE trial (Trial + no group).
   // Self-guarded + idempotent; mirrors the self-serve createTrialDealer path.

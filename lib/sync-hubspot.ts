@@ -13,7 +13,9 @@ import { sendMandrillEmail } from "@/lib/mandrill";
 import {
   hubspotConfigured,
   upsertObject,
+  associateContactToCompany,
   LIFECYCLE,
+  INDUSTRY,
   normalizeSubscriptionType,
   isPayingAccount,
   findUnlinkedOriginal,
@@ -265,7 +267,7 @@ async function alertDedupSkip(args: {
  * Three-stage match: (1) row already has hubspot_company_id → PATCH;
  * (2) search by platformid → PATCH + store id; (3) create.
  */
-export async function syncDealerToHubspot(dealerId: string): Promise<void> {
+export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?: string | null }): Promise<void> {
   if (!hubspotConfigured()) return;
   const admin = createAdminSupabaseClient();
   let payload: Record<string, unknown> = {};
@@ -308,9 +310,17 @@ export async function syncDealerToHubspot(dealerId: string): Promise<void> {
     const properties = dealerCompanyProperties(dealer, groupName, groupNumericId, lifetimePrints ?? 0);
     payload = properties;
 
+    // Create-only: a dealer Company is always industry "Automotive Dealer"; the
+    // source_form (creation-path attribution) is whatever the caller passed.
+    // Both are applied only when this sync POSTs a new Company — never on a
+    // PATCH — so they never clobber a later operator edit.
+    const createOnlyProperties: Record<string, string | null> = { industry: INDUSTRY.DEALER };
+    if (opts?.sourceForm) createOnlyProperties.source_form = opts.sourceForm;
+
     const { hubspotId, created } = await upsertObject({
       object: "companies",
       properties,
+      createOnlyProperties,
       existingHubspotId: dealer.hubspot_company_id,
       searchProperty: "platformid",
       searchValue: dealer.dealer_id,
@@ -340,7 +350,7 @@ export async function syncDealerToHubspot(dealerId: string): Promise<void> {
   }
 }
 
-export async function syncGroupToHubspot(groupId: string): Promise<void> {
+export async function syncGroupToHubspot(groupId: string, opts?: { sourceForm?: string | null }): Promise<void> {
   if (!hubspotConfigured()) return;
   const admin = createAdminSupabaseClient();
   let payload: Record<string, unknown> = {};
@@ -361,9 +371,17 @@ export async function syncGroupToHubspot(groupId: string): Promise<void> {
     const properties = groupCompanyProperties(group, memberCount ?? 0);
     payload = properties;
 
+    // Create-only: groups map to "Automotive Dealer Group" (reseller groups
+    // would use INDUSTRY.RESELLER once the data models that distinction — there
+    // is no reseller flag on groups today). source_form per creation path.
+    // Applied on POST only, never on PATCH.
+    const createOnlyProperties: Record<string, string | null> = { industry: INDUSTRY.GROUP };
+    if (opts?.sourceForm) createOnlyProperties.source_form = opts.sourceForm;
+
     const { hubspotId, created } = await upsertObject({
       object: "companies",
       properties,
+      createOnlyProperties,
       existingHubspotId: group.hubspot_company_id,
       searchProperty: "groupid",
       searchValue: group.internal_id,
@@ -405,14 +423,27 @@ export async function syncProfileToHubspot(profileId: string): Promise<void> {
       .maybeSingle<ProfileForHubspot>();
     if (!profile) return;
 
+    // Resolve the Company this contact belongs under (dealer by text id, else
+    // group by uuid): its name for the `company` text property, plus uuid +
+    // stored HubSpot id for the contact↔company association below.
     let companyName: string | null = null;
+    let companyUuid: string | null = null;
+    let companyHubspotId: string | null = null;
+    let companyKind: "dealer" | "group" | null = null;
     if (profile.dealer_id) {
       const { data: d } = await admin
         .from("dealers")
-        .select("name")
+        .select("id, name, hubspot_company_id")
         .eq("dealer_id", profile.dealer_id)
-        .maybeSingle<{ name: string | null }>();
-      companyName = d?.name ?? null;
+        .maybeSingle<{ id: string; name: string | null; hubspot_company_id: string | null }>();
+      if (d) { companyName = d.name; companyUuid = d.id; companyHubspotId = d.hubspot_company_id; companyKind = "dealer"; }
+    } else if (profile.group_id) {
+      const { data: g } = await admin
+        .from("groups")
+        .select("id, name, hubspot_company_id")
+        .eq("id", profile.group_id)
+        .maybeSingle<{ id: string; name: string | null; hubspot_company_id: string | null }>();
+      if (g) { companyName = g.name; companyUuid = g.id; companyHubspotId = g.hubspot_company_id; companyKind = "group"; }
     }
 
     const properties = profileContactProperties(profile, companyName);
@@ -428,6 +459,30 @@ export async function syncProfileToHubspot(profileId: string): Promise<void> {
 
     if (created || hubspotId !== profile.hubspot_contact_id) {
       await admin.from("profiles").update({ hubspot_contact_id: hubspotId }).eq("id", profileId);
+    }
+
+    // Associate the Contact to its Company so a dealer's people always appear
+    // under the dealership/group in HubSpot (and vice-versa). Idempotent. If the
+    // Company hasn't synced yet (create race on a fresh signup), sync it now so
+    // the id exists, then associate.
+    if (companyUuid && companyKind) {
+      if (!companyHubspotId) {
+        if (companyKind === "dealer") await syncDealerToHubspot(companyUuid);
+        else await syncGroupToHubspot(companyUuid);
+        const { data: refreshed } = await admin
+          .from(companyKind === "dealer" ? "dealers" : "groups")
+          .select("hubspot_company_id")
+          .eq("id", companyUuid)
+          .maybeSingle<{ hubspot_company_id: string | null }>();
+        companyHubspotId = refreshed?.hubspot_company_id ?? null;
+      }
+      if (companyHubspotId) {
+        try {
+          await associateContactToCompany(hubspotId, companyHubspotId);
+        } catch (assocErr) {
+          void logError("contact", profileId, "update", assocErr, { ...payload, association: `contact ${hubspotId} -> company ${companyHubspotId}` }, hubspotId);
+        }
+      }
     }
   } catch (err) {
     void logError("contact", profileId, "update", err, payload);
@@ -494,12 +549,12 @@ ready.</p>`,
  *
  * Returns the resulting hubspot_company_id on success, null on failure.
  */
-export async function syncDealerReliable(dealerId: string, context: string): Promise<string | null> {
+export async function syncDealerReliable(dealerId: string, context: string, opts?: { sourceForm?: string | null }): Promise<string | null> {
   if (!hubspotConfigured()) return null;
   let lastError = "";
   for (let attempt = 1; attempt <= RELIABLE_MAX_ATTEMPTS; attempt++) {
     try {
-      await syncDealerToHubspot(dealerId);
+      await syncDealerToHubspot(dealerId, opts);
       // syncDealerToHubspot swallows errors into hubspot_sync_errors, so
       // confirm success by reading the updated row back.
       const admin = createAdminSupabaseClient();
@@ -528,8 +583,8 @@ export async function syncDealerReliable(dealerId: string, context: string): Pro
  * wrapper around syncDealerReliable with the create-context string so
  * Mandrill alerts still call out the Marketing OS Phase 5 trigger.
  */
-export async function syncDealerCreateReliable(dealerId: string): Promise<string | null> {
-  return syncDealerReliable(dealerId, "dealer create (Trial — onboarding workflow trigger)");
+export async function syncDealerCreateReliable(dealerId: string, sourceForm?: string | null): Promise<string | null> {
+  return syncDealerReliable(dealerId, "dealer create (Trial — onboarding workflow trigger)", { sourceForm });
 }
 
 /**
@@ -537,8 +592,8 @@ export async function syncDealerCreateReliable(dealerId: string): Promise<string
  * uses the reliable retry+alert variant so a flaky HubSpot doesn't
  * silently skip onboarding.
  */
-export function fireDealerCreateReliable(dealerId: string): void {
-  void syncDealerCreateReliable(dealerId);
+export function fireDealerCreateReliable(dealerId: string, sourceForm?: string | null): void {
+  void syncDealerCreateReliable(dealerId, sourceForm);
 }
 
 /**
@@ -553,5 +608,5 @@ export function fireDealerReliable(dealerId: string, context: string): void {
 // ── Fire-and-forget convenience wrappers (call from route handlers) ─────────
 
 export function fireDealerSync(dealerId: string): void { void syncDealerToHubspot(dealerId); }
-export function fireGroupSync(groupId: string): void  { void syncGroupToHubspot(groupId); }
+export function fireGroupSync(groupId: string, sourceForm?: string | null): void  { void syncGroupToHubspot(groupId, { sourceForm }); }
 export function fireProfileSync(profileId: string): void { void syncProfileToHubspot(profileId); }

@@ -117,6 +117,49 @@ export const LIFECYCLE = {
   ACCOUNT_DOWNGRADED: "108387744",
 } as const;
 
+// ── source_form OPTION VALUES (Company) ───────────────────────────────────────
+// Set ON CREATE ONLY, keyed by the creation path. NOTE: the API value differs
+// from the dropdown label for the two dealer-add paths (the value carries a
+// "New " prefix the label hides). Confirmed against portal 23896347 2026-06-07
+// via /properties/companies/source_form.
+export const SOURCE_FORM = {
+  /** Marketing-OS self-serve signup (dealer or group). */
+  SELF_SERVE:      "DA Mktg OS",
+  /** Operator-created standalone dealer (POST /api/dealers, super_admin). */
+  DEALER_BY_ADMIN: "New Dealer Add by DA Admin",
+  /** group_admin-created member dealer (POST /api/dealers, group_admin). */
+  DEALER_BY_GROUP: "New Dealer Add by Group",
+  /** Operator-created group (POST /api/groups). */
+  GROUP_BY_ADMIN:  "Group Add by DA Admin",
+} as const;
+
+// ── industry OPTION VALUES (Company) — set ON CREATE ONLY, by entity type ──────
+// Custom options appended to the standard HubSpot `industry` enum; value==label.
+export const INDUSTRY = {
+  DEALER:   "Automotive Dealer",
+  GROUP:    "Automotive Dealer Group",
+  RESELLER: "Reseller",
+} as const;
+
+const V4_BASE = "https://api.hubapi.com/crm/v4";
+
+/**
+ * Associate a Contact to a Company using the default HubSpot association type
+ * (v4 "default" endpoint — no type id needed, creates the standard
+ * contact↔company link in both directions). Idempotent: PUT re-asserts the
+ * same default label without duplicating, so it's safe to call on every sync.
+ * Throws on failure (caller logs/swallows).
+ */
+export async function associateContactToCompany(contactId: string, companyId: string): Promise<void> {
+  const res = await fetch(
+    `${V4_BASE}/objects/contacts/${encodeURIComponent(contactId)}/associations/default/companies/${encodeURIComponent(companyId)}`,
+    { method: "PUT", headers: authHeaders({ "Content-Type": "application/json" }) },
+  );
+  if (!res.ok) {
+    throw new HubspotError(res.status, `associateContactToCompany ${contactId}->${companyId} ${res.status}`, await readBody(res));
+  }
+}
+
 // ── Plan-tier mapping (dealer.account_type → subscription_type enum) ──
 
 const SUBSCRIPTION_TYPE_MAP: Record<string, string> = {
@@ -305,15 +348,28 @@ export async function upsertObject(args: {
    * can log + alert instead of manufacturing a duplicate.
    */
   dedupCheck?: () => Promise<{ id: string; matchedOn: string } | null>;
+  /**
+   * Properties applied ONLY when this call actually POSTs a brand-new object
+   * (stage 3) — never on a PATCH of an existing/stored record. Use for fields
+   * that are stamped at creation and must not clobber later operator edits
+   * (source_form, industry). An existing record found by stored id or natural
+   * key is left untouched for these.
+   */
+  createOnlyProperties?: CompanyProperties;
 }): Promise<{ hubspotId: string; created: boolean }> {
   // Strip null/undefined values — HubSpot rejects null on enumerations
   // and treats empty string as "set to empty" which clobbers operator
   // edits.
-  const clean: CompanyProperties = {};
-  for (const [k, v] of Object.entries(args.properties)) {
-    if (v === null || v === undefined || v === "") continue;
-    clean[k] = v;
-  }
+  const strip = (src: CompanyProperties): CompanyProperties => {
+    const out: CompanyProperties = {};
+    for (const [k, v] of Object.entries(src)) {
+      if (v === null || v === undefined || v === "") continue;
+      out[k] = v;
+    }
+    return out;
+  };
+  const clean = strip(args.properties);
+  const cleanCreateOnly = strip(args.createOnlyProperties ?? {});
 
   // (1) PATCH by known id. If the stored id 404s the record was
   //     deleted in HubSpot but Supabase didn't get the memo — fall
@@ -347,7 +403,9 @@ export async function upsertObject(args: {
     if (hit) throw new DedupSkipError(hit.id, hit.matchedOn);
   }
 
-  // (3) Create.
-  const created = await createObject(args.object, clean);
+  // (3) Create. Create-only properties (source_form, industry) are merged in
+  //     here ONLY — they never reach the PATCH paths above, so a re-sync of an
+  //     existing record can't overwrite an operator's manual edit.
+  const created = await createObject(args.object, { ...clean, ...cleanCreateOnly });
   return { hubspotId: created.id, created: true };
 }

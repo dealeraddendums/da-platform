@@ -10,7 +10,8 @@
 // existing reliable/standard sync so DA Platform stays the sole HubSpot writer.
 
 import { createAdminSupabaseClient } from "@/lib/db";
-import { fireDealerCreateReliable, fireGroupSync, fireProfileSync } from "@/lib/sync-hubspot";
+import { syncDealerCreateReliable, syncGroupToHubspot, fireProfileSync } from "@/lib/sync-hubspot";
+import { SOURCE_FORM } from "@/lib/hubspot";
 import { sendPasskeyInvite } from "@/lib/migration-invite";
 
 export type Attribution = Record<string, string | null> | null | undefined;
@@ -64,9 +65,12 @@ export async function createTrialDealer(input: {
     throw new Error(`dealer insert failed: ${error?.message ?? "unknown"}`);
   }
 
-  // Reliable HubSpot Company create — the onboarding-workflow trigger. Fire-and-
-  // forget (never blocks); retries + alerts on terminal failure internally.
-  fireDealerCreateReliable(data.id as string);
+  // Reliable HubSpot Company create — the onboarding-workflow trigger. Stamps
+  // source_form="DA Mktg OS" + industry="Automotive Dealer" on create (create-
+  // only; never clobbers later operator edits). AWAITED here (not fire-and-
+  // forget) so the Company + its hubspot_company_id exist before the caller
+  // syncs the admin Contact, letting that sync associate Contact↔Company.
+  await syncDealerCreateReliable(data.id as string, SOURCE_FORM.SELF_SERVE);
 
   // Seed sample data so the fresh standalone trial isn't an empty account.
   // Self-guarded (Trial + group_id NULL + not-yet-seeded) and never throws.
@@ -242,7 +246,11 @@ export async function createTrialGroup(input: {
     throw new Error(`group insert failed: ${error?.message ?? "unknown"}`);
   }
 
-  fireGroupSync(data.id as string);
+  // Awaited (not fire-and-forget) for the same reason as the dealer path: the
+  // group Company + its hubspot_company_id must exist before the caller syncs
+  // the group_admin Contact so that sync can associate them. Stamps
+  // source_form="DA Mktg OS" + industry on create (create-only).
+  await syncGroupToHubspot(data.id as string, { sourceForm: SOURCE_FORM.SELF_SERVE });
 
   return { groupId: data.id as string, internalId };
 }
