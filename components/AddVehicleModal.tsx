@@ -201,6 +201,8 @@ type FormState = {
   options: string;
   mileage: string;
   msrp: string;
+  cmpg: string;
+  hmpg: string;
   condition: string;
 };
 
@@ -208,7 +210,7 @@ const EMPTY_FORM: FormState = {
   stock_number: "", vin: "", year: "", make: "", model: "", trim: "",
   body_style: "", exterior_color: "", interior_color: "", engine: "",
   transmission: "", drivetrain: "", description: "", options: "",
-  mileage: "0", msrp: "", condition: "Used",
+  mileage: "0", msrp: "", cmpg: "", hmpg: "", condition: "Used",
 };
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -302,6 +304,8 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
       engine: json.engine ?? f.engine,
       transmission: json.transmission ?? f.transmission,
       drivetrain: json.drivetrain ?? f.drivetrain,
+      cmpg: json.cmpg ?? f.cmpg,
+      hmpg: json.hmpg ?? f.hmpg,
       condition: json.year === currentYear ? "New" : "Used",
     }));
 
@@ -340,6 +344,8 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
         year: form.year ? parseInt(form.year, 10) : null,
         mileage: form.mileage ? parseInt(form.mileage, 10) : 0,
         msrp: form.msrp ? parseFloat(form.msrp) : null,
+        cmpg: form.cmpg.trim() || null,
+        hmpg: form.hmpg.trim() || null,
         decode_source: decodeResult ? "vin_decoder" : "manual",
         decode_flagged: decodeResult?.decode_flagged ?? false,
       }),
@@ -809,6 +815,30 @@ function VinTab({
                 onChange={(e) => setForm((f) => ({ ...f, mileage: e.target.value }))}
                 style={INPUT_STYLE}
                 min="0"
+              />
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>City MPG</label>
+              <input
+                type="number"
+                value={form.cmpg}
+                onChange={(e) => setForm((f) => ({ ...f, cmpg: e.target.value }))}
+                style={INPUT_STYLE}
+                min="0"
+                max="200"
+              />
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Highway MPG</label>
+              <input
+                type="number"
+                value={form.hmpg}
+                onChange={(e) => setForm((f) => ({ ...f, hmpg: e.target.value }))}
+                style={INPUT_STYLE}
+                min="0"
+                max="200"
               />
             </div>
 

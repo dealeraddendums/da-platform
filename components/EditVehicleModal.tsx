@@ -54,6 +54,8 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
     options: vehicle.options ?? "",
     mileage: vehicle.mileage ? String(vehicle.mileage) : "0",
     msrp: vehicle.msrp ? String(vehicle.msrp) : "",
+    cmpg: vehicle.cmpg ?? "",
+    hmpg: vehicle.hmpg ?? "",
     condition: vehicle.condition,
   });
   const [saving, setSaving] = useState(false);
@@ -88,6 +90,8 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
         year: form.year ? parseInt(form.year, 10) : null,
         mileage: form.mileage ? parseInt(form.mileage, 10) : 0,
         msrp: form.msrp ? parseFloat(form.msrp) : null,
+        cmpg: form.cmpg.trim() || null,
+        hmpg: form.hmpg.trim() || null,
       }),
     });
     const json = await res.json() as DealerVehicleRow & { error?: string };
@@ -160,6 +164,8 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
 
             <div><label style={LABEL_STYLE}>Mileage</label><input type="number" value={form.mileage} onChange={(e) => setForm((p) => ({ ...p, mileage: e.target.value }))} style={INPUT_STYLE} min="0" /></div>
             <div><label style={LABEL_STYLE}>MSRP</label><input type="number" value={form.msrp} onChange={(e) => setForm((p) => ({ ...p, msrp: e.target.value }))} style={INPUT_STYLE} min="0" step="100" /></div>
+            <div><label style={LABEL_STYLE}>City MPG</label><input type="number" value={form.cmpg} onChange={(e) => setForm((p) => ({ ...p, cmpg: e.target.value }))} style={INPUT_STYLE} min="0" max="200" /></div>
+            <div><label style={LABEL_STYLE}>Highway MPG</label><input type="number" value={form.hmpg} onChange={(e) => setForm((p) => ({ ...p, hmpg: e.target.value }))} style={INPUT_STYLE} min="0" max="200" /></div>
             <div>
               <label style={LABEL_STYLE}>Condition</label>
               <select value={form.condition} onChange={(e) => setForm((p) => ({ ...p, condition: e.target.value }))} style={{ ...INPUT_STYLE }}>

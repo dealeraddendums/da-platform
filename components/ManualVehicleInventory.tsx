@@ -130,6 +130,31 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aiEnabled, setAiEnabled] = useState(false);
+  // Filters persist per dealer across reloads / leaving + returning to the page.
+  const filtersKey = `da-inv-filters:${dealerId}`;
+  const [hydrated, setHydrated] = useState(false);
+
+  // Restore saved filters once on mount, before the first fetch.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(filtersKey);
+      if (raw) {
+        const s = JSON.parse(raw) as { condition?: string; printStatus?: string; q?: string };
+        if (typeof s.condition === "string") setCondition(s.condition);
+        if (typeof s.printStatus === "string") setPrintStatus(s.printStatus);
+        if (typeof s.q === "string") { setQ(s.q); setSearchInput(s.q); }
+      }
+    } catch { /* ignore corrupt/unavailable storage */ }
+    setHydrated(true);
+  }, [filtersKey]);
+
+  // Persist filters whenever they change (after hydration).
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      localStorage.setItem(filtersKey, JSON.stringify({ condition, printStatus, q }));
+    } catch { /* ignore */ }
+  }, [hydrated, filtersKey, condition, printStatus, q]);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -201,7 +226,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
     }
   }, [page, perPage, condition, printStatus, sortBy, sortDir, q]);
 
-  useEffect(() => { void fetchVehicles(); }, [fetchVehicles]);
+  useEffect(() => { if (hydrated) void fetchVehicles(); }, [fetchVehicles, hydrated]);
 
   const effectivePerPage = perPage === 0 ? total : perPage;
   const totalPages = effectivePerPage > 0 ? Math.ceil(total / effectivePerPage) : 1;
