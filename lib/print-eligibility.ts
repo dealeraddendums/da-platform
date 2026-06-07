@@ -70,9 +70,13 @@ export function isOverAllowance(d: { created_at?: string | null; lifetime_prints
 
 export type CanPrintReason = "trial_expired" | "free_downgraded" | "past_due";
 
-/** Verbatim copy for the past-due 403 + the disabled-button tooltip. */
-export const PAST_DUE_MESSAGE =
-  "Printing is paused — there's a past-due balance on this account (or your group's). Settle the outstanding invoice(s) to resume.";
+/** Past-due copy varies by the RESPONSIBLE PAYER (subscription_billed_to) — the
+ *  same discriminator the lock uses, not "is in a group". A self-billed dealer
+ *  that happens to sit in a group still gets the self-billed message. */
+export const PAST_DUE_MESSAGE_GROUP =
+  "Printing is paused. To restore it, please contact your Group Administrator.";
+export const PAST_DUE_MESSAGE_SELF =
+  "Printing is temporarily disabled due to a past-due invoice.";
 
 export interface CanPrintResult {
   ok: boolean;
@@ -80,6 +84,9 @@ export interface CanPrintResult {
   /** User-facing copy. The route uses this verbatim in 403 responses; the
    *  UI shows it in the disabled-button tooltip. */
   message?: string;
+  /** For past_due blocks: which payer is responsible, so the UI/analytics can
+   *  branch the same way the message does. Mirrors subscription_billed_to. */
+  billedBy?: "group" | "self";
 }
 
 export function canPrint(d: DealerEligibility): CanPrintResult {
@@ -191,12 +198,29 @@ export async function canPrintForDealer(dealerTextId: string): Promise<CanPrintR
   if (!base.ok) return base;
 
   // Past-due gate stacks on top: a paying, in-allowance dealer is still blocked
-  // when its (or its group's) balance is past due.
+  // when its (or its group's) balance is past due. Message varies by payer.
   if (await dealerPastDue(admin, dealer)) {
-    return { ok: false, reason: "past_due", message: PAST_DUE_MESSAGE };
+    const billedBy = dealer.subscription_billed_to === "group" ? "group" : "self";
+    return {
+      ok: false,
+      reason: "past_due",
+      billedBy,
+      message: billedBy === "group" ? PAST_DUE_MESSAGE_GROUP : PAST_DUE_MESSAGE_SELF,
+    };
   }
 
   return { ok: true };
+}
+
+/**
+ * Bust the cached billing status for a customer (or all when no id). Called by
+ * the da-billing → da-platform invalidate webhook the moment a customer's
+ * Overdue Days changes or an invoice is paid/voided, so the print lock reflects
+ * the change immediately instead of waiting out the 20-min TTL backstop.
+ */
+export function invalidateBillingStatusCache(customerId?: string | null): void {
+  if (customerId) billingPastDueCache.delete(customerId);
+  else billingPastDueCache.clear();
 }
 
 /**
