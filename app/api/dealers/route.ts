@@ -16,6 +16,7 @@ import { runSync, fireAndForget } from "@/lib/billing-sync";
 import { fireDealerCreateReliable, fireProfileSync } from "@/lib/sync-hubspot";
 import { fireGroupAssignCascade } from "@/lib/group-billing-cascade";
 import { createDealerFolder, boxConfigured } from "@/lib/box";
+import { seedTrialSampleData } from "@/lib/provisioning";
 
 interface NewBillingCustomerArgs {
   adminClient: ReturnType<typeof createAdminSupabaseClient>;
@@ -499,6 +500,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // starts — held to a higher bar than the general fire-and-forget
   // update path. Still doesn't block the HTTP response.
   fireDealerCreateReliable(createdDealerId);
+
+  // Seed sample data for an admin-created STANDALONE trial (Trial + no group).
+  // Self-guarded + idempotent; mirrors the self-serve createTrialDealer path.
+  if ((createdDealer.account_type as string | null) === "Trial" && createdDealerGroupId == null) {
+    await seedTrialSampleData(createdDealer.dealer_id as string);
+  }
 
   if (username?.trim() && password?.trim()) {
     const rawUsername = username.trim();

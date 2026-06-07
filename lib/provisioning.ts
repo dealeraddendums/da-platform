@@ -68,7 +68,141 @@ export async function createTrialDealer(input: {
   // forget (never blocks); retries + alerts on terminal failure internally.
   fireDealerCreateReliable(data.id as string);
 
+  // Seed sample data so the fresh standalone trial isn't an empty account.
+  // Self-guarded (Trial + group_id NULL + not-yet-seeded) and never throws.
+  await seedTrialSampleData(data.dealer_id as string);
+
   return { dealerUuid: data.id as string, dealerId: data.dealer_id as string, internalId };
+}
+
+/**
+ * Seed one sample Required product + one New + one Used sample vehicle for a
+ * brand-new STANDALONE Trial dealer, so a fresh signup lands on a non-empty
+ * account. Scope + idempotency are enforced here so it's safe to call from any
+ * creation path (self-serve `createTrialDealer` and the admin POST /api/dealers
+ * standalone-trial branch):
+ *   - only `account_type='Trial'` AND `group_id IS NULL` (group/reseller members
+ *     are operated by the group, which adds real inventory — skipped);
+ *   - seeded exactly once, claimed via `dealers.sample_seeded_at` (migration 093)
+ *     with an `.is(null)` guard so re-runs/re-saves never duplicate and deleting
+ *     a sample never re-seeds it.
+ * All records are clearly samples (`(Sample Product)` description; `SAMPLE-NEW`/
+ * `SAMPLE-USED` stock numbers) and are ordinary rows the dealer can edit/delete.
+ * Never throws — a seed failure must not break dealer creation.
+ */
+export async function seedTrialSampleData(dealerId: string): Promise<void> {
+  const admin = createAdminSupabaseClient();
+  try {
+    // Scope guard. Selecting sample_seeded_at also no-ops gracefully if migration
+    // 093 hasn't been applied yet (the select errors → we return without seeding).
+    // `as any`: the generated DB types don't include the new column yet (mirrors
+    // the acquisition-column casts above).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: dealer, error } = await (admin as any)
+      .from("dealers")
+      .select("account_type, group_id, sample_seeded_at")
+      .eq("dealer_id", dealerId)
+      .single();
+    if (error || !dealer) return;
+    if (dealer.account_type !== "Trial" || dealer.group_id != null || dealer.sample_seeded_at != null) return;
+
+    // Claim the one-time slot first: only the caller that flips NULL→now() seeds,
+    // so concurrent/retried creates can't duplicate the records.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: claimed } = await (admin as any)
+      .from("dealers")
+      .update({ sample_seeded_at: new Date().toISOString() })
+      .eq("dealer_id", dealerId)
+      .is("sample_seeded_at", null)
+      .select("dealer_id")
+      .single();
+    if (!claimed) return;
+
+    // 1. Sample Required product (Configure Product / addendum_library).
+    //    Required + applies_to 'all' + ad_types New/Used → auto-applies to both
+    //    sample vehicles, so printing either renders a complete addendum.
+    const { error: prodErr } = await admin.from("addendum_library").insert({
+      dealer_id: dealerId,
+      option_name: "Ceramic Tint",
+      item_price: "599",
+      description:
+        "(Sample Product) This advanced coating offers enhanced durability and longevity compared to standard tint, protecting your vehicle's interior and improving driving comfort.",
+      ad_type: "Both",
+      ad_types: ["New", "Used"],
+      applies_to: "all",
+      required: true,
+      active: true,
+      makes: "", makes_not: false,
+      models: "", models_not: false,
+      trims: "", trims_not: false,
+      body_styles: "",
+      year_condition: 0, year_value: null,
+      miles_condition: 0, miles_value: null,
+      msrp_condition: 0, msrp1: null, msrp2: null,
+      sort_order: 10,
+      show_models_only: false,
+      separator_above: false, separator_below: false,
+      spaces: 0,
+    });
+    if (prodErr) console.error("[sample-seed] product insert failed for", dealerId, prodErr.message);
+
+    // 2. Sample vehicles. Upsert on the (dealer_id, stock_number) unique key with
+    //    ignoreDuplicates so a partial retry can't error or double-insert.
+    const { error: vehErr } = await admin
+      .from("dealer_vehicles")
+      .upsert(
+        [
+          {
+            dealer_id: dealerId,
+            stock_number: "SAMPLE-NEW",
+            vin: "JTEABFAJ6VK069985",
+            year: 2027,
+            make: "Toyota",
+            model: "Land Cruiser",
+            trim: null,
+            exterior_color: "Meteor Shower",
+            interior_color: "Tan",
+            engine: "Hybrid",
+            transmission: "8-Speed Electronic",
+            fuel: "Hybrid",
+            drivetrain: "4WD",
+            msrp: 70477,
+            cmpg: "22",
+            hmpg: "25",
+            mileage: 8,
+            condition: "New",
+            status: "active",
+            decode_source: "manual",
+          },
+          {
+            dealer_id: dealerId,
+            stock_number: "SAMPLE-USED",
+            vin: "1GNEVJKW9LJ274964",
+            year: 2020,
+            make: "Chevrolet",
+            model: "Traverse",
+            trim: "RS",
+            exterior_color: "Black Metallic",
+            interior_color: "Jet Black",
+            engine: "3.6L V6",
+            transmission: "9-Speed Automatic",
+            fuel: "Gas",
+            drivetrain: "AWD",
+            msrp: 23218,
+            cmpg: "17",
+            hmpg: "25",
+            mileage: 48512,
+            condition: "Used",
+            status: "active",
+            decode_source: "manual",
+          },
+        ] as never,
+        { onConflict: "dealer_id,stock_number", ignoreDuplicates: true },
+      );
+    if (vehErr) console.error("[sample-seed] vehicle insert failed for", dealerId, vehErr.message);
+  } catch (e) {
+    console.error("[sample-seed] failed for", dealerId, e instanceof Error ? e.message : e);
+  }
 }
 
 /**
