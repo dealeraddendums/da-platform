@@ -15,9 +15,14 @@ const SECURITY_HEADERS: Record<string, string> = {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https: blob:",
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.s3.amazonaws.com https://s3.amazonaws.com https://xpsshipper.com https://api.anthropic.com https://api.qrserver.com https://api.mapbox.com https://events.mapbox.com",
+    // S3 hosts: the global `*.s3.amazonaws.com` wildcard matches `bucket.s3.amazonaws.com`
+    // but NOT the regional `bucket.s3.{region}.amazonaws.com` form, so each region the app
+    // fetches/frames must be enumerated explicitly. Buckets in play: dealer-addendums
+    // (us-west-1 — print output PDFs); new-addendum-backgrounds / new-infosheet-backgrounds /
+    // new-infobox-images / new-dealer-logos / addendum-product-images (us-east-1).
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com https://*.s3.us-east-1.amazonaws.com https://xpsshipper.com https://api.anthropic.com https://api.qrserver.com https://api.mapbox.com https://events.mapbox.com",
     "worker-src blob:",
-    "frame-src 'self' blob: https://etl2.dealeraddendums.com https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com",
+    "frame-src 'self' blob: https://etl2.dealeraddendums.com https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com https://*.s3.us-east-1.amazonaws.com",
     "object-src blob:",
     "frame-ancestors 'none'",
     "base-uri 'self'",
