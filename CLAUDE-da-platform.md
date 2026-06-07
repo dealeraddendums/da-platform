@@ -436,7 +436,7 @@ Super Admin can assign an existing standalone dealer to a group from the dealer 
 
 ## Migration Status
 
-Current highest migration: **090**
+Current highest migration: **092**
 
 Recent migrations:
 - 071 `dealer_inventory_provider` — track CDK/Tekion/manual feed source per dealer
@@ -466,6 +466,8 @@ Recent migrations:
 - 088 `lock_team_super_admin` — `enforce_team_super_admin()` BEFORE INSERT/UPDATE trigger on `profiles` pins `allan/alex/claire/marlena/carol@dealeraddendums.com` to `super_admin` regardless of writer (ETL-proof). To change the team list, edit the email array via a new migration.
 - 089 `invitation_setup_codes` — `setup_code_hash` + `setup_code_expires_at` on `invitations` (scanner-proof typed-code invite acceptance)
 - 090 `image_library_scope` — `scope` ('platform'|'group'|'dealer') + `group_id` + `dealer_id` on `image_library` (dealer/group/platform-scoped Builder images; RLS read = platform OR own-group OR own-dealer, write role-bounded)
+- 091 `help_articles` — dedicated dealer-help CMS (articles + RLS; rich text/graphics/video; separate from `qa_help_center`); + `/help` render, TipTap authoring, image/video upload
+- 092 `help_conversations` — Help assistant conversation + message log (`+ help_messages`, feedback, status, `hubspot_note_id`, `escalation_notified_at`; RLS owner-read / super_admin-all) for the global Help/Support widget
 
 
 ## 2026-06-05 — Session shipped (features + fixes)
@@ -507,6 +509,8 @@ Specs in `docs/` (`_build-queue.md` indexes them); all verified by Claude Code. 
 ### Account lifecycle + print-eligibility (`docs/print-eligibility-free-expired.md`, `docs/dealer-self-close-account.md`)
 - **States:** **Trial** = default for new dealers (allowance 30 days OR 30 lifetime prints since `created_at`; over → Trial Expired) · **Paid** (always prints) · **Free/Downgraded** = reached ONLY by downgrading from paid; can log in but cannot print; 60-day grace then archived. "Free Expired" folds into Downgraded — no separate HubSpot stage.
 - **`lib/print-eligibility.ts`** is the single source of truth: `canPrint`, `isOverAllowance` (30d OR 30 prints), `enforceCanPrint` (super_admin bypasses). 403-enforced in all four print routes (`api/pdf/generate`, `api/pdf/bulk`, `api/print/bulk`, `api/print/[vehicleId]`); inventory Print buttons disable + tooltip when blocked. The SAME `isOverAllowance` drives the HubSpot lifecycle derivation in `lib/sync-hubspot.ts`.
+- **Past-due billing lock (2026-06-07, `docs/past-due-print-lock.md`)** — `canPrintForDealer` stacks a past-due check on top of the Trial/Free gate: it resolves the **responsible payer** (group-billed dealer `subscription_billed_to='group'` → the **group's** da-billing customer; else the dealer's own `billing_customer_id`) and blocks when that customer is past due per da-billing `GET /customers/:id/billing-status` (an unpaid invoice older than the customer's **Overdue Days** grace — default 37, Dealer General 10). 20-min in-memory cache (`getBillingStatus` in `lib/billing.ts`); **fails open** (allows) on any da-billing error or unresolvable customer — never block a paying dealer on a service hiccup; super_admin bypasses. Tooltip varies by payer via `billedBy` on the gate result: group-billed → *"Printing is paused. To restore it, please contact your Group Administrator."*; self-billed → *"Printing is temporarily disabled due to a past-due invoice."* (a self-billed dealer that sits in a group still gets the self-billed copy — keyed off `subscription_billed_to`, not group membership). Single-instance prod (Puppeteer offloaded to da-pdf-service), so the in-memory cache is process-coherent.
+  - **Cache-bust webhook:** `POST /api/billing-cache/invalidate` (header `X-Webhook-Secret` = `BILLING_CACHE_WEBHOOK_SECRET`, body `{customerId}` or none → clear all) lets da-billing invalidate the cached status the moment Overdue Days changes or an invoice is paid/voided, so the lock reflects immediately instead of waiting out the TTL (the TTL is the backstop). Env on da-platform: **`BILLING_CACHE_WEBHOOK_SECRET`** (`.env.production`). da-billing side fires it — see `CLAUDE-da-billing.md`.
 - **Dealer self-close** `POST /api/billing/me/close`: $0-balance gate (409 `balance_due`) → `deleteTemplate` stops recurring billing now (NOT `archiveCustomer`) → `account_type='Free'` + `downgraded_at`, stays `active` → `account_closures` row → HubSpot Downgraded via `fireDealerReliable`. Migration `085`. "Free — $0/mo" option in the BillingTab plan picker. Re-open = re-subscribe (`/api/billing/me/subscription` PATCH); +60-day archive = existing `archive-downgraded` cron.
 
 ### Group-ghost scoping fix (`docs/group-ghost-dashboard-dealers-scoping.md`)
