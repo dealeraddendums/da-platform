@@ -265,6 +265,9 @@ export type DealerRow = {
   acquisition: Record<string, unknown> | null;
   /** When a trial dealer became a paying account (Trial -> paid). (Migration 095) */
   converted_at: string | null;
+  /** Creation-time classification: real | test | sales_demo. is_test is kept
+   *  in sync as (account_purpose <> 'real'). (Migration 096) */
+  account_purpose: "real" | "test" | "sales_demo";
   created_at: string;
   updated_at: string;
 };
@@ -337,6 +340,7 @@ type DealerInsert = {
   inactivated_at?: string | null;
   converted_at?: string | null;
   acquisition?: Record<string, unknown> | null;
+  account_purpose?: "real" | "test" | "sales_demo";
   created_at?: string | null;
 };
 
@@ -408,6 +412,8 @@ export type DealerUpdate = {
   downgraded_at?: string | null;
   inactivated_at?: string | null;
   converted_at?: string | null;
+  /** Account-purpose classifier (migration 096). super_admin only; recomputes is_test. */
+  account_purpose?: "real" | "test" | "sales_demo";
 };
 
 export type LabelOrderRow = {

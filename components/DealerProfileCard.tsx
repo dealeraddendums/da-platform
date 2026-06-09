@@ -220,12 +220,14 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
     setToggling(false);
   }
 
-  async function toggleIsTest() {
+  // Account-purpose classifier (migration 096). Setting purpose recomputes
+  // is_test server-side: is_test = (account_purpose <> 'real').
+  async function setPurpose(account_purpose: "real" | "test" | "sales_demo") {
     setTestToggling(true);
     const res = await fetch(`/api/dealers/${dealer.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ is_test: !dealer.is_test }),
+      body: JSON.stringify({ account_purpose }),
     });
     if (res.ok) {
       const json = (await res.json()) as { data: DealerRow };
@@ -972,31 +974,28 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
               </>
             )}
 
-            {/* Test Account flag — super_admin only. Setting this enables the
-                red Delete Dealer button in the action bar. */}
+            {/* Account Purpose (migration 096) — super_admin only. Test & Sales
+                Demo set the Test flag (is_test), excluding the account from BI /
+                billing / HubSpot and enabling the red Delete Dealer button. */}
             {isSuperAdmin && (
               <div className="flex items-start justify-between gap-4">
                 <div style={{ flexShrink: 0 }}>
-                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Test Account</span>
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Account Purpose</span>
                   <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                    Enables permanent deletion. Never enable for a real dealership.
+                    Test &amp; Sales Demo are excluded from BI/billing/HubSpot and allow deletion. Never use for a real dealership.
                   </p>
                 </div>
-                <label
-                  className="flex items-center gap-2 cursor-pointer"
-                  style={{ userSelect: "none" }}
+                <select
+                  value={dealer.account_purpose ?? (dealer.is_test ? "test" : "real")}
+                  disabled={testToggling || editing}
+                  onChange={(e) => void setPurpose(e.target.value as "real" | "test" | "sales_demo")}
+                  className="input"
+                  style={{ width: 130, cursor: testToggling ? "wait" : "pointer", color: dealer.is_test ? "#ffa500" : "var(--text-primary)" }}
                 >
-                  <input
-                    type="checkbox"
-                    checked={dealer.is_test}
-                    disabled={testToggling || editing}
-                    onChange={() => void toggleIsTest()}
-                    style={{ cursor: testToggling ? "wait" : "pointer" }}
-                  />
-                  <span className="text-sm font-medium" style={{ color: dealer.is_test ? "#ffa500" : "var(--text-muted)" }}>
-                    {testToggling ? "…" : dealer.is_test ? "TEST" : "Off"}
-                  </span>
-                </label>
+                  <option value="real">Real</option>
+                  <option value="test">Test</option>
+                  <option value="sales_demo">Sales Demo</option>
+                </select>
               </div>
             )}
 

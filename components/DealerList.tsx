@@ -352,6 +352,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
       {/* New dealer form */}
       {showNewForm && (
         <NewDealerForm
+          role={role}
           onCreated={(id) => router.push(`/dealers/${id}`)}
           onCancel={() => setShowNewForm(false)}
         />
@@ -676,11 +677,13 @@ const ACCOUNT_TYPES: { label: string; value: string }[] = [
 ];
 
 type NewDealerFormProps = {
+  role?: string;
   onCreated: (id: string) => void;
   onCancel: () => void;
 };
 
-function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
+function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
+  const isSuperAdmin = role === "super_admin";
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -688,6 +691,7 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
     name: "",
     dealer_id: String(Date.now()),
     account_type: "sub-manual",
+    account_purpose: "real",
     franchise: "",
     dealer_group: "",
     primary_contact: "",
@@ -724,6 +728,8 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
       dealer_id: fields.dealer_id.trim(),
       name: fields.name.trim(),
       account_type: fields.account_type,
+      // super_admin only; server forces 'real' for any other role.
+      account_purpose: isSuperAdmin ? fields.account_purpose : "real",
       dealer_group_legacy: fields.dealer_group.trim() || null,
       makes: fields.franchise ? [fields.franchise] : [],
       primary_contact: fields.primary_contact.trim() || null,
@@ -804,6 +810,19 @@ function NewDealerForm({ onCreated, onCancel }: NewDealerFormProps) {
               Enter a DA Group ID (number) to link to a DA group account, or a group name for informational purposes only.
             </p>
           </div>
+          {isSuperAdmin && (
+            <div>
+              <label className="label">Account Purpose</label>
+              <select className="input" value={fields.account_purpose} onChange={set("account_purpose")}>
+                <option value="real">Real</option>
+                <option value="test">Test</option>
+                <option value="sales_demo">Sales Demo</option>
+              </select>
+              <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                Test &amp; Sales Demo accounts are excluded from BI, billing &amp; HubSpot (sets the Test flag). Default Real.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Row 3: Franchise Brand, Contact Name, Contact Email */}

@@ -411,10 +411,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     rest.group_id = claims.group_id;
   }
 
+  // Account-purpose classifier (migration 096): super_admin chooses
+  // real | test | sales_demo; group_admin (and any default) is always 'real'.
+  // is_test is DERIVED from purpose (never trusted from the client) and stays
+  // the exclusion gate: is_test = (account_purpose <> 'real').
+  const VALID_PURPOSE = new Set(["real", "test", "sales_demo"]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rawPurpose = (rest as any).account_purpose;
+  const accountPurpose: "real" | "test" | "sales_demo" =
+    claims.role === "super_admin" && typeof rawPurpose === "string" && VALID_PURPOSE.has(rawPurpose)
+      ? (rawPurpose as "real" | "test" | "sales_demo")
+      : "real";
+
   const admin = createAdminSupabaseClient();
-  const insertPayload = { dealer_id, name: name.trim(), internal_id: internalId, inventory_dealer_id: dealer_id, ...rest };
+  const insertPayload = {
+    dealer_id, name: name.trim(), internal_id: internalId, inventory_dealer_id: dealer_id,
+    ...rest,
+    account_purpose: accountPurpose,
+    is_test: accountPurpose !== "real",
+  };
   let { data, error: dbError } = await admin.from("dealers").insert(insertPayload).select().single();
 
+  // Column-missing fallbacks (defensive — migration 096 is applied before deploy).
+  if (dbError && dbError.message.includes("account_purpose")) {
+    const { account_purpose: _p, ...noPurpose } = insertPayload as typeof insertPayload & { account_purpose?: string };
+    ({ data, error: dbError } = await admin.from("dealers").insert(noPurpose).select().single());
+  }
   if (dbError && dbError.message.includes("account_type")) {
     const { account_type: _drop, ...payloadWithoutAccountType } = insertPayload as typeof insertPayload & { account_type?: string };
     ({ data, error: dbError } = await admin.from("dealers").insert(payloadWithoutAccountType).select().single());

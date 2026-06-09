@@ -118,7 +118,22 @@ export async function PATCH(
   const patch: DealerUpdate = {};
   if (body.name !== undefined) patch.name = body.name;
   if (body.active !== undefined && claims.role === "super_admin") patch.active = body.active;
-  if (body.is_test !== undefined && claims.role === "super_admin") patch.is_test = body.is_test;
+  // Account-purpose classifier (migration 096) — super_admin only. Purpose is
+  // authoritative and recomputes is_test = (account_purpose <> 'real'). If only
+  // the raw is_test toggle is sent (back-compat), keep honoring it AND sync
+  // account_purpose so the invariant holds: on→'test', off→'real' (use the
+  // Purpose selector to set 'sales_demo').
+  if (body.account_purpose !== undefined && claims.role === "super_admin") {
+    const valid = new Set(["real", "test", "sales_demo"]);
+    if (!valid.has(body.account_purpose)) {
+      return NextResponse.json({ error: "Invalid account_purpose" }, { status: 400 });
+    }
+    patch.account_purpose = body.account_purpose;
+    patch.is_test = body.account_purpose !== "real";
+  } else if (body.is_test !== undefined && claims.role === "super_admin") {
+    patch.is_test = body.is_test;
+    patch.account_purpose = body.is_test ? "test" : "real";
+  }
   // DA Legacy ETL config-lock (migration 094) — super_admin only. A forged
   // etl_locked from dealer_admin/group_admin never reaches here (group_admin is
   // whitelist-rejected above; dealer_admin's value is simply not copied).
