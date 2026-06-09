@@ -252,12 +252,32 @@ export async function PATCH(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .update({ downgraded_at: new Date().toISOString() } as any)
         .eq("id", dealerUuid);
+      // Gap C: write an account_closures row so the BI "cancellation reasons"
+      // table isn't blank for admin-initiated churn (the dealer self-close flow
+      // writes its own row; this covers the super_admin downgrade path). The
+      // reason/detail come from the PATCH body when supplied, else "Not
+      // specified." Non-blocking — a failure here never rolls back the downgrade.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const closureRes = await (admin as any).from("account_closures").insert({
+        dealer_id: dealerUuid,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        reason: (body as any).closure_reason?.trim?.() || "Admin downgrade",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        detail: (body as any).closure_detail?.trim?.() || null,
+        closed_by: claims.sub,
+      });
+      if (closureRes.error) {
+        console.error("[dealer PATCH] account_closures insert failed:", closureRes.error.message);
+      }
     } else if (!prevPaying && newPaying) {
       lifecycleTransition = "upgrade";
+      // Trial/Free → paying: clear downgraded_at and stamp converted_at so the
+      // BI conversion funnel counts this dealer (migration 095). A re-conversion
+      // within the grace window correctly re-stamps the funnel date.
       await admin
         .from("dealers")
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .update({ downgraded_at: null } as any)
+        .update({ downgraded_at: null, converted_at: new Date().toISOString() } as any)
         .eq("id", dealerUuid);
     }
   }

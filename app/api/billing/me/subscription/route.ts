@@ -203,7 +203,13 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   if (isConversion) {
     const newAccountType = ACCOUNT_TYPE_FOR_TIER[descriptor.key];
     if (newAccountType && newAccountType !== dealer.account_type) {
-      await admin.from("dealers").update({ account_type: newAccountType }).eq("id", dealer.id);
+      // Stamp converted_at + clear any prior downgraded_at so a re-conversion
+      // within the grace window re-stamps the funnel date. Drives the BI tab's
+      // "Trials converted to paying" metric (migration 095).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any).from("dealers")
+        .update({ account_type: newAccountType, converted_at: new Date().toISOString(), downgraded_at: null })
+        .eq("id", dealer.id);
     }
     fireDealerReliable(dealer.id, "trial→paid conversion (lifecycle)");
   }

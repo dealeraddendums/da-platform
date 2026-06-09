@@ -257,6 +257,14 @@ export type DealerRow = {
   labels_billed_to: "dealer" | "group";
   /** Box.com folder id created on dealer save. (Migration 072) */
   box_folder_id: string | null;
+  /** When a paying account was downgraded to Free. (Migration 083) */
+  downgraded_at: string | null;
+  /** When the 60-day archive cron flipped active=false. (Migration 083) */
+  inactivated_at: string | null;
+  /** Marketing acquisition source captured at self-serve signup. (Migration 087) */
+  acquisition: Record<string, unknown> | null;
+  /** When a trial dealer became a paying account (Trial -> paid). (Migration 095) */
+  converted_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -325,6 +333,10 @@ type DealerInsert = {
   shipping_zip?: string | null;
   shipping_country?: string;
   shipping_phone?: string | null;
+  downgraded_at?: string | null;
+  inactivated_at?: string | null;
+  converted_at?: string | null;
+  acquisition?: Record<string, unknown> | null;
   created_at?: string | null;
 };
 
@@ -391,6 +403,11 @@ export type DealerUpdate = {
   shipping_zip?: string | null;
   shipping_country?: string;
   shipping_phone?: string | null;
+  /** Lifecycle timestamps (migrations 083 / 095). Updated via admin client; never
+   *  user-supplied through the PATCH body whitelist. */
+  downgraded_at?: string | null;
+  inactivated_at?: string | null;
+  converted_at?: string | null;
 };
 
 export type LabelOrderRow = {

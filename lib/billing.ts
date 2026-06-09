@@ -494,6 +494,45 @@ export async function lookupPrice(productKey: string): Promise<number | null> {
   return match ? match.price : null;
 }
 
+// ── Gross-billable trend + current MRR (BI tab) ─────────────────────────────
+
+export interface GrossBillableResult {
+  /** One entry per calendar month in [from, to], gaps filled with 0. */
+  series: { month: string; grossBilled: number }[];
+  /** Forward run-rate from active recurring templates (post-discount). */
+  currentMrr: number;
+}
+
+/**
+ * GET /reports/gross-billable?from=&to= — monthly invoiced totals
+ * (post-discount, what we actually billed) plus the current MRR run-rate.
+ * Source of truth for the BI tab's revenue section. `from`/`to` are
+ * YYYY-MM-DD. Throws (BillingError) on any non-OK so the caller can decide
+ * how to surface a da-billing outage.
+ */
+export async function getGrossBillable(
+  from: string,
+  to: string,
+  excludeCustomerIds: string[] = [],
+): Promise<GrossBillableResult> {
+  let url = `${BASE}/reports/gross-billable?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  if (excludeCustomerIds.length > 0) {
+    url += `&excludeCustomerIds=${encodeURIComponent(excludeCustomerIds.join(","))}`;
+  }
+  const res = await fetch(url, { headers: authHeaders() });
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `getGrossBillable ${res.status}`, text);
+  try {
+    const parsed = JSON.parse(text) as Partial<GrossBillableResult>;
+    return {
+      series: Array.isArray(parsed.series) ? parsed.series : [],
+      currentMrr: typeof parsed.currentMrr === "number" ? parsed.currentMrr : 0,
+    };
+  } catch (err) {
+    throw new BillingError(res.status, `getGrossBillable parse: ${(err as Error).message}`, text);
+  }
+}
+
 /**
  * Descriptor for the three monthly subscription tiers as exposed by
  * da-billing. `key` is the lookup id used in /pricing and as the
