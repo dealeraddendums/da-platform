@@ -23,13 +23,16 @@ echo "[deploy] git pull origin main…"
 git pull origin main || { echo "[deploy] git pull failed"; exit 1; }
 echo "[deploy] HEAD now: $(git rev-parse --short HEAD)"
 
-ATTEMPTS=6
+ATTEMPTS=8
 ok=
 for i in $(seq 1 "$ATTEMPTS"); do
   rm -rf .next .next/export 2>/dev/null
   echo "[deploy] build attempt $i/$ATTEMPTS …"
-  if ./node_modules/.bin/next build; then ok=1; break; fi
-  echo "[deploy] attempt $i failed (likely the .next/export ENOTEMPTY flake) — retrying…"
+  # Use `npm run build` (not the .bin/next path): npm re-resolves/recreates the
+  # node_modules/.bin symlink, which intermittently vanishes on this box. The
+  # remaining flake is the .next/export ENOTEMPTY race, which clears on retry.
+  if npm run build; then ok=1; break; fi
+  echo "[deploy] attempt $i failed (.next/export ENOTEMPTY race or transient bin) — retrying…"
   sleep 4
 done
 
