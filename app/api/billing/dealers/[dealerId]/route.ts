@@ -5,6 +5,7 @@ import {
   getCustomer,
   listInvoices,
   billingConfigured,
+  subscriptionTierLabel,
   type BillingCustomerDetail,
   type BillingInvoice,
 } from "@/lib/billing";
@@ -21,6 +22,8 @@ interface DealerBillingDealer {
   billing_customer_id: string | null;
   subscription_billed_to: "dealer" | "group";
   group: { id: string; name: string } | null;
+  /** Friendly plan label ("Automatic Web") — shown in the group-billed summary. */
+  subscriptionTier: string | null;
 }
 
 interface GroupBilledResponse {
@@ -68,7 +71,7 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
   const admin = createAdminSupabaseClient();
   const { data: rawDealer } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, billing_customer_id, subscription_billed_to, groups(id, name)")
+    .select("id, dealer_id, name, billing_customer_id, subscription_billed_to, account_type, groups(id, name)")
     .eq("id", params.dealerId)
     .maybeSingle();
   if (!rawDealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
@@ -79,6 +82,7 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
     name: string;
     billing_customer_id: string | null;
     subscription_billed_to: "dealer" | "group" | null;
+    account_type: string | null;
     groups: { id: string; name: string } | null;
   };
 
@@ -104,6 +108,7 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
     billing_customer_id: dealerRow.billing_customer_id,
     subscription_billed_to: dealerRow.subscription_billed_to === "group" ? "group" : "dealer",
     group: dealerRow.groups,
+    subscriptionTier: subscriptionTierLabel(dealerRow.account_type),
   };
 
   // ── Scenario A: group billed ──────────────────────────────────────────────

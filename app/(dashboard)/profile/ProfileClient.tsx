@@ -1430,6 +1430,11 @@ interface BillingMeData {
   }>;
   outstandingAmount: number;
   trial: { dayN: number; printN: number; overAllowance: boolean; daysCap: number; printsCap: number };
+  billedBy?: "self" | "group";
+  groupName?: string | null;
+  subscriptionTier?: string | null;
+  canManage?: boolean;
+  groupPastDue?: boolean;
   notes?: string;
 }
 
@@ -1517,6 +1522,32 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
   }
   if (error || !data) {
     return <div style={{ padding: 12, background: "#ffebee", border: "1px solid #ffcdd2", color: "#c62828", borderRadius: 4, fontSize: 12 }}>{error ?? "Failed to load billing"}</div>;
+  }
+
+  // ── Group-billed dealer: read-only summary (plan + payer), no manage UI ────
+  // The subscription + invoices live on the group's da-billing customer — this
+  // dealer can't see or pay them. Show what plan they have + who pays; hide
+  // Change Plan, invoices, Pay, and the no-subscription/no-invoice empty states.
+  if (data.billedBy === "group") {
+    const groupName = data.groupName ?? "your dealer group";
+    const tier = data.subscriptionTier ?? "Subscription";
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {data.groupPastDue && (
+          <div style={{ padding: "10px 14px", background: "#ffebee", border: "1px solid #ffcdd2", color: "#c62828", borderRadius: 6, fontSize: 13 }}>
+            Your group has a past-due balance — printing is paused. Contact your group administrator.
+          </div>
+        )}
+        <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: 24, background: "#fff" }}>
+          <div style={{ fontWeight: 600, fontSize: 16, color: "#2a2b3c", marginBottom: 8 }}>
+            Subscription: {tier}
+          </div>
+          <p style={{ fontSize: 14, color: "#555", lineHeight: 1.6, margin: 0 }}>
+            Billed by your group: <strong>{groupName}</strong>. Contact your group administrator for billing changes.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   const sub = data.subscription;

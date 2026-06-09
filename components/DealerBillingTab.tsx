@@ -20,6 +20,7 @@ interface DealerBillingDealer {
   billing_customer_id: string | null;
   subscription_billed_to: "dealer" | "group";
   group: { id: string; name: string } | null;
+  subscriptionTier: string | null;
 }
 
 interface BillingCustomerDetail {
@@ -165,12 +166,12 @@ export default function DealerBillingTab({ dealerId, viewerRole }: Props) {
           padding: 24,
           background: "#fff",
         }}>
-          <div style={{ fontWeight: 600, fontSize: 16, color: "#2a2b3c", marginBottom: 10 }}>
-            Subscription billed to group
+          <div style={{ fontWeight: 600, fontSize: 16, color: "#2a2b3c", marginBottom: 8 }}>
+            Subscription: {data.dealer.subscriptionTier ?? "Subscription"}
           </div>
           <p style={{ fontSize: 14, color: "#555", lineHeight: 1.6, margin: 0 }}>
-            Your subscription is billed through <strong>{groupName}</strong>.
-            Contact your group admin for billing information.
+            Billed by your group: <strong>{groupName}</strong>.
+            Contact your group admin for billing changes.
           </p>
         </div>
       </div>

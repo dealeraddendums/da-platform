@@ -586,3 +586,26 @@ export function firstOfNextMonthIso(now: Date = new Date()): string {
   const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   return next.toISOString().slice(0, 10);
 }
+
+// Friendly subscription-tier label for an account_type — mirrors the Dealers
+// list's SUBSCRIPTION_LABELS so both surfaces read identically ("Automatic
+// Web", "Manual", "Automatic DMS", "Trial", else "Free"). Strips the legacy
+// " $price" suffix. Used by the billing views (incl. group-billed dealers).
+const SUBSCRIPTION_TIER_LABELS: Record<string, string> = {
+  "sub-manual": "Manual",
+  "sub-auto-web": "Automatic Web",
+  "sub-auto-dms": "Automatic DMS",
+  "Manual": "Manual",
+  "Automatic Web": "Automatic Web",
+  "Automatic DMS": "Automatic DMS",
+  "Monthly Subscription Manual": "Manual",
+  "Monthly Subscription Automatic Web": "Automatic Web",
+  "Monthly Subscription Automatic DMS": "Automatic DMS",
+  "Trial": "Trial",
+};
+
+export function subscriptionTierLabel(accountType: string | null | undefined): string {
+  if (!accountType) return "Free";
+  const trimmed = accountType.split(" $")[0].trim();
+  return SUBSCRIPTION_TIER_LABELS[trimmed] ?? "Free";
+}

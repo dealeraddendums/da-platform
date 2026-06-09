@@ -7,6 +7,8 @@ import {
   getPricing,
   listInvoices,
   billingConfigured,
+  subscriptionTierLabel,
+  getBillingStatus,
   type BillingPriceEntry,
   type BillingInvoice,
 } from "@/lib/billing";
@@ -40,6 +42,19 @@ interface BillingMeResponse {
   invoices: BillingInvoice[];
   outstandingAmount: number;
   trial: TrialInfo;
+  /** Who pays. "group" → the subscription + invoices live on the group's
+   *  da-billing customer; this dealer can't see/pay them. Drives the
+   *  read-only group-billed summary in the UI. Absent/"self" → normal view. */
+  billedBy?: "self" | "group";
+  /** Group name when billedBy === "group". */
+  groupName?: string | null;
+  /** Friendly subscription tier ("Automatic Web") for the group-billed summary. */
+  subscriptionTier?: string | null;
+  /** False for group-billed dealers (no Change Plan / Pay). */
+  canManage?: boolean;
+  /** Group-billed only: the group's da-billing customer is past due → printing
+   *  is paused. Same read the print lock uses; fail-open (false) on any error. */
+  groupPastDue?: boolean;
   notes?: string;
 }
 
@@ -129,9 +144,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient();
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, name, billing_customer_id, internal_id, created_at")
+    .select("id, name, billing_customer_id, internal_id, created_at, subscription_billed_to, group_id, account_type")
     .eq("dealer_id", resolved.dealerTextId)
-    .maybeSingle<{ id: string; name: string; billing_customer_id: string | null; internal_id: string | null; created_at: string | null }>();
+    .maybeSingle<{
+      id: string; name: string; billing_customer_id: string | null; internal_id: string | null;
+      created_at: string | null; subscription_billed_to: "dealer" | "group" | null;
+      group_id: string | null; account_type: string | null;
+    }>();
 
   if (!dealer) {
     return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
@@ -144,6 +163,54 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .select("id", { count: "exact", head: true })
     .eq("dealer_id", resolved.dealerTextId);
   const trial = computeTrial(dealer.created_at, lifetimePrints ?? 0);
+
+  // ── Group-billed dealer ───────────────────────────────────────────────────
+  // The subscription + invoices live on the GROUP's da-billing customer, not
+  // this dealer's — so there's no own template/invoices to fetch. Return a
+  // read-only summary (plan + who pays) and skip da-billing entirely. Keyed on
+  // subscription_billed_to === 'group' (NOT mere group membership): a self-billed
+  // dealer that happens to sit in a group keeps the normal view below.
+  if (dealer.subscription_billed_to === "group") {
+    let groupName: string | null = null;
+    let groupPastDue = false;
+    if (dealer.group_id) {
+      const { data: g } = await admin
+        .from("groups")
+        .select("name, billing_customer_id")
+        .eq("id", dealer.group_id)
+        .maybeSingle<{ name: string; billing_customer_id: string | null }>();
+      groupName = g?.name ?? null;
+      // Group billing health — so a group-billed dealer understands a paused-
+      // print state. Same getBillingStatus the print lock reads; fail-open.
+      if (billingConfigured() && g?.billing_customer_id) {
+        try {
+          const status = await getBillingStatus(g.billing_customer_id);
+          groupPastDue = status?.past_due === true;
+        } catch {
+          /* fail open — never block the summary on a da-billing hiccup */
+        }
+      }
+    }
+    const payload: BillingMeResponse = {
+      dealer: {
+        id: dealer.id,
+        name: dealer.name,
+        billing_customer_id: dealer.billing_customer_id,
+        internal_id: dealer.internal_id,
+      },
+      subscription: null,
+      pricing: [],
+      invoices: [],
+      outstandingAmount: 0,
+      trial,
+      billedBy: "group",
+      groupName,
+      subscriptionTier: subscriptionTierLabel(dealer.account_type),
+      canManage: false,
+      groupPastDue,
+    };
+    return NextResponse.json(payload);
+  }
 
   if (!billingConfigured()) {
     const payload: BillingMeResponse = {
