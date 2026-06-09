@@ -20,9 +20,9 @@ export default async function BiPage() {
   const admin = createAdminSupabaseClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("role")
+    .select("role, email")
     .eq("id", session.user.id)
-    .single<{ role: string }>();
+    .single<{ role: string; email: string | null }>();
 
   const role = profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
@@ -30,6 +30,8 @@ export default async function BiPage() {
 
   if (role !== "super_admin") redirect("/dashboard");
 
-  // Phase 1: read-only BI surface. Export/email (Phase 2) is parked.
-  return <BiClient />;
+  // Prefill the email recipient with the acting super_admin's address (Allan's
+  // is allan@dealeraddendums.com); the to-field stays editable.
+  const defaultRecipient = profile?.email ?? session.user.email ?? "allan@dealeraddendums.com";
+  return <BiClient defaultRecipient={defaultRecipient} />;
 }

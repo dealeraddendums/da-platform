@@ -12,7 +12,7 @@
 // inclusive end DATE, so the whole day counts and boundaries don't double-count.
 
 import { createAdminSupabaseClient } from "@/lib/db";
-import { isTrialAccountType, TRIAL_DAYS_CAP } from "@/lib/print-eligibility";
+import { isTrialAccountType, isPaidAccountType, TRIAL_DAYS_CAP } from "@/lib/print-eligibility";
 import { getGrossBillable, billingConfigured } from "@/lib/billing";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -20,6 +20,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export interface BiReport {
   period: { from: string; to: string };
   generatedAt: string;
+  /** Point-in-time snapshot (NOT period-filtered) — current active book.
+   *  paying = active + isPaidAccountType; trial = active + independent +
+   *  isTrialAccountType. Both exclude test accounts. */
+  totals: { payingAccounts: number; trialAccounts: number };
   trials: {
     /** Independent dealers created in-period that started as a trial — counts
      *  those that have since converted/downgraded too (matches the doc). */
@@ -236,6 +240,22 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
   // Reconciliation: cancellations (downgraded_at in-period) with NO closure row.
   const withoutReason = cancelledRows.filter((d) => !closureDealerIds.has(d.id)).length;
 
+  // ── Current totals (point-in-time snapshot of the active book) ───────────
+  // Per the classification rule, paid/trial buckets go through the
+  // print-eligibility helpers (not raw account_type SQL). Active + test-excluded.
+  // Trial is restricted to independent (group_id NULL) — group dealers are
+  // provisioned by their group, not trials, and a null account_type on a group
+  // dealer must not inflate the trial count.
+  const activeRows = await fetchDealers(admin, (q) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (q as any).eq("active", true),
+  );
+  let payingAccounts = 0, trialAccounts = 0;
+  for (const d of activeRows) {
+    if (isPaidAccountType(d.account_type)) payingAccounts++;
+    else if (d.group_id == null && isTrialAccountType(d.account_type)) trialAccounts++;
+  }
+
   // ── C. Revenue (da-billing) ──────────────────────────────────────────────
   // Pass test dealers' da-billing customer IDs so gross-billable + MRR exclude
   // them too (da-billing has no native test flag — DA Platform is the source of
@@ -263,6 +283,7 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
   return {
     period: { from, to },
     generatedAt: new Date().toISOString(),
+    totals: { payingAccounts, trialAccounts },
     trials: {
       started,
       converted,

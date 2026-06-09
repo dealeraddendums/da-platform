@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 type BiReport = {
   period: { from: string; to: string };
   generatedAt: string;
+  totals: { payingAccounts: number; trialAccounts: number };
   trials: {
     started: number; converted: number; convertedIndependent: number; conversionRate: number;
     lost: number; lostIndependent: number; lostGroup: number;
@@ -64,7 +65,7 @@ function Card({ label, value, sub }: { label: string; value: string; sub?: strin
 
 function TrendChart({ series }: { series: { month: string; grossBilled: number }[] }) {
   if (series.length === 0) return <div style={{ color: MUTED, fontSize: 13 }}>No data in range.</div>;
-  const W = 640, H = 220, padL = 60, padR = 16, padT = 16, padB = 40;
+  const W = 640, H = 220, padL = 78, padR = 16, padT = 16, padB = 40;
   const max = Math.max(1, ...series.map((s) => s.grossBilled));
   const innerW = W - padL - padR, innerH = H - padT - padB;
   const n = series.length;
@@ -92,15 +93,21 @@ function TrendChart({ series }: { series: { month: string; grossBilled: number }
   );
 }
 
-// Phase 1 = read-only BI surface. The PDF/Excel download + on-demand email
-// (Phase 2) are parked for their own review and intentionally not wired here.
-export default function BiClient() {
+// Phase 2: read surface + PDF/Excel download + on-demand email. Export/email
+// hit /api/admin/bi/export and /api/admin/bi/email, which build from the same
+// buildBiReport() as the read endpoint — so PDF == Excel == on-screen, and the
+// is_test / excludeCustomerIds exclusions are inherited automatically.
+export default function BiClient({ defaultRecipient }: { defaultRecipient: string }) {
   const initial = prevCalendarMonth();
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [report, setReport] = useState<BiReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"" | "pdf" | "xlsx" | "email">("");
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [recipients, setRecipients] = useState(defaultRecipient);
+  const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async (f: string, t: string) => {
     setLoading(true); setErr(null);
@@ -118,6 +125,49 @@ export default function BiClient() {
 
   useEffect(() => { void load(initial.from, initial.to); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
+  // Download the export for the CURRENT from/to so the file matches what's
+  // on screen (same period → same buildBiReport → same numbers).
+  async function download(format: "pdf" | "xlsx") {
+    setBusy(format); setErr(null);
+    try {
+      const res = await fetch(`/api/admin/bi/export?format=${format}&from=${from}&to=${to}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error ?? `Export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `da-bi-${from}_${to}.${format}`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function sendEmail() {
+    setBusy("email"); setErr(null);
+    try {
+      const res = await fetch(`/api/admin/bi/email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to, recipients: recipients.split(",").map((r) => r.trim()).filter(Boolean) }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error ?? `Email failed (${res.status})`);
+      setEmailOpen(false);
+      setToast(`Report emailed to ${(j.recipients ?? []).join(", ")}`);
+      setTimeout(() => setToast(null), 6000);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Email failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
   const btnPrimary: React.CSSProperties = {
     height: 36, padding: "0 16px", background: BLUE, color: "#fff", border: "none",
     borderRadius: 4, fontSize: 13, fontWeight: 500, cursor: "pointer",
@@ -127,9 +177,41 @@ export default function BiClient() {
     borderRadius: 4, fontSize: 13, fontWeight: 500, cursor: "pointer",
   };
 
+  const actions = (
+    <div style={{ display: "flex", gap: 8 }}>
+      <button style={{ ...btnGhost, opacity: !report || busy === "pdf" ? 0.6 : 1 }} disabled={!report || busy === "pdf"} onClick={() => void download("pdf")}>
+        {busy === "pdf" ? "Generating…" : "Download PDF"}
+      </button>
+      <button style={{ ...btnGhost, opacity: !report || busy === "xlsx" ? 0.6 : 1 }} disabled={!report || busy === "xlsx"} onClick={() => void download("xlsx")}>
+        {busy === "xlsx" ? "Generating…" : "Download Excel"}
+      </button>
+      <button style={{ ...btnPrimary, opacity: !report ? 0.6 : 1 }} disabled={!report} onClick={() => setEmailOpen((v) => !v)}>
+        Email report
+      </button>
+    </div>
+  );
+
   return (
     <div>
-      <PageHeader title="Business Intelligence" subtitle="Acquisition, conversion, churn & revenue" />
+      <PageHeader title="Business Intelligence" subtitle="Acquisition, conversion, churn & revenue" action={actions} />
+
+      {emailOpen && (
+        <div style={{ ...cardStyle, marginBottom: 16, display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+          <label style={{ fontSize: 12, color: MUTED, flex: 1, minWidth: 280 }}>
+            <div style={{ marginBottom: 4 }}>Recipients (comma-separated)</div>
+            <input type="text" value={recipients} onChange={(e) => setRecipients(e.target.value)}
+              style={{ width: "100%", height: 34, padding: "0 10px", border: `1px solid ${BORDER}`, borderRadius: 4, fontSize: 13 }} />
+          </label>
+          <button style={{ ...btnPrimary, opacity: busy === "email" ? 0.6 : 1 }} disabled={busy === "email"} onClick={() => void sendEmail()}>
+            {busy === "email" ? "Sending…" : "Send PDF + Excel"}
+          </button>
+          <div style={{ fontSize: 11, color: MUTED, flexBasis: "100%" }}>Sends the current period ({from} → {to}) as PDF + Excel attachments. On-demand only.</div>
+        </div>
+      )}
+
+      {toast && (
+        <div style={{ marginBottom: 16, padding: "10px 14px", background: "#e8f5e9", border: "1px solid #c8e6c9", borderRadius: 6, color: "#2e7d32", fontSize: 13 }}>{toast}</div>
+      )}
 
       {/* Date range */}
       <div style={{ ...cardStyle, display: "flex", alignItems: "flex-end", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
@@ -159,6 +241,11 @@ export default function BiClient() {
         <div style={{ color: MUTED, fontSize: 14 }}>{loading ? "Loading report…" : "No data."}</div>
       ) : (
         <>
+          <div style={{ ...cardStyle, marginBottom: 16, display: "flex", gap: 28, fontSize: 13, color: NAVY }}>
+            <div><span style={{ color: MUTED }}>Current book (all-time): </span><strong>Paying accounts {report.totals.payingAccounts}</strong></div>
+            <div><strong>Trial accounts (independent) {report.totals.trialAccounts}</strong></div>
+          </div>
+
           {/* Section A */}
           <SectionTitle>Acquisition &amp; trial funnel (independent)</SectionTitle>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
