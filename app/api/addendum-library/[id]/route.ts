@@ -60,6 +60,8 @@ export async function PATCH(
   if (body.trims !== undefined) patch.trims = body.trims;
   if (body.trims_not !== undefined) patch.trims_not = body.trims_not;
   if (body.body_styles !== undefined) patch.body_styles = body.body_styles;
+  if (body.fuel !== undefined) patch.fuel = body.fuel;
+  if (body.fuel_not !== undefined) patch.fuel_not = body.fuel_not;
   if (body.year_condition !== undefined) patch.year_condition = body.year_condition;
   if (body.year_value !== undefined) patch.year_value = body.year_value;
   if (body.miles_condition !== undefined) patch.miles_condition = body.miles_condition;

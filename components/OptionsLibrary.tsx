@@ -7,6 +7,7 @@ import ImageUploadPicker from "@/components/ImageUploadPicker";
 import { RichName } from "@/lib/product-name";
 import RichTextEditor from "@/components/RichTextEditor";
 import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
+import FuelRuleSelect from "@/components/FuelRuleSelect";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,8 @@ type FormData = {
   makes: string;
   makes_not: boolean;
   body_styles: string;
+  fuel: string;
+  fuel_not: boolean;
   year_condition: number;
   year_value: string;
   miles_condition: number;
@@ -39,7 +42,7 @@ type FormData = {
 const BLANK: FormData = {
   option_name: "", item_price: "", description: "", ad_types: ["New", "Used"],
   models: "", models_not: false, trims: "", trims_not: false,
-  makes: "", makes_not: false, body_styles: "",
+  makes: "", makes_not: false, body_styles: "", fuel: "", fuel_not: false,
   year_condition: 0, year_value: "",
   miles_condition: 0, miles_value: "",
   msrp_condition: 0, msrp1: "", msrp2: "",
@@ -63,6 +66,7 @@ function rowToForm(r: AddendumLibraryRow): FormData {
     trims: r.trims, trims_not: r.trims_not,
     makes: r.makes, makes_not: r.makes_not,
     body_styles: r.body_styles,
+    fuel: r.fuel ?? "", fuel_not: r.fuel_not ?? false,
     year_condition: r.year_condition, year_value: r.year_value != null ? String(r.year_value) : "",
     miles_condition: r.miles_condition, miles_value: r.miles_value != null ? String(r.miles_value) : "",
     msrp_condition: r.msrp_condition,
@@ -443,6 +447,15 @@ function OptionForm({
             ))}
           </div>
 
+          <div style={{ marginTop: 14 }}>
+            <FuelRuleSelect
+              value={form.fuel}
+              onChange={v => f("fuel", v)}
+              not={form.fuel_not}
+              onNotChange={v => f("fuel_not", v)}
+            />
+          </div>
+
           {row("Year", (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <select value={form.year_condition} onChange={e => f("year_condition", parseInt(e.target.value))}
@@ -656,7 +669,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
     if (item.applies_to === "none") {
       setAppliesTo("none");
     } else {
-      const hasRules = !!(item.models || item.trims || item.makes || item.body_styles || item.year_condition || item.miles_condition || item.msrp_condition);
+      const hasRules = !!(item.models || item.trims || item.makes || item.body_styles || item.fuel || item.year_condition || item.miles_condition || item.msrp_condition);
       setAppliesTo(hasRules ? "rules" : "all");
     }
     setFormError(null);
@@ -678,7 +691,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
         msrp2: form.msrp2 ? parseInt(form.msrp2) : null,
         required: form.required,
       };
-      const clearRules = { models: "", models_not: false, trims: "", trims_not: false, makes: "", makes_not: false, body_styles: "", year_condition: 0, year_value: null, miles_condition: 0, miles_value: null, msrp_condition: 0, msrp1: null, msrp2: null, show_models_only: false };
+      const clearRules = { models: "", models_not: false, trims: "", trims_not: false, makes: "", makes_not: false, body_styles: "", fuel: "", fuel_not: false, year_condition: 0, year_value: null, miles_condition: 0, miles_value: null, msrp_condition: 0, msrp1: null, msrp2: null, show_models_only: false };
       const payload = appliesTo === "rules"
         ? { ...base, applies_to: "rules" }
         : { ...base, ...clearRules, applies_to: appliesTo };

@@ -22,7 +22,7 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     "option_name", "option_price", "sort_order", "active", "is_suggested",
     "description", "required", "applies_to", "ad_type", "ad_types",
     "makes", "makes_not", "models", "models_not", "trims", "trims_not",
-    "body_styles", "year_condition", "year_value", "miles_condition",
+    "body_styles", "fuel", "fuel_not", "year_condition", "year_value", "miles_condition",
     "miles_value", "msrp_condition", "msrp1", "msrp2",
     "show_models_only", "separator_above", "separator_below", "spaces",
     "assign_all_dealers", "locked",

@@ -6,7 +6,7 @@ import type { GroupOptionRow } from "@/lib/db";
 type RichInsert = Partial<Pick<GroupOptionRow,
   "description" | "required" | "applies_to" | "ad_type" | "ad_types" |
   "makes" | "makes_not" | "models" | "models_not" | "trims" | "trims_not" |
-  "body_styles" | "year_condition" | "year_value" | "miles_condition" |
+  "body_styles" | "fuel" | "fuel_not" | "year_condition" | "year_value" | "miles_condition" |
   "miles_value" | "msrp_condition" | "msrp1" | "msrp2" |
   "show_models_only" | "separator_above" | "separator_below" | "spaces" |
   "locked"
@@ -26,6 +26,8 @@ function pickRich(body: Record<string, unknown>): RichInsert {
   if (typeof body.trims === "string") out.trims = body.trims;
   if (typeof body.trims_not === "boolean") out.trims_not = body.trims_not;
   if (typeof body.body_styles === "string") out.body_styles = body.body_styles;
+  if (typeof body.fuel === "string") out.fuel = body.fuel;
+  if (typeof body.fuel_not === "boolean") out.fuel_not = body.fuel_not;
   if (typeof body.year_condition === "number") out.year_condition = body.year_condition;
   if (typeof body.year_value === "number" || body.year_value === null) out.year_value = body.year_value as number | null;
   if (typeof body.miles_condition === "number") out.miles_condition = body.miles_condition;

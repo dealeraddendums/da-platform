@@ -21,6 +21,8 @@ type LibraryRow = {
   trims: string | null;
   trims_not: boolean;
   body_styles: string | null;
+  fuel: string | null;
+  fuel_not: boolean;
   year_condition: number;
   year_value: number | null;
   miles_condition: number;
@@ -83,6 +85,8 @@ type RulesRow = {
   trims?: string | null;
   trims_not?: boolean;
   body_styles?: string | null;
+  fuel?: string | null;
+  fuel_not?: boolean;
   year_condition?: number;
   year_value?: number | null;
   miles_condition?: number;
@@ -114,6 +118,7 @@ export function matchesRulesRow(row: RulesRow, vehicle: VehicleRow): boolean {
   if (!listMatchesWithNot(vehicle.MAKE, row.makes ?? null, !!row.makes_not)) return false;
   if (!listMatchesWithNot(vehicle.MODEL, row.models ?? null, !!row.models_not)) return false;
   if (!listMatchesWithNot(vehicle.TRIM, row.trims ?? null, !!row.trims_not)) return false;
+  if (!listMatchesWithNot(vehicle.FUEL, row.fuel ?? null, !!row.fuel_not)) return false;
 
   if (row.body_styles && row.body_styles !== "NONE" && row.body_styles !== "") {
     if (!listMatchesWithNot(vehicle.BODYSTYLE, row.body_styles, false)) return false;
@@ -161,7 +166,7 @@ export async function matchOptionsToVehicle(
   const admin = createAdminSupabaseClient();
   const { data: rows } = await admin
     .from("addendum_library")
-    .select("id, dealer_id, option_name, item_price, description, applies_to, makes, makes_not, models, models_not, trims, trims_not, body_styles, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2, sort_order, active, ad_types, required")
+    .select("id, dealer_id, option_name, item_price, description, applies_to, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2, sort_order, active, ad_types, required")
     .eq("dealer_id", dealerId)
     .eq("active", true)
     .neq("applies_to", "none")

@@ -24,7 +24,7 @@ async function loadVehicleForRules(
   if (!isUUID(vehicleId)) return undefined;
   const { data: dv } = await admin
     .from("dealer_vehicles")
-    .select("dealer_id, vin, stock_number, year, make, model, trim, body_style, exterior_color, mileage, msrp, condition, cmpg, hmpg, mpg")
+    .select("dealer_id, vin, stock_number, year, make, model, trim, body_style, exterior_color, mileage, msrp, condition, cmpg, hmpg, mpg, fuel")
     .eq("id", vehicleId)
     .maybeSingle();
   if (!dv) return undefined;
@@ -44,6 +44,7 @@ async function loadVehicleForRules(
     cmpg: string | null;
     hmpg: string | null;
     mpg: string | null;
+    fuel: string | null;
   };
   const v = dv as unknown as DV;
   return {
@@ -59,7 +60,7 @@ async function loadVehicleForRules(
     EXT_COLOR: v.exterior_color,
     INT_COLOR: null,
     ENGINE: null,
-    FUEL: null,
+    FUEL: v.fuel,
     DRIVETRAIN: null,
     TRANSMISSION: null,
     MILEAGE: v.mileage != null ? String(v.mileage) : null,
@@ -163,7 +164,7 @@ async function filterRowsByLibraryRules<T extends { option_name: string }>(
   const names = Array.from(new Set(rows.map(r => r.option_name)));
   const { data: lib } = await admin
     .from("addendum_library")
-    .select("option_name, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
+    .select("option_name, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
     .eq("dealer_id", dealerId)
     .in("option_name", names);
   if (!lib || lib.length === 0) return rows;
@@ -178,6 +179,8 @@ async function filterRowsByLibraryRules<T extends { option_name: string }>(
     trims: string | null;
     trims_not: boolean | null;
     body_styles: string | null;
+    fuel: string | null;
+    fuel_not: boolean | null;
     year_condition: number | null;
     year_value: number | null;
     miles_condition: number | null;
@@ -201,6 +204,8 @@ async function filterRowsByLibraryRules<T extends { option_name: string }>(
       trims: rule.trims,
       trims_not: rule.trims_not ?? false,
       body_styles: rule.body_styles,
+      fuel: rule.fuel,
+      fuel_not: rule.fuel_not ?? false,
       year_condition: rule.year_condition ?? 0,
       year_value: rule.year_value,
       miles_condition: rule.miles_condition ?? 0,
@@ -293,6 +298,8 @@ export async function GET(
             trims: r.trims as string | null,
             trims_not: r.trims_not as boolean | undefined,
             body_styles: r.body_styles as string | null,
+            fuel: r.fuel as string | null,
+            fuel_not: r.fuel_not as boolean | undefined,
             year_condition: r.year_condition as number | undefined,
             year_value: r.year_value as number | null | undefined,
             miles_condition: r.miles_condition as number | undefined,

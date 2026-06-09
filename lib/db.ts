@@ -654,6 +654,8 @@ export type AddendumLibraryRow = {
   trims: string;
   trims_not: boolean;
   body_styles: string;
+  fuel: string;
+  fuel_not: boolean;
   year_condition: number;
   year_value: number | null;
   miles_condition: number;
@@ -673,7 +675,10 @@ export type AddendumLibraryRow = {
   updated_at: string;
 };
 
-type AddendumLibraryInsert = Omit<AddendumLibraryRow, 'id' | 'created_at' | 'updated_at'>;
+// fuel/fuel_not are optional on insert — the DB defaults ('' / false) cover
+// callers that don't set a fuel rule (sample-seed, group→dealer copy). The
+// addendum-library POST sets them explicitly.
+type AddendumLibraryInsert = Omit<AddendumLibraryRow, 'id' | 'created_at' | 'updated_at' | 'fuel' | 'fuel_not'> & { fuel?: string; fuel_not?: boolean };
 type AddendumLibraryUpdate = Partial<Omit<AddendumLibraryRow, 'id' | 'dealer_id' | 'created_at' | 'updated_at'>>;
 
 export type AddendumDataRow = {
@@ -859,6 +864,8 @@ export type GroupOptionRow = {
   trims: string;
   trims_not: boolean;
   body_styles: string;
+  fuel: string;
+  fuel_not: boolean;
   year_condition: number;
   year_value: number | null;
   miles_condition: number;
@@ -897,6 +904,8 @@ type GroupOptionInsert = {
   trims?: string;
   trims_not?: boolean;
   body_styles?: string;
+  fuel?: string;
+  fuel_not?: boolean;
   year_condition?: number;
   year_value?: number | null;
   miles_condition?: number;
@@ -930,6 +939,8 @@ type GroupOptionUpdate = {
   trims?: string;
   trims_not?: boolean;
   body_styles?: string;
+  fuel?: string;
+  fuel_not?: boolean;
   year_condition?: number;
   year_value?: number | null;
   miles_condition?: number;

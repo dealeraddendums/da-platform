@@ -3,6 +3,7 @@
 import { useState } from "react";
 import RichTextEditor from "@/components/RichTextEditor";
 import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
+import FuelRuleSelect from "@/components/FuelRuleSelect";
 import type { GroupOptionRow } from "@/lib/db";
 import { RichName } from "@/lib/product-name";
 
@@ -20,6 +21,8 @@ type FormState = {
   trims_not: boolean;
   makes: string;
   makes_not: boolean;
+  fuel: string;
+  fuel_not: boolean;
   separator_above: boolean;
   separator_below: boolean;
   spaces: number;
@@ -39,6 +42,8 @@ const BLANK: FormState = {
   trims_not: false,
   makes: "",
   makes_not: false,
+  fuel: "",
+  fuel_not: false,
   separator_above: false,
   separator_below: false,
   spaces: 0,
@@ -60,6 +65,8 @@ function rowToForm(r: GroupOptionRow): FormState {
     trims_not: r.trims_not ?? false,
     makes: r.makes ?? "",
     makes_not: r.makes_not ?? false,
+    fuel: r.fuel ?? "",
+    fuel_not: r.fuel_not ?? false,
     separator_above: r.separator_above ?? false,
     separator_below: r.separator_below ?? false,
     spaces: r.spaces ?? 0,
@@ -150,6 +157,8 @@ export default function CorporateProductModal({
       trims_not: form.trims_not,
       makes: form.makes.trim(),
       makes_not: form.makes_not,
+      fuel: form.fuel.trim(),
+      fuel_not: form.fuel_not,
       separator_above: form.separator_above,
       separator_below: form.separator_below,
       spaces: form.spaces,
@@ -298,6 +307,14 @@ export default function CorporateProductModal({
                 modelRight={<NotPill on={form.models_not} onClick={() => f("models_not", !form.models_not)} />}
                 trimRight={<NotPill on={form.trims_not} onClick={() => f("trims_not", !form.trims_not)} />}
               />
+              <div style={{ marginTop: 12 }}>
+                <FuelRuleSelect
+                  value={form.fuel}
+                  onChange={v => f("fuel", v)}
+                  not={form.fuel_not}
+                  onNotChange={v => f("fuel_not", v)}
+                />
+              </div>
             </div>
           )}
 
