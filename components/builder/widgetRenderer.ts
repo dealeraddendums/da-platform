@@ -17,6 +17,22 @@ function looksLikeHtml(s: string): boolean {
   return /<[a-z][^>]*>/i.test(s);
 }
 
+// Pick a readable text color for a solid background — dark text on light bars,
+// white on dark. Luminance per ITU-R BT.601 (0.299r+0.587g+0.114b). Handles
+// 3- and 6-digit hex (with or without '#'); falls back to white for anything
+// unparseable. Shared by the canvas preview and the PDF via renderW.
+function readableText(bg: string): string {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((bg || '').trim());
+  if (!m) return '#fff';
+  let hex = m[1];
+  if (hex.length === 3) hex = hex.split('').map(ch => ch + ch).join('');
+  const r = parseInt(hex.slice(0, 2), 16) / 255;
+  const g = parseInt(hex.slice(2, 4), 16) / 255;
+  const b = parseInt(hex.slice(4, 6), 16) / 255;
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  return lum > 0.6 ? '#1a1916' : '#fff';
+}
+
 function renderDescription(desc: string, fontPx: number): string {
   if (!desc) return '';
   const baseStyle = `font-size:${fontPx}px;color:#666;padding-left:8px;margin-top:1px`;
@@ -162,7 +178,9 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   if (type === 'headerbar') {
-    return `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;background:${d.color || '#1a1916'}"><div style="font-size:11px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:.06em">${d.text || 'HEADER'}</div></div>`;
+    const bg = (d.color as string) || '#1a1916';
+    const txt = readableText(bg);
+    return `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;background:${bg}"><div style="font-size:11px;font-weight:700;color:${txt};text-transform:uppercase;letter-spacing:.06em">${d.text || 'HEADER'}</div></div>`;
   }
 
   if (type === 'customtext') {

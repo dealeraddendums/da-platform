@@ -2110,9 +2110,9 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Fd label="Text"><input value={(d.text as string) || ''} onChange={e => u('text', e.target.value)} style={fiStyle} /></Fd>
           <Eps style={{ marginTop: 8 }}>Color</Eps>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-            {[['#1a1916','Black'],['#374151','Slate'],['#2563EB','Blue'],['#DC2626','Red'],['#15803D','Green'],['#7C3AED','Purple'],['#D97706','Gold']].map(([c,n]) => (
+            {[['#1a1916','Black'],['#374151','Slate'],['#2563EB','Blue'],['#DC2626','Red'],['#15803D','Green'],['#7C3AED','Purple'],['#D97706','Gold'],['#ffffff','White']].map(([c,n]) => (
               <div key={c} title={n} onClick={() => u('color', c)}
-                style={{ width: 22, height: 22, borderRadius: 4, background: c, cursor: 'pointer', border: `1.5px solid ${(d.color as string) === c ? '#1976d2' : 'transparent'}`, boxShadow: (d.color as string) === c ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }} />
+                style={{ width: 22, height: 22, borderRadius: 4, background: c, cursor: 'pointer', border: `1.5px solid ${(d.color as string) === c ? '#1976d2' : (c === '#ffffff' ? '#ccc' : 'transparent')}`, boxShadow: (d.color as string) === c ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }} />
             ))}
           </div>
         </EpSection>
