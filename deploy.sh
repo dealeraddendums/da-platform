@@ -41,7 +41,13 @@ ln -sfn "$SHARED/.env.production" "$REL/.env.production"
 
 # 3. Build in the clean release dir: npm ci gives a correct node_modules/.bin/next every time
 #    (kills the missing-symlink flake) and the separate dir kills the .next/export ENOTEMPTY race.
-( cd "$REL" && npm ci && npm run build )
+#    Handle a failing build explicitly (under `set -e` a bare subshell failure would exit before
+#    the cleanup below) so the failed release dir is always removed.
+if ! ( cd "$REL" && npm ci && npm run build ); then
+  echo "[deploy] BUILD FAILED — aborting; current untouched. Removing $REL"
+  rm -rf "$REL"
+  exit 1
+fi
 
 # 4. VERIFY before any swap — never cut over to an incomplete build
 if [ ! -f "$REL/.next/BUILD_ID" ] || [ ! -f "$REL/.next/routes-manifest.json" ]; then
@@ -58,10 +64,16 @@ echo "[deploy] current -> $REL ; pm2 reload (rolling)…"
 # time — reloading by name can re-exec the previous release's cached script path under a symlink.
 pm2 reload "$BASE/ecosystem.config.js" --update-env
 
-# 6. Health gate — if the new release won't come online, flip the symlink straight back
-sleep 5
-if ! pm2 describe "$APP" 2>/dev/null | grep -q "status.*online"; then
-  echo "[deploy] WARN: $APP not online after reload."
+# 6. Health gate — poll a REAL HTTP 200 (not just pm2 'online'); auto-revert if never healthy.
+HEALTH_URL="http://127.0.0.1:3000/login"
+healthy=
+for i in $(seq 1 15); do          # ~30s: 15 x 2s
+  sleep 2
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$HEALTH_URL" || true)
+  if [ "$code" = "200" ]; then healthy=1; echo "[deploy] health OK (200) after $((i*2))s"; break; fi
+done
+if [ -z "$healthy" ]; then
+  echo "[deploy] NEW RELEASE UNHEALTHY (no HTTP 200 from $HEALTH_URL in ~30s)."
   if [ -n "$PREV" ] && [ -d "$PREV" ]; then
     echo "[deploy] auto-reverting current -> $PREV and reloading…"
     ln -sfn "$PREV" "$BASE/current"
