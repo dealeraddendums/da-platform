@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { VehicleRow } from "@/lib/vehicles";
 import { vehicleCondition, parsePhotos } from "@/lib/vehicles";
 import { formatOptionPrice, parseOptionPriceValue, priceSetUsesDecimals, formatCurrencyAmount } from "@/lib/option-price";
-import { RichName, sanitizeProductHtml } from "@/lib/product-name";
+import { RichName, sanitizeProductDescription } from "@/lib/product-name";
 import type { VehicleOptionRow } from "@/lib/db";
 import PrintPreviewModal from "@/components/PrintPreviewModal";
 import BuyersGuideModal from "@/components/BuyersGuideModal";
@@ -538,15 +538,18 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                             {(() => {
                               const desc = (opt as MatchedOption).description ?? (opt as VehicleOptionRow).description;
                               if (!desc) return null;
-                              // Route through the shared sanitizer — same
-                              // allowlist as the name rendering so operators
-                              // can use inline emphasis here too without
-                              // re-opening the XSS hole.
+                              // Route through the DESCRIPTION sanitizer so
+                              // authored bullets / line breaks / font-size
+                              // survive (the tight name allowlist collapsed
+                              // them). The .description-html class re-applies
+                              // list markers + indent that Tailwind preflight
+                              // strips on-screen (globals.css), matching print.
                               return (
                                 <div
+                                  className="description-html"
                                   style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, paddingLeft: 8, lineHeight: 1.4 }}
                                   // eslint-disable-next-line react/no-danger
-                                  dangerouslySetInnerHTML={{ __html: sanitizeProductHtml(desc) }}
+                                  dangerouslySetInnerHTML={{ __html: sanitizeProductDescription(desc) }}
                                 />
                               );
                             })()}

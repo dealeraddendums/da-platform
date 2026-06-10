@@ -151,3 +151,16 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* Product description rich text — on-screen render of sanitizeProductDescription
+   output (AddendumEditor "Addendum Details" row + Builder canvas). Tailwind
+   preflight (@layer base) zeroes ul/ol margin+padding and sets list-style:none,
+   which would hide authored bullets/numbers/indent. These rules are UNLAYERED so
+   they win over preflight, and mirror the PDF CSS in lib/pdf-html.ts so the row,
+   the Builder canvas, and the printed addendum/infosheet all match. Inline
+   font-size / line-height / color from the editor are respected as-is. */
+.description-html p  { margin: 0; }
+.description-html ul    { margin: 0; padding-left: 1.2em; list-style: disc outside; }
+.description-html ul ul { list-style: circle outside; }
+.description-html ol    { margin: 0; padding-left: 1.2em; list-style: decimal outside; }
+.description-html li { margin: 0; padding: 0; }

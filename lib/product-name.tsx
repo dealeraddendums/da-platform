@@ -12,28 +12,52 @@
 //   • <RichName> — product name renderer (table cells, library lists,
 //     Add-from-Library modal, AddendumEditor rows, Configure Product
 //     preview).
-//   • sanitizeProductHtml — exported separately so the description
-//     render in AddendumEditor can route through the SAME allowlist
-//     (the existing dangerouslySetInnerHTML there was unsanitized).
+//   • sanitizeProductHtml — product NAME allowlist (tight/inline).
+//   • sanitizeProductDescription — product DESCRIPTION allowlist: the
+//     name allowlist PLUS the block structure the rich-text editor can
+//     author (<p>, <ul>/<ol>/<li> with nested-list indent, font-size +
+//     line-height). Description render sites (AddendumEditor row, the
+//     Builder/print description widget) route through this so authored
+//     bullets / line breaks / font size survive instead of collapsing.
 
 import React from "react";
 import DOMPurify from "isomorphic-dompurify";
 
-// Tags and attributes operators are allowed to author. Everything else
-// is dropped by DOMPurify per the spec doc.
-const ALLOWED_TAGS = ["span", "b", "strong", "i", "em", "u", "br", "sub", "sup", "img"];
+// Tags operators are allowed to author. The NAME allowlist is tight/inline —
+// only the inline emphasis a product name needs (bold, colored span, logo img).
+// The DESCRIPTION allowlist adds exactly the block structure the rich-text
+// editor (TipTap, components/RichTextEditor.tsx) can author: paragraphs and
+// bullet/numbered lists (indent is a NESTED <ul>, not a margin). Nothing more —
+// the allowlist should match everything the editor emits and nothing else.
+const NAME_TAGS = ["span", "b", "strong", "i", "em", "u", "br", "sub", "sup", "img"];
+const DESCRIPTION_TAGS = [...NAME_TAGS, "p", "ul", "ol", "li"];
 const ALLOWED_ATTR = ["style", "src", "alt", "width", "height", "title"];
 
-// CSS properties operators are allowed to set inline. DOMPurify
-// applies this via the uponSanitizeAttribute hook because the style
-// attribute is a free-form bag — needs per-property filtering.
-const ALLOWED_STYLE_PROPS = new Set([
+// CSS properties operators are allowed to set inline. DOMPurify applies this
+// via the uponSanitizeAttribute hook because the style attribute is a free-form
+// bag — needs per-property filtering. NAME stays tight; DESCRIPTION adds the two
+// block controls the editor emits — font-size (the Size dropdown) and
+// line-height (the line-spacing stepper). Verified against stored descriptions:
+// the editor authors no text-align / margin-left, so those are intentionally
+// excluded.
+const NAME_STYLE_PROP_LIST = [
   "color",
   "font-weight",
   "font-style",
   "text-decoration",
   "background-color",     // for highlighter-style spans
+];
+const NAME_STYLE_PROPS = new Set(NAME_STYLE_PROP_LIST);
+const DESCRIPTION_STYLE_PROPS = new Set([
+  ...NAME_STYLE_PROP_LIST,
+  "font-size",
+  "line-height",
 ]);
+
+// The uponSanitizeAttribute hook is global, so the style filter reads which
+// allowlist to apply from here. DOMPurify.sanitize is synchronous, so setting
+// this immediately before a sanitize call and resetting it after is race-free.
+let activeStyleProps: Set<string> = NAME_STYLE_PROPS;
 
 // S3 hosts the platform writes product images to. Anything else
 // (operator pasted a logo from elsewhere, stale legacy URL) gets the
@@ -57,7 +81,7 @@ function filterStyleAttribute(raw: string): string {
     if (idx < 0) continue;
     const prop = decl.slice(0, idx).trim().toLowerCase();
     const value = decl.slice(idx + 1).trim();
-    if (!ALLOWED_STYLE_PROPS.has(prop)) continue;
+    if (!activeStyleProps.has(prop)) continue;
     if (!value || value.length > 100) continue;
     // Reject url() / expressions / known-malicious tokens regardless of property.
     if (/url\s*\(|expression\s*\(|javascript:/i.test(value)) continue;
@@ -99,16 +123,35 @@ function isSafeImgSrc(src: string): boolean {
   }
 }
 
-/** Run the input through the configured DOMPurify allowlist. Returns a
- *  string of clean HTML safe to pass to dangerouslySetInnerHTML. */
+function runSanitize(raw: string, tags: string[], styleProps: Set<string>): string {
+  ensureHooks();
+  activeStyleProps = styleProps;
+  try {
+    return DOMPurify.sanitize(raw, {
+      ALLOWED_TAGS: tags,
+      ALLOWED_ATTR,
+      KEEP_CONTENT: true,      // strip disallowed tags but keep the inner text
+    });
+  } finally {
+    activeStyleProps = NAME_STYLE_PROPS;   // reset so a stray call defaults tight
+  }
+}
+
+/** Sanitize a product NAME — tight, inline-only allowlist (bold/colored span/
+ *  logo img). Returns clean HTML safe for dangerouslySetInnerHTML. */
 export function sanitizeProductHtml(raw: string | null | undefined): string {
   if (!raw) return "";
-  ensureHooks();
-  return DOMPurify.sanitize(String(raw), {
-    ALLOWED_TAGS,
-    ALLOWED_ATTR,
-    KEEP_CONTENT: true,      // strip the tags but keep the inner text
-  });
+  return runSanitize(String(raw), NAME_TAGS, NAME_STYLE_PROPS);
+}
+
+/** Sanitize a product DESCRIPTION — the name allowlist plus the block structure
+ *  the rich-text editor authors: <p>, <ul>/<ol>/<li> (incl. nested-list indent)
+ *  and the font-size + line-height inline styles. Keeps the same script/img/url()
+ *  rejection as names. Use this for every description render (table row, Builder
+ *  canvas, print) so authored bullets/breaks/size survive instead of collapsing. */
+export function sanitizeProductDescription(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return runSanitize(String(raw), DESCRIPTION_TAGS, DESCRIPTION_STYLE_PROPS);
 }
 
 // ── Parsed-name helpers (image metadata extraction) ──────────────────

@@ -1,5 +1,5 @@
 import { IB_DEFAULT, VEHICLE_PHOTO_COMING_SOON } from './constants';
-import { sanitizeProductHtml } from '@/lib/product-name';
+import { sanitizeProductHtml, sanitizeProductDescription } from '@/lib/product-name';
 
 type D = Record<string, unknown>;
 
@@ -37,7 +37,7 @@ function renderDescription(desc: string, fontPx: number): string {
   if (!desc) return '';
   const baseStyle = `font-size:${fontPx}px;color:#666;padding-left:8px;margin-top:1px`;
   if (looksLikeHtml(desc)) {
-    return `<div class="description-html" style="${baseStyle}">${sanitizeProductHtml(desc)}</div>`;
+    return `<div class="description-html" style="${baseStyle}">${sanitizeProductDescription(desc)}</div>`;
   }
   // Escape plain text to keep parity with previous behavior.
   const escaped = desc.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

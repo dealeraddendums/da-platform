@@ -304,7 +304,7 @@ body { width: ${paper.w}px; height: ${paper.h}px; overflow: hidden; background: 
 .description-html p { margin: 0; }
 .description-html ul { margin: 0; padding-left: 1.2em; list-style-type: disc; }
 .description-html ul ul { list-style-type: circle; padding-left: 1.2em; }
-.description-html ol { margin: 0; padding-left: 1.2em; }
+.description-html ol { margin: 0; padding-left: 1.2em; list-style-type: decimal; }
 .description-html li { margin: 0; padding: 0; }
 </style>
 </head>
