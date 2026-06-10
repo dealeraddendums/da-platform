@@ -46,7 +46,7 @@ const BLANK: FormData = {
   year_condition: 0, year_value: "",
   miles_condition: 0, miles_value: "",
   msrp_condition: 0, msrp1: "", msrp2: "",
-  show_models_only: false, separator_above: false, separator_below: false, spaces: 2,
+  show_models_only: false, separator_above: false, separator_below: false, spaces: 0,
   required: true,
 };
 

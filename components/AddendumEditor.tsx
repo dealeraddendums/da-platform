@@ -8,6 +8,7 @@ import { RichName, sanitizeProductDescription } from "@/lib/product-name";
 import type { VehicleOptionRow } from "@/lib/db";
 import PrintPreviewModal from "@/components/PrintPreviewModal";
 import BuyersGuideModal from "@/components/BuyersGuideModal";
+import RichTextEditor from "@/components/RichTextEditor";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -85,6 +86,11 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
 
   // Edit inline
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Per-vehicle product edit modal (this vehicle only — global library untouched)
+  const [editProduct, setEditProduct] = useState<
+    { idx: number; name: string; price: string; description: string; required: boolean } | null
+  >(null);
 
   // Print preview modal — initialize with initialDocType so ?type= param auto-opens correct modal
   const [printDoc, setPrintDoc] = useState<"addendum" | "infosheet" | "buyer_guide" | null>(
@@ -216,6 +222,42 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
     setShowAddForm(false);
   }
 
+  // ── Per-vehicle product edit ─────────────────────────────────────────────────
+  // Opens the product modal pre-filled with this line's values; saving updates
+  // only THIS vehicle's vehicle_options row (replace-all via POST), never the
+  // global addendum_library product.
+
+  function openEditProduct(idx: number) {
+    const o = options[idx];
+    setEditProduct({
+      idx,
+      name: o.option_name,
+      price: o.option_price,
+      description: (o as MatchedOption).description ?? (o as VehicleOptionRow).description ?? "",
+      required: (o as MatchedOption).required !== false && (o as VehicleOptionRow).required !== false,
+    });
+  }
+
+  async function saveEditProduct() {
+    if (!editProduct) return;
+    const { idx, name, price, description, required } = editProduct;
+    if (!name.trim()) return;
+    // Drop an empty rich-text shell (e.g. "<p></p>") to null so it renders nothing.
+    const descClean =
+      description && (description.replace(/<[^>]*>/g, "").trim() !== "" || /<img/i.test(description))
+        ? description
+        : null;
+    const updated = options.map((o, i) =>
+      i === idx
+        ? { ...o, option_name: name.trim(), option_price: price.trim() || "NC", description: descClean, required }
+        : o
+    );
+    setOptions(updated);
+    setDirty(true);
+    setEditProduct(null);
+    await saveOptions(updated);
+  }
+
   // ── Delete ───────────────────────────────────────────────────────────────────
 
   function deleteOption(idx: number) {
@@ -268,7 +310,8 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
 
   // ── Save ─────────────────────────────────────────────────────────────────────
 
-  async function saveOptions() {
+  async function saveOptions(override?: (VehicleOptionRow | MatchedOption)[]) {
+    const list = override ?? options;
     setSaving(true);
     setError(null);
     try {
@@ -276,7 +319,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          options: options.map((o, i) => ({
+          options: list.map((o, i) => ({
             option_name: o.option_name,
             option_price: o.option_price,
             description: (o as MatchedOption).description ?? (o as VehicleOptionRow).description ?? null,
@@ -432,7 +475,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                   <th className="px-3 py-2 text-left font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>Products</th>
                   <th className="px-3 py-2 text-right font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", width: 110 }}>Price</th>
                   <th className="px-3 py-2 text-center font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", width: 100 }}>Type</th>
-                  <th className="px-3 py-2" style={{ width: 40 }}></th>
+                  <th className="px-3 py-2" style={{ width: 64 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -600,16 +643,26 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                         })()}
                       </td>
 
-                      {/* Delete */}
-                      <td className="px-3 py-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => deleteOption(idx)}
-                          style={{ color: "var(--text-muted)", fontSize: 16, lineHeight: 1 }}
-                          title="Remove"
-                        >
-                          ×
-                        </button>
+                      {/* Edit + Delete */}
+                      <td className="px-3 py-2">
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => openEditProduct(idx)}
+                            style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 13, lineHeight: 1, cursor: "pointer" }}
+                            title="Edit this product for this vehicle only"
+                          >
+                            ✎
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteOption(idx)}
+                            style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 16, lineHeight: 1, cursor: "pointer" }}
+                            title="Remove"
+                          >
+                            ×
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -793,6 +846,80 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                 </tbody>
               </table>
             )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Per-vehicle product edit modal ────────────────────────────────── */}
+      {editProduct && (
+        <Modal title="Edit Product" onClose={() => setEditProduct(null)}>
+          <div className="px-4 py-3" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div
+              className="text-xs px-3 py-2 rounded"
+              style={{ background: "#e3f2fd", color: "#1565c0", fontWeight: 600 }}
+            >
+              Editing for this vehicle only — does not change the global product.
+            </div>
+
+            <label style={{ display: "block" }}>
+              <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>Name</span>
+              <input
+                className="input text-sm w-full"
+                style={{ height: 34, marginTop: 4 }}
+                value={editProduct.name}
+                onChange={(e) => setEditProduct((p) => (p ? { ...p, name: e.target.value } : p))}
+                autoFocus
+              />
+            </label>
+
+            <div style={{ display: "flex", gap: 12 }}>
+              <label style={{ flex: 1 }}>
+                <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>Price</span>
+                <input
+                  className="input text-sm w-full"
+                  style={{ height: 34, marginTop: 4 }}
+                  placeholder="NC"
+                  value={editProduct.price}
+                  onChange={(e) => setEditProduct((p) => (p ? { ...p, price: e.target.value } : p))}
+                />
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 18 }}>
+                <input
+                  type="checkbox"
+                  checked={editProduct.required}
+                  onChange={(e) => setEditProduct((p) => (p ? { ...p, required: e.target.checked } : p))}
+                />
+                <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>Required</span>
+              </label>
+            </div>
+
+            <div>
+              <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>Description</span>
+              <div style={{ marginTop: 4 }}>
+                <RichTextEditor
+                  value={editProduct.description}
+                  onChange={(html) => setEditProduct((p) => (p ? { ...p, description: html } : p))}
+                  placeholder="Optional description shown under the product name"
+                  minHeight={80}
+                  toolbarOpen
+                />
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+              <button type="button" className="btn btn-secondary text-xs" style={{ height: 32 }} onClick={() => setEditProduct(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary text-xs"
+                style={{ height: 32 }}
+                disabled={saving || !editProduct.name.trim()}
+                onClick={() => void saveEditProduct()}
+              >
+                {saving ? "Saving…" : "Save for this vehicle"}
+              </button>
+            </div>
           </div>
         </Modal>
       )}

@@ -2077,6 +2077,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Eps>Asking Price Bar</Eps>
           <Fd label="Label"><input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} /></Fd>
           <Fd label="Subtitle (optional)"><input value={(d.subtitle as string) || ''} onChange={e => u('subtitle', e.target.value)} style={fiStyle} /></Fd>
+          <Fd label="Symbol after price (optional)"><input value={(d.priceSuffix as string) || ''} maxLength={3} placeholder="e.g. *" onChange={e => u('priceSuffix', e.target.value)} style={fiStyle} /></Fd>
           <Fd label="Label color">
             <ColorPair value={(d.labelColor as string) || '#ffffff'} onChange={v => u('labelColor', v)} />
           </Fd>
