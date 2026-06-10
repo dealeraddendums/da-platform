@@ -4,8 +4,10 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import {
   getTemplate,
   putTemplate,
+  deleteTemplate,
   createCustomer,
   createTemplate,
+  archiveCustomer,
   customerExists,
   firstOfNextMonthIso,
   subscriptionDescriptorFor,
@@ -136,7 +138,16 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   // Otherwise create one. Always against the da-billing customer UUID, never
   // internal_id (templates are keyed by customer UUID).
   let effectiveCustomerKey = dealer.billing_customer_id;
+  let createdCustomerId: string | null = null; // a customer THIS request created (for rollback)
   if (!effectiveCustomerKey) {
+    // Release a legacy internal_id-keyed ORPHAN template first (task #125): dead data
+    // from the old Case-2 putTemplate(internal_id) path — a template whose "customer"
+    // (the internal_id) doesn't exist. da-billing's duplicate-dealer guard would
+    // otherwise reject the new template ("dealer already on a template for
+    // {internal_id}"). Safe to delete: no customer backs it, so it can't bill.
+    if ((await getTemplate(dealer.internal_id)) && !(await customerExists(dealer.internal_id))) {
+      await deleteTemplate(dealer.internal_id);
+    }
     if (dealer.billing_id && (await customerExists(dealer.billing_id))) {
       effectiveCustomerKey = dealer.billing_id;
     } else {
@@ -150,6 +161,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         isGroup: false,
       });
       effectiveCustomerKey = cust.id;
+      createdCustomerId = cust.id;
     }
     // Persist the customer id (+ template_id mirror) BEFORE the template write so
     // a retry sees billing_customer_id and skips re-provisioning.
@@ -195,15 +207,31 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  if (current) {
-    await putTemplate(effectiveCustomerKey, merged);
-  } else {
-    await createTemplate({
-      customerId: effectiveCustomerKey,
-      products: merged,
-      nextInvoiceDate: firstOfNextMonthIso(),
-      scheduleInterval: "monthly",
-    });
+  // Write the template. Defensive (task #125): if it fails AND we just created the
+  // customer this request, archive that customer and revert the persisted pointer so
+  // we never leave a dangling customer (or a billing_customer_id pointing at a
+  // template-less one). A linked pre-existing customer is left intact — it's real,
+  // and a retry will reattach the template.
+  try {
+    if (current) {
+      await putTemplate(effectiveCustomerKey, merged);
+    } else {
+      await createTemplate({
+        customerId: effectiveCustomerKey,
+        products: merged,
+        nextInvoiceDate: firstOfNextMonthIso(),
+        scheduleInterval: "monthly",
+      });
+    }
+  } catch (err) {
+    if (createdCustomerId) {
+      try { await archiveCustomer(createdCustomerId); } catch { /* best-effort rollback */ }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any).from("dealers")
+        .update({ billing_customer_id: null, template_id: null })
+        .eq("id", dealer.id);
+    }
+    throw err;
   }
 
   // Conversion (dealer was NOT already on a paid tier) → flip Trial/expired →
