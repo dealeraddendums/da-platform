@@ -5,17 +5,66 @@
 > deploy." Keep this updated as items ship.
 
 ## ▶️ Next session
-- **DEFERRED — Step 3, group da-billing customers.** The bill-to backfill flipped 627+ dealers
-  to group-billed across **128 groups with no `groups.billing_customer_id`** (only 2 had one).
-  Allan deferred while testing. When ready: split the 128 into real dealer-groups vs
-  resellers/vendors (same Aurora signal as the profiles cleanup), create customers for the real
-  groups, leave resellers to the lazy create-on-next-event path in `group-billing-cascade.ts`.
+- **🔴 URGENT — ETL config-lock ENFORCEMENT (`da-legacy-etl` half) NOT built; the freeze toggle is
+  inert** (task #115; see `da-legacy-etl/docs/etl-config-lock.md` STATUS banner). The da-platform
+  freeze toggle + account_purpose classifier shipped, but `da-legacy-etl` never honored `etl_locked`,
+  so Job 5 (Options) re-upserts deleted products **nightly** — Mercedes Benz of Collierville (Dealer
+  General) has a **duplicate "Elite Member"** that, being Required/All-Vehicles, **prints twice on
+  their addendums**. Build + deploy the runner change (configDealers/printStatusDealers + Job 1/2
+  skip-sets per the spec), then freeze Dealer General + re-delete the dupes. **Stopgap until then:**
+  set Mercedes `migration_status='migrated'` (ETL already skips it; reversible; harmless — it's a
+  new-platform dealer).
+- **Fuel Type product rule — SHIPPED 2026-06-09** (`40eb01f`; `options-rule-fuel-type.md`): curated
+  multiselect (Gasoline/Diesel/Hybrid/Plug-in/Electric/Flex/Hydrogen/CNG/Propane) + IN/NOT IN +
+  keyword-CSV matching; Electric catches BEV/ELEC, NOT-IN [Gasoline] excludes 62k, only a 4-vehicle
+  junk edge. `deploy.sh` hardened (`fbc4539`). Open follow-up: the `dealer_vehicles.fuel` 95%-garbage
+  feed-mapping bug (separate, w/ Alex).
+- **DA Business Intelligence tab (SuperAdmin) — Phases 1 + 2 SHIPPED 2026-06-08** (da-billing
+  `c03ddbd` · da-platform `72b8419` [P1] + `b8c6d53` [P2]). `superadmin-bi-tab.md`.
+  8 metrics (trials · conversions · lost-trials · acquisition source · group dealers added ·
+  cancellations independent-vs-group + reasons · gross-billable trend); default = previous calendar
+  month + custom range; **PDF + Excel** download; **on-demand** email. New pieces: `dealers.converted_at`
+  (migration ~095 — confirm next free) + da-billing `GET /reports/gross-billable`. **Foundation
+  (REQUIRED): stamp `converted_at` AND `downgraded_at` + an `account_closures` row on EVERY write
+  path** — incl. admin/bulk downgrade (prod 2026-06-08: 2,107 dealers, 325 Free, **0 `downgraded_at`,
+  0 closures** → churn reads 0 until this ships; the 325 are legacy baseline, ≤36 ever-billed). Exact
+  SQL in the doc's appendix. ✅ Verified live: gating, cohort identity sums, gross-billable reconciles
+  to da-billing Reports, admin-downgrade + self-close both write `downgraded_at` + a closure that
+  surfaces in the metric, `is_test` exclusion holds, 8 internal test dealers flagged.
+  **Phase 2 (PDF/Excel export + on-demand email) SHIPPED** (`b8c6d53`) — exports/email build from the
+  same `buildBiReport()` as the screen (PDF == Excel == on-screen; `is_test` + test-customer revenue
+  exclusions inherited); super_admin-gated, a test email to allan@ delivered with both attachments.
+  Remaining follow-ups: (a)
+  at-creation **account-purpose classifier (Real / Test / Sales Demo)** on super_admin
+  dealer-create — root cause; QA fixtures AND ongoing sales demos must be flaggable at creation so
+  they auto-exclude from BI/billing/HubSpot (today nothing flags them, so they pollute until swept);
+  (b) optional da-billing-dashboard test-customer cleanup (BI revenue already auto-excludes via
+  `excludeCustomerIds`); (c) ✅ Demo-Account triage — Allan confirmed all 8 are **sales demos** →
+  flag `is_test=true` (Andre / Asher Enterprises / Tyler Jorgensen / CA ClearBra / Millennium Dealer
+  Services / CDS Zoom / STARSHIELD / Toyota Demo accounts).
+  _(Other 2026-06-07/08 specs — past-due print lock, ETL config-lock + freeze toggle, billing
+  price-integrity [shipped], addendum-data sync gap — are tracked in their own docs in `docs/`,
+  pending the session-close fold-in.)_
+- **Platform ↔ da-billing link sync (revises old "Step 3").** `platform-billing-link-sync.md`.
+  The "128 groups with no `groups.billing_customer_id`" is **not** missing customers — da-billing
+  **already has** them (Dealer General = `18796f8c-c`, active), the platform link was just never
+  backfilled. So this is a **sync/backfill across all groups + dealers (~95% already have a
+  da-billing customer)**, NOT a mass-create — mass-creating would **duplicate**. Crux = the
+  match key (da-billing **DA Client ID** ↔ platform legacy/internal id; CC resolves against live
+  data). Also **guard "Create Billing Account" + the cascade lazy-create** to link an existing
+  customer instead of duplicating. ⚠️ Until the guard ships, don't click Create Billing Account on
+  an existing account. Read-only audit + dry-run first.
 - **Confirm deploy — group_admin active-dealer scoping (Dashboard/Products)**
   (`group-admin-active-dealer-scoping.md`, #71). Specced; the template-save sibling shipped
   (`313d9fc`) — confirm the Dashboard/Products page scoping deployed too.
-- **Route-audit sweep** — grep the remaining Builder write paths a group_admin-as-dealer hits
-  (disclaimers, options/products, custom sizes, image uploads) for the same "`?dealer_id`
-  required → 400/403 for group_admin" pattern; fix any found (same shape as the template-save fix).
+- **Route-audit sweep — DONE (`dcacae2`):** fixed the disclaimers gap (group_admin-as-dealer in
+  the blank Builder); options, image uploads, and custom sizes were already correct/intentional.
+- **group_admin authorization fixes — CONFIRMED, spec'd** (`group-admin-read-scope-and-billing.md`):
+  (1) **group-scoped reads** — Allan: a group_admin may read only its own group's dealers, so add
+  the group-ownership check to `options/library` **and** `corporate-products` (overrides the prior
+  "intentional" note) + sweep other dealer-scoped GET routes; (2) **active-dealer billing** —
+  Allan: group_admins manage a member dealer's billing while switched in, so make `billing/me*`
+  honor the active dealer (same fix as template-save). Ready for CC.
 - **Legal pages:** final legal-counsel review before treating as binding; **marketing DNS
   cutover** — the new `/terms` + `/privacy` are live on the app and staged on the marketing box
   (`dealeraddendums.com/terms` goes live at cutover).
