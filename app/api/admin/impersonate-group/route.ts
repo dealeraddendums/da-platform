@@ -32,11 +32,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
+  // Deterministic target: oldest group_admin by created_at, then email — NOT an
+  // arbitrary row order (which silently picked whoever the DB returned first).
   const { data: profileRows } = await admin
     .from("profiles")
-    .select("id, email, role")
+    .select("id, email, role, created_at")
     .eq("group_id", group_id)
-    .eq("role", "group_admin");
+    .eq("role", "group_admin")
+    .order("created_at", { ascending: true, nullsFirst: false })
+    .order("email", { ascending: true });
 
   const targetProfile = (profileRows ?? [])[0] ?? null;
   if (!targetProfile) {
@@ -84,6 +88,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // Reset active-dealer to GROUP LEVEL on impersonation entry: clear the target
+  // group_admin's persisted active_dealer_id so the impersonated session lands
+  // at the group, not inside whatever member dealer that user last switched into
+  // (the "Crown Nissan" bug). This is the same clear the "← Back to Group" action
+  // performs; it's transient nav state, and group-level is the correct landing.
+  await admin.from("profiles").update({ active_dealer_id: null }).eq("id", targetProfile.id);
+
   void admin.from("admin_audit").insert({
     admin_user_id: claims.sub,
     action: "impersonate_group",
@@ -95,5 +106,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     refresh_token: sessionData.refresh_token,
     group_name: group.name,
     group_id,
+    // Surface who is being impersonated so the UI/banner can show it (no longer
+    // an arbitrary, invisible choice).
+    target_email: targetProfile.email,
   });
 }

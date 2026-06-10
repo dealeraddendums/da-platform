@@ -153,7 +153,7 @@ export default function GroupList() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ group_id: groupId }),
     });
-    const json = (await res.json()) as { access_token?: string; refresh_token?: string; group_name?: string; group_id?: string; error?: string };
+    const json = (await res.json()) as { access_token?: string; refresh_token?: string; group_name?: string; group_id?: string; target_email?: string; error?: string };
 
     if (!res.ok || !json.access_token || !json.refresh_token) {
       setGroupActionError(json.error ?? "Failed to impersonate group");
@@ -162,7 +162,9 @@ export default function GroupList() {
     }
 
     localStorage.setItem("da_impersonate", JSON.stringify({
-      dealer_name: `${groupName} (Group)`,
+      // Surface WHICH group_admin is being impersonated (deterministic on the
+      // server) so the banner isn't an invisible choice.
+      dealer_name: json.target_email ? `${groupName} (Group — as ${json.target_email})` : `${groupName} (Group)`,
       dealer_id: groupId,
       original_access_token: currentSession?.access_token ?? "",
       original_refresh_token: currentSession?.refresh_token ?? "",
@@ -344,20 +346,16 @@ export default function GroupList() {
                 >
                   {/* Name — click to enter group context; 📋 links to profile; 👻 = no group_admin */}
                   <td className="px-4 py-3">
+                    {/* Name → super_admin GROUP PROFILE (does NOT impersonate).
+                        Entering group context is the EXPLICIT button below, so a
+                        super_admin never silently lands in a member's session. */}
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <button
-                        onClick={() => void handleGroupClick(g)}
-                        disabled={ghosting === g.id || impersonatingGroup === g.id}
-                        style={{
-                          fontWeight: 500, color: "var(--text-primary)", background: "none",
-                          border: "none", padding: 0, textAlign: "left",
-                          cursor: (ghosting === g.id || impersonatingGroup === g.id) ? "wait" : "pointer",
-                          opacity: (ghosting === g.id || impersonatingGroup === g.id) ? 0.6 : 1,
-                          textDecoration: "underline",
-                        }}
+                      <Link
+                        href={`/groups/${g.id}`}
+                        style={{ fontWeight: 500, color: "var(--text-primary)", textDecoration: "underline" }}
                       >
-                        {(ghosting === g.id || impersonatingGroup === g.id) ? "Entering…" : g.name}
-                      </button>
+                        {g.name}
+                      </Link>
                       {g.is_test && (
                         <span
                           className="text-xs font-semibold px-2 py-0.5"
@@ -367,16 +365,22 @@ export default function GroupList() {
                           TEST
                         </span>
                       )}
-                      {!g.has_group_admin && (
-                        <span title="No group admin — will use ghost mode" style={{ fontSize: 13, lineHeight: 1 }}>👻</span>
-                      )}
-                      <Link
-                        href={`/groups/${g.id}`}
-                        title="View group profile"
-                        style={{ color: "var(--text-muted)", lineHeight: 1, textDecoration: "none", fontSize: 14 }}
+                      <button
+                        onClick={() => void handleGroupClick(g)}
+                        disabled={ghosting === g.id || impersonatingGroup === g.id}
+                        title={g.has_group_admin ? "Impersonate this group's admin" : "Enter ghost mode (no group admin)"}
+                        style={{
+                          fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 4,
+                          border: "1px solid #e0e0e0", background: "#fff", color: "#1976d2",
+                          cursor: (ghosting === g.id || impersonatingGroup === g.id) ? "wait" : "pointer",
+                          opacity: (ghosting === g.id || impersonatingGroup === g.id) ? 0.6 : 1,
+                          flexShrink: 0,
+                        }}
                       >
-                        📋
-                      </Link>
+                        {(ghosting === g.id || impersonatingGroup === g.id)
+                          ? "Entering…"
+                          : g.has_group_admin ? "Impersonate" : "👻 Ghost"}
+                      </button>
                     </div>
                   </td>
 
