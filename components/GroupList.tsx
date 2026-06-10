@@ -183,6 +183,10 @@ export default function GroupList() {
     }
 
     document.cookie = "da_impersonating=1; path=/; max-age=86400; SameSite=Lax";
+    // Session-layer group-level reset (#116): land at GROUP level, not the
+    // impersonated user's last active dealer. getJwtClaims honors this; it's
+    // cleared when they switch into a dealer or exit impersonation.
+    document.cookie = "da_group_level=1; path=/; max-age=86400; SameSite=Lax";
     window.location.href = "/groups";
   }
 

@@ -54,6 +54,7 @@ export default function ImpersonationBanner() {
     });
     localStorage.removeItem("da_impersonate");
     document.cookie = "da_impersonating=; path=/; max-age=0; SameSite=Lax";
+    document.cookie = "da_group_level=; path=/; max-age=0; SameSite=Lax"; // #116 reset flag
     window.location.href = "/dealers";
   }
 

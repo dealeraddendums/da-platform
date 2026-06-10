@@ -45,5 +45,9 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: updateErr.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true });
+  // Explicitly switching dealers clears the #116 session-layer group-level reset
+  // so this choice (and the persisted profile value) is honored from now on.
+  const res = NextResponse.json({ ok: true });
+  res.cookies.set("da_group_level", "", { path: "/", maxAge: 0 });
+  return res;
 }

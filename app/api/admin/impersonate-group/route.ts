@@ -88,12 +88,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Reset active-dealer to GROUP LEVEL on impersonation entry: clear the target
-  // group_admin's persisted active_dealer_id so the impersonated session lands
-  // at the group, not inside whatever member dealer that user last switched into
-  // (the "Crown Nissan" bug). This is the same clear the "← Back to Group" action
-  // performs; it's transient nav state, and group-level is the correct landing.
-  await admin.from("profiles").update({ active_dealer_id: null }).eq("id", targetProfile.id);
+  // NOTE: active-dealer is reset to GROUP LEVEL at the SESSION/CLAIMS layer
+  // (the client sets the `da_group_level` cookie on entry; lib/auth.getJwtClaims
+  // honors it) — we deliberately DO NOT mutate the target's
+  // profiles.active_dealer_id, so their own saved nav state is untouched.
 
   void admin.from("admin_audit").insert({
     admin_user_id: claims.sub,

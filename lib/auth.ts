@@ -123,7 +123,15 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
 
   // When a group_admin has an active dealer selected, resolve the dealer's
   // text dealer_id so all downstream routes work without special-casing.
-  if (role === "group_admin" && profile?.active_dealer_id) {
+  //
+  // Session-layer group-level reset (#116): when a group is freshly impersonated,
+  // entry sets the `da_group_level` cookie so we IGNORE the impersonated user's
+  // persisted active_dealer_id and land at GROUP level — WITHOUT mutating their
+  // profile. The cookie is cleared the moment they explicitly switch into a
+  // dealer (/api/profiles/active-dealer) or exit impersonation.
+  let groupLevelReset = false;
+  try { groupLevelReset = cookies().get("da_group_level")?.value === "1"; } catch { /* no req ctx */ }
+  if (role === "group_admin" && profile?.active_dealer_id && !groupLevelReset) {
     activeDealerUuid = profile.active_dealer_id;
     const { data: activeDlr } = await admin
       .from("dealers")
