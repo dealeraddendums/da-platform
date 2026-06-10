@@ -53,8 +53,10 @@ fi
 # 5. Atomic cutover + graceful rolling reload (cluster: workers cycle one at a time, draining)
 PREV=$(readlink "$BASE/current" 2>/dev/null || true)
 ln -sfn "$REL" "$BASE/current"
-echo "[deploy] current -> $REL ; pm2 reload $APP (rolling)…"
-pm2 reload "$APP" --update-env
+echo "[deploy] current -> $REL ; pm2 reload (rolling)…"
+# Reload via the ecosystem FILE (not by name) so pm2 re-resolves cwd->current->new release each
+# time — reloading by name can re-exec the previous release's cached script path under a symlink.
+pm2 reload "$BASE/ecosystem.config.js" --update-env
 
 # 6. Health gate — if the new release won't come online, flip the symlink straight back
 sleep 5
@@ -63,7 +65,7 @@ if ! pm2 describe "$APP" 2>/dev/null | grep -q "status.*online"; then
   if [ -n "$PREV" ] && [ -d "$PREV" ]; then
     echo "[deploy] auto-reverting current -> $PREV and reloading…"
     ln -sfn "$PREV" "$BASE/current"
-    pm2 reload "$APP" --update-env
+    pm2 reload "$BASE/ecosystem.config.js" --update-env
   fi
   echo "[deploy] investigate: pm2 logs $APP"
   exit 1

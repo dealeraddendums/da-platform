@@ -20,5 +20,5 @@ TARGET="${TARGET%/}"
 [ -d "$TARGET" ] && [ -f "$TARGET/.next/BUILD_ID" ] || { echo "[rollback] no valid release at: $TARGET"; exit 1; }
 
 ln -sfn "$TARGET" "$BASE/current"
-pm2 reload "$APP" --update-env
+pm2 reload "$BASE/ecosystem.config.js" --update-env
 echo "[rollback] current -> $TARGET (reloaded)"
