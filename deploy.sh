@@ -1,56 +1,75 @@
-#!/bin/bash
-# da-platform deploy — git pull → production build → pm2 restart.
+#!/usr/bin/env bash
+# da-platform — zero-downtime deploy (release dirs + atomic symlink swap + cluster reload).
+# Spec: docs/zero-downtime-deploy.md
 #
-# Run ON THE BOX:  cd /var/www/da-platform && bash deploy.sh
+#   Run ON THE BOX:  bash /var/www/da-platform/deploy.sh            # deploy origin/main
+#                    bash /var/www/da-platform/deploy.sh <commit>   # deploy a specific commit
 #
-# Hard-won safety rules (two outages on 2026-06-10 taught these):
-#   1. The intermittent Next 14 `ENOTEMPTY: rmdir '.next/export'` is a build
-#      flake that is NOT caused by the running server (it happens with the app
-#      stopped too) — so DO NOT pm2-stop before building. Just retry; a clean
-#      `.next` usually builds within a few tries.
-#   2. NEVER restart onto an unverified build — outage #1 was a build that
-#      exited 0 with an incomplete `.next` (missing routes-manifest.json) that
-#      got restarted onto. We verify BUILD_ID + routes-manifest before restart.
-#   3. On failure, DO NOTHING destructive: leave the running process alone (it
-#      keeps serving its already-loaded build) and exit non-zero. Building in
-#      place means a failed deploy = "prod unchanged", not "prod down".
-#      (Outage #2 came from pm2-stop + a failed rollback leaving no .next.)
+# Layout (created by the one-time setup in the spec):
+#   /var/www/da-platform/repo/                 git checkout (commit source)
+#   /var/www/da-platform/releases/<ts>-<sha>/  one dir per deploy
+#   /var/www/da-platform/current -> releases/… live release (symlink pm2 runs from)
+#   /var/www/da-platform/shared/.env.production single secrets file, symlinked into each release
 #
-# da-platform is a normal Next app (no output:'standalone'); deploy = build +
-# restart. Migrations are applied separately (Supabase SQL editor).
+# The running app is NEVER touched until a fresh, verified build is ready. Any failure before the
+# symlink flip aborts with `current` + all prior releases untouched; only the failed dir is removed.
 
-set -uo pipefail
-cd /var/www/da-platform || { echo "[deploy] cannot cd to /var/www/da-platform"; exit 1; }
+set -euo pipefail
 
-echo "[deploy] git pull origin main…"
-git pull origin main || { echo "[deploy] git pull failed"; exit 1; }
-echo "[deploy] HEAD now: $(git rev-parse --short HEAD)"
+APP=da-platform
+BASE=/var/www/$APP
+REPO=$BASE/repo
+SHARED=$BASE/shared
+TARGET="${1:-origin/main}"
 
-build_ok() { [ -f .next/BUILD_ID ] && [ -f .next/routes-manifest.json ]; }
+[ -d "$REPO/.git" ] || { echo "[deploy] $REPO is not a git checkout — run the one-time setup first."; exit 1; }
+[ -f "$SHARED/.env.production" ] || { echo "[deploy] missing $SHARED/.env.production — run the one-time setup first."; exit 1; }
 
-ATTEMPTS=8
-ok=
-for i in $(seq 1 "$ATTEMPTS"); do
-  echo "[deploy] build attempt $i/$ATTEMPTS (server stays up)…"
-  rm -rf .next .next/export 2>/dev/null
-  if npm run build && build_ok; then ok=1; break; fi
-  echo "[deploy] attempt $i failed/incomplete (.next/export ENOTEMPTY flake) — retrying…"
-  sleep 4
-done
+echo "[deploy] fetch + checkout $TARGET in $REPO …"
+git -C "$REPO" fetch --quiet origin
+git -C "$REPO" checkout --quiet --detach "$TARGET"
+SHA=$(git -C "$REPO" rev-parse --short HEAD)
+REL=$BASE/releases/$(date -u +%Y%m%d-%H%M%S)-$SHA
+echo "[deploy] building release $REL (sha $SHA) off the live path…"
 
-if [ -z "$ok" ]; then
-  echo "[deploy] BUILD FAILED after $ATTEMPTS attempts — NOT restarting."
-  echo "[deploy] The running process is untouched (still serving the previous build)."
-  echo "[deploy] Re-run deploy.sh; the flake is intermittent and usually clears."
+# 1. Materialize the commit into a fresh release dir (tracked files only — no box cruft, no .env)
+mkdir -p "$REL"
+git -C "$REPO" archive HEAD | tar -x -C "$REL"
+
+# 2. Wire the single shared secrets file (Next reads .env.production from cwd at runtime)
+ln -sfn "$SHARED/.env.production" "$REL/.env.production"
+
+# 3. Build in the clean release dir: npm ci gives a correct node_modules/.bin/next every time
+#    (kills the missing-symlink flake) and the separate dir kills the .next/export ENOTEMPTY race.
+( cd "$REL" && npm ci && npm run build )
+
+# 4. VERIFY before any swap — never cut over to an incomplete build
+if [ ! -f "$REL/.next/BUILD_ID" ] || [ ! -f "$REL/.next/routes-manifest.json" ]; then
+  echo "[deploy] BUILD INCOMPLETE (no BUILD_ID/routes-manifest) — aborting; current untouched."
+  rm -rf "$REL"
   exit 1
 fi
 
-echo "[deploy] build verified (BUILD_ID + routes-manifest) — restarting pm2 'da-platform'…"
-pm2 restart da-platform || pm2 start da-platform
-sleep 4
-if pm2 describe da-platform 2>/dev/null | grep -q "status.*online"; then
-  echo "[deploy] done. HEAD $(git rev-parse --short HEAD) is live."
-else
-  echo "[deploy] WARN: app not online after restart — check 'pm2 logs da-platform'. .next is intact; a re-run or manual 'pm2 restart' may recover."
+# 5. Atomic cutover + graceful rolling reload (cluster: workers cycle one at a time, draining)
+PREV=$(readlink "$BASE/current" 2>/dev/null || true)
+ln -sfn "$REL" "$BASE/current"
+echo "[deploy] current -> $REL ; pm2 reload $APP (rolling)…"
+pm2 reload "$APP" --update-env
+
+# 6. Health gate — if the new release won't come online, flip the symlink straight back
+sleep 5
+if ! pm2 describe "$APP" 2>/dev/null | grep -q "status.*online"; then
+  echo "[deploy] WARN: $APP not online after reload."
+  if [ -n "$PREV" ] && [ -d "$PREV" ]; then
+    echo "[deploy] auto-reverting current -> $PREV and reloading…"
+    ln -sfn "$PREV" "$BASE/current"
+    pm2 reload "$APP" --update-env
+  fi
+  echo "[deploy] investigate: pm2 logs $APP"
   exit 1
 fi
+
+# 7. Prune — keep the last 5 releases
+ls -1dt "$BASE"/releases/*/ | tail -n +6 | xargs -r rm -rf
+
+echo "[deploy] done. $SHA is live at $REL"

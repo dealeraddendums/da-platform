@@ -1,13 +1,18 @@
+// da-platform — pm2 cluster config for zero-downtime `pm2 reload`.
+// Lives at /var/www/da-platform/ecosystem.config.js (a STABLE path, outside releases).
+// cwd is the `current` symlink, so each `pm2 reload` re-spawns workers into the new release.
+// Spec: docs/zero-downtime-deploy.md
 module.exports = {
   apps: [{
     name: 'da-platform',
-    script: 'node_modules/.bin/next',
+    script: 'node_modules/next/dist/bin/next', // direct path — never the flaky .bin/next symlink
     args: 'start',
-    cwd: '/var/www/da-platform',
-    instances: 1,
+    cwd: '/var/www/da-platform/current',
+    exec_mode: 'cluster',
+    instances: 2,                              // >=2 so `reload` always leaves a live worker
     autorestart: true,
     watch: false,
-    max_memory_restart: '512M',
+    max_memory_restart: '768M',
     env: {
       NODE_ENV: 'production',
       PORT: 3000,
