@@ -295,7 +295,7 @@ export default function DealerBillingTab({ dealerId, viewerRole }: Props) {
           {outstanding.length === 0 ? (
             <div style={{ fontSize: 13, color: "#78828c" }}>No outstanding invoices.</div>
           ) : (
-            <InvoiceTable rows={outstanding} variant="outstanding" />
+            <InvoiceTable rows={outstanding} variant="outstanding" baseUrl={`/api/billing/dealers/${data.dealer.id}/invoices`} />
           )}
         </div>
       )}
@@ -333,7 +333,7 @@ export default function DealerBillingTab({ dealerId, viewerRole }: Props) {
               {paid.length === 0 ? (
                 <div style={{ fontSize: 13, color: "#78828c" }}>No paid invoices yet.</div>
               ) : (
-                <InvoiceTable rows={paid} variant="history" />
+                <InvoiceTable rows={paid} variant="history" baseUrl={`/api/billing/dealers/${data.dealer.id}/invoices`} />
               )}
             </div>
           )}
@@ -343,12 +343,22 @@ export default function DealerBillingTab({ dealerId, viewerRole }: Props) {
   );
 }
 
-function InvoiceTable({ rows, variant }: { rows: BillingInvoice[]; variant: "outstanding" | "history" }) {
+function invoiceActions(baseUrl: string, inv: BillingInvoice) {
+  const link = { fontSize: 12, color: "#1976d2", textDecoration: "none", fontWeight: 600 } as const;
+  return (
+    <span style={{ display: "inline-flex", gap: 12, alignItems: "center" }}>
+      <a href={`${baseUrl}/${inv.id}/pdf`} target="_blank" rel="noreferrer" style={link}>View</a>
+      <a href={`${baseUrl}/${inv.id}/pdf?download=1`} style={link}>Download</a>
+    </span>
+  );
+}
+
+function InvoiceTable({ rows, variant, baseUrl }: { rows: BillingInvoice[]; variant: "outstanding" | "history"; baseUrl: string }) {
   const headerColor = variant === "outstanding" ? "#c62828" : "#78828c";
   const borderColor = variant === "outstanding" ? "#ffcdd2" : "#e0e0e0";
   const headers = variant === "outstanding"
     ? ["Invoice #", "Period", "Amount", "Due Date", ""]
-    : ["Invoice #", "Period", "Amount", "Status"];
+    : ["Invoice #", "Period", "Amount", "Status", ""];
 
   return (
     <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
@@ -369,24 +379,30 @@ function InvoiceTable({ rows, variant }: { rows: BillingInvoice[]; variant: "out
               <>
                 <td style={{ padding: "8px 10px", color: inv.status === "overdue" ? "#c62828" : "#555" }}>{fmtDate(inv.dueDate)}</td>
                 <td style={{ padding: "8px 10px", textAlign: "right" }}>
-                  {inv.paymentUrl && (
-                    <a
-                      href={inv.paymentUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ padding: "5px 14px", background: "#ffa500", color: "#fff", borderRadius: 4, fontSize: 12, fontWeight: 600, textDecoration: "none", display: "inline-block" }}
-                    >
-                      Pay
-                    </a>
-                  )}
+                  <span style={{ display: "inline-flex", gap: 12, alignItems: "center" }}>
+                    {invoiceActions(baseUrl, inv)}
+                    {inv.paymentUrl && (
+                      <a
+                        href={inv.paymentUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ padding: "5px 14px", background: "#ffa500", color: "#fff", borderRadius: 4, fontSize: 12, fontWeight: 600, textDecoration: "none", display: "inline-block" }}
+                      >
+                        Pay
+                      </a>
+                    )}
+                  </span>
                 </td>
               </>
             ) : (
-              <td style={{ padding: "8px 10px" }}>
-                <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", textTransform: "uppercase", letterSpacing: ".04em" }}>
-                  Paid
-                </span>
-              </td>
+              <>
+                <td style={{ padding: "8px 10px" }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", textTransform: "uppercase", letterSpacing: ".04em" }}>
+                    Paid
+                  </span>
+                </td>
+                <td style={{ padding: "8px 10px", textAlign: "right" }}>{invoiceActions(baseUrl, inv)}</td>
+              </>
             )}
           </tr>
         ))}

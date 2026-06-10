@@ -1805,16 +1805,20 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
                   </td>
                   <td style={{ padding: "8px 10px", fontFamily: "monospace", color: "#333" }}>{money(inv.total)}</td>
                   <td style={{ padding: "8px 10px", textAlign: "right" }}>
-                    {inv.paymentUrl && (
-                      <a
-                        href={inv.paymentUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ padding: "5px 14px", background: "#ffa500", color: "#fff", borderRadius: 4, fontSize: 12, fontWeight: 600, textDecoration: "none", display: "inline-block" }}
-                      >
-                        Pay
-                      </a>
-                    )}
+                    <span style={{ display: "inline-flex", gap: 12, alignItems: "center" }}>
+                      <a href={`/api/billing/me/invoices/${inv.id}/pdf`} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#1976d2", textDecoration: "none", fontWeight: 600 }}>View</a>
+                      <a href={`/api/billing/me/invoices/${inv.id}/pdf?download=1`} style={{ fontSize: 12, color: "#1976d2", textDecoration: "none", fontWeight: 600 }}>Download</a>
+                      {inv.paymentUrl && (
+                        <a
+                          href={inv.paymentUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ padding: "5px 14px", background: "#ffa500", color: "#fff", borderRadius: 4, fontSize: 12, fontWeight: 600, textDecoration: "none", display: "inline-block" }}
+                        >
+                          Pay
+                        </a>
+                      )}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -1834,7 +1838,7 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
           <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid #e0e0e0", textAlign: "left" }}>
-                {["Invoice #", "Date", "Amount", "Status"].map((h) => (
+                {["Invoice #", "Date", "Amount", "Status", ""].map((h) => (
                   <th key={h} style={{ padding: "6px 10px", fontSize: 11, fontWeight: 700, color: "#78828c", textTransform: "uppercase", letterSpacing: ".04em" }}>{h}</th>
                 ))}
               </tr>
@@ -1848,6 +1852,12 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
                   <td style={{ padding: "8px 10px" }}>
                     <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", textTransform: "uppercase", letterSpacing: ".04em" }}>
                       Paid
+                    </span>
+                  </td>
+                  <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                    <span style={{ display: "inline-flex", gap: 12, alignItems: "center" }}>
+                      <a href={`/api/billing/me/invoices/${inv.id}/pdf`} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#1976d2", textDecoration: "none", fontWeight: 600 }}>View</a>
+                      <a href={`/api/billing/me/invoices/${inv.id}/pdf?download=1`} style={{ fontSize: 12, color: "#1976d2", textDecoration: "none", fontWeight: 600 }}>Download</a>
                     </span>
                   </td>
                 </tr>

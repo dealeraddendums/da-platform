@@ -457,6 +457,21 @@ export async function listInvoices(customerId: string): Promise<ListInvoicesResu
   }
 }
 
+/**
+ * GET /invoices/:id/pdf — da-billing serves the invoice as rendered **HTML**
+ * (despite the path), public/no-auth "for sharing". We only ever reach it
+ * through the authenticated da-platform proxy + ownership check, and convert
+ * to a real PDF via da-pdf-service on download. Returns the HTML string.
+ */
+export async function fetchInvoiceHtml(invoiceId: string): Promise<string> {
+  const res = await fetch(`${BASE}/invoices/${encodeURIComponent(invoiceId)}/pdf`, {
+    headers: authHeaders(),
+  });
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `fetchInvoiceHtml ${res.status}`, text);
+  return text;
+}
+
 // ── Billing status (past-due print lock) ────────────────────────────────────
 
 export interface BillingStatus {

@@ -9,7 +9,18 @@ function isUUID(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
 
-export default async function AddendumPage({ params }: { params: { id: string } }) {
+export default async function AddendumPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: { type?: string };
+}) {
+  // ?type=infosheet|buyer_guide (from the Bulk buttons) → open that doc type.
+  const rawType = searchParams?.type;
+  const initialDocType: "infosheet" | "buyer_guide" | undefined =
+    rawType === "infosheet" || rawType === "buyer_guide" ? rawType : undefined;
+
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect(`/login?next=/vehicles/${params.id}/addendum`);
@@ -99,6 +110,7 @@ export default async function AddendumPage({ params }: { params: { id: string } 
       <AddendumEditor
         vehicle={vehicle}
         dealerVehicleId={dealerVehicleId}
+        initialDocType={initialDocType}
         initialPrintState={{
           addendum: dv.print_status === 1,
           infosheet: dv.print_info === 1,
