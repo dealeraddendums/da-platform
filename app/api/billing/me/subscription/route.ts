@@ -6,6 +6,7 @@ import {
   putTemplate,
   createCustomer,
   createTemplate,
+  customerExists,
   firstOfNextMonthIso,
   subscriptionDescriptorFor,
   billingConfigured,
@@ -104,11 +105,11 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, name, internal_id, billing_customer_id, legacy_id, account_type, primary_contact, primary_contact_email, phone, address, state")
+    .select("id, name, internal_id, billing_customer_id, billing_id, legacy_id, account_type, primary_contact, primary_contact_email, phone, address, state")
     .eq("dealer_id", dealerTextId)
     .maybeSingle<{
       id: string; name: string; internal_id: string | null; billing_customer_id: string | null;
-      legacy_id: number | null; account_type: string | null;
+      billing_id: string | null; legacy_id: number | null; account_type: string | null;
       primary_contact: string | null; primary_contact_email: string | null;
       phone: string | null; address: string | null; state: string | null;
     }>();
@@ -117,15 +118,46 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Dealer missing internal_id (line item tag)" }, { status: 409 });
   }
 
-  // Three da-billing customer cases:
-  //   1. billing_customer_id set         → existing platform customer (tier swap).
-  //   2. null + legacy_id set            → legacy dealer; FreshBooks customer is
-  //                                         keyed by internal_id (don't recreate).
-  //   3. null + legacy_id null (native)  → TRIAL → PAID conversion: no da-billing
-  //                                         customer exists yet (billing skipped at
-  //                                         trial) — create customer + template now.
-  const isConversion = !dealer.billing_customer_id && dealer.legacy_id == null;
-  const customerKey = dealer.billing_customer_id ?? dealer.internal_id;
+  // On the new platform EVERY paying dealer — native or migrated — bills via
+  // da-billing (FreshBooks is suspended at cutover), so a trial→paid upgrade must
+  // ensure a da-billing customer exists regardless of legacy_id. The old code
+  // skipped customer-create when legacy_id was set (a stale FreshBooks
+  // assumption), so migrated trials never converted: no customer, account_type
+  // stuck on Trial → print locked + "Upgrade Now" persists.
+  //
+  // "Conversion" = the dealer is NOT already on a paid tier (native Trial OR
+  // migrated Trial with legacy_id). An already-paying dealer swapping tiers is
+  // not a conversion — it keeps its account_type + funnel date.
+  const wasPaying = subscriptionDescriptorFor(dealer.account_type) != null;
+
+  // Resolve / provision the da-billing customer. Link-don't-duplicate: a migrated
+  // dealer already carries its da-billing customer UUID in billing_id — if it
+  // still resolves, LINK it instead of creating a dup (~1.8k migrated customers).
+  // Otherwise create one. Always against the da-billing customer UUID, never
+  // internal_id (templates are keyed by customer UUID).
+  let effectiveCustomerKey = dealer.billing_customer_id;
+  if (!effectiveCustomerKey) {
+    if (dealer.billing_id && (await customerExists(dealer.billing_id))) {
+      effectiveCustomerKey = dealer.billing_id;
+    } else {
+      const cust = await createCustomer({
+        name: (dealer.primary_contact ?? dealer.name).trim(),
+        company: dealer.name,
+        email: dealer.primary_contact_email ?? undefined,
+        phone: dealer.phone ?? undefined,
+        address: dealer.address ?? undefined,
+        state: dealer.state ?? undefined,
+        isGroup: false,
+      });
+      effectiveCustomerKey = cust.id;
+    }
+    // Persist the customer id (+ template_id mirror) BEFORE the template write so
+    // a retry sees billing_customer_id and skips re-provisioning.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any).from("dealers")
+      .update({ billing_customer_id: effectiveCustomerKey, template_id: effectiveCustomerKey })
+      .eq("id", dealer.id);
+  }
 
   // No price is sent — da-billing is the sole price authority and canonicalizes
   // sub-*/dms-setup server-side; discounts apply via subscriptionDiscount.
@@ -137,18 +169,14 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
   };
 
-  // Build the product list. Conversion → brand-new template (just the sub line).
-  // Otherwise merge over the existing template, preserving non-subscription
-  // (label-order) lines, identified by productId NOT starting with "sub-".
-  let merged: BillingProduct[];
-  if (isConversion) {
-    merged = [newSubLine];
-  } else {
-    const current = await getTemplate(customerKey);
-    merged = current
-      ? [newSubLine, ...current.products.filter((p) => !p.productId?.startsWith?.("sub-"))]
-      : [newSubLine];
-  }
+  // Build the product list. Merge over any existing template, preserving
+  // non-subscription (label-order) lines, identified by productId NOT starting
+  // with "sub-". A freshly created/linked customer with no template yet → a
+  // brand-new template with just the sub line.
+  const current = await getTemplate(effectiveCustomerKey);
+  const merged: BillingProduct[] = current
+    ? [newSubLine, ...current.products.filter((p) => !p.productId?.startsWith?.("sub-"))]
+    : [newSubLine];
 
   // sub-auto-dms → ensure a one-time DMS Setup Charge (de-duped by productId or
   // the "<internal_id>::dms-setup" tag so re-runs never double-bill).
@@ -167,40 +195,24 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  let effectiveCustomerKey = customerKey;
-  if (isConversion) {
-    // First subscription for a trial dealer — create the da-billing customer +
-    // recurring template (reuses the create path from POST /api/dealers).
-    const cust = await createCustomer({
-      name: (dealer.primary_contact ?? dealer.name).trim(),
-      company: dealer.name,
-      email: dealer.primary_contact_email ?? undefined,
-      phone: dealer.phone ?? undefined,
-      address: dealer.address ?? undefined,
-      state: dealer.state ?? undefined,
-      isGroup: false,
-    });
-    effectiveCustomerKey = cust.id;
-    // Persist the customer id (+ template_id mirror) BEFORE creating the
-    // template so a retry sees billing_customer_id and takes the existing path.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any).from("dealers")
-      .update({ billing_customer_id: cust.id, template_id: cust.id })
-      .eq("id", dealer.id);
+  if (current) {
+    await putTemplate(effectiveCustomerKey, merged);
+  } else {
     await createTemplate({
-      customerId: cust.id,
+      customerId: effectiveCustomerKey,
       products: merged,
       nextInvoiceDate: firstOfNextMonthIso(),
       scheduleInterval: "monthly",
     });
-  } else {
-    await putTemplate(customerKey, merged);
   }
 
-  // Conversion only: flip Trial → the paid account_type (unblocks the print
-  // gate) and fire the reliable HubSpot sync (lifecyclestage Trial → Customer).
-  // Existing paying dealers swapping tiers keep their account_type + behavior.
-  if (isConversion) {
+  // Conversion (dealer was NOT already on a paid tier) → flip Trial/expired →
+  // the paid account_type (unblocks the print gate, clears the "Upgrade Now"
+  // CTA), stamp the funnel date, clear any downgraded_at, and fire the reliable
+  // HubSpot sync (lifecyclestage Trial → Customer). Runs for native AND migrated
+  // dealers — the legacy_id-based skip is gone. An already-paying dealer swapping
+  // tiers keeps its account_type + funnel date.
+  if (!wasPaying) {
     const newAccountType = ACCOUNT_TYPE_FOR_TIER[descriptor.key];
     if (newAccountType && newAccountType !== dealer.account_type) {
       // Stamp converted_at + clear any prior downgraded_at so a re-conversion
@@ -219,6 +231,6 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     tier: descriptor.key,
     name: descriptor.name,
     customerId: effectiveCustomerKey,
-    converted: isConversion,
+    converted: !wasPaying,
   });
 }
