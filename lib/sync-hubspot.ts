@@ -75,6 +75,7 @@ interface ProfileForHubspot {
   dealer_id: string | null;
   group_id: string | null;
   hubspot_contact_id: string | null;
+  active: boolean | null;
 }
 
 function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, groupId: string | null, lifetimePrints: number): Record<string, string | number | null> {
@@ -187,6 +188,11 @@ function profileContactProperties(p: ProfileForHubspot, companyName: string | nu
     dealer_id: p.dealer_id,
     group_id:  p.group_id,
     company:   companyName,
+    // "DA User" contact property — every contact this sync touches is a DA
+    // login account; active-aware so a deactivation flips it back. NOTE: the
+    // HubSpot enum's internal values are "true"/"false" ("Yes"/"No" are only
+    // the display labels — confirmed via GET /crm/v3/properties/contacts/da_user).
+    da_user:   p.active === false ? "false" : "true",
   };
 }
 
@@ -417,7 +423,7 @@ export async function syncProfileToHubspot(profileId: string): Promise<void> {
   try {
     const { data: profile } = await admin
       .from("profiles")
-      .select("id, email, full_name, phone, role, dealer_id, group_id, hubspot_contact_id")
+      .select("id, email, full_name, phone, role, dealer_id, group_id, hubspot_contact_id, active")
       .eq("id", profileId)
       .maybeSingle<ProfileForHubspot>();
     if (!profile) return;

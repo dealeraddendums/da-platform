@@ -210,6 +210,10 @@ function profileProps(p, companyName) {
     dealer_id: p.dealer_id,
     group_id: p.group_id,
     company: companyName,
+    // "DA User" — every synced contact is a DA login account. Enum internal
+    // values are "true"/"false" (labels "Yes"/"No"); active-aware to match
+    // lib/sync-hubspot.ts (this run scopes to active=true anyway).
+    da_user: p.active === false ? "false" : "true",
   };
 }
 
