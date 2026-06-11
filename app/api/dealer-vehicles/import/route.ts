@@ -12,6 +12,7 @@ type MappedVehicle = {
   trim?: string | null;
   body_style?: string | null;
   exterior_color?: string | null;
+  fuel?: string | null;
   mileage?: number;
   msrp?: number | null;
   condition?: string;
@@ -94,6 +95,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         trim: veh.trim?.trim() || null,
         body_style: veh.body_style?.trim() || null,
         exterior_color: veh.exterior_color?.trim() || null,
+        // slice(0,20): dealer_vehicles.fuel is varchar(20)
+        fuel: veh.fuel?.trim().slice(0, 20) || null,
         mileage: veh.mileage ?? 0,
         msrp: veh.msrp ?? null,
         condition: veh.condition || "New",

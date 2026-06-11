@@ -145,6 +145,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     engine: (body.engine as string | undefined)?.trim() || null,
     transmission: (body.transmission as string | undefined)?.trim() || null,
     drivetrain: (body.drivetrain as string | undefined)?.trim() || null,
+    // slice(0,20): dealer_vehicles.fuel is varchar(20)
+    fuel: (body.fuel as string | undefined)?.trim().slice(0, 20) || null,
     mileage: body.mileage ? parseInt(String(body.mileage), 10) : 0,
     msrp: body.msrp ? parseFloat(String(body.msrp)) : null,
     cmpg: (body.cmpg as string | undefined)?.trim() || null,

@@ -60,7 +60,7 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
   const EDITABLE: (keyof DealerVehicleInsert)[] = [
     "stock_number", "vin", "year", "make", "model", "trim",
     "body_style", "exterior_color", "interior_color", "engine",
-    "transmission", "drivetrain", "mileage", "msrp", "condition", "status",
+    "transmission", "drivetrain", "fuel", "mileage", "msrp", "condition", "status",
     "description", "options", "cmpg", "hmpg",
   ];
 

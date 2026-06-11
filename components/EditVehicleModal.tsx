@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { DealerVehicleRow } from "@/lib/db";
+import { FUEL_RULE_OPTIONS } from "@/lib/fuel-rule";
 
 type Props = {
   vehicle: DealerVehicleRow;
@@ -50,6 +51,7 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
     engine: vehicle.engine ?? "",
     transmission: vehicle.transmission ?? "",
     drivetrain: vehicle.drivetrain ?? "",
+    fuel: vehicle.fuel ?? "",
     description: vehicle.description ?? "",
     options: vehicle.options ?? "",
     mileage: vehicle.mileage ? String(vehicle.mileage) : "0",
@@ -92,6 +94,7 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
         msrp: form.msrp ? parseFloat(form.msrp) : null,
         cmpg: form.cmpg.trim() || null,
         hmpg: form.hmpg.trim() || null,
+        fuel: form.fuel.trim() || null,
       }),
     });
     const json = await res.json() as DealerVehicleRow & { error?: string };
@@ -133,6 +136,17 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
             <div><label style={LABEL_STYLE}>Engine</label>{f("engine")}</div>
             <div><label style={LABEL_STYLE}>Transmission</label>{f("transmission")}</div>
             <div><label style={LABEL_STYLE}>Drivetrain</label>{f("drivetrain")}</div>
+            <div>
+              <label style={LABEL_STYLE}>Fuel</label>
+              <select value={form.fuel} onChange={(e) => setForm((p) => ({ ...p, fuel: e.target.value }))} style={INPUT_STYLE}>
+                <option value="">—</option>
+                {/* Preserve a legacy free-text feed value until the dealer changes it */}
+                {form.fuel && !FUEL_RULE_OPTIONS.some((o) => o.label === form.fuel) && (
+                  <option value={form.fuel}>{form.fuel}</option>
+                )}
+                {FUEL_RULE_OPTIONS.map((o) => <option key={o.label} value={o.label}>{o.label}</option>)}
+              </select>
+            </div>
 
             <div style={{ gridColumn: "1 / -1" }}>
               <label style={LABEL_STYLE}>

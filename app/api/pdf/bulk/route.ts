@@ -648,7 +648,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           YEAR: dv.year ? String(dv.year) : null,
           MAKE: dv.make, MODEL: dv.model, TRIM: dv.trim,
           BODYSTYLE: dv.body_style, EXT_COLOR: dv.exterior_color,
-          INT_COLOR: dv.interior_color, ENGINE: dv.engine, FUEL: null,
+          INT_COLOR: dv.interior_color, ENGINE: dv.engine, FUEL: dv.fuel ?? null,
           DRIVETRAIN: dv.drivetrain, TRANSMISSION: dv.transmission,
           MILEAGE: dv.mileage != null ? String(dv.mileage) : null,
           DATE_IN_STOCK: dv.date_added, STATUS: "1" as const,

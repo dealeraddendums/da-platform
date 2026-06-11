@@ -332,7 +332,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       EXT_COLOR: dv.exterior_color,
       INT_COLOR: dv.interior_color,
       ENGINE: dv.engine,
-      FUEL: null,
+      FUEL: dv.fuel ?? null,
       DRIVETRAIN: dv.drivetrain,
       TRANSMISSION: dv.transmission,
       MILEAGE: dv.mileage != null ? String(dv.mileage) : null,

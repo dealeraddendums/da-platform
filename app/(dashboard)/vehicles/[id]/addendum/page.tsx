@@ -67,7 +67,7 @@ export default async function AddendumPage({
     EXT_COLOR: dv.exterior_color ?? null,
     INT_COLOR: dv.interior_color ?? null,
     ENGINE: dv.engine ?? null,
-    FUEL: null,
+    FUEL: dv.fuel ?? null,
     DRIVETRAIN: dv.drivetrain ?? null,
     TRANSMISSION: dv.transmission ?? null,
     MILEAGE: dv.mileage ? String(dv.mileage) : null,

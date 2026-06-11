@@ -39,3 +39,30 @@ export const FUEL_RULE_OPTIONS: FuelRuleOption[] = [
   { label: "CNG",            keywords: ["cng", "compressed natural"] },
   { label: "Propane",        keywords: ["propane", "lpg"] },
 ];
+
+// Priority order for normalizing a raw fuel string to a curated label. Differs
+// from the display order above: more specific categories first, so "PHEV" hits
+// Plug-in Hybrid before Hybrid ("hev"), and "Compressed Natural Gas" / "Liquefied
+// Petroleum Gas" hit CNG/Propane before Gasoline ("gas").
+const NORMALIZE_PRIORITY = [
+  "Plug-in Hybrid", "Hybrid", "Flex Fuel", "CNG", "Propane",
+  "Hydrogen", "Diesel", "Electric", "Gasoline",
+] as const;
+
+/**
+ * Map a raw fuel string (NHTSA FuelTypePrimary, a feed value, a CSV cell) to
+ * its curated label, or null when nothing matches. Uses the same keyword sets
+ * as the rules matcher, so a normalized dealer_vehicles.fuel value is
+ * guaranteed to match the rule for its category. Curated labels also all fit
+ * the column's varchar(20) — raw NHTSA strings like "Flexible Fuel Vehicle
+ * (FFV)" would overflow it.
+ */
+export function normalizeFuel(raw: string | null | undefined): string | null {
+  const v = (raw ?? "").trim().toLowerCase();
+  if (!v) return null;
+  for (const label of NORMALIZE_PRIORITY) {
+    const opt = FUEL_RULE_OPTIONS.find((o) => o.label === label);
+    if (opt?.keywords.some((k) => v.includes(k))) return opt.label;
+  }
+  return null;
+}

@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ExcelJS from "exceljs";
 import type { DecodeResult } from "@/lib/vin-decoder";
+import { FUEL_RULE_OPTIONS, normalizeFuel } from "@/lib/fuel-rule";
 
 // ── File parsing helpers ────────────────────────────────────────────────────
 
@@ -112,6 +113,7 @@ const DA_IMPORT_FIELDS = [
   "Trim",
   "Body Style",
   "Color",
+  "Fuel",
   "Mileage",
   "MSRP",
   "Condition",
@@ -197,6 +199,7 @@ type FormState = {
   engine: string;
   transmission: string;
   drivetrain: string;
+  fuel: string;
   description: string;
   options: string;
   mileage: string;
@@ -209,7 +212,7 @@ type FormState = {
 const EMPTY_FORM: FormState = {
   stock_number: "", vin: "", year: "", make: "", model: "", trim: "",
   body_style: "", exterior_color: "", interior_color: "", engine: "",
-  transmission: "", drivetrain: "", description: "", options: "",
+  transmission: "", drivetrain: "", fuel: "", description: "", options: "",
   mileage: "0", msrp: "", cmpg: "", hmpg: "", condition: "Used",
 };
 
@@ -304,6 +307,7 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
       engine: json.engine ?? f.engine,
       transmission: json.transmission ?? f.transmission,
       drivetrain: json.drivetrain ?? f.drivetrain,
+      fuel: normalizeFuel(json.fuel_type) ?? f.fuel,
       cmpg: json.cmpg ?? f.cmpg,
       hmpg: json.hmpg ?? f.hmpg,
       condition: json.year === currentYear ? "New" : "Used",
@@ -346,6 +350,7 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
         msrp: form.msrp ? parseFloat(form.msrp) : null,
         cmpg: form.cmpg.trim() || null,
         hmpg: form.hmpg.trim() || null,
+        fuel: form.fuel.trim() || null,
         decode_source: decodeResult ? "vin_decoder" : "manual",
         decode_flagged: decodeResult?.decode_flagged ?? false,
       }),
@@ -439,6 +444,9 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
         .map((row) => {
           const stock = get(row, "Stock Number");
           if (!stock) return null;
+          // Normalize to a curated fuel label; keep unmatched raw values
+          // (truncated to the column's varchar(20)) so data isn't dropped.
+          const rawFuel = get(row, "Fuel");
           return {
             stock_number: stock,
             vin: get(row, "VIN").toUpperCase() || undefined,
@@ -448,6 +456,7 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
             trim: get(row, "Trim") || undefined,
             body_style: get(row, "Body Style") || undefined,
             exterior_color: get(row, "Color") || undefined,
+            fuel: normalizeFuel(rawFuel) ?? (rawFuel.slice(0, 20) || undefined),
             mileage: safeNum(get(row, "Mileage")) ?? 0,
             msrp: safeNum(get(row, "MSRP")),
             condition: isCertifiedValue(get(row, "Certified"))
@@ -805,6 +814,23 @@ function VinTab({
             <div>
               <label style={LABEL_STYLE}>Drivetrain</label>
               {field("drivetrain")}
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Fuel</label>
+              <select
+                value={form.fuel}
+                onChange={(e) => setForm((f) => ({ ...f, fuel: e.target.value }))}
+                style={INPUT_STYLE}
+              >
+                <option value="">—</option>
+                {form.fuel && !FUEL_RULE_OPTIONS.some((o) => o.label === form.fuel) && (
+                  <option value={form.fuel}>{form.fuel}</option>
+                )}
+                {FUEL_RULE_OPTIONS.map((o) => (
+                  <option key={o.label} value={o.label}>{o.label}</option>
+                ))}
+              </select>
             </div>
 
             <div>
