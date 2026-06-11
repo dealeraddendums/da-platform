@@ -175,7 +175,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
 
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [bulkPrinting, setBulkPrinting] = useState(false);
-  const [bulkModal, setBulkModal] = useState<{ url: string; docType: "addendum" | "infosheet" | "buyer_guide"; count: number } | null>(null);
+  const [bulkModal, setBulkModal] = useState<{ url: string; docType: "addendum" | "infosheet" | "buyer_guide"; count: number; printToken?: string } | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<DealerVehicleRow | null>(null);
   const [historyVehicle, setHistoryVehicle] = useState<{ id: string; stockNumber: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -310,9 +310,10 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
         return;
       }
 
+      const printToken = res.headers.get("X-Print-Token") ?? undefined;
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      setBulkModal({ url, docType, count: ids.length });
+      setBulkModal({ url, docType, count: ids.length, printToken });
       setCheckedIds(new Set());
     } catch (err) {
       const msg = err instanceof Error && err.name === "AbortError"
@@ -776,6 +777,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
           docType={bulkModal.docType}
           vehicleName={`${bulkModal.count} Vehicles`}
           preloadedUrl={bulkModal.url}
+          printToken={bulkModal.printToken}
           onClose={() => {
             setBulkModal(null);
             // Refresh the rows (green Print Now state) AND the parent

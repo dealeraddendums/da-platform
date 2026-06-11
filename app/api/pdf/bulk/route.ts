@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { DealerSettingsRow, AddendumDataInsert, BuyersGuideDefaults } from "@/lib/db";
+import type { DealerSettingsRow, BuyersGuideDefaults } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
-import { syncAddendumItems } from "@/lib/sync-addendum-items";
+import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/record-print";
 // buildBuyersGuidePdf is pdf-lib only (no Puppeteer). The bulk
 // buyer_guide branch still renders it locally; if we ever want it on
 // the PDF service too, the single buyers-guide route's pattern shows
@@ -28,7 +28,7 @@ interface BulkBgJob {
    *  pipeline uploads this buffer to s3Key. Absent when the PDF service
    *  rendered + uploaded server-side — in that case
    *  preUploadedSignedUrl carries the resulting 24h signed URL and
-   *  uploadAndLogBulkJob skips its own upload. */
+   *  uploadBulkJobPdf skips its own upload. */
   pdfBuffer?: Buffer;
   preUploadedSignedUrl?: string;
   s3Key: string;
@@ -39,109 +39,24 @@ interface BulkBgJob {
   options: { option_name: string; option_price: string; description: string | null; required?: boolean }[];
 }
 
-async function uploadAndLogBulkJob(
-  job: BulkBgJob,
-  claimsSub: string,
-  admin: ReturnType<typeof createAdminSupabaseClient>,
-): Promise<void> {
-  let pdfUrl = "";
-  let uploadedKey: string | null = null;
-  if (job.preUploadedSignedUrl) {
-    // Service path: per-vehicle PDF already uploaded by the PDF service
-    // with the appropriate doc_type tag.
-    pdfUrl = job.preUploadedSignedUrl;
-    uploadedKey = job.s3Key;
-  } else if (job.pdfBuffer) {
-    try {
-      // Local fallback path — only the bulk buyer_guide branch reaches
-      // here today (uses pdf-lib locally, not the service). Tag with
-      // the doc_type so the lifecycle rule still applies.
-      pdfUrl = await uploadPdf(job.pdfBuffer, job.s3Key, { docType: job.docType });
-      uploadedKey = job.s3Key;
-    } catch (err) {
-      console.error(`[BULK] S3 upload failed vehicleId=${job.vehicleId}:`, err instanceof Error ? err.message : err);
-    }
-  } else {
-    console.warn(`[BULK] no pdfBuffer or preUploadedSignedUrl for vehicleId=${job.vehicleId} — print_history.pdf_url will be null`);
+/**
+ * Upload-only half of the old uploadAndLogBulkJob — the DB logging half moved
+ * to lib/record-print.ts and now runs at the user's Send/Download confirm
+ * (POST /api/print/confirm), not at generation.
+ */
+async function uploadBulkJobPdf(job: BulkBgJob): Promise<void> {
+  if (job.preUploadedSignedUrl) return; // service already uploaded with doc_type tag
+  if (!job.pdfBuffer) {
+    console.warn(`[BULK] no pdfBuffer or preUploadedSignedUrl for vehicleId=${job.vehicleId} — print_history.pdf_url will be a signed key without an upload`);
+    return;
   }
-
-  const { error: phErr } = await admin.from("print_history").insert({
-    vehicle_id: job.vehicleId,
-    dealer_id: job.dvDealerId,
-    document_type: job.docType,
-    printed_by: claimsSub,
-    pdf_url: pdfUrl || null,
-  });
-  if (phErr) console.error(`[BULK] print_history insert failed vehicleId=${job.vehicleId}:`, phErr.message);
-
-  // Mirror to dealer_vehicles canonical print fields. doc type controls which
-  // column flips: addendum → print_status, infosheet → print_info,
-  // buyer_guide → print_guide.
-  const todayDate = new Date().toISOString().split("T")[0];
-  const dvUpdate: Partial<{ print_status: number; print_info: number; print_guide: number; print_date: string; print_user: string }> = {
-    print_date: todayDate,
-    print_user: claimsSub,
-  };
-  if (job.docType === "addendum") dvUpdate.print_status = 1;
-  else if (job.docType === "infosheet") dvUpdate.print_info = 1;
-  else if (job.docType === "buyer_guide") dvUpdate.print_guide = 1;
-  let { error: dvUpdateErr } = await admin
-    .from("dealer_vehicles")
-    .update(dvUpdate)
-    .eq("id", job.vehicleId);
-  // See pdf/generate route — same varchar(20) → UUID retry safety net.
-  if (dvUpdateErr && /too long/i.test(dvUpdateErr.message)) {
-    const { print_user: _omit, ...withoutUser } = dvUpdate;
-    void _omit;
-    const retry = await admin
-      .from("dealer_vehicles")
-      .update(withoutUser)
-      .eq("id", job.vehicleId);
-    dvUpdateErr = retry.error;
-  }
-  if (dvUpdateErr) console.error(`[BULK] dealer_vehicles print update failed vehicleId=${job.vehicleId}:`, dvUpdateErr.message);
-
-  if (job.dealerUuid && job.options.length > 0) {
-    const printedAt = new Date().toISOString();
-    const adRows: AddendumDataInsert[] = job.options.map((o, i) => ({
-      dealer_id: job.dealerUuid!,
-      legacy_dealer_id: job.dvDealerId,
-      vehicle_id: job.vehicleId,
-      vin_number: job.dvVin,
-      item_name: o.option_name,
-      item_description: o.description,
-      item_price: o.option_price,
-      active: "1",
-      or_or_ad: 1,
-      order_by: i,
-      separator_spaces: 2,
-      editable: 1,
-      printed_at: printedAt,
-      document_type: job.docType,
-      s3_key: uploadedKey,
-    }));
-    const { error: adErr } = await admin.from("addendum_data").insert(adRows);
-    if (adErr) console.error(`[BULK] addendum_data insert failed vehicleId=${job.vehicleId}:`, adErr.message);
-  }
-
-  // Refresh save-state slice of addendum_data with what was just printed.
-  // Same gating as the single-print path — only addendum doc type
-  // contributes the dealer's canonical "current product set". Print-event
-  // rows inserted above (with printed_at + s3_key) are preserved.
-  if (job.docType === "addendum" && job.dealerUuid) {
-    await syncAddendumItems(admin, {
-      vehicleId: job.vehicleId,
-      dealerId: job.dealerUuid,
-      legacyDealerId: job.dvDealerId,
-      vin: job.dvVin,
-      documentType: "addendum",
-      products: job.options.map(o => ({
-        name: o.option_name,
-        price: o.option_price,
-        description: o.description ?? null,
-        required: o.required !== false,
-      })),
-    });
+  try {
+    // Local fallback path — only the bulk buyer_guide branch reaches
+    // here today (uses pdf-lib locally, not the service). Tag with
+    // the doc_type so the lifecycle rule still applies.
+    await uploadPdf(job.pdfBuffer, job.s3Key, { docType: job.docType });
+  } catch (err) {
+    console.error(`[BULK] S3 upload failed vehicleId=${job.vehicleId}:`, err instanceof Error ? err.message : err);
   }
 }
 
@@ -889,7 +804,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         // Queue for the batch service call below. Per-vehicle rendering
         // happens server-side on the PDF service; bgJob carries no
-        // pdfBuffer — uploadAndLogBulkJob picks up preUploadedSignedUrl
+        // pdfBuffer — uploadBulkJobPdf picks up preUploadedSignedUrl
         // from the service response once renderBulkViaService returns.
         serviceItems.push({
           vehicleId,
@@ -928,7 +843,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
       mergedBuffer = result.buffer;
       // Splice each per-item signedUrl onto the matching bgJob so
-      // uploadAndLogBulkJob skips its own uploadPdf.
+      // uploadBulkJobPdf skips its own uploadPdf.
       //
       // Self-heal for the missing per-vehicle {VIN}.pdf bug: the single-print
       // path always re-uploads the per-vehicle PDF from da-platform as a
@@ -937,7 +852,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // jobs[i].s3Key. When the service returns no signedUrl for an item (it
       // didn't upload the per-vehicle PDF), reconstruct that vehicle's page
       // from the merged PDF and stash it on bgJob.pdfBuffer so the existing
-      // background uploadAndLogBulkJob path writes the canonical per-vehicle
+      // background uploadBulkJobPdf path writes the canonical per-vehicle
       // slot. Auto-disables the moment the service starts returning signedUrls.
       let mergedDocForSplit: PDFDocument | null = null;
       let canSplit = false;
@@ -995,33 +910,66 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "All vehicles failed to render" }, { status: 500 });
   }
 
-  // S3 upload + DB logging in the background.
+  // S3 uploads in the background.
   //
   // Service path (addendum / infosheet bulk): the PDF service already
   // uploaded each per-vehicle PDF AND the merged transport PDF (the
-  // latter with doc_type=bulk_merged → 1-day TTL). uploadAndLogBulkJob
-  // picks up per-vehicle URLs via preUploadedSignedUrl.
+  // latter with doc_type=bulk_merged → 1-day TTL).
   //
   // Local path (buyer_guide bulk only): each per-vehicle PDF is
-  // uploaded by uploadAndLogBulkJob with doc_type=buyer_guide. The
+  // uploaded by uploadBulkJobPdf with doc_type=buyer_guide. The
   // merged buffer is returned to the caller as the HTTP response body
   // and is NOT persisted — bulk merged files are intentionally
   // ephemeral (Allan's retention policy: merged bulk PDFs are not
   // archived).
   void Promise.all(
     bgJobs.map(job =>
-      uploadAndLogBulkJob(job, claims.sub, admin).catch(err =>
-        console.error(`[BULK] background logging failed vehicleId=${job.vehicleId}:`, err instanceof Error ? err.message : err)
+      uploadBulkJobPdf(job).catch(err =>
+        console.error(`[BULK] background upload failed vehicleId=${job.vehicleId}:`, err instanceof Error ? err.message : err)
       )
     )
   );
   void mergedKey;
+
+  // Print recording is DEFERRED to the user's Send/Download click in the
+  // preview modal (POST /api/print/confirm with the token below) — opening
+  // the bulk preview no longer logs prints. One pending row covers all the
+  // vehicles in this batch. Fallback: if the stash fails (migration 099 not
+  // applied), record immediately, i.e. the legacy generation-time behavior.
+  const printPayloads: PrintRecordPayload[] = bgJobs.map(job => ({
+    source: "bulk" as const,
+    vehicleId: job.vehicleId,
+    dealerTextId: job.dvDealerId,
+    dealerUuid: job.dealerUuid,
+    vin: job.dvVin,
+    stockNumber: null,
+    docType: job.docType,
+    s3Key: job.s3Key,
+    pdfUrl: job.preUploadedSignedUrl ?? null,
+    options: job.options,
+  }));
+  let printToken: string | null = null;
+  if (printPayloads.length > 0) {
+    printToken = await createPendingPrint(admin, {
+      dealerTextId: printPayloads[0].dealerTextId,
+      createdBy: claims.sub,
+      payloads: printPayloads,
+    });
+    if (!printToken) {
+      void Promise.all(printPayloads.map(p =>
+        recordPrint(admin, claims.sub, p).catch(err =>
+          console.error(`[BULK] fallback logging failed vehicleId=${p.vehicleId}:`, err instanceof Error ? err.message : err)
+        )
+      ));
+    }
+  }
 
   return new NextResponse(mergedBuffer as unknown as BodyInit, {
     status: 200,
     headers: {
       "Content-Type": "application/pdf",
       "Content-Length": String(mergedBuffer.length),
+      ...(printToken ? { "X-Print-Token": printToken } : {}),
     },
   });
 }

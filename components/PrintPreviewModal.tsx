@@ -9,9 +9,15 @@ type Props = {
   docType: DocType;
   vehicleName: string;
   onClose: () => void;
+  /** Fired once the print is actually RECORDED (Send to Printer / Download),
+   *  not on generation — a cancelled preview never counts as a print. */
   onPrinted?: () => void;
   /** Skip PDF generation and use this URL directly (e.g. pre-generated bulk PDF). */
   preloadedUrl?: string;
+  /** Pending-print token from a pre-generated PDF (bulk path) — confirmed on
+   *  Send/Download via POST /api/print/confirm. The in-modal generate path
+   *  captures its own token from the generate response. */
+  printToken?: string;
 };
 
 const DOC_LABELS: Record<DocType, string> = {
@@ -65,6 +71,7 @@ export default function PrintPreviewModal({
   onClose,
   onPrinted,
   preloadedUrl,
+  printToken,
 }: Props) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(preloadedUrl ?? null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -72,6 +79,32 @@ export default function PrintPreviewModal({
   const [progressLabel, setProgressLabel] = useState("Rendering…");
   const [genError, setGenError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const tokenRef = useRef<string | null>(printToken ?? null);
+  const confirmedRef = useRef(false);
+
+  // Record the print on the user's actual action. Idempotent client-side
+  // (confirmedRef) and server-side (the token is claimed atomically), so
+  // Download followed by Send only records once.
+  async function confirmPrint() {
+    if (confirmedRef.current) return;
+    confirmedRef.current = true;
+    const token = tokenRef.current;
+    if (token) {
+      try {
+        await fetch("/api/print/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+          keepalive: true,
+        });
+      } catch (e) {
+        console.error("[print] confirm failed:", e);
+      }
+    }
+    // No token = the server fell back to generation-time logging (pending
+    // table unavailable) — the print is already recorded; still notify.
+    onPrinted?.();
+  }
 
   useEffect(() => {
     if (preloadedUrl) return; // already have URL — skip generation
@@ -104,17 +137,20 @@ export default function PrintPreviewModal({
         const contentType = res.headers.get("content-type") ?? "";
         if (contentType.includes("application/json")) {
           // Async path: poll until complete, then use the signed URL.
-          const j = await res.json() as { jobId: string; statusUrl: string };
+          const j = await res.json() as { jobId: string; statusUrl: string; printToken?: string | null };
+          tokenRef.current = j.printToken ?? null;
           const signedUrl = await pollUntilComplete(j.statusUrl, () => cancelled, setProgressLabel);
           if (cancelled) return;
           setPdfUrl(signedUrl);
         } else {
           // Sync path: response body is the PDF bytes (USE_PDF_SERVICE off
           // OR async wasn't honored). Blob it like the old flow.
+          tokenRef.current = res.headers.get("X-Print-Token");
           const blob = await res.blob();
           setPdfUrl(URL.createObjectURL(blob));
         }
-        onPrinted?.();
+        // NOTE: onPrinted intentionally NOT fired here — the print is only
+        // recorded (and onPrinted fired) on Send/Download via confirmPrint().
       } catch (e) {
         if (!cancelled) setGenError(e instanceof Error ? e.message : "PDF generation failed");
       } finally {
@@ -252,6 +288,7 @@ export default function PrintPreviewModal({
               <a
                 href={blobUrl}
                 download={filename}
+                onClick={() => { void confirmPrint(); }}
                 style={{
                   height: 36, padding: "0 16px", background: "#fff",
                   border: "1px solid var(--border)", borderRadius: 4,
@@ -262,8 +299,11 @@ export default function PrintPreviewModal({
                 Download PDF
               </a>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (!blobUrl) return;
+                  // Record first so the post-close refresh (inventory rows +
+                  // dashboard cards) sees the new print state.
+                  await confirmPrint();
                   printPdfFromBlobUrl(blobUrl);
                   onClose();
                 }}

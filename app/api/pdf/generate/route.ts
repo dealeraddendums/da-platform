@@ -1,162 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { VehicleAuditLogInsert, AddendumHistoryInsert, AddendumDataInsert, DealerSettingsRow } from "@/lib/db";
+import type { DealerSettingsRow } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
-import { signPdfKey, buildPdfKey } from "@/lib/s3-upload";
-import { useService as usePdfService, renderViaService, enqueueGenerate, awaitJobAndFetch, type PdfDocTypeTag } from "@/lib/pdf-service-client";
-import { syncAddendumItems } from "@/lib/sync-addendum-items";
+import { buildPdfKey } from "@/lib/s3-upload";
+import { useService as usePdfService, renderViaService, enqueueGenerate, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { enforceCanPrint } from "@/lib/print-eligibility";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
+import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/record-print";
 
 type BgOption = { option_name: string; option_price?: string; description?: string | null; required?: boolean };
-
-async function logGeneratePdf(
-  pdfBuffer: Buffer,
-  s3Key: string,
-  dealerVehicleId: string,
-  dv: { dealer_id: string; vin: string | null; stock_number: string | null },
-  dealer: { id: string; dealer_id: string } | null,
-  claims: { sub: string },
-  docType: "addendum" | "infosheet" | "buyer_guide",
-  options: BgOption[],
-  admin: ReturnType<typeof createAdminSupabaseClient>,
-): Promise<void> {
-  // The PDF service already uploaded `pdfBuffer` to `s3Key` with the
-  // appropriate doc_type tag for lifecycle. Re-uploading from here
-  // would CLEAR the tag (PutObject Tagging param replaces the tag set),
-  // breaking the 180-day / 1-day lifecycle rules. So we just sign the
-  // existing key for print_history.pdf_url; no second PUT.
-  let pdfUrl = "";
-  let uploadedKey: string | null = null;
-  try {
-    pdfUrl = await signPdfKey(s3Key);
-    uploadedKey = s3Key;
-  } catch (err) {
-    console.error("[pdf/generate] signPdfKey failed:", err instanceof Error ? err.message : err);
-  }
-  // pdfBuffer is intentionally unused now that we don't re-upload; keep
-  // the parameter for signature continuity and to leave the door open
-  // for fallback resurrection if the service ever needs to be bypassed.
-  void pdfBuffer;
-
-  const { error: phErr } = await admin.from("print_history").insert({
-    vehicle_id: dealerVehicleId,
-    dealer_id: dv.dealer_id,
-    document_type: docType,
-    printed_by: claims.sub,
-    pdf_url: pdfUrl || null,
-  });
-  if (phErr) console.error("[pdf/generate] print_history insert failed:", phErr.message, phErr.code);
-
-  // Mark the canonical print fields on dealer_vehicles so dashboard counts,
-  // legacy-aware filters, and the per-document button states see this vehicle
-  // as printed without depending on print_history. The doc type controls
-  // which column flips: addendum → print_status, infosheet → print_info,
-  // buyer_guide → print_guide.
-  const todayDate = new Date().toISOString().split("T")[0];
-  const dvUpdate: Partial<{ print_status: number; print_info: number; print_guide: number; print_date: string; print_user: string }> = {
-    print_date: todayDate,
-    print_user: claims.sub,
-  };
-  if (docType === "addendum") dvUpdate.print_status = 1;
-  else if (docType === "infosheet") dvUpdate.print_info = 1;
-  else if (docType === "buyer_guide") dvUpdate.print_guide = 1;
-  let { error: dvUpdateErr } = await admin
-    .from("dealer_vehicles")
-    .update(dvUpdate)
-    .eq("id", dealerVehicleId);
-  // Pre-migration-055 safety net: dealer_vehicles.print_user was varchar(20)
-  // and rejected 36-char UUIDs, rolling back the whole atomic UPDATE — which
-  // is why print_status / print_date never landed. Retry without print_user
-  // so the canonical print_status fields still flip even before migration 055
-  // is applied. Once the column is widened to text, the first try succeeds.
-  if (dvUpdateErr && /too long/i.test(dvUpdateErr.message)) {
-    const { print_user: _omit, ...withoutUser } = dvUpdate;
-    void _omit;
-    const retry = await admin
-      .from("dealer_vehicles")
-      .update(withoutUser)
-      .eq("id", dealerVehicleId);
-    dvUpdateErr = retry.error;
-  }
-  if (dvUpdateErr) console.error("[pdf/generate] dealer_vehicles print update failed:", dvUpdateErr.message);
-
-  await admin.from("vehicle_audit_log").insert({
-    dealer_id: dv.dealer_id,
-    vehicle_id: dealerVehicleId,
-    stock_number: dv.stock_number,
-    action: "print",
-    method: "print",
-    changed_by: claims.sub,
-    document_type: docType,
-  } as VehicleAuditLogInsert);
-
-  if (dealer?.id && options.length > 0) {
-    const printedAt = new Date().toISOString();
-    const adRows: AddendumDataInsert[] = options.map((o, i) => ({
-      dealer_id: dealer.id,
-      legacy_dealer_id: dv.dealer_id,
-      vehicle_id: dealerVehicleId,
-      vin_number: dv.vin,
-      item_name: o.option_name,
-      item_description: o.description ?? null,
-      item_price: o.option_price ?? null,
-      active: "1",
-      or_or_ad: 1,
-      order_by: i,
-      separator_spaces: 2,
-      editable: 1,
-      printed_at: printedAt,
-      document_type: docType,
-      s3_key: uploadedKey,
-      required: o.required !== false,
-    }));
-    const { error: adErr } = await admin.from("addendum_data").insert(adRows);
-    if (adErr) console.error("[pdf/generate] addendum_data insert failed:", adErr.message);
-  }
-
-  // Refresh the save-state slice of addendum_data (legacy_id IS NULL, no
-  // s3_key, no printed_at) with what was just printed. Only the addendum
-  // doc type contributes the dealer's "current product set" — infosheet and
-  // buyer-guide prints aren't product-set events. The print-event rows above
-  // (with printed_at + s3_key) are independent and preserved.
-  if (docType === "addendum" && dealer?.id) {
-    await syncAddendumItems(admin, {
-      vehicleId: dealerVehicleId,
-      dealerId: dealer.id,
-      legacyDealerId: dv.dealer_id,
-      vin: dv.vin,
-      documentType: "addendum",
-      products: options.map(o => ({
-        name: o.option_name,
-        price: o.option_price,
-        description: o.description ?? null,
-        required: o.required !== false,
-      })),
-    });
-  }
-
-  const today = new Date().toISOString().split("T")[0];
-  const historyRows: AddendumHistoryInsert[] = options.map((o, i) => ({
-    legacy_id: null,
-    vehicle_id: null,
-    vin: dv.vin,
-    dealer_id: dv.dealer_id,
-    item_name: o.option_name,
-    item_description: null,
-    item_price: o.option_price ?? null,
-    active: "Yes",
-    creation_date: today,
-    order_by: i,
-    source: "platform",
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }));
-  if (historyRows.length > 0) {
-    await admin.from("addendum_history").insert(historyRows);
-  }
-}
 import {
   BG_DEFAULT,
   IS_BG_DEFAULT,
@@ -741,18 +594,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       docType,
     });
 
+    // Print recording is DEFERRED to the user's actual Send-to-Printer /
+    // Download click: we stash the full logging payload in pending_prints and
+    // hand the client a one-time token; POST /api/print/confirm replays it via
+    // lib/record-print.ts. A preview that's cancelled never records a print
+    // (multiprint-qa-2026-06-11, secondary item). If the stash fails (e.g.
+    // migration 099 not applied), fall back to the legacy generation-time
+    // logging so prints are never silently lost. Note: the Builder's template
+    // test-download hits this route too and never confirms — by design
+    // (the Builder never prints).
+    const printPayload: PrintRecordPayload = {
+      source: "generate",
+      vehicleId: dealerVehicleId,
+      dealerTextId: dv.dealer_id,
+      dealerUuid: dealer?.id ?? null,
+      vin: dv.vin,
+      stockNumber: dv.stock_number,
+      docType,
+      s3Key,
+      options,
+    };
+
     // Phase E: async mode. Browser sends ?async=1 to get a jobId back
     // immediately, then polls /api/pdf/status/:jobId for completion.
     // Only meaningful when the service path is on — the local Puppeteer
     // path doesn't know about jobs, so it falls through to the sync
     // bytes response below.
-    //
-    // logGeneratePdf still has to run (print_history, dealer_vehicles
-    // print flags, audit log) — we fire-and-forget a poller in the
-    // background that fetches the rendered buffer once the service
-    // marks complete and then runs the existing side-effect pipeline.
-    // From the user's perspective the print is "done" the moment the
-    // signed URL loads; the DB write happens shortly after.
     const asyncMode = req.nextUrl.searchParams.get("async") === "1";
     if (asyncMode && usePdfService()) {
       try {
@@ -761,21 +628,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           customDims: customPaperDims,
           docType: docType as PdfDocTypeTag,
         }, s3Key);
-        // Fire-and-forget completion: poll the EXISTING jobId (not a
-        // new render), fetch bytes once complete, run the logging
-        // pipeline. Closure captures scope vars so no re-query.
-        void (async () => {
-          try {
-            const result = await awaitJobAndFetch(jobId);
-            await logGeneratePdf(result.buffer, s3Key, dealerVehicleId, dv, dealer, claims, docType, options, admin);
-          } catch (err) {
-            console.error("[pdf/generate async] completion failed for job", jobId, err instanceof Error ? err.message : err);
-          }
-        })();
+        const printToken = await createPendingPrint(admin, { dealerTextId: dv.dealer_id, createdBy: claims.sub, payloads: [printPayload] });
+        if (!printToken) {
+          void recordPrint(admin, claims.sub, printPayload)
+            .catch(err => console.error("[pdf/generate] fallback logging error:", err instanceof Error ? err.message : err));
+        }
         return NextResponse.json({
           jobId,
           statusUrl: `/api/pdf/status/${jobId}`,
           s3Key,
+          printToken,
         });
       } catch (err) {
         return NextResponse.json({ error: err instanceof Error ? err.message : "PDF enqueue failed" }, { status: 500 });
@@ -791,10 +653,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
     let pdfBuffer: Buffer;
     try {
-      // The service uploads to s3Key itself; logGeneratePdf below
-      // re-uploads via uploadPdf() so the DB row pdf_url is the
-      // canonical 24h signed URL from s3-upload.ts. Second PUT is a
-      // no-op overwrite of identical bytes.
+      // The service uploads to s3Key itself with the doc_type tag.
       const result = await renderViaService(html, {
         paperSize: effectivePaperSizeStr,
         customDims: customPaperDims,
@@ -805,15 +664,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: err instanceof Error ? err.message : "PDF render failed" }, { status: 500 });
     }
 
-    // S3 upload + all DB logging happen in the background — PDF bytes returned immediately
-    void logGeneratePdf(pdfBuffer, s3Key, dealerVehicleId, dv, dealer, claims, docType, options, admin)
-      .catch(err => console.error("[pdf/generate] background logging error:", err instanceof Error ? err.message : err));
+    // Bytes response — print token travels in a header. Callers that never
+    // confirm (the Builder's test download) simply leave the pending row to GC.
+    const syncToken = await createPendingPrint(admin, { dealerTextId: dv.dealer_id, createdBy: claims.sub, payloads: [printPayload] });
+    if (!syncToken) {
+      void recordPrint(admin, claims.sub, printPayload)
+        .catch(err => console.error("[pdf/generate] fallback logging error:", err instanceof Error ? err.message : err));
+    }
 
     return new NextResponse(pdfBuffer as unknown as BodyInit, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
         "Content-Length": String(pdfBuffer.length),
+        ...(syncToken ? { "X-Print-Token": syncToken } : {}),
       },
     });
 

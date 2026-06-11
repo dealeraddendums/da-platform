@@ -33,6 +33,30 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const tokenRef = useRef<string | null>(null);
+  const confirmedRef = useRef(false);
+
+  // Record the print on the user's actual action (Send/Download or the
+  // both-languages ZIP download) — generating a preview alone no longer
+  // counts. Idempotent client- and server-side.
+  async function confirmPrint() {
+    if (confirmedRef.current) return;
+    confirmedRef.current = true;
+    const token = tokenRef.current;
+    if (token) {
+      try {
+        await fetch("/api/print/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+          keepalive: true,
+        });
+      } catch (e) {
+        console.error("[buyers-guide] confirm failed:", e);
+      }
+    }
+    onPrinted?.();
+  }
 
   useEffect(() => {
     fetch("/api/settings")
@@ -80,6 +104,10 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
 
       if (both) {
         if (!res.ok) throw new Error("Generation failed");
+        // The ZIP path downloads immediately — that IS the print action, so
+        // record it right away.
+        tokenRef.current = res.headers.get("X-Print-Token");
+        confirmedRef.current = false;
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -87,7 +115,7 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
         a.download = `${vehicleName.replace(/[^a-zA-Z0-9]+/g, "_")}_buyers_guide_en_es.zip`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 2000);
-        onPrinted?.();
+        void confirmPrint();
         setGenerating(false);
         return;
       }
@@ -96,9 +124,12 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
         const json = await res.json() as { error?: string };
         throw new Error(json.error ?? "Generation failed");
       }
+      // Preview path: hold the token; the print is recorded (and onPrinted
+      // fired) on Send/Download. A regenerate gets a fresh, unconfirmed token.
+      tokenRef.current = res.headers.get("X-Print-Token");
+      confirmedRef.current = false;
       const blob = await res.blob();
       setPdfUrl(URL.createObjectURL(blob));
-      onPrinted?.();
     } catch (e) {
       setGenError(e instanceof Error ? e.message : "Generation failed");
     } finally {
@@ -239,12 +270,13 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
             </button>
             {pdfUrl && blobUrl && (
               <>
-                <a href={blobUrl} download={filename} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, color: "var(--text-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
+                <a href={blobUrl} download={filename} onClick={() => { void confirmPrint(); }} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, color: "var(--text-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
                   Download PDF
                 </a>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (!blobUrl) return;
+                    await confirmPrint();
                     printPdfFromBlobUrl(blobUrl);
                     onClose();
                   }}

@@ -1268,6 +1268,24 @@ export type ImageLibraryInsert =
   & { uploaded_by?: string | null; scope?: "platform" | "group" | "dealer"; group_id?: string | null; dealer_id?: string | null };
 export type ImageLibraryUpdate = Partial<ImageLibraryInsert>;
 
+// ── pending_prints (migration 099) ─────────────────────────────────────────
+// payload is a PrintRecordPayload[] (lib/record-print.ts) — typed loosely here
+// to avoid a lib→lib import cycle; the confirm route casts it back.
+export type PendingPrintRow = {
+  id: string;
+  dealer_id: string;
+  created_by: string;
+  payload: unknown;
+  created_at: string;
+};
+export type PendingPrintInsert = {
+  id?: string;
+  dealer_id: string;
+  created_by: string;
+  payload: unknown;
+  created_at?: string;
+};
+
 export type StaffProfileRow = {
   id: string;
   user_id: string;
@@ -1704,6 +1722,14 @@ export type Database = {
         Row: StaffProfileRow;
         Insert: StaffProfileInsert;
         Update: StaffProfileUpdate;
+        Relationships: [];
+      };
+      // Migration 099 — payloads stashed at PDF generation, claimed by
+      // POST /api/print/confirm on the actual Send/Download action.
+      pending_prints: {
+        Row: PendingPrintRow;
+        Insert: PendingPrintInsert;
+        Update: Partial<PendingPrintInsert>;
         Relationships: [];
       };
     };

@@ -54,7 +54,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId, printGa
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleRow | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
   const [bulkPrinting, setBulkPrinting] = useState(false);
-  const [bulkModal, setBulkModal] = useState<{ url: string; docType: "addendum" | "infosheet" | "buyer_guide"; count: number } | null>(null);
+  const [bulkModal, setBulkModal] = useState<{ url: string; docType: "addendum" | "infosheet" | "buyer_guide"; count: number; printToken?: string } | null>(null);
   const [clearingHistory, setClearingHistory] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
@@ -178,9 +178,10 @@ export default function VehicleInventory({ fixedDealerId, role, groupId, printGa
         return;
       }
 
+      const printToken = res.headers.get("X-Print-Token") ?? undefined;
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      setBulkModal({ url, docType, count: ids.length });
+      setBulkModal({ url, docType, count: ids.length, printToken });
       setCheckedIds(new Set());
     } catch (err) {
       const msg = err instanceof Error && err.name === "AbortError"
@@ -637,6 +638,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId, printGa
           docType={bulkModal.docType}
           vehicleName={`${bulkModal.count} Vehicles`}
           preloadedUrl={bulkModal.url}
+          printToken={bulkModal.printToken}
           onClose={() => setBulkModal(null)}
         />
       )}

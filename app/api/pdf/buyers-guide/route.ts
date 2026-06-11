@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { BuyersGuideDefaults } from "@/lib/db";
-import { signPdfKey, buildPdfKey } from "@/lib/s3-upload";
+import { buildPdfKey } from "@/lib/s3-upload";
 import { useService as usePdfService, renderBuyerGuideViaService } from "@/lib/pdf-service-client";
+import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/record-print";
 import { getBuyersGuidePdfBytes } from "@/lib/buyers-guide-storage";
 import type { BgKey } from "@/lib/buyers-guide-constants";
 import JSZip from "jszip";
@@ -98,6 +99,7 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
   };
 
   const dvDealerId = dv.dealer_id;
+  const dvVin = dv.vin ?? null;
   const claimsSub = claims.sub;
 
   const dealerUuid = dealer?.id ?? null;
@@ -121,24 +123,29 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     return result.buffer;
   }
 
-  async function logPrint(buffer: Buffer, s3Key: string): Promise<void> {
-    // Service already uploaded with doc_type=buyer_guide tag (→ 1-day
-    // lifecycle). Re-uploading from da-platform would clear the tag.
-    // Just sign the existing key for print_history.pdf_url.
-    let pdfUrl = "";
-    try {
-      pdfUrl = await signPdfKey(s3Key);
-    } catch (err) {
-      console.error("[buyers-guide] signPdfKey failed:", err instanceof Error ? err.message : err);
+  // Print recording is DEFERRED to the user's Send/Download click (POST
+  // /api/print/confirm with the X-Print-Token below) — generating a preview
+  // no longer logs a print. Fallback: if the stash fails (migration 099 not
+  // applied), record immediately — the legacy generation-time behavior.
+  async function stashPrint(s3Key: string): Promise<string | null> {
+    const payload: PrintRecordPayload = {
+      source: "buyer_guide",
+      vehicleId,
+      dealerTextId: dvDealerId,
+      dealerUuid,
+      vin: dvVin,
+      stockNumber: null,
+      docType: "buyer_guide",
+      s3Key,
+      options: [],
+    };
+    const token = await createPendingPrint(admin, { dealerTextId: dvDealerId, createdBy: claimsSub, payloads: [payload] });
+    if (!token) {
+      void recordPrint(admin, claimsSub, payload).catch(err =>
+        console.error("[buyers-guide] fallback logging error:", err instanceof Error ? err.message : err)
+      );
     }
-    void buffer;
-    await admin.from("print_history").insert({
-      vehicle_id: vehicleId,
-      dealer_id: dvDealerId,
-      document_type: "buyer_guide",
-      printed_by: claimsSub,
-      pdf_url: pdfUrl || null,
-    });
+    return token;
   }
 
   // ── Generate ──────────────────────────────────────────────────────────────
@@ -159,9 +166,7 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
       generateOneLang('en', enKey),
       generateOneLang('es', esKey),
     ]);
-    void logPrint(enBuffer, enKey).catch(err =>
-      console.error("[buyers-guide] background logging error:", err instanceof Error ? err.message : err)
-    );
+    const zipToken = await stashPrint(enKey);
 
     const zip = new JSZip();
     const base = `${dv.make ?? 'vehicle'}_${dv.year ?? ''}_buyers_guide`.replace(/\s+/g, '_');
@@ -175,6 +180,7 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
         "Content-Type": "application/zip",
         "Content-Disposition": `attachment; filename="${base}_en_es.zip"`,
         "Content-Length": String((zipBuffer as ArrayBuffer).byteLength),
+        ...(zipToken ? { "X-Print-Token": zipToken } : {}),
       },
     });
   }
@@ -187,14 +193,13 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     docType: 'buyer_guide',
   });
   const buffer = await generateOneLang(language, s3Key);
-  void logPrint(buffer, s3Key).catch(err =>
-    console.error("[buyers-guide] background logging error:", err instanceof Error ? err.message : err)
-  );
+  const printToken = await stashPrint(s3Key);
   return new NextResponse(buffer as unknown as BodyInit, {
     status: 200,
     headers: {
       "Content-Type": "application/pdf",
       "Content-Length": String(buffer.length),
+      ...(printToken ? { "X-Print-Token": printToken } : {}),
     },
   });
 }
