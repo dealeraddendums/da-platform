@@ -12,6 +12,7 @@ import {
   isPayingAccount,
 } from "@/lib/hubspot";
 import { isOverAllowance, isFreeAccountType } from "@/lib/print-eligibility";
+import { printedVehicleCount } from "@/lib/print-counts";
 
 /**
  * POST /api/cron/sync-hubspot-computed
@@ -94,11 +95,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     for (const d of dealers ?? []) {
       stats.dealers_processed++;
       try {
-        const { count: prints12 } = await admin
-          .from("print_history")
-          .select("id", { count: "exact", head: true })
-          .eq("dealer_id", d.dealer_id)
-          .gte("created_at", twelveMonthsAgo);
+        // DISTINCT vehicles printed in the window, not print_history rows —
+        // same semantics as the trial cap (multiprint-qa-2026-06-11 Issue B).
+        const prints12 = await printedVehicleCount(admin, { dealerId: d.dealer_id, since: twelveMonthsAgo });
 
         // Lifecycle precedence mirrors lib/sync-hubspot.ts dealerCompanyProperties
         // (and the docs/print-eligibility-free-expired.md spec). Free is
@@ -110,11 +109,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         } else if (d.downgraded_at || isFreeAccountType(d.account_type)) {
           stage = LIFECYCLE.ACCOUNT_DOWNGRADED;
         } else {
-          const { count: lifetimePrints } = await admin
-            .from("print_history")
-            .select("id", { count: "exact", head: true })
-            .eq("dealer_id", d.dealer_id);
-          const expired = isOverAllowance({ created_at: d.created_at, lifetime_prints: lifetimePrints ?? 0 });
+          const lifetimePrints = await printedVehicleCount(admin, { dealerId: d.dealer_id });
+          const expired = isOverAllowance({ created_at: d.created_at, lifetime_prints: lifetimePrints });
           stage = expired ? LIFECYCLE.TRIAL_EXPIRED : LIFECYCLE.DEALER_TRIAL;
           if (expired) stats.dealers_expired++;
         }

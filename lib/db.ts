@@ -1708,7 +1708,14 @@ export type Database = {
       };
     };
     Views: { [_ in never]: never };
-    Functions: { [_ in never]: never };
+    Functions: {
+      // Migration 098 — count(DISTINCT vehicle_id) over print_history.
+      // All params optional: dealer / dealer-set / time-window filters.
+      printed_vehicle_count: {
+        Args: { p_dealer_id?: string | null; p_dealer_ids?: string[] | null; p_since?: string | null };
+        Returns: number;
+      };
+    };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };
   };

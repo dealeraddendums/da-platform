@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 import { normalizeSubscriptionType, isPayingAccount } from "@/lib/hubspot";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { billingConfigured, getBillingStatus } from "@/lib/billing";
+import { printedVehicleCount } from "@/lib/print-counts";
 
 export const TRIAL_DAYS_CAP = 30;
 export const TRIAL_PRINTS_CAP = 30;
@@ -184,16 +185,21 @@ export async function canPrintForDealer(dealerTextId: string): Promise<CanPrintR
   // which is the right default for the rare race.
   if (!dealer) return { ok: true };
 
-  const { count: lifetimePrints } = await admin
-    .from("print_history")
-    .select("id", { count: "exact", head: true })
-    .eq("dealer_id", dealerTextId);
+  // Lifetime prints = DISTINCT vehicles printed, not print_history rows (a row
+  // is logged per vehicle per PDF generation, so reprints would inflate the
+  // count and wrongly trip the cap — docs/multiprint-qa-2026-06-11.md Issue B).
+  // Only trial accounts need the number: paid passes outright and Free/
+  // Downgraded blocks outright, so skip the query for both.
+  let lifetimePrints = 0;
+  if (isTrialAccountType(dealer.account_type)) {
+    lifetimePrints = await printedVehicleCount(admin, { dealerId: dealerTextId });
+  }
 
   // Trial/Free gate (pure) — any block here wins; no need to hit da-billing.
   const base = canPrint({
     account_type: dealer.account_type,
     created_at: dealer.created_at,
-    lifetime_prints: lifetimePrints ?? 0,
+    lifetime_prints: lifetimePrints,
   });
   if (!base.ok) return base;
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import AddVehicleModal from "./AddVehicleModal";
 import EditVehicleModal from "./EditVehicleModal";
 import PrintPreviewModal from "./PrintPreviewModal";
@@ -50,12 +51,14 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
 }
 
-function PrintNowBtn({ vehicleId, printed, printDate, canPrint, blockedMsg }: {
+function PrintNowBtn({ vehicleId, printed, printDate, canPrint, blockedMsg, onNavigate }: {
   vehicleId: string;
   printed: boolean;
   printDate: string | null;
   canPrint: boolean;
   blockedMsg?: string;
+  /** Called when the user follows the link — lets the parent refresh print state on return. */
+  onNavigate?: () => void;
 }) {
   const tooltip = !canPrint && blockedMsg
     ? blockedMsg
@@ -84,6 +87,7 @@ function PrintNowBtn({ vehicleId, printed, printDate, canPrint, blockedMsg }: {
       href={`/vehicles/${vehicleId}/addendum`}
       title={tooltip}
       style={baseStyle}
+      onClick={onNavigate}
     >
       Print Now
     </a>
@@ -114,6 +118,10 @@ function SortTh({ label, col, sortBy, sortDir, onSort }: {
 }
 
 export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false, printGate }: Props) {
+  const router = useRouter();
+  // Set when the user leaves for a print screen; the return-to-page effect
+  // refreshes (and resets it) so the new print state shows without a reload.
+  const printNavRef = useRef(false);
   const canPrint = printGate?.ok !== false;
   const printBlockedMsg = printGate?.message;
   const [vehicles, setVehicles] = useState<DealerVehicleRow[]>([]);
@@ -228,6 +236,31 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
 
   useEffect(() => { if (hydrated) void fetchVehicles(); }, [fetchVehicles, hydrated]);
 
+  // Refresh print state when the user RETURNS from a Print Now navigation.
+  // The single-vehicle paths leave this page for the addendum screen (same tab
+  // via PrintNowBtn, new tab via single-selection bulk print), so without this
+  // the green state and the server-rendered dashboard cards stay stale until a
+  // manual reload. Gated on printNavRef so an innocent tab switch doesn't
+  // refetch (fetchVehicles clears the checkbox selection).
+  useEffect(() => {
+    if (!hydrated) return;
+    const refresh = () => {
+      if (!printNavRef.current) return;
+      printNavRef.current = false;
+      void fetchVehicles();
+      router.refresh();
+    };
+    const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) refresh(); };
+    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, fetchVehicles]);
+
   const effectivePerPage = perPage === 0 ? total : perPage;
   const totalPages = effectivePerPage > 0 ? Math.ceil(total / effectivePerPage) : 1;
 
@@ -253,6 +286,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
 
     // Single vehicle: go to addendum options screen
     if (ids.length === 1) {
+      printNavRef.current = true; // refresh print state when the user returns
       window.open(`/dealer-vehicles/${ids[0]}/addendum?type=${docType}`, "_blank");
       setCheckedIds(new Set());
       return;
@@ -568,7 +602,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
                         </button>
                       </td>
                       <td className="px-3 py-2">
-                        <PrintNowBtn vehicleId={v.id} printed={v.print_status === 1} printDate={v.print_date ?? null} canPrint={canPrint} blockedMsg={printBlockedMsg} />
+                        <PrintNowBtn vehicleId={v.id} printed={v.print_status === 1} printDate={v.print_date ?? null} canPrint={canPrint} blockedMsg={printBlockedMsg} onNavigate={() => { printNavRef.current = true; }} />
                       </td>
                     </tr>
                   );
@@ -742,7 +776,16 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
           docType={bulkModal.docType}
           vehicleName={`${bulkModal.count} Vehicles`}
           preloadedUrl={bulkModal.url}
-          onClose={() => setBulkModal(null)}
+          onClose={() => {
+            setBulkModal(null);
+            // Refresh the rows (green Print Now state) AND the parent
+            // dashboard cards (Printed This Month / Unprinted are rendered by
+            // the server dashboard page, not this component). Done on close —
+            // by then the fire-and-forget print-flag/print_history writes from
+            // the bulk generation have landed.
+            void fetchVehicles();
+            router.refresh();
+          }}
         />
       )}
 

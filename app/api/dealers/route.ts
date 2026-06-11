@@ -147,14 +147,23 @@ async function getPrintCounts(admin: ReturnType<typeof createAdminSupabaseClient
   if (dealerIds.length === 0) return { lifetime: {} as Record<string, number>, recent: {} as Record<string, number> };
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const [lifetimeRes, recentRes] = await Promise.all([
-    admin.from("print_history").select("dealer_id").in("dealer_id", dealerIds).limit(50000),
-    admin.from("print_history").select("dealer_id").in("dealer_id", dealerIds).gte("created_at", thirtyDaysAgo).limit(10000),
+    admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).limit(50000),
+    admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).gte("created_at", thirtyDaysAgo).limit(10000),
   ]);
-  const lifetime: Record<string, number> = {};
-  const recent: Record<string, number> = {};
-  for (const r of lifetimeRes.data ?? []) lifetime[r.dealer_id] = (lifetime[r.dealer_id] ?? 0) + 1;
-  for (const r of recentRes.data ?? []) recent[r.dealer_id] = (recent[r.dealer_id] ?? 0) + 1;
-  return { lifetime, recent };
+  // DISTINCT vehicles per dealer, not rows — a row is logged per vehicle per
+  // PDF generation, so reprints inflate row counts (multiprint-qa Issue B).
+  const dedupe = (rows: Array<{ dealer_id: string; vehicle_id: string | null }> | null) => {
+    const sets = new Map<string, Set<string>>();
+    for (const r of rows ?? []) {
+      if (!r.vehicle_id) continue;
+      if (!sets.has(r.dealer_id)) sets.set(r.dealer_id, new Set());
+      sets.get(r.dealer_id)!.add(r.vehicle_id);
+    }
+    const counts: Record<string, number> = {};
+    sets.forEach((s, d) => { counts[d] = s.size; });
+    return counts;
+  };
+  return { lifetime: dedupe(lifetimeRes.data), recent: dedupe(recentRes.data) };
 }
 
 // hubspot_company_id is stored directly in the Supabase dealers table.

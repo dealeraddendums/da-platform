@@ -22,6 +22,7 @@ import {
   DedupSkipError,
 } from "@/lib/hubspot";
 import { isOverAllowance, isFreeAccountType } from "@/lib/print-eligibility";
+import { printedVehicleCount } from "@/lib/print-counts";
 
 // ── Property builders ───────────────────────────────────────────────────────
 
@@ -295,19 +296,17 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
       groupNumericId = g?.internal_id ?? null;
     }
 
-    // Lifetime print count from print_history — feeds the Trial Expired
+    // Lifetime print count (DISTINCT vehicles, not print_history rows — same
+    // semantics as the canPrint trial cap) — feeds the Trial Expired
     // derivation alongside created_at. dealers.lifetime_prints isn't a
     // stored column (getPrintCounts in app/api/dealers/route.ts computes
     // it on demand from print_history), so we count it here too. Only
     // matters when the dealer isn't paid and isn't already Free — paid
     // wins outright via isPayingAccount, so this is bounded to legacy
     // trials and ex-trials.
-    const { count: lifetimePrints } = await admin
-      .from("print_history")
-      .select("id", { count: "exact", head: true })
-      .eq("dealer_id", dealer.dealer_id);
+    const lifetimePrints = await printedVehicleCount(admin, { dealerId: dealer.dealer_id });
 
-    const properties = dealerCompanyProperties(dealer, groupName, groupNumericId, lifetimePrints ?? 0);
+    const properties = dealerCompanyProperties(dealer, groupName, groupNumericId, lifetimePrints);
     payload = properties;
 
     // Create-only: a dealer Company is always industry "Automotive Dealer"; the

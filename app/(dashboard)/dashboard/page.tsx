@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import { canPrintForDealer } from "@/lib/print-eligibility";
+import { printedVehicleCount } from "@/lib/print-counts";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import { PageHeader } from "@/components/PageHeader";
 import ActivitySection from "@/components/dashboard/ActivitySection";
@@ -290,7 +291,7 @@ export default async function DashboardPage() {
       { count: trialCount },
       { count: vehicleTotal },
       { count: vehiclePrinted },
-      { count: addendumMonth },
+      addendumMonth,
       { data: dealerRows },
     ] = await Promise.all([
       admin.from("dealers").select("*", { count: "exact", head: true })
@@ -301,8 +302,9 @@ export default async function DashboardPage() {
         .neq("status", "inactive"),
       admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
         .neq("status", "inactive").eq("print_status", 1),
-      admin.from("print_history").select("*", { count: "exact", head: true })
-        .gte("created_at", startOfMonth.toISOString()),
+      // DISTINCT vehicles printed this month, not print_history rows
+      // (multiprint-qa Issue B — reprints inflate row counts).
+      printedVehicleCount(admin, { since: startOfMonth.toISOString() }),
       admin.from("dealers").select("id, dealer_id, name, account_type, lat, lng, address, city, state, zip").limit(5000),
     ]);
 
@@ -376,15 +378,14 @@ export default async function DashboardPage() {
     const textDealerIds = (groupDealerRows ?? []).map(d => d.dealer_id as string);
     const dealerCount = textDealerIds.length;
 
-    // Phase 2: addendums this month (needs textDealerIds)
+    // Phase 2: addendums this month (needs textDealerIds) — DISTINCT vehicles,
+    // not print_history rows (multiprint-qa Issue B).
     let addendumMonth = 0;
     if (textDealerIds.length > 0) {
-      const { count } = await admin
-        .from("print_history")
-        .select("*", { count: "exact", head: true })
-        .in("dealer_id", textDealerIds)
-        .gte("created_at", startOfMonth.toISOString());
-      addendumMonth = count ?? 0;
+      addendumMonth = await printedVehicleCount(admin, {
+        dealerIds: textDealerIds,
+        since: startOfMonth.toISOString(),
+      });
     }
 
     const mapDealers: DealerMapPoint[] = (groupDealerRows ?? []).map(d => ({

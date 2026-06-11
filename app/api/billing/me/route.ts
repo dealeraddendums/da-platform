@@ -13,6 +13,7 @@ import {
   type BillingInvoice,
 } from "@/lib/billing";
 import { isOverAllowance, TRIAL_DAYS_CAP, TRIAL_PRINTS_CAP } from "@/lib/print-eligibility";
+import { printedVehicleCount } from "@/lib/print-counts";
 
 interface SubscriptionInfo {
   productId: string | null;
@@ -156,13 +157,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
   }
 
-  // Trial progress (lifetime prints from print_history, same source as
-  // canPrintForDealer) — drives the "Free"/"Trial" card copy.
-  const { count: lifetimePrints } = await admin
-    .from("print_history")
-    .select("id", { count: "exact", head: true })
-    .eq("dealer_id", resolved.dealerTextId);
-  const trial = computeTrial(dealer.created_at, lifetimePrints ?? 0);
+  // Trial progress (lifetime DISTINCT vehicles printed, same source as
+  // canPrintForDealer — reprints don't inflate it) — drives the "Free"/"Trial"
+  // card copy.
+  const lifetimePrints = await printedVehicleCount(admin, { dealerId: resolved.dealerTextId });
+  const trial = computeTrial(dealer.created_at, lifetimePrints);
 
   // ── Group-billed dealer ───────────────────────────────────────────────────
   // The subscription + invoices live on the GROUP's da-billing customer, not
