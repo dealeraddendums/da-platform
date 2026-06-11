@@ -233,6 +233,14 @@ function applyVehicleDataToWidgets(
   return result;
 }
 
+// Capture the pointer on the drag-origin element so pointerup/pointercancel are
+// delivered even when released outside the paper or the window.
+function capturePointer(e: React.PointerEvent): HTMLElement | null {
+  const el = e.currentTarget as HTMLElement;
+  try { el.setPointerCapture(e.pointerId); } catch { return null; }
+  return el;
+}
+
 type DealerInfo = {
   name?: string | null;
   address?: string | null;
@@ -334,6 +342,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     mode: 'move' | 'resize'; id: string; dir?: string;
     ox: number; oy: number; sx: number; sy: number;
     origX: number; origY: number; origW: number; origH: number;
+    // Pointer-capture bookkeeping: a drag only "starts" past a small movement
+    // threshold, so a plain click selects without ever entering move mode.
+    started: boolean; pointerId: number; el: HTMLElement | null;
   } | null>(null);
   const ZRef = useRef(Z);
   const paperSizeRef = useRef(paperSize);
@@ -509,8 +520,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   }, [nid, pushHistory]);
 
   // ── Drag/resize ────────────────────────────────────────────────────
-  const startMove = useCallback((e: React.MouseEvent, id: string) => {
-    if (previewMode) return;
+  const startMove = useCallback((e: React.PointerEvent, id: string) => {
+    if (previewMode || e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     setSelId(id);
@@ -523,11 +534,12 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       oy: e.clientY - pr.top  - w.y * ZRef.current,
       sx: e.clientX, sy: e.clientY,
       origX: w.x, origY: w.y, origW: w.w, origH: w.h,
+      started: false, pointerId: e.pointerId, el: capturePointer(e),
     };
   }, [previewMode]);
 
-  const startResize = useCallback((e: React.MouseEvent, id: string, dir: string) => {
-    if (previewMode) return;
+  const startResize = useCallback((e: React.PointerEvent, id: string, dir: string) => {
+    if (previewMode || e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     const w = widgetsRef.current[id];
@@ -537,13 +549,20 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       ox: 0, oy: 0,
       sx: e.clientX, sy: e.clientY,
       origX: w.x, origY: w.y, origW: w.w, origH: w.h,
+      started: false, pointerId: e.pointerId, el: capturePointer(e),
     };
   }, [previewMode]);
 
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
+    const DRAG_THRESHOLD = 4; // px of pointer travel before a press becomes a drag
+
+    const onMove = (e: PointerEvent) => {
       const drag = dragRef.current;
-      if (!drag || !paperRef.current) return;
+      if (!drag || !paperRef.current || e.pointerId !== drag.pointerId) return;
+      if (!drag.started) {
+        if (Math.abs(e.clientX - drag.sx) < DRAG_THRESHOLD && Math.abs(e.clientY - drag.sy) < DRAG_THRESHOLD) return;
+        drag.started = true;
+      }
       const w = widgetsRef.current[drag.id];
       if (!w) return;
       const Z = ZRef.current;
@@ -577,19 +596,32 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       }
     };
 
-    const onUp = () => {
-      if (!dragRef.current) return;
+    const endDrag = () => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      try { drag.el?.releasePointerCapture(drag.pointerId); } catch { /* already released */ }
       dragRef.current = null;
+      if (!drag.started) return; // plain click: selection only, no state write, no history entry
       setWidgets({ ...widgetsRef.current });
       const ws = widgetsRef.current;
       setNid(n => { pushHistory(ws, n); return n; });
     };
 
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    const onUp = (e: PointerEvent) => {
+      if (dragRef.current && e.pointerId !== dragRef.current.pointerId) return;
+      endDrag();
+    };
+    const onBlur = () => endDrag();
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+    window.addEventListener('blur', onBlur);
     return () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('blur', onBlur);
     };
   }, [pushHistory]);
 
@@ -1383,21 +1415,28 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                           key={tile.type}
                           draggable={!used}
                           onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; setDragType(tile.type); }}
-                          onClick={() => !used && addWidget(tile.type)}
+                          onClick={() => {
+                            if (!used) { addWidget(tile.type); return; }
+                            // Single-instance widget already placed — select it on the canvas
+                            const placed = Object.values(widgets).find(wg => wg.type === tile.type);
+                            if (placed) {
+                              setSelId(placed.id);
+                              widgetEls.current.get(placed.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                            }
+                          }}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 7,
                             padding: '7px 8px', border: '1px solid #e0e0e0', borderRadius: 4,
-                            marginBottom: 3, cursor: used ? 'default' : 'grab',
-                            background: '#fff', opacity: used ? 0.22 : 1,
+                            marginBottom: 3, cursor: used ? 'pointer' : 'grab',
+                            background: '#fff', opacity: used ? 0.4 : 1,
                             filter: used ? 'grayscale(1)' : 'none',
-                            pointerEvents: used ? 'none' : 'auto',
                             transition: 'all .12s',
                           }}
                         >
                           <div style={{ width: 26, height: 26, borderRadius: 5, background: '#f0f4ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}>{tile.emoji}</div>
                           <div>
                             <div style={{ fontSize: 11, fontWeight: 500, color: '#333' }}>{tile.label}</div>
-                            <div style={{ fontSize: 10, color: '#78828c', marginTop: 1 }}>{tile.hint}</div>
+                            <div style={{ fontSize: 10, color: '#78828c', marginTop: 1 }}>{used ? 'Placed — click to select' : tile.hint}</div>
                           </div>
                         </div>
                       );
@@ -1447,8 +1486,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                   <div
                     key={w.id}
                     ref={el => { if (el) widgetEls.current.set(w.id, el); else widgetEls.current.delete(w.id); }}
-                    style={{ position: 'absolute', left: w.x, top: w.y, width: w.w, height: w.h, zIndex: w.z ?? 10, cursor: previewMode ? 'default' : 'move', userSelect: 'none' }}
-                    onMouseDown={e => startMove(e, w.id)}
+                    style={{ position: 'absolute', left: w.x, top: w.y, width: w.w, height: w.h, zIndex: w.z ?? 10, cursor: previewMode ? 'default' : 'move', userSelect: 'none', touchAction: 'none' }}
+                    onPointerDown={e => startMove(e, w.id)}
                     onClick={e => { e.stopPropagation(); if (!previewMode) setSelId(w.id); }}
                   >
                     {/* Selection overlay */}
@@ -1472,7 +1511,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                     {isSelected && (
                       <div
                         style={{ position: 'absolute', top: -8, right: -8, width: 18, height: 18, background: '#ff5252', borderRadius: '50%', border: '2px solid #fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#fff', fontWeight: 700, zIndex: 6 }}
-                        onMouseDown={e => e.stopPropagation()}
+                        onPointerDown={e => e.stopPropagation()}
                         onClick={e => { e.stopPropagation(); deleteWidget(w.id); }}
                       >✕</div>
                     )}
@@ -1486,8 +1525,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                           background: '#fff', border: '1.5px solid #1976d2', borderRadius: 2, zIndex: 7,
                           ...resizeHandlePos(dir),
                           cursor: dir + '-resize',
+                          touchAction: 'none',
                         }}
-                        onMouseDown={e => startResize(e, w.id, dir)}
+                        onPointerDown={e => startResize(e, w.id, dir)}
                       />
                     ))}
                     {/* Content */}
@@ -2090,8 +2130,17 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
       {w.type === 'dealer' && (
         <EpSection>
           <Eps>Dealer Address</Eps>
-          <textarea value={(d.text as string) || ''} onChange={e => u('text', e.target.value)} rows={5}
-            style={{ ...fiStyle, resize: 'none', width: '100%', boxSizing: 'border-box' }} />
+          {/* Address is profile-sourced — every load path re-derives it, so it's not editable here */}
+          {(d.text as string) ? (
+            <div style={{ ...fiStyle, padding: '7px 9px', whiteSpace: 'pre-wrap', color: '#555', background: '#f7f8fa', cursor: 'default' }}>
+              {(d.text as string)}
+            </div>
+          ) : null}
+          <div style={{ fontSize: 10, color: '#78828c', marginTop: 6, lineHeight: 1.5 }}>
+            {(d.text as string)
+              ? <>Address comes from your profile — edit it in <a href="/profile" style={{ color: '#1976d2' }}>My Profile</a>.</>
+              : <>No address on file — add it in <a href="/profile" style={{ color: '#1976d2' }}>My Profile</a>.</>}
+          </div>
           <Fd label="Alignment" style={{ marginTop: 8 }}>
             <div style={{ display: 'flex', gap: 2 }}>
               {(['left','center','right'] as const).map(a => (
