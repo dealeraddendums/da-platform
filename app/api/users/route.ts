@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { lastSignInByEmail } from "@/lib/last-sign-in";
+import { fireProfileSync } from "@/lib/sync-hubspot";
 import type { UserRole } from "@/lib/db";
 
 const DEALER_ROLES: UserRole[] = ["dealer_admin", "dealer_user", "dealer_restricted"];
@@ -295,6 +296,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     void admin.auth.admin.deleteUser(authData.user.id);
     return NextResponse.json({ error: profileErr.message }, { status: 500 });
   }
+
+  // HubSpot Contact sync — fire-and-forget, mirroring invite/accept. Without
+  // this, directly-added users (the "+ Add User" path) never reach HubSpot.
+  fireProfileSync(authData.user.id);
 
   return NextResponse.json({ user: profile }, { status: 201 });
 }

@@ -19,7 +19,12 @@ import { printedVehicleCount } from "@/lib/print-counts";
  *
  * Daily refresh of the HubSpot Company fields that are too expensive or
  * too event-less to push from the request path:
- *   • prints_last_30        from dealers.last30
+ *   • prints_last_30        DISTINCT vehicles from print_history over a
+ *                           rolling 30 days (computed fresh — dealers.last30
+ *                           is refreshed from this too, so the dealers-list
+ *                           UI and event-driven syncs stay correct; the old
+ *                           stored counter stopped updating after the
+ *                           multiprint record-on-send refactor)
  *   • prints_last_12mo      COUNT(print_history) for the dealer over 12mo
  *   • dealers_in_group      COUNT(dealers) for each group's Company
  *   • lifecyclestage        re-evaluate Trial → Trial Expired when the
@@ -91,6 +96,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .eq("active", true) as { data: Array<{ id: string; dealer_id: string; account_type: string | null; created_at: string | null; last30: number | null; hubspot_company_id: string; group_id: string | null; downgraded_at: string | null }> | null };
 
     const twelveMonthsAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+    const thirtyDaysAgo   = new Date(Date.now() -  30 * 24 * 60 * 60 * 1000).toISOString();
 
     for (const d of dealers ?? []) {
       stats.dealers_processed++;
@@ -98,6 +104,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // DISTINCT vehicles printed in the window, not print_history rows —
         // same semantics as the trial cap (multiprint-qa-2026-06-11 Issue B).
         const prints12 = await printedVehicleCount(admin, { dealerId: d.dealer_id, since: twelveMonthsAgo });
+        const prints30 = await printedVehicleCount(admin, { dealerId: d.dealer_id, since: thirtyDaysAgo });
+
+        // Keep dealers.last30 in step with the same computation — it feeds
+        // the dealers-list UI and the event-driven HubSpot pushes between
+        // cron runs.
+        if ((d.last30 ?? 0) !== prints30) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any).from("dealers").update({ last30: prints30 }).eq("id", d.id);
+        }
 
         // Lifecycle precedence mirrors lib/sync-hubspot.ts dealerCompanyProperties
         // (and the docs/print-eligibility-free-expired.md spec). Free is
@@ -118,7 +133,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         await upsertObject({
           object: "companies",
           properties: {
-            prints_last_30:   d.last30 ?? 0,
+            prints_last_30:   prints30 ?? 0,
             prints_last_12mo: prints12 ?? 0,
             lifecyclestage:   stage,
           },

@@ -151,8 +151,9 @@ function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, 
     feed_company:      d.inventory_provider,
     feed_company_type: d.inventory_provider ? (d.inventory_provider_is_dms ? "Auto-DMS" : "Auto-Web") : null,
 
-    // Activity — last30 is event-driven (already on the row); 12mo +
-    // dealers_in_group come from the cron in 14b.
+    // Activity — dealers.last30 is refreshed nightly by the computed cron
+    // (distinct vehicles from print_history, rolling 30 days); 12mo +
+    // dealers_in_group come from the cron too.
     prints_last_30: d.last30 ?? null,
 
     // Lifecycle — paying ? Customer : Dealer Trial. Trial → Trial Expired
