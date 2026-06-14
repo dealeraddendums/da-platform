@@ -342,13 +342,13 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
             <Field label="Phone" value={form.phone} editing={editing} onChange={set("phone")} view={group.phone} />
             {isSuperAdmin && (
               <div className="flex items-start justify-between gap-4">
-                <div style={{ flexShrink: 0 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Test Account</span>
                   <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
                     Enables permanent deletion. Member dealers stay; they&apos;re just dissociated.
                   </p>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
+                <label className="flex items-center gap-2 cursor-pointer" style={{ userSelect: "none", flexShrink: 0 }}>
                   <input
                     type="checkbox"
                     checked={group.is_test}
@@ -366,13 +366,13 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
             {/* Freeze legacy ETL sync — super_admin only (migration 094). Cascades to all members. */}
             {isSuperAdmin && (
               <div className="flex items-start justify-between gap-4">
-                <div style={{ flexShrink: 0 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Freeze legacy ETL sync</span>
                   <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
                     When on, the nightly legacy sync won&apos;t overwrite this group <strong>or its {memberCount ?? 0} member dealer{(memberCount ?? 0) === 1 ? "" : "s"}</strong> from Aurora. Print history still syncs.
                   </p>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
+                <label className="flex items-center gap-2 cursor-pointer" style={{ userSelect: "none", flexShrink: 0 }}>
                   <input
                     type="checkbox"
                     checked={group.etl_locked}

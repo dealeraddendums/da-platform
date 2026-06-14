@@ -979,7 +979,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                 billing / HubSpot and enabling the red Delete Dealer button. */}
             {isSuperAdmin && (
               <div className="flex items-start justify-between gap-4">
-                <div style={{ flexShrink: 0 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Account Purpose</span>
                   <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
                     Test &amp; Sales Demo are excluded from BI/billing/HubSpot and allow deletion. Never use for a real dealership.
@@ -990,7 +990,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                   disabled={testToggling || editing}
                   onChange={(e) => void setPurpose(e.target.value as "real" | "test" | "sales_demo")}
                   className="input"
-                  style={{ width: 130, cursor: testToggling ? "wait" : "pointer", color: dealer.is_test ? "#ffa500" : "var(--text-primary)" }}
+                  style={{ width: 130, flexShrink: 0, cursor: testToggling ? "wait" : "pointer", color: dealer.is_test ? "#ffa500" : "var(--text-primary)" }}
                 >
                   <option value="real">Real</option>
                   <option value="test">Test</option>
@@ -1002,7 +1002,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
             {/* Freeze legacy ETL sync — super_admin only (migration 094). */}
             {isSuperAdmin && (
               <div className="flex items-start justify-between gap-4">
-                <div style={{ flexShrink: 0 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Freeze legacy ETL sync</span>
                   <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
                     When on, the nightly legacy sync won&apos;t overwrite this account from Aurora — the dealer is managing it in the new platform. Print history still syncs.
@@ -1011,7 +1011,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                     )}
                   </p>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
+                <label className="flex items-center gap-2 cursor-pointer" style={{ userSelect: "none", flexShrink: 0 }}>
                   <input
                     type="checkbox"
                     checked={etlEffectiveLocked}
