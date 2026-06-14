@@ -5,6 +5,7 @@ import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { archiveCustomer, unarchiveCustomer, billingConfigured, updateCustomer, getTemplate, putTemplate } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
 import { fireDealerSync, fireDealerReliable } from "@/lib/sync-hubspot";
+import { fireConversionWebhook } from "@/lib/marketing-webhook";
 import { normalizeSubscriptionType, isPayingAccount } from "@/lib/hubspot";
 import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 import { fireSuperAdminGroupAssignCascade } from "@/lib/group-billing-cascade";
@@ -428,6 +429,16 @@ export async function PATCH(
         ? "dealer update (upgrade to paying plan — Customer workflow)"
         : "dealer update (plan tier change)";
     fireDealerReliable(dealerUuid, ctx);
+    // Operator upgrade → notify Marketing OS so its funnel Converted stage
+    // updates. resolved.dealer_id (ss_*) is the marketing_leads.da_dealer_id
+    // join key. Only on the upgrade transition; fire-and-forget.
+    if (lifecycleTransition === "upgrade") {
+      fireConversionWebhook({
+        dealerId: resolved.dealer_id,
+        convertedAt: new Date().toISOString(),
+        plan: typeof body.account_type === "string" ? body.account_type : undefined,
+      });
+    }
   } else {
     fireDealerSync(dealerUuid);
   }

@@ -15,6 +15,7 @@ import {
   type BillingProduct,
 } from "@/lib/billing";
 import { fireDealerReliable } from "@/lib/sync-hubspot";
+import { fireConversionWebhook } from "@/lib/marketing-webhook";
 
 // dealers.account_type value for each tier — flips Trial → a paying type on
 // conversion so the print gate unblocks and HubSpot moves Trial → Customer.
@@ -252,6 +253,14 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         .eq("id", dealer.id);
     }
     fireDealerReliable(dealer.id, "trial→paid conversion (lifecycle)");
+    // Notify Marketing OS so its funnel's Converted stage lights up in real
+    // time. dealerTextId (ss_*) is the marketing_leads.da_dealer_id join key.
+    // Fire-and-forget — never blocks/breaks the upgrade.
+    fireConversionWebhook({
+      dealerId: dealerTextId,
+      convertedAt: new Date().toISOString(),
+      plan: descriptor.name,
+    });
   }
 
   return NextResponse.json({
