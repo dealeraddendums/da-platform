@@ -144,7 +144,19 @@ export async function PATCH(
     patch.etl_locked_by = body.etl_locked ? claims.sub : null;
     patch.etl_locked_reason = body.etl_locked ? (body.etl_locked_reason ?? null) : null;
   }
-  if (body.group_id !== undefined && claims.role === "super_admin") patch.group_id = body.group_id;
+  if (body.group_id !== undefined && claims.role === "super_admin") {
+    patch.group_id = body.group_id;
+    // Removing a dealer from its group must clear group-derived state, or the
+    // dealer keeps a stale "🔒 Group" lock and a group-billed billing route that
+    // points at a now-missing group (orphaning the past-due/billing lookup).
+    // An explicit value for any of these in the same request still wins (the
+    // dedicated blocks below run after this and only set when body provides it).
+    if (body.group_id === null) {
+      if (body.group_controls_templates === undefined) patch.group_controls_templates = false;
+      if (body.subscription_billed_to === undefined) patch.subscription_billed_to = "dealer";
+      if (body.labels_billed_to === undefined) patch.labels_billed_to = "dealer";
+    }
+  }
   // account_type drives the HubSpot subscription_type + lifecyclestage —
   // super_admin only. Free downgrades and Manual/Auto-Web/Auto-DMS upgrades
   // both flow through here.

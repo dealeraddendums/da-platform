@@ -158,11 +158,12 @@ export async function DELETE(
 
   const { data, error: dbError } = await admin
     .from("dealers")
-    // Reset billing-flow flags to defaults on the way out so re-assigning
-    // to a different group starts clean. Group_controls_templates is left
-    // alone — it's an admin-managed flag, not part of billing cascade.
+    // Reset group-derived flags to defaults on the way out so the dealer
+    // doesn't keep a stale "🔒 Group" lock (group_controls_templates is only
+    // meaningful with a group_id) or a group-billed route pointing at a group
+    // it no longer belongs to. Re-assigning to a different group starts clean.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .update({ group_id: null, subscription_billed_to: "dealer", labels_billed_to: "dealer" } as any)
+    .update({ group_id: null, subscription_billed_to: "dealer", labels_billed_to: "dealer", group_controls_templates: false } as any)
     .eq("id", body.dealer_id)
     .select()
     .single();

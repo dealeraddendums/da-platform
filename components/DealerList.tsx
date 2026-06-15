@@ -520,7 +520,10 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                             TEST
                           </span>
                         )}
-                        {d.group_controls_templates && (
+                        {/* Only meaningful while the dealer is actually in a group —
+                            matches the lock gate in layout/settings/builder. A
+                            group-less dealer with a stale flag is NOT locked. */}
+                        {d.group_controls_templates && d.group_id && (
                           <span
                             className="text-xs font-semibold px-2 py-0.5"
                             style={{
