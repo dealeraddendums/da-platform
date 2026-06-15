@@ -40,8 +40,20 @@ function calcGroupDiscountTier(n) {
 
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// da-billing rate-limits bursts (HTTP 429). Retry with exponential backoff so a
+// 160-customer sweep doesn't drop requests; also throttled between groups below.
+async function fetchRetry(url, opts) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, opts);
+    if (res.status !== 429 || attempt >= 6) return res;
+    await sleep(750 * Math.pow(2, attempt)); // 0.75,1.5,3,6,12,24s
+  }
+}
+
 async function getCustomer(customerId) {
-  const res = await fetch(`${BASE}/customers/${encodeURIComponent(customerId)}`, {
+  const res = await fetchRetry(`${BASE}/customers/${encodeURIComponent(customerId)}`, {
     headers: { "X-API-Key": API_KEY },
   });
   if (res.status === 404) return null;
@@ -51,7 +63,7 @@ async function getCustomer(customerId) {
 }
 
 async function putDiscount(customerId, value) {
-  const res = await fetch(`${BASE}/customers/${encodeURIComponent(customerId)}`, {
+  const res = await fetchRetry(`${BASE}/customers/${encodeURIComponent(customerId)}`, {
     method: "PUT",
     headers: {
       "X-API-Key": API_KEY,
@@ -102,6 +114,7 @@ async function fetchAllGroups() {
 
   const records = [];
   for (const g of groups) {
+    await sleep(120); // gentle throttle so da-billing doesn't 429 the sweep
     let rec = { groupId: g.id, name: g.name, billing_customer_id: g.billing_customer_id, dealerCount: null, oldDiscount: null, newDiscount: null, action: null };
     try {
       const customer = await getCustomer(g.billing_customer_id);
