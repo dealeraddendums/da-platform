@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow, GroupUpdate } from "@/lib/db";
+import { billingConfigured, updateCustomer } from "@/lib/billing";
+import { fireAndForget } from "@/lib/billing-sync";
 
 type Params = { params: { id: string } };
 
@@ -92,6 +94,19 @@ export async function PATCH(
   }
 
   const admin = createAdminSupabaseClient();
+
+  // Snapshot the prior name so we can detect a real rename for the da-billing
+  // company sync below (only when name is actually being patched).
+  let prevName: string | null = null;
+  if (patch.name !== undefined) {
+    const { data: snap } = await admin
+      .from("groups")
+      .select("name")
+      .eq("id", params.id)
+      .maybeSingle<{ name: string | null }>();
+    prevName = snap?.name ?? null;
+  }
+
   const { data, error: dbError } = await admin
     .from("groups")
     .update(patch)
@@ -106,7 +121,31 @@ export async function PATCH(
     );
   }
 
-  return NextResponse.json({ data: data as GroupRow });
+  const updatedGroup = data as GroupRow;
+
+  // Group rename → propagate the new name to the group's da-billing customer
+  // (company field). NAME/COMPANY ONLY — pricing lives in template:{uuid} and is
+  // never touched here. updateCustomer is a partial PUT (lib/billing.ts), so
+  // sending just { company } can't blank other fields — no read-merge needed.
+  // Only the group's own customer; member dealers' customers are unaffected.
+  // Fire-and-forget: a billing hiccup logs to billing_sync_errors, never blocks
+  // or rolls back the rename.
+  if (
+    patch.name !== undefined
+    && prevName !== null
+    && (patch.name ?? "").trim() !== prevName
+    && updatedGroup.billing_customer_id
+    && billingConfigured()
+  ) {
+    const newName = (patch.name as string).trim();
+    const customerId = updatedGroup.billing_customer_id;
+    fireAndForget(
+      () => updateCustomer(customerId, { company: newName }),
+      { event: "billing.group.rename", groupId: updatedGroup.id, payload: { customerId, newName } },
+    );
+  }
+
+  return NextResponse.json({ data: updatedGroup });
 }
 
 /**

@@ -433,6 +433,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       : "real";
 
   const admin = createAdminSupabaseClient();
+
+  // Pre-check the login email BEFORE creating anything — a duplicate must fail
+  // cleanly (409) and create no dealer/user, not create the dealer then 201 with
+  // a swallowed warning. Case-insensitive profile existence check (auth schema
+  // isn't on the data API), mirroring the dealer Users-tab route.
+  if (username?.trim() && password?.trim()) {
+    const rawUsername = username.trim();
+    const preEmail = (rawUsername.includes("@") ? rawUsername : `${rawUsername}@dealeraddendums.com`).toLowerCase();
+    const { data: dupProfile } = await admin
+      .from("profiles")
+      .select("id")
+      .ilike("email", preEmail)
+      .maybeSingle<{ id: string }>();
+    if (dupProfile) {
+      return NextResponse.json({ error: "That email is already registered — use a different email." }, { status: 409 });
+    }
+  }
+
   const insertPayload = {
     dealer_id, name: name.trim(), internal_id: internalId, inventory_dealer_id: dealer_id,
     ...rest,
@@ -538,6 +556,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     await seedTrialSampleData(createdDealer.dealer_id as string);
   }
 
+  // Tracks whether the created USER actually got a welcome/login email, so the
+  // response's emailSent flag is truthful (it used to report sendNotify alone,
+  // even though no user email was ever sent on the dealer path).
+  let userWelcomeSent = false;
   if (username?.trim() && password?.trim()) {
     const rawUsername = username.trim();
     const authEmail = rawUsername.includes("@") ? rawUsername : `${rawUsername}@dealeraddendums.com`;
@@ -568,6 +590,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // moments later. Plain fire-and-forget — updates aren't the
     // workflow trigger, so no retry+alert needed.
     fireProfileSync(authUser.user.id);
+
+    // Welcome/login email to the created user (sendNotify button only) —
+    // mirrors the group welcome. Previously only the internal email fired, so
+    // an admin-created dealer user was never actually notified.
+    if (sendNotify) {
+      const contactName = (rest.primary_contact as string | undefined) ?? null;
+      void sendMandrillEmail({
+        subject: `Welcome to DealerAddendums — ${name.trim()}`,
+        from_email: "noreply@dealeraddendums.com",
+        from_name: "DealerAddendums",
+        to: [{ email: authEmail, name: contactName ?? undefined }],
+        html: `<p>Hi ${contactName ?? "there"},</p>
+<p>Your DealerAddendums account <strong>${name.trim()}</strong> has been created.</p>
+<p><strong>Your login details:</strong><br>
+Username: ${authEmail}</p>
+<p>You can access your account at: <a href="https://app.dealeraddendums.com">https://app.dealeraddendums.com</a></p>
+<p>If you have any questions, contact <a href="mailto:support@dealeraddendums.com">support@dealeraddendums.com</a></p>`,
+      }).catch((err) => console.error("[dealers/notify] welcome email failed:", err instanceof Error ? err.message : err));
+      userWelcomeSent = true;
+    }
   }
 
   const dealer = data as Record<string, unknown>;
@@ -599,5 +641,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 <strong>Created at:</strong> ${now} ET</p>`,
   }).catch((err) => console.error("[dealers/notify] internal email failed:", err instanceof Error ? err.message : err));
 
-  return NextResponse.json({ data, emailSent: sendNotify ? true : false }, { status: 201 });
+  return NextResponse.json({ data, emailSent: userWelcomeSent }, { status: 201 });
 }

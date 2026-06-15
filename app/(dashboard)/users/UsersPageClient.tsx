@@ -256,6 +256,36 @@ const labelStyle: React.CSSProperties = { display: "block", fontSize: 12, fontWe
 const inputStyle: React.CSSProperties = { width: "100%", height: 36, border: "1px solid #e0e0e0", borderRadius: 4, padding: "0 10px", fontSize: 13, color: "#333", outline: "none", boxSizing: "border-box" };
 const selectStyle: React.CSSProperties = { ...inputStyle };
 
+// Password input with a show/hide eye toggle. Each instance keeps its own
+// visibility state so the Add/Edit password + confirm fields toggle independently.
+function PasswordField({ value, onChange, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        style={{ ...inputStyle, paddingRight: 40 }}
+        type={show ? "text" : "password"}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+      <button
+        type="button"
+        onClick={() => setShow(s => !s)}
+        aria-label={show ? "Hide password" : "Show password"}
+        title={show ? "Hide password" : "Show password"}
+        style={{ position: "absolute", right: 6, top: 0, height: 36, width: 30, border: "none", background: "none", cursor: "pointer", color: "#78828c", fontSize: 15, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+      >
+        {show ? "🙈" : "👁️"}
+      </button>
+    </div>
+  );
+}
+
 // ── AddUserModal ──────────────────────────────────────────────────────────────
 
 type AddForm = {
@@ -358,11 +388,11 @@ function AddUserModal({ onClose, onSuccess, dealerMode, ownDealerId }: {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
               <label style={labelStyle}>Password *</label>
-              <input style={inputStyle} type="password" value={form.password} onChange={e => setField("password", e.target.value)} placeholder="Min. 8 characters" />
+              <PasswordField value={form.password} onChange={v => setField("password", v)} placeholder="Min. 8 characters" />
             </div>
             <div>
               <label style={labelStyle}>Confirm Password *</label>
-              <input style={inputStyle} type="password" value={form.confirm} onChange={e => setField("confirm", e.target.value)} placeholder="Re-enter password" />
+              <PasswordField value={form.confirm} onChange={v => setField("confirm", v)} placeholder="Re-enter password" />
             </div>
           </div>
           {err && <p style={{ fontSize: 13, color: "#ff5252", margin: 0 }}>{err}</p>}
@@ -506,11 +536,11 @@ function EditUserModal({ user, onClose, onSuccess, dealerMode, canImpersonate, o
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div>
                 <label style={labelStyle}>New Password</label>
-                <input style={inputStyle} type="password" value={form.newPassword} onChange={e => setField("newPassword", e.target.value)} placeholder="New password" />
+                <PasswordField value={form.newPassword} onChange={v => setField("newPassword", v)} placeholder="New password" />
               </div>
               <div>
                 <label style={labelStyle}>Confirm Password</label>
-                <input style={inputStyle} type="password" value={form.confirmPassword} onChange={e => setField("confirmPassword", e.target.value)} placeholder="Re-enter password" />
+                <PasswordField value={form.confirmPassword} onChange={v => setField("confirmPassword", v)} placeholder="Re-enter password" />
               </div>
             </div>
           </div>

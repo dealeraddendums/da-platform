@@ -125,6 +125,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (rest.billing_country == null) billingDefaults.billing_country = rest.country ?? "US";
 
   const admin = createAdminSupabaseClient();
+
+  // Pre-check the login email BEFORE creating anything — a duplicate must fail
+  // cleanly (409) and create no group/user, not create the group then 201 with a
+  // swallowed warning. Case-insensitive profile existence check (auth schema
+  // isn't on the data API), mirroring the dealer Users-tab route.
+  if (username?.trim() && password?.trim()) {
+    const rawUsername = username.trim();
+    const preEmail = (rawUsername.includes("@") ? rawUsername : `${rawUsername}@dealeraddendums.com`).toLowerCase();
+    const { data: dupProfile } = await admin
+      .from("profiles")
+      .select("id")
+      .ilike("email", preEmail)
+      .maybeSingle<{ id: string }>();
+    if (dupProfile) {
+      return NextResponse.json({ error: "That email is already registered — use a different email." }, { status: 409 });
+    }
+  }
+
   const insertPayload = { name: name.trim(), internal_id: groupInternalId, ...rest, ...billingDefaults };
   let { data, error: dbError } = await admin.from("groups").insert(insertPayload).select().single();
 
@@ -140,10 +158,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const group = data as GroupRow;
 
+  // Login email of the created user (if any) — used as the welcome-email
+  // fallback when no separate contact email was supplied.
+  let createdUserEmail: string | null = null;
+
   // Optionally create a group_admin auth user
   if (username?.trim() && password?.trim()) {
     const rawUsername = username.trim();
     const authEmail = rawUsername.includes("@") ? rawUsername : `${rawUsername}@dealeraddendums.com`;
+    createdUserEmail = authEmail;
     const { data: authUser, error: authError } = await admin.auth.admin.createUser({
       email: authEmail,
       password: password.trim(),
@@ -242,13 +265,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const contactEmail = (rest.primary_contact_email as string | null) ?? null;
   const now = new Date().toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" });
 
-  // Welcome email to group contact (sendNotify button only)
-  if (sendNotify && contactEmail) {
+  // Welcome email (sendNotify button only). Prefer the explicit contact email;
+  // fall back to the created user's login email so a notify-with-user create
+  // still reaches the person even when no separate contact email was entered.
+  const welcomeTo = contactEmail ?? createdUserEmail;
+  if (sendNotify && welcomeTo) {
     void sendMandrillEmail({
       subject: `Welcome to DealerAddendums — ${group.name}`,
       from_email: "noreply@dealeraddendums.com",
       from_name: "DealerAddendums",
-      to: [{ email: contactEmail, name: contactName ?? undefined }],
+      to: [{ email: welcomeTo, name: contactName ?? undefined }],
       html: `<p>Hi ${contactName ?? "there"},</p>
 <p>Your DealerAddendums group account <strong>${group.name}</strong> has been created.</p>
 <p><strong>Your login details:</strong><br>
@@ -278,7 +304,7 @@ Username: ${username?.trim() ? (username.trim().includes("@") ? username.trim() 
   fireGroupSync(group.id, SOURCE_FORM.GROUP_BY_ADMIN);
 
   return NextResponse.json(
-    { data: group, emailSent: sendNotify && !!contactEmail },
+    { data: group, emailSent: !!(sendNotify && welcomeTo) },
     { status: 201 }
   );
 }

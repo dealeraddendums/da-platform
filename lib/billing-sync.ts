@@ -13,6 +13,7 @@ export type BillingSyncEvent =
   | "billing.customer.unarchive"
   | "billing.dealer.rename"
   | "billing.dealer.rename.group_template"
+  | "billing.group.rename"
   | "xps.order.create"
   | "xps.shipment.poll"
   | "box.folder.create";
