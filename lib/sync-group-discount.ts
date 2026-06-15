@@ -24,8 +24,11 @@ import { calcGroupDiscountTier } from "@/lib/group-discount";
 // The four values calcGroupDiscountTier can ever emit. Any
 // subscriptionDiscount that isn't one of these is, by definition, a
 // custom value an operator hand-set in da-billing — and this sync must
-// not touch it under any circumstances.
-const AUTO_TIER_VALUES: ReadonlySet<number> = new Set([0, 10, 20, 30]);
+// not touch it under any circumstances. NOTE: the old 10% tier is
+// intentionally NOT here — existing 10% groups are migrated to the new
+// tiers by scripts/resync-group-discounts.mjs (run once after deploy);
+// after that no auto group sits at 10%.
+const AUTO_TIER_VALUES: ReadonlySet<number> = new Set([0, 20, 25, 30]);
 
 // da-billing's Customer type includes `subscriptionDiscount` and
 // `discountLocked` but lib/billing.ts's BillingCustomerDetail is the
@@ -92,7 +95,7 @@ export async function syncGroupDiscount(groupId: string): Promise<void> {
     }
 
     // 5. Custom-value guard: if the current subscriptionDiscount isn't one
-    //    of the auto-tier values (0/10/20/30), an operator has hand-set it
+    //    of the auto-tier values (0/20/25/30), an operator has hand-set it
     //    in da-billing and the sync must not touch it. This catches the
     //    case where discountLocked wasn't flipped but the value is clearly
     //    not auto-tier (e.g. 17%). Prevents a dealer-count change from

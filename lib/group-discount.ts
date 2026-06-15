@@ -3,13 +3,13 @@
 // removed, or deactivated within a group.
 //
 //   1 dealer     → 0%   (no discount, also covers 0/empty groups)
-//   2–10 dealers → 10%
-//   11–30 dealers → 20%
+//   2–10 dealers → 20%
+//   11–30 dealers → 25%
 //   31+ dealers   → 30%
 
 export function calcGroupDiscountTier(dealerCount: number): number {
   if (dealerCount <= 1) return 0;
-  if (dealerCount <= 10) return 10;
-  if (dealerCount <= 30) return 20;
+  if (dealerCount <= 10) return 20;
+  if (dealerCount <= 30) return 25;
   return 30;
 }
