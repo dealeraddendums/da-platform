@@ -28,9 +28,13 @@ import { createClient } from "@supabase/supabase-js";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const FLAGS   = process.argv.filter(a => a.startsWith("--") && a !== "--dry-run").map(a => a.slice(2));
-const RUN_DEALERS  = FLAGS.length === 0 || FLAGS.includes("dealers");
-const RUN_GROUPS   = FLAGS.length === 0 || FLAGS.includes("groups");
-const RUN_PROFILES = FLAGS.length === 0 || FLAGS.includes("profiles");
+// --assoc-only: create NOTHING (no contacts, no companies) — only link an
+// existing contact to its existing company. Skips any profile without a
+// hubspot_contact_id and any company without a hubspot_company_id.
+const ASSOC_ONLY = FLAGS.includes("assoc-only");
+const RUN_DEALERS  = !ASSOC_ONLY && (FLAGS.length === 0 || FLAGS.includes("dealers"));
+const RUN_GROUPS   = !ASSOC_ONLY && (FLAGS.length === 0 || FLAGS.includes("groups"));
+const RUN_PROFILES = ASSOC_ONLY || FLAGS.length === 0 || FLAGS.includes("profiles");
 const RATE_MS = 50;
 
 const HUBSPOT_BASE = "https://api.hubapi.com/crm/v3";
@@ -295,16 +299,45 @@ async function run() {
       [["active", true]],
     );
     console.log(`\nProfiles to process: ${profiles.length}`);
-    // Preload dealers for company-name lookup
-    const allDealers = await fetchAll("dealers", "dealer_id, name");
-    const dealerNameBySlug = new Map(allDealers.map(d => [d.dealer_id, d.name]));
+    // Preload dealers + groups for company name + hubspot_company_id. The id is
+    // needed to ASSOCIATE each contact to its company — the gap that left
+    // backfill-created contacts floating unattached (syncProfileToHubspot
+    // associates; this script previously did not).
+    const allDealers = await fetchAll("dealers", "dealer_id, name, hubspot_company_id");
+    const dealerBySlug = new Map(allDealers.map(d => [d.dealer_id, d]));
+    const allGroupsForProfiles = await fetchAll("groups", "id, name, hubspot_company_id");
+    const groupById = new Map(allGroupsForProfiles.map(g => [g.id, g]));
+    stats.profiles.assoc = 0;
 
     for (const p of profiles) {
       try {
-        const companyName = p.dealer_id ? dealerNameBySlug.get(p.dealer_id) ?? null : null;
+        const dealer = p.dealer_id ? dealerBySlug.get(p.dealer_id) : null;
+        const group = !dealer && p.group_id ? groupById.get(p.group_id) : null;
+        const companyName = dealer?.name ?? group?.name ?? null;
+        const companyHubspotId = dealer?.hubspot_company_id ?? group?.hubspot_company_id ?? null;
+        if (ASSOC_ONLY) {
+          // Link-only: create NOTHING. Both the contact and the company must
+          // already exist in HubSpot, else skip.
+          if (!p.hubspot_contact_id || !companyHubspotId) {
+            stats.profiles.skipped = (stats.profiles.skipped || 0) + 1;
+            process.stdout.write("·");
+          } else if (DRY_RUN) {
+            console.log(`  [dry-assoc] ${p.email}  contact=${p.hubspot_contact_id} -> company=${companyHubspotId}`);
+          } else {
+            const ar = await fetch(`https://api.hubapi.com/crm/v4/objects/contacts/${encodeURIComponent(p.hubspot_contact_id)}/associations/default/companies/${encodeURIComponent(companyHubspotId)}`, {
+              method: "PUT",
+              headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+            });
+            if (ar.ok) { stats.profiles.assoc++; process.stdout.write("="); }
+            else { console.error(`\n  ⚠ assoc ${p.email}: HTTP ${ar.status}`); }
+            await new Promise(r => setTimeout(r, RATE_MS));
+          }
+          stats.profiles.ok++;
+          continue;
+        }
         const props = profileProps(p, companyName);
         if (DRY_RUN) {
-          console.log(`  [dry] ${p.email}  hubspot=${p.hubspot_contact_id || "(none)"}`);
+          console.log(`  [dry] ${p.email}  hubspot=${p.hubspot_contact_id || "(none)"}  company=${companyHubspotId || "(none)"}`);
         } else {
           const { hubspotId, created } = await upsert({
             object: "contacts", properties: props,
@@ -313,6 +346,15 @@ async function run() {
           });
           if (created || hubspotId !== p.hubspot_contact_id) {
             await admin.from("profiles").update({ hubspot_contact_id: hubspotId }).eq("id", p.id);
+          }
+          // Associate contact → company (idempotent v4 default association).
+          if (hubspotId && companyHubspotId) {
+            const ar = await fetch(`https://api.hubapi.com/crm/v4/objects/contacts/${encodeURIComponent(hubspotId)}/associations/default/companies/${encodeURIComponent(companyHubspotId)}`, {
+              method: "PUT",
+              headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+            });
+            if (ar.ok) stats.profiles.assoc++;
+            else console.error(`\n  ⚠ assoc ${p.email}: HTTP ${ar.status}`);
           }
           process.stdout.write(created ? "+" : ".");
           await new Promise(r => setTimeout(r, RATE_MS));
@@ -329,7 +371,7 @@ async function run() {
   console.log("\n=== Summary ===");
   console.log(`  Dealers:  ${stats.dealers.ok} ok, ${stats.dealers.err} err`);
   console.log(`  Groups:   ${stats.groups.ok} ok, ${stats.groups.err} err`);
-  console.log(`  Profiles: ${stats.profiles.ok} ok, ${stats.profiles.err} err`);
+  console.log(`  Profiles: ${stats.profiles.ok} ok, ${stats.profiles.err} err${stats.profiles.assoc != null ? `, ${stats.profiles.assoc} company associations` : ""}${stats.profiles.skipped ? `, ${stats.profiles.skipped} skipped (no contact/company id)` : ""}`);
   if (DRY_RUN) console.log("\n(dry-run — no writes performed)");
 }
 
