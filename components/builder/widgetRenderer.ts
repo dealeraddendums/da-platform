@@ -148,12 +148,18 @@ export function renderW(type: string, d: D, fontScale: number): string {
     ).join('')}</div>`;
   }
 
+  // askbar + suggested_price are white-label bars overlaying a pre-printed bar
+  // on the background image. Their style strings pin line-height:1.5 so the
+  // top-aligned glyphs land at the SAME vertical offset in both renderers: the
+  // Builder canvas inherits the app body line-height (globals.css: 1.5), but
+  // pdf-html's <style> sets none, so it fell back to the browser default
+  // `normal` (~1.2) and the bar text printed too high. 1.5 = no canvas change.
   if (type === 'suggested_price') {
     const lfs = Math.round(12 * fs * ((d.labelFontSize as number) || 1));
     const vfs = Math.round(13 * fs * ((d.valueFontSize as number) || 1));
     const lc = (d.labelColor as string) || '#ffffff';
     const vc = (d.valueColor as string) || '#000000';
-    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px"><div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div></div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}</div></div>`;
+    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5"><div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div></div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}</div></div>`;
   }
 
   if (type === 'subtotal') {
@@ -167,7 +173,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const sfs = Math.round(8 * fs * ((d.labelFontSize as number) || 1));
     const lc = (d.labelColor as string) || '#ffffff';
     const vc = (d.valueColor as string) || '#000000';
-    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px"><div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div>${d.subtitle ? `<div style="font-size:${sfs}px;color:${lc};font-style:italic;margin-top:1px">${d.subtitle}</div>` : ''}</div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}${(d.priceSuffix as string) || ''}</div></div>`;
+    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5"><div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div>${d.subtitle ? `<div style="font-size:${sfs}px;color:${lc};font-style:italic;margin-top:1px">${d.subtitle}</div>` : ''}</div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}${(d.priceSuffix as string) || ''}</div></div>`;
   }
 
   if (type === 'dealer') {

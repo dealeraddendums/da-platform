@@ -1,5 +1,6 @@
 // Server-only: builds an HTML string for Puppeteer to render as a PDF.
 import { renderW } from '@/components/builder/widgetRenderer';
+import { PAPERS } from '@/components/builder/constants';
 import type { Widget, PaperSize } from '@/components/builder/types';
 import { formatOptionPrice, parseOptionPriceValue, priceSetUsesDecimals, formatCurrencyAmount } from '@/lib/option-price';
 import { parsePhotos } from '@/lib/vehicles';
@@ -27,12 +28,6 @@ async function inlineImagesInHtml(html: string): Promise<string> {
   const map = Object.fromEntries(entries);
   return html.replace(re, (_, url) => `src="${map[url] || url}"`);
 }
-
-const PAPER_DIMS: Record<string, { w: number; h: number }> = {
-  standard: { w: 408, h: 1056 },
-  narrow: { w: 300, h: 1056 },
-  infosheet: { w: 816, h: 1056 },
-};
 
 type AnyOption = {
   option_name: string;
@@ -86,9 +81,15 @@ export async function buildPdfHtml({
   dbDescription,
   dbOptionsText,
 }: BuildPdfHtmlInput): Promise<string> {
+  // Use the SAME paper geometry as the Builder canvas (components/builder/
+  // constants.ts PAPERS) so the PDF .paper width/height exactly matches the
+  // canvas for every named size — standard/narrow/WIDE/infosheet. customDims
+  // (a pre-resolved custom size) uses the identical *96 math as getPaperDims'
+  // custom branch. Previously a local PAPER_DIMS copy here was missing 'wide'
+  // (silently fell back to standard 408×1056), drifting the PDF from the canvas.
   const paper = customDims
     ? { w: Math.round(customDims.widthIn * 96), h: Math.round(customDims.heightIn * 96) }
-    : (PAPER_DIMS[paperSize] ?? PAPER_DIMS.standard);
+    : (PAPERS[paperSize as keyof typeof PAPERS] ?? PAPERS.standard);
 
   // Split options into required vs suggested (default: all required for backward compat)
   const allOptions = (options ?? []).filter(o => o.active !== false);
