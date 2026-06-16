@@ -257,16 +257,28 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
       if (!confirm("Resume legacy sync? On the next run, Aurora will overwrite any in-platform edits to this account again.")) return;
     }
     setEtlToggling(true);
-    const res = await fetch(`/api/dealers/${dealer.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(turningOn ? { etl_locked: true, etl_locked_reason: reason } : { etl_locked: false }),
-    });
-    if (res.ok) {
-      const json = (await res.json()) as { data: DealerRow };
-      setDealer(json.data);
+    setError(null);
+    try {
+      const res = await fetch(`/api/dealers/${dealer.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(turningOn ? { etl_locked: true, etl_locked_reason: reason } : { etl_locked: false }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { data: DealerRow };
+        setDealer(json.data); // reflect the persisted state (FROZEN / live)
+      } else {
+        // Surface the failure instead of silently reverting the toggle. The
+        // route returns { error: <dbError message> }; dealer state is left
+        // unchanged so the switch doesn't look acted-on.
+        const j = (await res.json().catch(() => null)) as { error?: string } | null;
+        setError(`Couldn't ${turningOn ? "freeze" : "resume"} legacy ETL sync — ${j?.error || `request failed (HTTP ${res.status})`}`);
+      }
+    } catch (e) {
+      setError(`Couldn't ${turningOn ? "freeze" : "resume"} legacy ETL sync — ${e instanceof Error ? e.message : "network error"}`);
+    } finally {
+      setEtlToggling(false);
     }
-    setEtlToggling(false);
   }
 
   const etlTooltip = frozenViaGroup
