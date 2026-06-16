@@ -215,6 +215,28 @@ export async function unarchiveCustomer(customerId: string): Promise<void> {
   if (!res.ok) throw new BillingError(res.status, `unarchiveCustomer ${res.status}`, await readBody(res));
 }
 
+/**
+ * Bulk-list every da-billing recurring template (one big-page call) → a map of
+ * customerId → { active, nextInvoiceDate }. Used by the migration readiness
+ * console to compute "billing template staged" for many dealers without a
+ * per-dealer round trip. Returns an empty map (never throws) on a billing hiccup
+ * so the console degrades gracefully.
+ */
+export async function listBillingTemplatesByCustomer(): Promise<Map<string, { active?: boolean; nextInvoiceDate?: string | null }>> {
+  const map = new Map<string, { active?: boolean; nextInvoiceDate?: string | null }>();
+  try {
+    const res = await fetch(`${BASE}/templates?pageSize=100000&status=all`, { headers: authHeaders() });
+    if (!res.ok) return map;
+    const parsed = JSON.parse(await readBody(res)) as { templates?: Array<{ customerId?: string; active?: boolean; nextInvoiceDate?: string | null }> };
+    for (const t of parsed.templates ?? []) {
+      if (t.customerId) map.set(t.customerId, { active: t.active, nextInvoiceDate: t.nextInvoiceDate ?? null });
+    }
+  } catch {
+    // degrade gracefully — readiness shows billing as "unknown/not staged"
+  }
+  return map;
+}
+
 // ── Templates ────────────────────────────────────────────────────────────────
 
 export interface BillingProduct {
