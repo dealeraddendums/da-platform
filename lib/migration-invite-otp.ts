@@ -38,19 +38,21 @@ export async function sendMigrationInvite(
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, name, inventory_dealer_id, primary_contact, primary_contact_email")
+    .select("id, dealer_id, name, inventory_dealer_id, primary_contact, primary_contact_email")
     .eq("inventory_dealer_id", inventoryDealerId)
-    .maybeSingle<{ id: string; name: string; inventory_dealer_id: string; primary_contact: string | null; primary_contact_email: string | null }>();
+    .maybeSingle<{ id: string; dealer_id: string; name: string; inventory_dealer_id: string; primary_contact: string | null; primary_contact_email: string | null }>();
   if (!dealer) throw new Error(`Dealer not found: ${inventoryDealerId}`);
 
   // Recipient: the dealer's primary contact; fall back to a dealer_admin profile.
   let email = (dealer.primary_contact_email ?? "").trim().toLowerCase();
   let contactName = (dealer.primary_contact ?? "").trim();
   if (!email) {
+    // profiles.dealer_id is the dealer's TEXT dealer_id (can differ from
+    // inventory_dealer_id), so look up by dealer.dealer_id, not the param.
     const { data: prof } = await admin
       .from("profiles")
       .select("email, full_name")
-      .eq("dealer_id", inventoryDealerId)
+      .eq("dealer_id", dealer.dealer_id)
       .eq("role", "dealer_admin")
       .limit(1)
       .maybeSingle<{ email: string | null; full_name: string | null }>();
