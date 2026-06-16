@@ -65,11 +65,14 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
   );
   const groupById = new Map(groups.map((g) => [g.id, g]));
 
-  // ETL signals (batched, whole-table — small): which dealers have a user + a settings row.
-  const profiles = await fetchAll<{ dealer_id: string | null }>(admin, "profiles", "dealer_id");
-  const hasProfile = new Set(profiles.map((p) => p.dealer_id).filter(Boolean) as string[]);
+  // Warning signals (batched, whole-table — both small): which dealers have a
+  // settings row, and which have synced products (vehicle_options ~12k rows).
+  // dealer_vehicles (~1.6M) is NOT scanned — vehicle_options presence is the
+  // cheap, meaningful "is this dealer set up" inventory signal.
   const settings = await fetchAll<{ dealer_id: string | null }>(admin, "dealer_settings", "dealer_id");
   const hasSettings = new Set(settings.map((s) => s.dealer_id).filter(Boolean) as string[]);
+  const options = await fetchAll<{ dealer_id: string | null }>(admin, "vehicle_options", "dealer_id");
+  const hasOptions = new Set(options.map((o) => o.dealer_id).filter(Boolean) as string[]);
 
   // Billing templates (bulk, one call) → customerId → { active, nextInvoiceDate }.
   const billingByCustomer = await listBillingTemplatesByCustomer();
@@ -80,8 +83,8 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     return computeReadiness(d, {
       groupName: group?.name ?? null,
       groupBillingCustomerId: group?.billing_customer_id ?? null,
-      hasProfile: hasProfile.has(d.dealer_id),
       hasSettings: hasSettings.has(d.dealer_id),
+      hasOptions: hasOptions.has(d.dealer_id),
       billingByCustomer,
       now,
     });
@@ -93,9 +96,16 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     total: rows.length,
     ready: rows.filter((r) => r.ready).length,
     eligible: rows.filter((r) => r.eligible).length,
-    etlComplete: rows.filter((r) => r.etlComplete).length,
     billingStaged: rows.filter((r) => r.billingStaged).length,
     templateConfirmed: rows.filter((r) => r.templateConfirmed).length,
+    // "one toggle from ready" pool = billing-staged ∩ eligible (these flip to
+    // Ready the moment template-confirmed is toggled; the already-confirmed
+    // subset is `ready`).
+    readyPool: rows.filter((r) => r.billingStaged && r.eligible).length,
+    // warnings (informational — do not gate)
+    settingsMissing: rows.filter((r) => r.settingsMissing).length,
+    logoMissing: rows.filter((r) => r.logoMissing).length,
+    zeroInventory: rows.filter((r) => r.zeroInventory).length,
   };
 
   return NextResponse.json({
@@ -103,6 +113,6 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     summary,
     flagsColumnPresent, // false until migration 100 is applied (toggle disabled in the UI)
     billingTemplatesLoaded: billingByCustomer.size,
-    note: "ETL-complete checks dealer record + address + inventory id + logo + a settings row + a user. Inventory (vehicles/options) is synced nightly by the ETL and not live-counted in step 1.",
+    note: "Ready = billing-template-staged + template-confirmed + eligible (HARD gates). Settings/logo/inventory are WARNINGS only — the migration creates a default settings row, a logo is addable later, and inventory syncs nightly. Inventory signal = synced products (vehicle_options); the 1.6M-row dealer_vehicles table is not scanned.",
   });
 }

@@ -8,16 +8,18 @@ interface Row {
   name: string;
   groupName: string | null;
   state: string | null;
-  etlComplete: boolean;
-  etlMissing: string[];
   billingStaged: boolean;
   billingReason: string;
   templateConfirmed: boolean;
   eligible: boolean;
   eligibleReason: string;
   ready: boolean;
+  settingsMissing: boolean;
+  logoMissing: boolean;
+  zeroInventory: boolean;
+  warnings: string[];
 }
-interface Summary { total: number; ready: number; eligible: number; etlComplete: number; billingStaged: number; templateConfirmed: number; }
+interface Summary { total: number; ready: number; eligible: number; billingStaged: number; templateConfirmed: number; readyPool: number; settingsMissing: number; logoMissing: number; zeroInventory: number; }
 interface ApiResp { rows: Row[]; summary: Summary; flagsColumnPresent: boolean; billingTemplatesLoaded: number; note: string; }
 
 const Check = ({ ok, title }: { ok: boolean; title?: string }) => (
@@ -63,13 +65,12 @@ export default function MigrationConsole() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Save failed");
-      // recompute ready locally (ready = etl && billing && confirmed && eligible)
+      // recompute ready locally — HARD gates only: billing && confirmed && eligible
       setData((d) => d && {
         ...d,
         rows: d.rows.map((r) => r.id === row.id
-          ? { ...r, templateConfirmed: next, ready: r.etlComplete && r.billingStaged && next && r.eligible }
+          ? { ...r, templateConfirmed: next, ready: r.billingStaged && next && r.eligible }
           : r),
-        summary: { ...d.summary }, // recomputed below via useMemo-free approach
       });
     } catch (e) {
       alert(e instanceof Error ? e.message : "Save failed");
@@ -108,9 +109,9 @@ export default function MigrationConsole() {
       total: rows.length,
       ready: rows.filter((r) => r.ready).length,
       eligible: rows.filter((r) => r.eligible).length,
-      etlComplete: rows.filter((r) => r.etlComplete).length,
       billingStaged: rows.filter((r) => r.billingStaged).length,
       templateConfirmed: rows.filter((r) => r.templateConfirmed).length,
+      readyPool: rows.filter((r) => r.billingStaged && r.eligible).length,
     };
   }, [data]);
 
@@ -124,6 +125,7 @@ export default function MigrationConsole() {
   const lbl: React.CSSProperties = { fontSize: 12, color: "var(--text-muted, #78828c)", marginTop: 2 };
   const th: React.CSSProperties = { textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 600, color: "#55595c", textTransform: "uppercase", letterSpacing: ".04em", borderBottom: "1px solid #e0e0e0", whiteSpace: "nowrap" };
   const td: React.CSSProperties = { padding: "8px 10px", fontSize: 13, color: "#333", borderBottom: "1px solid #f0f0f0", verticalAlign: "middle" };
+  const warnChip: React.CSSProperties = { background: "#fff8e1", color: "#8a6d00", border: "1px solid #ffe082", borderRadius: 10, padding: "1px 6px", fontSize: 10, fontWeight: 600, whiteSpace: "nowrap" };
 
   return (
     <div style={{ fontFamily: "'Roboto', sans-serif" }}>
@@ -135,12 +137,12 @@ export default function MigrationConsole() {
         </div>
       )}
 
-      {/* Summary cards */}
+      {/* Summary cards — HARD-gate definition (ready = billing ∩ template ∩ eligible) */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         <div style={cardStyle}><div style={{ ...num, color: "#2e7d32" }}>{s.ready}</div><div style={lbl}>Ready to invite</div></div>
+        <div style={cardStyle}><div style={{ ...num, color: "#1976d2" }}>{s.readyPool}</div><div style={lbl}>One toggle from ready<br /><span style={{ fontSize: 10 }}>billing ∩ eligible</span></div></div>
         <div style={cardStyle}><div style={num}>{s.total}</div><div style={lbl}>Un-migrated dealers</div></div>
         <div style={cardStyle}><div style={num}>{s.eligible}</div><div style={lbl}>Eligible</div></div>
-        <div style={cardStyle}><div style={num}>{s.etlComplete}</div><div style={lbl}>ETL complete</div></div>
         <div style={cardStyle}><div style={num}>{s.billingStaged}</div><div style={lbl}>Billing staged</div></div>
         <div style={cardStyle}><div style={num}>{s.templateConfirmed}</div><div style={lbl}>Template confirmed</div></div>
       </div>
@@ -173,11 +175,11 @@ export default function MigrationConsole() {
               <th style={th}>Dealer</th>
               <th style={th}>Group</th>
               <th style={th}>State</th>
-              <th style={{ ...th, textAlign: "center" }}>ETL</th>
-              <th style={{ ...th, textAlign: "center" }}>Billing</th>
-              <th style={{ ...th, textAlign: "center" }}>Template</th>
-              <th style={{ ...th, textAlign: "center" }}>Eligible</th>
+              <th style={{ ...th, textAlign: "center" }} title="Hard gate">Billing</th>
+              <th style={{ ...th, textAlign: "center" }} title="Hard gate">Template</th>
+              <th style={{ ...th, textAlign: "center" }} title="Hard gate">Eligible</th>
               <th style={{ ...th, textAlign: "center" }}>Ready?</th>
+              <th style={{ ...th, textAlign: "center" }} title="Informational — does NOT block Ready">Warnings</th>
             </tr>
           </thead>
           <tbody>
@@ -189,7 +191,6 @@ export default function MigrationConsole() {
                 </td>
                 <td style={td}>{r.groupName ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
                 <td style={td}>{r.state ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
-                <td style={{ ...td, textAlign: "center" }}><Check ok={r.etlComplete} title={r.etlMissing.length ? `Missing: ${r.etlMissing.join(", ")}` : "complete"} /></td>
                 <td style={{ ...td, textAlign: "center" }}><Check ok={r.billingStaged} title={r.billingReason} /></td>
                 <td style={{ ...td, textAlign: "center" }}>
                   <input
@@ -206,6 +207,15 @@ export default function MigrationConsole() {
                   {r.ready
                     ? <span style={{ background: "#2e7d32", color: "#fff", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20 }}>READY</span>
                     : <span style={{ color: "#9aa0a6", fontSize: 12 }}>—</span>}
+                </td>
+                <td style={{ ...td, textAlign: "center" }}>
+                  {r.warnings.length === 0
+                    ? <span style={{ color: "#cfd8dc" }}>—</span>
+                    : <span title={`Non-blocking: ${r.warnings.join(", ")}`} style={{ display: "inline-flex", gap: 4, flexWrap: "wrap", justifyContent: "center" }}>
+                        {r.logoMissing && <span style={warnChip}>no logo</span>}
+                        {r.settingsMissing && <span style={warnChip}>no settings</span>}
+                        {r.zeroInventory && <span style={warnChip}>no products</span>}
+                      </span>}
                 </td>
               </tr>
             ))}

@@ -49,14 +49,18 @@ export interface ReadinessRow {
   name: string;
   groupName: string | null;
   state: string | null;
-  etlComplete: boolean;
-  etlMissing: string[];        // which ETL sub-checks failed (for the tooltip)
+  // ── HARD gates (these three determine `ready`) ──────────────────────────
   billingStaged: boolean;
   billingReason: string;       // human note: staged / missing / active / past-date / no-customer
   templateConfirmed: boolean;
   eligible: boolean;
   eligibleReason: string;      // why not eligible (white-glove group / complex / migrated / test)
-  ready: boolean;              // ALL green
+  ready: boolean;              // billingStaged && templateConfirmed && eligible
+  // ── WARNINGS (informational only — never block `ready`) ──────────────────
+  settingsMissing: boolean;    // no dealer_settings row (migration creates one — Step 5)
+  logoMissing: boolean;        // no logo_url (optional / addable later)
+  zeroInventory: boolean;      // no synced products/options (vehicle_options) — assumed from nightly ETL
+  warnings: string[];          // labels for the ones that are true, for display/tooltip
 }
 
 const present = (v: string | null | undefined) => !!(v && String(v).trim().length);
@@ -73,24 +77,23 @@ export function computeReadiness(
   ctx: {
     groupName: string | null;
     groupBillingCustomerId: string | null;
-    hasProfile: boolean;
     hasSettings: boolean;
+    hasOptions: boolean;
     billingByCustomer: Map<string, BillingTemplateInfo>;
     now: number;
   },
 ): ReadinessRow {
-  // ── ETL complete ─────────────────────────────────────────────────────────
-  // Cheap, batchable signals: core dealer record + logo + a settings row + a
-  // user. (Inventory vehicles/options come from the nightly ETL and aren't
-  // live-counted here in step 1 — see the route's note.)
-  const etlMissing: string[] = [];
-  if (!present(d.name)) etlMissing.push('name');
-  if (!present(d.address) || !present(d.city) || !present(d.state) || !present(d.zip)) etlMissing.push('address');
-  if (!present(d.inventory_dealer_id)) etlMissing.push('inventory id');
-  if (!present(d.logo_url)) etlMissing.push('logo');
-  if (!ctx.hasSettings) etlMissing.push('settings');
-  if (!ctx.hasProfile) etlMissing.push('users');
-  const etlComplete = etlMissing.length === 0;
+  // ── WARNINGS (informational only — softened 2026-06-16; do NOT block ready) ─
+  // The migration handles these: it creates a default dealer_settings row
+  // (procedure Step 5), a logo is optional/addable later, and inventory is
+  // synced by the nightly ETL. Flag them so the operator sees them, never gate.
+  const settingsMissing = !ctx.hasSettings;
+  const logoMissing = !present(d.logo_url);
+  const zeroInventory = !ctx.hasOptions;
+  const warnings: string[] = [];
+  if (settingsMissing) warnings.push('no settings row');
+  if (logoMissing) warnings.push('no logo');
+  if (zeroInventory) warnings.push('no synced products');
 
   // ── Billing template staged ───────────────────────────────────────────────
   // Group-billed dealers stage on the GROUP's customer; else their own.
@@ -116,12 +119,13 @@ export function computeReadiness(
   else if (isWhiteGloveGroup(ctx.groupName)) { eligible = false; eligibleReason = `white-glove group (${ctx.groupName})`; }
   else if (d.migration_complex) { eligible = false; eligibleReason = 'flagged complex'; }
 
+  // ── Ready = the THREE hard gates only (warnings excluded) ──────────────────
   const templateConfirmed = !!d.template_confirmed;
-  const ready = etlComplete && billingStaged && templateConfirmed && eligible;
+  const ready = billingStaged && templateConfirmed && eligible;
 
   return {
     id: d.id, dealer_id: d.dealer_id, name: d.name, groupName: ctx.groupName, state: d.state,
-    etlComplete, etlMissing, billingStaged, billingReason,
-    templateConfirmed, eligible, eligibleReason, ready,
+    billingStaged, billingReason, templateConfirmed, eligible, eligibleReason, ready,
+    settingsMissing, logoMissing, zeroInventory, warnings,
   };
 }

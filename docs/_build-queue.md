@@ -14,6 +14,24 @@
   skip-sets per the spec), then freeze Dealer General + re-delete the dupes. **Stopgap until then:**
   set Mercedes `migration_status='migrated'` (ETL already skips it; reversible; harmless — it's a
   new-platform dealer).
+- **✅ 2026-06-11 QA pass — Multiprint — SHIPPED `0c1f24e`** (pending Allan's QA pass):
+  `multiprint-qa-2026-06-11.md`. **Issue B** — trial cap + counters now count **distinct vehicles** via a
+  new **`printed_vehicle_count` RPC** (migration applied; efficient SQL path, no JS fallback), not
+  `print_history` rows. **Issue A** — bulk + single print now green the row + update "Printed This Month"
+  on modal close, **no reload**. **Bonus (beyond spec — Allan to confirm OK):** prints are now recorded
+  on the actual **Send / Download** click, not on PDF generation — via a new **`pending_prints`** staging
+  table (migration applied). Opening + cancelling a preview records **nothing** (no History, no green, no
+  trial count); the Builder test-download no longer logs. Content recorded is identical to before — only
+  the trigger moved. ⚠️ Follow-ups: (a) confirm `pending_prints` has GC/TTL so abandoned previews don't
+  orphan rows; (b) **Thursday QA Test Dealer is at 31 distinct vehicles → correctly re-blocked** by the
+  30-print trial cap (clear its print history or flip to paid to keep testing).
+- **🟠 2026-06-11 QA pass — Builder (pending CC, STOP for review):** `builder-qa-2026-06-11.md`.
+  (1) **Dealer Address read-only** — it's source-of-truth from the profile (re-derived every load), so
+  make the box read-only + "edit in My Profile" (Allan's decision); keep alignment/layout. (2) **Widget
+  sticks to cursor** — `startMove` arms drag on mousedown with no threshold + document-only mouseup; add
+  a ~3–4px drag threshold + pointer capture (`releasePointerCapture`/`pointercancel`). (3) **Greyed-out
+  (placed) palette tiles** clickable to **select** the placed widget (`BuilderPage.tsx:1375–1396` — drop
+  `pointerEvents:none`; `used ? selectPlacedWidget : addWidget`). All client-side; no migration.
 - **Fuel Type product rule — SHIPPED 2026-06-09** (`40eb01f`; `options-rule-fuel-type.md`): curated
   multiselect (Gasoline/Diesel/Hybrid/Plug-in/Electric/Flex/Hydrogen/CNG/Propane) + IN/NOT IN +
   keyword-CSV matching; Electric catches BEV/ELEC, NOT-IN [Gasoline] excludes 62k, only a 4-vehicle
@@ -76,6 +94,41 @@
   "Operator-side follow-ups" at the bottom.
 
 ## ✅ Shipped (for context)
+
+### Shipped 2026-06-15/16 (session — verified by Claude Code; STOP-for-review per item)
+- **Phase 13b step 1 — migration readiness console (READ-ONLY)** — `cacbf19`. super_admin `/migration`
+  view; `lib/migration-readiness.ts` (white-glove list + computeReadiness) + bulk da-billing template
+  lookup (`lib/billing.ts listBillingTemplatesByCustomer`) + `GET /api/migration/readiness` +
+  `PATCH /api/migration/template-confirmed` + `MigrationConsole.tsx`. Migration **100** (template_confirmed,
+  migration_complex). **Gate softened 2026-06-16** (`<pending>` — this task): `ready` = billing-staged ∩
+  template-confirmed ∩ eligible only; ETL/logo/settings/inventory demoted to non-blocking WARNINGS.
+- **Template migration decision** — legacy `template_builder` is fixed-slot config (case d), no layout
+  converter; migrated dealers take the new default/group template + synced options. Read-only Aurora
+  investigation `legacy-template-investigation-2026-06-16.md`. **Content-seed lib** (`lib/template-content-seed.ts`,
+  content-only: labels/address/show-hide/disclaimer) built for the future 13a flow; verified on 3 real rows.
+- **Freeze ETL toggle silently reverting — FIXED** — `8502291` + migration **101**. Root cause:
+  `dealers.etl_locked_by` (and `groups.etl_locked_by`) never landed on prod (094 applied from a copy
+  predating that line) → PATCH 500 → client swallowed it. Added the column + hardened `toggleEtlLock` to
+  surface the error. Verified persist end-to-end on a test dealer. (NB the ETL-enforcement half — task #115
+  above — is still the open URGENT item.)
+- **Auto group-discount tiers changed** — `7fddc0e`/`19bca2f`. 2–10→20, 11–30→25, 31+→30;
+  `AUTO_TIER_VALUES`={0,20,25,30}. One-time resync `scripts/resync-group-discounts.mjs` applied: 147
+  groups updated, locked/custom preserved, idempotent. (da-billing `AUTO_TIER_DISCOUNTS` guard updated to
+  include 25 — `41d3760`.)
+- **5 QA-walkthrough fixes** — `757c6fe`. HubSpot company `type`=industry on create; SuperAdmin create now
+  emails the created user (dealer + group fallback to login email); Add/Edit-User password show/hide;
+  duplicate user-email → clean 409 (pre-check, nothing created); group rename → da-billing customer company.
+- **Builder↔PDF askbar positioning + paper geometry** — `015c606`. pdf-html now imports the Builder's
+  `PAPERS` (fixes missing `wide`); askbar+suggested_price pinned `line-height:1.5` so the bar lands where
+  the canvas shows it.
+- **Group-derived state cleanup** — `11a8eaa`. "🔒 Group" badge gated on `group_controls_templates &&
+  group_id`; remove-from-group clears the flag + reverts billing-to-dealer. One-time cleanup of 3 orphans.
+- **da-billing: tax on LABEL line items only** — `41d3760` (master). `lib/tax.ts taxableSubtotal()` across
+  all 6 invoice/schedule/generation tax sites + 2 UI previews. **Settings nav + Tax tab** — `8002272`
+  (Admin→Settings direct item; the previously-unrendered Tax tab now wired).
+- **da-marketing-os: two-way live chat** (`46d7baf`) + **Resend→Mandrill** email swap (`7b7d028`, isolated
+  subaccount key). (See da-marketing repo; not da-platform.)
+
 - **PDF per-vehicle fix** — flat `{VIN}.pdf` keys + bulk per-vehicle upload + nested
   backfill. `pdf-vin-fix-deploy-task.md`. Deployed + verified.
 - **HubSpot Phase 14 sync** (company/contact records). `hubspot-sync-plan.md`.
