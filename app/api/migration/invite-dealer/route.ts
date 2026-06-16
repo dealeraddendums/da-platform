@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
-import { inviteUsersForDealer } from "@/lib/migration-invite";
+import { sendMigrationInvite } from "@/lib/migration-invite-otp";
 
 /**
  * POST /api/migration/invite-dealer
@@ -8,7 +8,11 @@ import { inviteUsersForDealer } from "@/lib/migration-invite";
  * The token-based auth is used by the ETL dashboard (/da-legacy-etl) which has no user session.
  *
  * Body: { inventory_dealer_id: string }
- * Returns: InviteResult JSON
+ * Returns: MigrationInviteResult JSON.
+ *
+ * Phase 13a.1: SUPERSEDES the old magic-link path (lib/migration-invite.ts) —
+ * sends a scanner-proof OTP code + inert /migrate link instead (Barracuda was
+ * pre-consuming the magic link → otp_expired). Sets migration_status='invited'.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // Allow either super_admin JWT or shared migration token (for ETL dashboard)
@@ -34,7 +38,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const result = await inviteUsersForDealer(inventory_dealer_id.trim(), adminUserId);
+    const result = await sendMigrationInvite(inventory_dealer_id.trim(), adminUserId);
     return NextResponse.json(result);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
