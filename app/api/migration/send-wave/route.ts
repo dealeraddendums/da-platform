@@ -58,6 +58,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     (data ?? []).forEach((d: { id: string; inventory_dealer_id: string | null }) => { if (d.inventory_dealer_id) invByDealerId.set(d.id, d.inventory_dealer_id); });
   }
 
+  const waveId = "wave-" + new Date().toISOString();
   const sent: { id: string; name: string; email: string | null }[] = [];
   const failed: { id: string; name: string; error: string }[] = [];
   for (const id of ready) {
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const invId = invByDealerId.get(id);
     if (!invId) { failed.push({ id, name: r.name, error: "no inventory_dealer_id" }); continue; }
     try {
-      const res = await sendMigrationInvite(invId, claims.sub);
+      const res = await sendMigrationInvite(invId, claims.sub, waveId);
       if (res.emailSent) sent.push({ id, name: r.name, email: res.email });
       else failed.push({ id, name: r.name, error: res.warning ?? "email not sent" });
     } catch (e) {
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const summary = { requested: dealerIds.length, sent: sent.length, failed: failed.length, blocked: blocked.length };
-  console.log(`[send-wave] by=${claims.sub} ${JSON.stringify(summary)}`);
+  console.log(`[send-wave] by=${claims.sub} wave=${waveId} ${JSON.stringify(summary)}`);
   void sendMandrillEmail({
     subject: `Migration wave sent — ${sent.length} invite(s)`,
     from_email: "noreply@dealeraddendums.com", from_name: "DealerAddendums",
@@ -83,5 +84,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     html: `<p>A migration wave was sent.</p><p>Requested: ${summary.requested} · <strong>Sent: ${summary.sent}</strong> · Failed: ${summary.failed} · Blocked (not ready): ${summary.blocked}</p>${sent.length ? `<p>Invited:<br>${sent.map((s) => `${s.name} — ${s.email}`).join("<br>")}</p>` : ""}${failed.length ? `<p>Failed:<br>${failed.map((f) => `${f.name} — ${f.error}`).join("<br>")}</p>` : ""}`,
   }).catch(() => {});
 
-  return NextResponse.json({ ok: true, summary, sent, failed, blocked });
+  return NextResponse.json({ ok: true, waveId, summary, sent, failed, blocked });
 }

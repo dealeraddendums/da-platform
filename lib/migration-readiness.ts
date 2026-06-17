@@ -32,6 +32,7 @@ export interface ReadinessDealer {
   billing_customer_id: string | null;
   logo_url: string | null;
   primary_contact_email: string | null;
+  invited_at: string | null;
   // core ETL fields used by the etl-complete check
   address: string | null;
   city: string | null;
@@ -62,6 +63,35 @@ export interface ReadinessRow {
   logoMissing: boolean;        // no logo_url (optional / addable later)
   zeroInventory: boolean;      // no synced products/options (vehicle_options) — assumed from nightly ETL
   warnings: string[];          // labels for the ones that are true, for display/tooltip
+  // ── Invite lifecycle (Phase 13b step 3; populated by loadReadinessRows) ─────
+  inviteStatus: InviteStatus;
+  invitedAt: string | null;
+  waveId: string | null;
+}
+
+export type InviteStatus = "not-invited" | "invited" | "stalled" | "expired" | "migrated";
+
+export const STALL_DAYS = 7; // invited but not migrated after this → "stalled"
+
+/**
+ * Current invite-lifecycle status for a dealer (Phase 13b step 3). Our confirm is
+ * atomic (accept + migrate in one step), so there's no separate "accepted" state
+ * — invited → migrated, with "stalled"/"expired" for invites that go cold.
+ */
+export function computeInviteStatus(
+  migrationStatus: string | null,
+  invitedAt: string | null,
+  invitation: { accepted_at: string | null; expires_at: string | null } | null,
+  now: number,
+): InviteStatus {
+  if (migrationStatus === "migrated") return "migrated";
+  if (!invitation && migrationStatus !== "invited") return "not-invited";
+  if (!invitation) return "invited"; // status says invited but no row (legacy/edge) — treat as invited
+  if (invitation.accepted_at) return "migrated"; // consumed → migrated
+  if (invitation.expires_at && Date.parse(invitation.expires_at) < now) return "expired";
+  const stamp = invitedAt ?? null;
+  if (stamp && now - Date.parse(stamp) > STALL_DAYS * 24 * 60 * 60 * 1000) return "stalled";
+  return "invited";
 }
 
 const present = (v: string | null | undefined) => !!(v && String(v).trim().length);
@@ -83,6 +113,7 @@ export function computeReadiness(
     hasDealerAdmin: boolean;
     billingByCustomer: Map<string, BillingTemplateInfo>;
     now: number;
+    invitation?: { accepted_at: string | null; expires_at: string | null; wave_id?: string | null } | null;
   },
 ): ReadinessRow {
   // ── WARNINGS (informational only — softened 2026-06-16; do NOT block ready) ─
@@ -131,9 +162,12 @@ export function computeReadiness(
   const templateConfirmed = !!d.template_confirmed;
   const ready = billingStaged && templateConfirmed && eligible;
 
+  const inviteStatus = computeInviteStatus(d.migration_status, d.invited_at, ctx.invitation ?? null, ctx.now);
+
   return {
     id: d.id, dealer_id: d.dealer_id, name: d.name, groupName: ctx.groupName, state: d.state,
     billingStaged, billingReason, templateConfirmed, eligible, eligibleReason, ready,
     settingsMissing, logoMissing, zeroInventory, warnings,
+    inviteStatus, invitedAt: d.invited_at ?? null, waveId: ctx.invitation?.wave_id ?? null,
   };
 }

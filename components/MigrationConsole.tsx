@@ -18,7 +18,11 @@ interface Row {
   logoMissing: boolean;
   zeroInventory: boolean;
   warnings: string[];
+  inviteStatus: "not-invited" | "invited" | "stalled" | "expired" | "migrated";
+  invitedAt: string | null;
+  waveId: string | null;
 }
+interface Wave { waveId: string; sentAt: string | null; sent: number; migrated: number; pending: number; }
 interface Summary { total: number; ready: number; eligible: number; billingStaged: number; templateConfirmed: number; readyPool: number; settingsMissing: number; logoMissing: number; zeroInventory: number; }
 interface ApiResp { rows: Row[]; summary: Summary; flagsColumnPresent: boolean; billingTemplatesLoaded: number; note: string; }
 
@@ -27,6 +31,19 @@ const NAVY = "#2a2b3c";
 const Check = ({ ok, title }: { ok: boolean; title?: string }) => (
   <span title={title} style={{ color: ok ? "#2e7d32" : "#c62828", fontWeight: 700 }}>{ok ? "✓" : "✗"}</span>
 );
+
+const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
+  "not-invited": { bg: "#f0f0f0", fg: "#78828c", label: "Not invited" },
+  invited: { bg: "#e3f2fd", fg: "#1565c0", label: "Invited" },
+  stalled: { bg: "#fff3e0", fg: "#b06a00", label: "Stalled" },
+  expired: { bg: "#ffebee", fg: "#c62828", label: "Expired" },
+  migrated: { bg: "#e8f5e9", fg: "#2e7d32", label: "Migrated" },
+};
+const StatusBadge = ({ status, invitedAt }: { status: string; invitedAt: string | null }) => {
+  const s = STATUS_STYLE[status] ?? STATUS_STYLE["not-invited"];
+  const date = invitedAt && (status === "invited" || status === "stalled" || status === "expired") ? new Date(invitedAt).toLocaleDateString() : null;
+  return <span title={date ? `invited ${date}` : s.label} style={{ background: s.bg, color: s.fg, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>{s.label}{date ? ` · ${date}` : ""}</span>;
+};
 
 export default function MigrationConsole() {
   const [data, setData] = useState<ApiResp | null>(null);
@@ -45,6 +62,11 @@ export default function MigrationConsole() {
   const [group, setGroup] = useState("");
   const [state, setState] = useState("");
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+
+  // wave summaries (13b step 3)
+  const [waves, setWaves] = useState<Wave[]>([]);
+  const [resendingId, setResendingId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true); setErr(null);
@@ -59,7 +81,22 @@ export default function MigrationConsole() {
       setLoading(false);
     }
   };
-  useEffect(() => { void load(); }, []);
+  const loadWaves = async () => {
+    try { const r = await fetch("/api/migration/waves"); const j = await r.json(); if (r.ok) setWaves(j.waves ?? []); } catch { /* */ }
+  };
+  useEffect(() => { void load(); void loadWaves(); }, []);
+
+  async function resend(row: Row) {
+    if (!confirm(`Resend a migration invite to ${row.name}? A fresh one-time code goes to their contact (resets the stall clock).`)) return;
+    setResendingId(row.id);
+    try {
+      const res = await fetch("/api/migration/resend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealerId: row.id }) });
+      const j = await res.json();
+      if (!res.ok) { alert(j.error ?? "Resend failed"); return; }
+      alert(`Invite resent${j.email ? ` to ${j.email}` : ""}.`);
+      await load();
+    } catch { alert("Resend failed"); } finally { setResendingId(null); }
+  }
 
   const toggleConfirmed = async (row: Row) => {
     if (!data?.flagsColumnPresent) return;
@@ -101,6 +138,7 @@ export default function MigrationConsole() {
   const filtered = useMemo(() => {
     let rows = data?.rows ?? [];
     if (readyOnly) rows = rows.filter((r) => r.ready);
+    if (statusFilter) rows = rows.filter((r) => r.inviteStatus === statusFilter);
     if (group) rows = rows.filter((r) => r.groupName === group);
     if (state) rows = rows.filter((r) => r.state === state);
     if (search.trim()) {
@@ -108,7 +146,7 @@ export default function MigrationConsole() {
       rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.dealer_id.toLowerCase().includes(q) || (r.groupName ?? "").toLowerCase().includes(q));
     }
     return rows;
-  }, [data, readyOnly, group, state, search]);
+  }, [data, readyOnly, statusFilter, group, state, search]);
 
   // live summary recomputed from rows so toggling template-confirmed updates the cards
   const live = useMemo(() => {
@@ -120,6 +158,9 @@ export default function MigrationConsole() {
       billingStaged: rows.filter((r) => r.billingStaged).length,
       templateConfirmed: rows.filter((r) => r.templateConfirmed).length,
       readyPool: rows.filter((r) => r.billingStaged && r.eligible).length,
+      invited: rows.filter((r) => r.inviteStatus === "invited").length,
+      stalled: rows.filter((r) => r.inviteStatus === "stalled" || r.inviteStatus === "expired").length,
+      migrated: rows.filter((r) => r.inviteStatus === "migrated").length,
     };
   }, [data]);
 
@@ -171,7 +212,27 @@ export default function MigrationConsole() {
         <div style={cardStyle}><div style={num}>{s.eligible}</div><div style={lbl}>Eligible</div></div>
         <div style={cardStyle}><div style={num}>{s.billingStaged}</div><div style={lbl}>Billing staged</div></div>
         <div style={cardStyle}><div style={num}>{s.templateConfirmed}</div><div style={lbl}>Template confirmed</div></div>
+        <div style={cardStyle}><div style={{ ...num, color: "#1565c0" }}>{s.invited}</div><div style={lbl}>Invited (pending)</div></div>
+        <div style={cardStyle}><div style={{ ...num, color: "#b06a00" }}>{s.stalled}</div><div style={lbl}>Stalled / expired</div></div>
+        <div style={cardStyle}><div style={{ ...num, color: "#2e7d32" }}>{s.migrated}</div><div style={lbl}>Migrated</div></div>
       </div>
+
+      {/* Recent waves */}
+      {waves.length > 0 && (
+        <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 8, padding: "10px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#55595c", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>Recent waves</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {waves.slice(0, 6).map((w) => (
+              <div key={w.waveId} style={{ display: "flex", gap: 12, fontSize: 13, alignItems: "center" }}>
+                <span style={{ color: "#78828c", minWidth: 150 }}>{w.sentAt ? new Date(w.sentAt).toLocaleString() : w.waveId}</span>
+                <span><strong>{w.sent}</strong> sent</span>
+                <span style={{ color: "#2e7d32" }}>{w.migrated} migrated</span>
+                <span style={{ color: "#b06a00" }}>{w.pending} pending</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
@@ -184,6 +245,14 @@ export default function MigrationConsole() {
         <select value={state} onChange={(e) => setState(e.target.value)} style={{ height: 34, padding: "0 8px", border: "1px solid #cccccc", borderRadius: 6, fontSize: 13 }}>
           <option value="">All states</option>
           {states.map((st) => <option key={st} value={st}>{st}</option>)}
+        </select>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ height: 34, padding: "0 8px", border: "1px solid #cccccc", borderRadius: 6, fontSize: 13 }}>
+          <option value="">All statuses</option>
+          <option value="not-invited">Not invited</option>
+          <option value="invited">Invited</option>
+          <option value="stalled">Stalled</option>
+          <option value="expired">Expired</option>
+          <option value="migrated">Migrated</option>
         </select>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }}>
           <input type="checkbox" checked={readyOnly} onChange={(e) => setReadyOnly(e.target.checked)} /> Ready only
@@ -237,6 +306,7 @@ export default function MigrationConsole() {
               <th style={{ ...th, textAlign: "center" }} title="Hard gate">Template</th>
               <th style={{ ...th, textAlign: "center" }} title="Hard gate">Eligible</th>
               <th style={{ ...th, textAlign: "center" }}>Ready?</th>
+              <th style={{ ...th }}>Invite status</th>
               <th style={{ ...th, textAlign: "center" }} title="Informational — does NOT block Ready">Warnings</th>
             </tr>
           </thead>
@@ -272,6 +342,18 @@ export default function MigrationConsole() {
                     ? <span style={{ background: "#2e7d32", color: "#fff", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20 }}>READY</span>
                     : <span style={{ color: "#9aa0a6", fontSize: 12 }}>—</span>}
                 </td>
+                <td style={td}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <StatusBadge status={r.inviteStatus} invitedAt={r.invitedAt} />
+                    {(r.inviteStatus === "invited" || r.inviteStatus === "stalled" || r.inviteStatus === "expired") && (
+                      <button type="button" onClick={() => void resend(r)} disabled={resendingId === r.id}
+                        title="Resend the migration invite (fresh code)"
+                        style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+                        {resendingId === r.id ? "…" : "resend"}
+                      </button>
+                    )}
+                  </div>
+                </td>
                 <td style={{ ...td, textAlign: "center" }}>
                   {r.warnings.length === 0
                     ? <span style={{ color: "#cfd8dc" }}>—</span>
@@ -284,7 +366,7 @@ export default function MigrationConsole() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td style={{ ...td, textAlign: "center", color: "#9aa0a6" }} colSpan={9}>No dealers match these filters.</td></tr>
+              <tr><td style={{ ...td, textAlign: "center", color: "#9aa0a6" }} colSpan={10}>No dealers match these filters.</td></tr>
             )}
           </tbody>
         </table>

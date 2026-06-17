@@ -33,6 +33,7 @@ const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14-day migration window
 export async function sendMigrationInvite(
   inventoryDealerId: string,
   adminUserId?: string,
+  waveId?: string,
 ): Promise<MigrationInviteResult> {
   const admin = createAdminSupabaseClient();
 
@@ -84,10 +85,13 @@ export async function sendMigrationInvite(
   // purpose so the invite still works; apply 102 for the cross-flow guard).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const inv = (admin as any).from("invitations");
-  let res = await inv.upsert({ ...baseRow, purpose: "migration" }, { onConflict: "email,dealer_id", ignoreDuplicates: false }).select("token").single();
-  if (res.error && /purpose/i.test(res.error.message ?? "")) {
-    res = await inv.upsert(baseRow, { onConflict: "email,dealer_id", ignoreDuplicates: false }).select("token").single();
-  }
+  const up = (row: Record<string, unknown>) => inv.upsert(row, { onConflict: "email,dealer_id", ignoreDuplicates: false }).select("token").single();
+  // Try with purpose (migration 102) + wave_id (migration 103); fall back as
+  // each column may be unapplied. purpose is the important marker, so drop
+  // wave_id first, then purpose only if still erroring.
+  let res = await up({ ...baseRow, purpose: "migration", ...(waveId ? { wave_id: waveId } : {}) });
+  if (res.error && /wave_id/i.test(res.error.message ?? "")) res = await up({ ...baseRow, purpose: "migration" });
+  if (res.error && /purpose/i.test(res.error.message ?? "")) res = await up(baseRow);
   if (res.error || !res.data) throw new Error(res.error?.message ?? "Failed to create migration invitation");
   const token: string = res.data.token;
 

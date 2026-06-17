@@ -25,7 +25,7 @@ async function fetchAll<T>(admin: Admin, table: string, columns: string, filter?
 }
 
 const DEALER_COLS =
-  "id, dealer_id, name, state, group_id, account_purpose, is_test, migration_status, " +
+  "id, dealer_id, name, state, group_id, account_purpose, is_test, migration_status, invited_at, " +
   "subscription_billed_to, billing_customer_id, logo_url, primary_contact_email, address, city, zip, inventory_dealer_id";
 const DEALER_COLS_WITH_FLAGS = DEALER_COLS + ", migration_complex, template_confirmed";
 
@@ -76,6 +76,24 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
   const admins = await fetchAll<{ dealer_id: string | null }>(admin, "profiles", "dealer_id", (q: Admin) => q.eq("role", "dealer_admin"));
   const hasDealerAdmin = new Set(admins.map((p) => p.dealer_id).filter(Boolean) as string[]);
 
+  // Migration invitations → dealer_id (uuid) → latest invite (for invite status +
+  // wave). purpose='migration' only; resilient to wave_id (migration 103) absence.
+  type InvRow = { dealer_id: string | null; accepted_at: string | null; expires_at: string | null; created_at: string | null; wave_id?: string | null };
+  let invitations: InvRow[];
+  try {
+    invitations = await fetchAll<InvRow>(admin, "invitations", "dealer_id, accepted_at, expires_at, created_at, wave_id", (q: Admin) => q.eq("purpose", "migration"));
+  } catch (e) {
+    if (/wave_id|column/i.test(e instanceof Error ? e.message : String(e))) {
+      invitations = await fetchAll<InvRow>(admin, "invitations", "dealer_id, accepted_at, expires_at, created_at", (q: Admin) => q.eq("purpose", "migration"));
+    } else { throw e; }
+  }
+  const invByDealer = new Map<string, InvRow>();
+  for (const iv of invitations) {
+    if (!iv.dealer_id) continue;
+    const prev = invByDealer.get(iv.dealer_id);
+    if (!prev || (iv.created_at ?? "") > (prev.created_at ?? "")) invByDealer.set(iv.dealer_id, iv);
+  }
+
   const billingByCustomer = await listBillingTemplatesByCustomer();
 
   const now = Date.now();
@@ -89,6 +107,7 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
       hasDealerAdmin: hasDealerAdmin.has(d.dealer_id),
       billingByCustomer,
       now,
+      invitation: invByDealer.get(d.id) ?? null,
     });
   });
   rows.sort((a, b) => Number(b.ready) - Number(a.ready) || a.name.localeCompare(b.name));
