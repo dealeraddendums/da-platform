@@ -172,16 +172,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     `<p><strong>${dealer.name}</strong> (${dealer.dealer_id}) just self-migrated. <strong>Operator action:</strong> stop their FreshBooks recurring profile (manually — do not dry-run-then-live). Leave existing FreshBooks invoices due.</p>`,
   );
 
-  // ── 8. Consume the invite + audit + summary alert ───────────────────────────
+  // ── 8. Consume the invite + log + summary alert ─────────────────────────────
   await a.from("invitations").update({ accepted_at: nowIso, setup_code_hash: null }).eq("id", inv.id);
-  try {
-    await admin.from("admin_audit").insert({
-      admin_user_id: userId,
-      action: "dealer_self_migrated",
-      target_dealer_id: dealer.dealer_id,
-      metadata: { dealer_uuid: dealer.id, dealer_name: dealer.name, account_type: paidType, billing: billingState, billing_detail: billingDetail, group_billed: groupBilled },
-    });
-  } catch (e) { console.error("[migrate/confirm] audit insert failed:", e instanceof Error ? e.message : e); }
+  // Durable log = the team alert below (emailed) + this structured line in the
+  // app logs. (No admin_audit table exists in this project; a queryable
+  // migration_log is a 13b.3 status-tracking follow-up.)
+  console.log(`[migrate/confirm] MIGRATED dealer=${dealer.dealer_id} (${dealer.name}) uuid=${dealer.id} plan=${paidType} billing=${billingState} (${billingDetail}) group_billed=${groupBilled} user=${userId}`);
   void alert(
     `✅ Self-migration complete — ${dealer.name}`,
     `<p><strong>${dealer.name}</strong> (${dealer.dealer_id}) migrated to 5.0.<br>Plan: ${paidType}<br>Billing: <strong>${billingState}</strong> — ${billingDetail}<br>FreshBooks recurring-stop: <strong>queued for operator</strong>.</p>`,
