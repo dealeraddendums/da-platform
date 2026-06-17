@@ -79,7 +79,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         show_models_only: false,
         separator_above: false,
         separator_below: false,
-        spaces: 2,
+        spaces: 0,
         created_at: r.created_at,
         updated_at: r.updated_at,
       }));
@@ -175,7 +175,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       show_models_only: body.show_models_only ?? false,
       separator_above: body.separator_above ?? false,
       separator_below: body.separator_below ?? false,
-      spaces: body.spaces ?? 2,
+      spaces: body.spaces ?? 0,
     })
     .select()
     .single();
