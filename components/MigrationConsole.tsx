@@ -23,10 +23,12 @@ interface Row {
   waveId: string | null;
   freshbooksStoppedAt: string | null;
   freshbooksStopPending: boolean;
+  assignedTo: string | null;
 }
 interface Wave { waveId: string; sentAt: string | null; sent: number; migrated: number; pending: number; }
-interface Summary { total: number; ready: number; eligible: number; billingStaged: number; templateConfirmed: number; readyPool: number; settingsMissing: number; logoMissing: number; zeroInventory: number; }
-interface ApiResp { rows: Row[]; summary: Summary; flagsColumnPresent: boolean; billingTemplatesLoaded: number; note: string; }
+interface Operator { id: string; name: string; }
+interface Summary { total: number; ready: number; eligible: number; billingStaged: number; templateConfirmed: number; readyPool: number; settingsMissing: number; logoMissing: number; zeroInventory: number; freshbooksStopPending: number; unassigned: number; }
+interface ApiResp { rows: Row[]; summary: Summary; operators: Operator[]; currentUserId: string; flagsColumnPresent: boolean; billingTemplatesLoaded: number; note: string; }
 
 const NAVY = "#2a2b3c";
 
@@ -66,10 +68,20 @@ export default function MigrationConsole() {
   const [state, setState] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [assignFilter, setAssignFilter] = useState(""); // "" all | "me" | "unassigned" | <operatorId>
 
   // wave summaries (13b step 3)
   const [waves, setWaves] = useState<Wave[]>([]);
   const [resendingId, setResendingId] = useState<string | null>(null);
+
+  // operator assignment
+  const [assignTarget, setAssignTarget] = useState("me"); // "me" | "unassign" | <operatorId>
+  const [assigning, setAssigning] = useState(false);
+  const [claiming, setClaiming] = useState(false);
+
+  const me = data?.currentUserId ?? "";
+  const operators = data?.operators ?? [];
+  const opName = (id: string | null) => !id ? null : (id === me ? "Me" : (operators.find((o) => o.id === id)?.name ?? "—"));
 
   const load = async () => {
     setLoading(true); setErr(null);
@@ -108,6 +120,32 @@ export default function MigrationConsole() {
       if (!res.ok) { alert(j.error ?? "Update failed"); return; }
       setData((d) => d && { ...d, rows: d.rows.map((r) => r.id === row.id ? { ...r, freshbooksStoppedAt: j.freshbooks_stopped_at, freshbooksStopPending: r.inviteStatus === "migrated" && !j.freshbooks_stopped_at } : r) });
     } catch { alert("Update failed"); }
+  }
+
+  async function assignSelected() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    const assignTo = assignTarget === "me" ? me : assignTarget === "unassign" ? null : assignTarget;
+    setAssigning(true);
+    try {
+      const res = await fetch("/api/migration/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealerIds: ids, assignTo }) });
+      const j = await res.json();
+      if (!res.ok) { alert(j.error ?? "Assign failed"); return; }
+      setSelected(new Set());
+      await load();
+    } catch { alert("Assign failed"); } finally { setAssigning(false); }
+  }
+
+  async function claimNext() {
+    setClaiming(true);
+    try {
+      const res = await fetch("/api/migration/claim-next", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ count: 25 }) });
+      const j = await res.json();
+      if (!res.ok) { alert(j.error ?? "Claim failed"); return; }
+      alert(j.claimed > 0 ? `Claimed ${j.claimed} dealer${j.claimed === 1 ? "" : "s"} to your batch.` : (j.note ?? "Nothing to claim."));
+      setAssignFilter("me");
+      await load();
+    } catch { alert("Claim failed"); } finally { setClaiming(false); }
   }
 
   const toggleConfirmed = async (row: Row) => {
@@ -151,6 +189,9 @@ export default function MigrationConsole() {
     let rows = data?.rows ?? [];
     if (readyOnly) rows = rows.filter((r) => r.ready);
     if (fbPending) rows = rows.filter((r) => r.freshbooksStopPending);
+    if (assignFilter === "me") rows = rows.filter((r) => r.assignedTo === me);
+    else if (assignFilter === "unassigned") rows = rows.filter((r) => !r.assignedTo);
+    else if (assignFilter) rows = rows.filter((r) => r.assignedTo === assignFilter);
     if (statusFilter) rows = rows.filter((r) => r.inviteStatus === statusFilter);
     if (group) rows = rows.filter((r) => r.groupName === group);
     if (state) rows = rows.filter((r) => r.state === state);
@@ -159,7 +200,18 @@ export default function MigrationConsole() {
       rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.dealer_id.toLowerCase().includes(q) || (r.groupName ?? "").toLowerCase().includes(q));
     }
     return rows;
-  }, [data, readyOnly, fbPending, statusFilter, group, state, search]);
+  }, [data, readyOnly, fbPending, assignFilter, me, statusFilter, group, state, search]);
+
+  // "My batch" — dealers assigned to me, by stage.
+  const myBatch = useMemo(() => {
+    const mine = (data?.rows ?? []).filter((r) => r.assignedTo && r.assignedTo === me);
+    return {
+      total: mine.length,
+      ready: mine.filter((r) => r.ready).length,
+      invited: mine.filter((r) => r.inviteStatus === "invited" || r.inviteStatus === "stalled" || r.inviteStatus === "expired").length,
+      migrated: mine.filter((r) => r.inviteStatus === "migrated").length,
+    };
+  }, [data, me]);
 
   // live summary recomputed from rows so toggling template-confirmed updates the cards
   const live = useMemo(() => {
@@ -175,15 +227,17 @@ export default function MigrationConsole() {
       stalled: rows.filter((r) => r.inviteStatus === "stalled" || r.inviteStatus === "expired").length,
       migrated: rows.filter((r) => r.inviteStatus === "migrated").length,
       fbPending: rows.filter((r) => r.freshbooksStopPending).length,
+      unassigned: rows.filter((r) => r.eligible && !r.assignedTo).length,
     };
   }, [data]);
 
   const toggleSelect = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   async function sendWave() {
-    const ids = Array.from(selected);
-    if (ids.length === 0) return;
-    if (ids.length > CAP) { alert(`Select ${CAP} or fewer (weekly cap).`); return; }
+    // Invite only the READY subset of the selection (server blocks the rest anyway).
+    const ids = (data?.rows ?? []).filter((r) => selected.has(r.id) && r.ready).map((r) => r.id);
+    if (ids.length === 0) { alert("No Ready dealers selected."); return; }
+    if (ids.length > CAP) { alert(`${ids.length} ready selected — over the cap of ${CAP}. Deselect some.`); return; }
     if (!confirm(`Send migration invites to ${ids.length} dealer${ids.length === 1 ? "" : "s"}? Each gets a one-time code to self-migrate. This does NOT change their billing.`)) return;
     setSending(true); setWaveResult(null);
     try {
@@ -249,6 +303,18 @@ export default function MigrationConsole() {
         </div>
       )}
 
+      {/* My batch + Claim next 25 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, background: "#eef6ff", border: "1px solid #bcdcff", borderRadius: 8, padding: "10px 14px", marginBottom: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: NAVY }}>My batch</span>
+        <span style={{ fontSize: 13, color: "#55595c" }}>{myBatch.total} assigned · <strong style={{ color: "#2e7d32" }}>{myBatch.ready} ready</strong> · {myBatch.invited} invited · {myBatch.migrated} migrated</span>
+        <span style={{ fontSize: 12, color: "#78828c" }}>· {s.unassigned} unassigned eligible</span>
+        <button type="button" onClick={claimNext} disabled={claiming}
+          title="Claim the next 25 unassigned eligible dealers (one-toggle-from-ready first)"
+          style={{ marginLeft: "auto", height: 32, padding: "0 16px", border: "none", borderRadius: 6, background: claiming ? "#9bbfe6" : "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: claiming ? "default" : "pointer" }}>
+          {claiming ? "Claiming…" : "Claim next 25"}
+        </button>
+      </div>
+
       {/* Filters */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name / ID / group…"
@@ -260,6 +326,12 @@ export default function MigrationConsole() {
         <select value={state} onChange={(e) => setState(e.target.value)} style={{ height: 34, padding: "0 8px", border: "1px solid #cccccc", borderRadius: 6, fontSize: 13 }}>
           <option value="">All states</option>
           {states.map((st) => <option key={st} value={st}>{st}</option>)}
+        </select>
+        <select value={assignFilter} onChange={(e) => setAssignFilter(e.target.value)} style={{ height: 34, padding: "0 8px", border: "1px solid #cccccc", borderRadius: 6, fontSize: 13 }} title="Assigned to">
+          <option value="">All owners</option>
+          <option value="me">Me</option>
+          <option value="unassigned">Unassigned</option>
+          {operators.filter((o) => o.id !== me).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ height: 34, padding: "0 8px", border: "1px solid #cccccc", borderRadius: 6, fontSize: 13 }}>
           <option value="">All statuses</option>
@@ -287,20 +359,35 @@ export default function MigrationConsole() {
         </span>
       </div>
 
-      {/* Wave action bar — appears once Ready dealers are selected */}
-      {selected.size > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 14, background: selected.size > CAP ? "#fff3e0" : "#eef6ff", border: `1px solid ${selected.size > CAP ? "#ffcc80" : "#bcdcff"}`, borderRadius: 8, padding: "10px 14px", marginBottom: 12 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: NAVY }}>{selected.size} selected</span>
-          {selected.size > CAP
-            ? <span style={{ fontSize: 13, color: "#b06a00" }}>⚠ Over the weekly cap of {CAP} — deselect {selected.size - CAP}.</span>
-            : <span style={{ fontSize: 12, color: "#55595c" }}>Inviting doesn’t change billing — that happens on each dealer’s own confirm.</span>}
-          <button type="button" onClick={() => setSelected(new Set())} style={{ marginLeft: "auto", height: 32, padding: "0 10px", border: "1px solid #cccccc", borderRadius: 6, background: "#fff", fontSize: 13, cursor: "pointer" }}>Clear</button>
-          <button type="button" onClick={sendWave} disabled={sending || selected.size > CAP}
-            style={{ height: 32, padding: "0 16px", border: "none", borderRadius: 6, background: sending || selected.size > CAP ? "#9bbfe6" : "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: sending || selected.size > CAP ? "default" : "pointer" }}>
-            {sending ? "Sending…" : `Send migration invites (${Math.min(selected.size, CAP)})`}
-          </button>
-        </div>
-      )}
+      {/* Action bar — appears when rows are selected. Assign works on ALL
+          selected; Send invites applies to the Ready subset (server blocks the
+          rest). */}
+      {selected.size > 0 && (() => {
+        const selectedReady = (data?.rows ?? []).filter((r) => selected.has(r.id) && r.ready).length;
+        const overCap = selectedReady > CAP;
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 12, background: overCap ? "#fff3e0" : "#eef6ff", border: `1px solid ${overCap ? "#ffcc80" : "#bcdcff"}`, borderRadius: 8, padding: "10px 14px", marginBottom: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: NAVY }}>{selected.size} selected{selectedReady !== selected.size ? ` (${selectedReady} ready)` : ""}</span>
+            {/* Assign */}
+            <select value={assignTarget} onChange={(e) => setAssignTarget(e.target.value)} style={{ height: 32, padding: "0 8px", border: "1px solid #cccccc", borderRadius: 6, fontSize: 13 }}>
+              <option value="me">Assign to me</option>
+              {operators.filter((o) => o.id !== me).map((o) => <option key={o.id} value={o.id}>Assign to {o.name}</option>)}
+              <option value="unassign">Unassign</option>
+            </select>
+            <button type="button" onClick={assignSelected} disabled={assigning}
+              style={{ height: 32, padding: "0 14px", border: "1px solid #1976d2", borderRadius: 6, background: "#fff", color: "#1976d2", fontSize: 13, fontWeight: 600, cursor: assigning ? "default" : "pointer", opacity: assigning ? 0.6 : 1 }}>
+              {assigning ? "Assigning…" : "Assign"}
+            </button>
+            {overCap && <span style={{ fontSize: 12, color: "#b06a00" }}>⚠ {selectedReady} ready &gt; cap {CAP}</span>}
+            <button type="button" onClick={() => setSelected(new Set())} style={{ marginLeft: "auto", height: 32, padding: "0 10px", border: "1px solid #cccccc", borderRadius: 6, background: "#fff", fontSize: 13, cursor: "pointer" }}>Clear</button>
+            <button type="button" onClick={sendWave} disabled={sending || selectedReady === 0 || overCap}
+              title={selectedReady === 0 ? "No Ready dealers selected" : "Send the 13a OTP invite to selected Ready dealers"}
+              style={{ height: 32, padding: "0 16px", border: "none", borderRadius: 6, background: sending || selectedReady === 0 || overCap ? "#9bbfe6" : "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: sending || selectedReady === 0 || overCap ? "default" : "pointer" }}>
+              {sending ? "Sending…" : `Send invites (${Math.min(selectedReady, CAP)})`}
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Last wave result */}
       {waveResult && (
@@ -318,6 +405,7 @@ export default function MigrationConsole() {
             <tr>
               <th style={{ ...th, width: 34, textAlign: "center" }} title="Select Ready dealers for a wave"> </th>
               <th style={th}>Dealer</th>
+              <th style={th}>Owner</th>
               <th style={th}>Group</th>
               <th style={th}>State</th>
               <th style={{ ...th, textAlign: "center" }} title="Hard gate">Billing</th>
@@ -332,14 +420,19 @@ export default function MigrationConsole() {
             {filtered.map((r) => (
               <tr key={r.id} style={{ background: r.ready ? "#f4fbf4" : undefined }}>
                 <td style={{ ...td, textAlign: "center" }}>
-                  <input type="checkbox" checked={selected.has(r.id)} disabled={!r.ready}
+                  <input type="checkbox" checked={selected.has(r.id)} disabled={r.inviteStatus === "migrated"}
                     onChange={() => toggleSelect(r.id)}
-                    title={r.ready ? "Select for a migration wave" : "Only Ready dealers can be invited"}
-                    style={{ cursor: r.ready ? "pointer" : "not-allowed" }} />
+                    title={r.inviteStatus === "migrated" ? "Already migrated" : "Select to assign and/or invite"}
+                    style={{ cursor: r.inviteStatus === "migrated" ? "not-allowed" : "pointer" }} />
                 </td>
                 <td style={td}>
                   <div style={{ fontWeight: 600 }}>{r.name}</div>
                   <div style={{ fontSize: 11, color: "#9aa0a6" }}>{r.dealer_id}</div>
+                </td>
+                <td style={td}>
+                  {r.assignedTo
+                    ? <span style={{ fontSize: 12, fontWeight: r.assignedTo === me ? 600 : 400, color: r.assignedTo === me ? "#1565c0" : "#55595c" }}>{opName(r.assignedTo)}</span>
+                    : <span style={{ color: "#9aa0a6", fontSize: 12 }}>Unassigned</span>}
                 </td>
                 <td style={td}>{r.groupName ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
                 <td style={td}>{r.state ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
@@ -391,7 +484,7 @@ export default function MigrationConsole() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td style={{ ...td, textAlign: "center", color: "#9aa0a6" }} colSpan={10}>No dealers match these filters.</td></tr>
+              <tr><td style={{ ...td, textAlign: "center", color: "#9aa0a6" }} colSpan={11}>No dealers match these filters.</td></tr>
             )}
           </tbody>
         </table>

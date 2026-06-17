@@ -102,6 +102,13 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
     fb.forEach((d) => { if (d.freshbooks_stopped_at) fbStopped.set(d.id, d.freshbooks_stopped_at); });
   } catch { /* migration 104 not applied yet — all treated as pending */ }
 
+  // Operator assignment (separate so a missing migration 105 stays harmless).
+  const assignedBy = new Map<string, string | null>();
+  try {
+    const as = await fetchAll<{ id: string; migration_assigned_to: string | null }>(admin, "dealers", "id, migration_assigned_to", baseFilter);
+    as.forEach((d) => { if (d.migration_assigned_to) assignedBy.set(d.id, d.migration_assigned_to); });
+  } catch { /* migration 105 not applied yet — all unassigned */ }
+
   const billingByCustomer = await listBillingTemplatesByCustomer();
 
   const now = Date.now();
@@ -117,6 +124,7 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
       now,
       invitation: invByDealer.get(d.id) ?? null,
       freshbooksStoppedAt: fbStopped.get(d.id) ?? null,
+      assignedTo: assignedBy.get(d.id) ?? null,
     });
   });
   rows.sort((a, b) => Number(b.ready) - Number(a.ready) || a.name.localeCompare(b.name));

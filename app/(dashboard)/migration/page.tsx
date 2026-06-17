@@ -28,7 +28,7 @@ export default async function MigrationPage() {
     <div className="p-6">
       <PageHeader
         title="Migration Readiness"
-        subtitle="Phase 13b · who's ready to invite to self-serve migration (read-only; invites are step 2)"
+        subtitle="Assign, prepare, invite, and track self-serve dealer migrations."
       />
       <MigrationConsole />
     </div>

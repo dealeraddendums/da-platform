@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
+import { createAdminSupabaseClient } from "@/lib/db";
 import { loadReadinessRows } from "@/lib/migration-readiness-data";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +12,16 @@ export const dynamic = "force-dynamic";
  * settings/logo/inventory are non-blocking warnings (softened 2026-06-16).
  */
 export async function GET(_req: NextRequest): Promise<NextResponse> {
-  const { error } = await requireSuperAdmin();
+  const { claims, error } = await requireSuperAdmin();
   if (error) return error;
 
   const { rows, flagsColumnPresent, billingTemplatesLoaded } = await loadReadinessRows();
+
+  // Operators (the team that divides the tail) = super_admin profiles, for the
+  // "Assigned to" column/filter + the assign dropdown.
+  const admin = createAdminSupabaseClient();
+  const { data: ops } = await admin.from("profiles").select("id, full_name, email").eq("role", "super_admin");
+  const operators = (ops ?? []).map((o: { id: string; full_name: string | null; email: string | null }) => ({ id: o.id, name: o.full_name || o.email || o.id }));
 
   const summary = {
     total: rows.length,
@@ -27,11 +34,14 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     logoMissing: rows.filter((r) => r.logoMissing).length,
     zeroInventory: rows.filter((r) => r.zeroInventory).length,
     freshbooksStopPending: rows.filter((r) => r.freshbooksStopPending).length,
+    unassigned: rows.filter((r) => r.eligible && !r.assignedTo).length,
   };
 
   return NextResponse.json({
     rows,
     summary,
+    operators,
+    currentUserId: claims.sub,
     flagsColumnPresent,
     billingTemplatesLoaded,
     note: "Ready = billing-template-staged + template-confirmed + eligible (HARD gates). Settings/logo/inventory are WARNINGS only. Eligible excludes white-glove groups, flagged-complex, and dealers with no self-serve contact (operator/group-managed).",
