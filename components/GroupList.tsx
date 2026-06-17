@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
+import EntityRowActions from "@/components/EntityRowActions";
 import { createClient } from "@/lib/supabase/client";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
 
@@ -114,15 +115,6 @@ export default function GroupList() {
     if (hoverTimerRef.current) {
       clearTimeout(hoverTimerRef.current);
       hoverTimerRef.current = null;
-    }
-  }
-
-  async function handleGroupClick(g: GroupListRow) {
-    setGroupActionError(null);
-    if (g.has_group_admin) {
-      await handleGroupImpersonate(g.id, g.name);
-    } else {
-      await handleGroupGhost(g.id, g.name);
     }
   }
 
@@ -340,6 +332,12 @@ export default function GroupList() {
                 >
                   HubSpot
                 </th>
+                <th
+                  className="text-right px-4 py-2.5 font-semibold"
+                  style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}
+                >
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -369,22 +367,6 @@ export default function GroupList() {
                           TEST
                         </span>
                       )}
-                      <button
-                        onClick={() => void handleGroupClick(g)}
-                        disabled={ghosting === g.id || impersonatingGroup === g.id}
-                        title={g.has_group_admin ? "Impersonate this group's admin" : "Enter ghost mode (no group admin)"}
-                        style={{
-                          fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 4,
-                          border: "1px solid #e0e0e0", background: "#fff", color: "#1976d2",
-                          cursor: (ghosting === g.id || impersonatingGroup === g.id) ? "wait" : "pointer",
-                          opacity: (ghosting === g.id || impersonatingGroup === g.id) ? 0.6 : 1,
-                          flexShrink: 0,
-                        }}
-                      >
-                        {(ghosting === g.id || impersonatingGroup === g.id)
-                          ? "Entering…"
-                          : g.has_group_admin ? "Impersonate" : "👻 Ghost"}
-                      </button>
                     </div>
                   </td>
 
@@ -468,6 +450,17 @@ export default function GroupList() {
                     {g.hubspot_company_id && (
                       <HubSpotPill href={`https://app.hubspot.com/contacts/23896347/record/0-2/${g.hubspot_company_id}`} />
                     )}
+                  </td>
+
+                  {/* Actions — shared with Dealers (Edit · Ghost · Impersonate) */}
+                  <td className="px-4 py-3 text-right">
+                    <EntityRowActions
+                      editHref={`/groups/${g.id}`}
+                      onGhost={() => void handleGroupGhost(g.id, g.name)}
+                      onImpersonate={() => void handleGroupImpersonate(g.id, g.name)}
+                      canImpersonate={g.has_group_admin}
+                      busy={ghosting === g.id ? "ghost" : impersonatingGroup === g.id ? "impersonate" : null}
+                    />
                   </td>
                 </tr>
               ))}

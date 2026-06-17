@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { createClient } from "@/lib/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
+import EntityRowActions from "@/components/EntityRowActions";
 import { decodeHtmlEntities } from "@/lib/format";
 
 type DealerListRow = DealerRow & {
@@ -252,10 +253,9 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
 
     if (!res.ok || !json.access_token || !json.refresh_token) {
       setImpersonating(null);
-      // No dealer_admin account — enter ghost mode automatically
-      if (res.status === 404 && json.error?.includes("No dealer_admin account")) {
-        void handleEnterGhost(d);
-      }
+      // No auto-fallback to Ghost — Impersonate is simply disabled in the UI
+      // when there's no user (dealer.has_users false). Surfacing nothing here
+      // matches the prior silent-fail behavior for the rare race.
       return;
     }
 
@@ -470,6 +470,14 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                     HubSpot
                   </th>
                 )}
+                {role === "super_admin" && (
+                  <th
+                    className="text-right px-4 py-2.5 font-semibold"
+                    style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}
+                  >
+                    Actions
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -488,24 +496,13 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                         {risk === "low" && (
                           <span title="Low print activity" style={{ width: 7, height: 7, borderRadius: "50%", background: "#ffd54f", display: "inline-block", flexShrink: 0 }} />
                         )}
-                        {!d.has_users && (
-                          <span title="No user accounts — Ghost Mode" style={{ fontSize: 13, lineHeight: 1, flexShrink: 0, cursor: "help" }}>👻</span>
-                        )}
-                        <button
-                          onClick={() => void handleImpersonate(d)}
-                          disabled={impersonating === d.dealer_id || enteringGhost === d.dealer_id}
-                          title={d.has_users ? "Log in as this dealer" : "Enter Ghost Mode (no user account)"}
-                          style={{
-                            background: "none", border: "none", padding: 0,
-                            fontWeight: 500, color: "var(--text-primary)",
-                            cursor: (impersonating === d.dealer_id || enteringGhost === d.dealer_id) ? "wait" : "pointer",
-                            fontSize: "inherit", textDecoration: "underline",
-                            textDecorationColor: "transparent", transition: "text-decoration-color 100ms",
-                          }}
+                        <Link
+                          href={`/dealers/${d.id}`}
+                          style={{ fontWeight: 500, color: "var(--text-primary)", textDecoration: "underline" }}
                           className="hover:underline"
                         >
-                          {(impersonating === d.dealer_id || enteringGhost === d.dealer_id) ? "…" : decodeHtml(d.name || `Dealer ${d.dealer_id}`)}
-                        </button>
+                          {decodeHtml(d.name || `Dealer ${d.dealer_id}`)}
+                        </Link>
                         {d.is_test && (
                           <span
                             className="text-xs font-semibold px-2 py-0.5"
@@ -538,14 +535,6 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                             🔒 Group
                           </span>
                         )}
-                        <Link
-                          href={`/dealers/${d.id}`}
-                          title="View dealer profile"
-                          className="opacity-0 group-hover:opacity-50"
-                          style={{ fontSize: 13, lineHeight: 1, color: "var(--text-muted)", transition: "opacity 100ms", textDecoration: "none" }}
-                        >
-                          📋
-                        </Link>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-sm">
@@ -576,6 +565,17 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                         {d.hubspot_company_id && (
                           <HubSpotPill href={`https://app.hubspot.com/contacts/23896347/record/0-2/${d.hubspot_company_id}`} />
                         )}
+                      </td>
+                    )}
+                    {role === "super_admin" && (
+                      <td className="px-4 py-3 text-right">
+                        <EntityRowActions
+                          editHref={`/dealers/${d.id}`}
+                          onGhost={() => void handleEnterGhost(d)}
+                          onImpersonate={() => void handleImpersonate(d)}
+                          canImpersonate={d.has_users}
+                          busy={enteringGhost === d.dealer_id ? "ghost" : impersonating === d.dealer_id ? "impersonate" : null}
+                        />
                       </td>
                     )}
                   </tr>
