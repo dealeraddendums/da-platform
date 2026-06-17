@@ -216,6 +216,43 @@ export async function unarchiveCustomer(customerId: string): Promise<void> {
 }
 
 /**
+ * Activate (or deactivate) a customer's recurring template WITHOUT touching its
+ * products/prices — Phase 13a migration confirm + rollback. On activate, pass a
+ * FUTURE nextInvoiceDate (the no-double-bill guardrail); the daily cron issues
+ * the first invoice on that date. Group-billed dealers pass the GROUP's customer
+ * id. Throws on failure so the caller can surface/queue it.
+ */
+export async function setTemplateStatus(
+  customerId: string,
+  active: boolean,
+  nextInvoiceDate?: string,
+): Promise<{ active: boolean; nextInvoiceDate?: string | null }> {
+  const res = await fetch(`${BASE}/templates/${encodeURIComponent(customerId)}/set-status`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ active, ...(nextInvoiceDate ? { nextInvoiceDate } : {}) }),
+  });
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `setTemplateStatus ${res.status}`, text);
+  try {
+    const parsed = JSON.parse(text) as { template?: { active: boolean; nextInvoiceDate?: string | null } };
+    return parsed.template ?? { active };
+  } catch (err) {
+    throw new BillingError(res.status, `setTemplateStatus parse: ${(err as Error).message}`, text);
+  }
+}
+
+/** Migration confirm: activate the template with a future nextInvoiceDate. */
+export function activateTemplate(customerId: string, nextInvoiceDate: string) {
+  return setTemplateStatus(customerId, true, nextInvoiceDate);
+}
+
+/** Rollback: pause the template (no further invoicing). */
+export function deactivateTemplate(customerId: string) {
+  return setTemplateStatus(customerId, false);
+}
+
+/**
  * Bulk-list every da-billing recurring template (one big-page call) → a map of
  * customerId → { active, nextInvoiceDate }. Used by the migration readiness
  * console to compute "billing template staged" for many dealers without a

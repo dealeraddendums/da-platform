@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 // Phase 13a.2 — dealer-facing guided self-migration. 4 steps:
 //   code → confirm dealership → set up 5.0 login → review plan/billing → confirm.
@@ -85,11 +86,18 @@ export default function MigrateFlow() {
         body: JSON.stringify({ token, code: code.trim(), password, corrections }),
       });
       const j = await res.json();
-      // 13a.2: confirm is a stub returning { pending: true } (202). 13a.3 will
-      // perform the real activation. Either way, show the dealer a clear state.
-      if (j.pending) { setPendingMsg(j.message ?? "Your migration is being finalized."); setStep("done"); return; }
-      if (!res.ok) { setError(j.error ?? "Couldn't finish your migration."); return; }
-      setPendingMsg(j.message ?? "Migration complete!"); setStep("done");
+      if (!res.ok || !j.ok) {
+        // (202 pending is the 13a.2 stub fallback — treat as a soft message.)
+        if (j.pending) { setPendingMsg(j.message ?? "Your migration is being finalized."); setStep("done"); return; }
+        setError(j.error ?? "Couldn't finish your migration."); return;
+      }
+      // Migrated. Sign in with the password they just set, then land on 5.0.
+      setPendingMsg(j.message ?? "You're migrated! Taking you to your dashboard…");
+      setStep("done");
+      try {
+        await createClient().auth.signInWithPassword({ email: (email || "").trim().toLowerCase(), password });
+        setTimeout(() => { window.location.href = "/dashboard"; }, 1800);
+      } catch { /* stay on the done screen; they can sign in manually */ }
     } catch { setError("Something went wrong finishing your migration. Please try again."); } finally { setLoading(false); }
   }
 
