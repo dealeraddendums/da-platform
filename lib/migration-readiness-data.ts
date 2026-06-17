@@ -94,6 +94,14 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
     if (!prev || (iv.created_at ?? "") > (prev.created_at ?? "")) invByDealer.set(iv.dealer_id, iv);
   }
 
+  // 13d: FreshBooks-stop tracking (separate so a missing migration 104 doesn't
+  // disable the migration-100 flags above). dealer.id → freshbooks_stopped_at.
+  const fbStopped = new Map<string, string | null>();
+  try {
+    const fb = await fetchAll<{ id: string; freshbooks_stopped_at: string | null }>(admin, "dealers", "id, freshbooks_stopped_at", baseFilter);
+    fb.forEach((d) => { if (d.freshbooks_stopped_at) fbStopped.set(d.id, d.freshbooks_stopped_at); });
+  } catch { /* migration 104 not applied yet — all treated as pending */ }
+
   const billingByCustomer = await listBillingTemplatesByCustomer();
 
   const now = Date.now();
@@ -108,6 +116,7 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
       billingByCustomer,
       now,
       invitation: invByDealer.get(d.id) ?? null,
+      freshbooksStoppedAt: fbStopped.get(d.id) ?? null,
     });
   });
   rows.sort((a, b) => Number(b.ready) - Number(a.ready) || a.name.localeCompare(b.name));

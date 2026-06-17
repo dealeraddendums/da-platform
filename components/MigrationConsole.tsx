@@ -21,6 +21,8 @@ interface Row {
   inviteStatus: "not-invited" | "invited" | "stalled" | "expired" | "migrated";
   invitedAt: string | null;
   waveId: string | null;
+  freshbooksStoppedAt: string | null;
+  freshbooksStopPending: boolean;
 }
 interface Wave { waveId: string; sentAt: string | null; sent: number; migrated: number; pending: number; }
 interface Summary { total: number; ready: number; eligible: number; billingStaged: number; templateConfirmed: number; readyPool: number; settingsMissing: number; logoMissing: number; zeroInventory: number; }
@@ -59,6 +61,7 @@ export default function MigrationConsole() {
 
   // filters
   const [readyOnly, setReadyOnly] = useState(false);
+  const [fbPending, setFbPending] = useState(false);
   const [group, setGroup] = useState("");
   const [state, setState] = useState("");
   const [search, setSearch] = useState("");
@@ -96,6 +99,15 @@ export default function MigrationConsole() {
       alert(`Invite resent${j.email ? ` to ${j.email}` : ""}.`);
       await load();
     } catch { alert("Resend failed"); } finally { setResendingId(null); }
+  }
+
+  async function markFbStopped(row: Row, stopped: boolean) {
+    try {
+      const res = await fetch("/api/migration/freshbooks-stopped", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealerId: row.id, stopped }) });
+      const j = await res.json();
+      if (!res.ok) { alert(j.error ?? "Update failed"); return; }
+      setData((d) => d && { ...d, rows: d.rows.map((r) => r.id === row.id ? { ...r, freshbooksStoppedAt: j.freshbooks_stopped_at, freshbooksStopPending: r.inviteStatus === "migrated" && !j.freshbooks_stopped_at } : r) });
+    } catch { alert("Update failed"); }
   }
 
   const toggleConfirmed = async (row: Row) => {
@@ -138,6 +150,7 @@ export default function MigrationConsole() {
   const filtered = useMemo(() => {
     let rows = data?.rows ?? [];
     if (readyOnly) rows = rows.filter((r) => r.ready);
+    if (fbPending) rows = rows.filter((r) => r.freshbooksStopPending);
     if (statusFilter) rows = rows.filter((r) => r.inviteStatus === statusFilter);
     if (group) rows = rows.filter((r) => r.groupName === group);
     if (state) rows = rows.filter((r) => r.state === state);
@@ -146,7 +159,7 @@ export default function MigrationConsole() {
       rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.dealer_id.toLowerCase().includes(q) || (r.groupName ?? "").toLowerCase().includes(q));
     }
     return rows;
-  }, [data, readyOnly, statusFilter, group, state, search]);
+  }, [data, readyOnly, fbPending, statusFilter, group, state, search]);
 
   // live summary recomputed from rows so toggling template-confirmed updates the cards
   const live = useMemo(() => {
@@ -161,6 +174,7 @@ export default function MigrationConsole() {
       invited: rows.filter((r) => r.inviteStatus === "invited").length,
       stalled: rows.filter((r) => r.inviteStatus === "stalled" || r.inviteStatus === "expired").length,
       migrated: rows.filter((r) => r.inviteStatus === "migrated").length,
+      fbPending: rows.filter((r) => r.freshbooksStopPending).length,
     };
   }, [data]);
 
@@ -215,6 +229,7 @@ export default function MigrationConsole() {
         <div style={cardStyle}><div style={{ ...num, color: "#1565c0" }}>{s.invited}</div><div style={lbl}>Invited (pending)</div></div>
         <div style={cardStyle}><div style={{ ...num, color: "#b06a00" }}>{s.stalled}</div><div style={lbl}>Stalled / expired</div></div>
         <div style={cardStyle}><div style={{ ...num, color: "#2e7d32" }}>{s.migrated}</div><div style={lbl}>Migrated</div></div>
+        <div style={cardStyle}><div style={{ ...num, color: s.fbPending ? "#c62828" : "#2e7d32" }}>{s.fbPending}</div><div style={lbl}>FreshBooks stop pending</div></div>
       </div>
 
       {/* Recent waves */}
@@ -256,6 +271,9 @@ export default function MigrationConsole() {
         </select>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }}>
           <input type="checkbox" checked={readyOnly} onChange={(e) => setReadyOnly(e.target.checked)} /> Ready only
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }} title="Migrated dealers whose FreshBooks recurring still needs stopping">
+          <input type="checkbox" checked={fbPending} onChange={(e) => setFbPending(e.target.checked)} /> FB stop pending
         </label>
         <button
           type="button"
@@ -353,6 +371,13 @@ export default function MigrationConsole() {
                       </button>
                     )}
                   </div>
+                  {r.inviteStatus === "migrated" && (
+                    <div style={{ fontSize: 11, marginTop: 4 }}>
+                      {r.freshbooksStoppedAt
+                        ? <span style={{ color: "#2e7d32" }} title={`stopped ${new Date(r.freshbooksStoppedAt).toLocaleString()}`}>FreshBooks stopped ✓ <button type="button" onClick={() => void markFbStopped(r, false)} style={{ fontSize: 10, color: "#9aa0a6", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>undo</button></span>
+                        : <span style={{ color: "#b06a00" }}>FreshBooks stop pending <button type="button" onClick={() => void markFbStopped(r, true)} style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>mark stopped</button></span>}
+                    </div>
+                  )}
                 </td>
                 <td style={{ ...td, textAlign: "center" }}>
                   {r.warnings.length === 0

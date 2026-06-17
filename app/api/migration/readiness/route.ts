@@ -26,6 +26,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     settingsMissing: rows.filter((r) => r.settingsMissing).length,
     logoMissing: rows.filter((r) => r.logoMissing).length,
     zeroInventory: rows.filter((r) => r.zeroInventory).length,
+    freshbooksStopPending: rows.filter((r) => r.freshbooksStopPending).length,
   };
 
   return NextResponse.json({

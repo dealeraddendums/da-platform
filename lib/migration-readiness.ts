@@ -67,6 +67,9 @@ export interface ReadinessRow {
   inviteStatus: InviteStatus;
   invitedAt: string | null;
   waveId: string | null;
+  // ── 13d: legacy FreshBooks recurring-stop tracking (operator-managed) ───────
+  freshbooksStoppedAt: string | null;
+  freshbooksStopPending: boolean; // migrated but FreshBooks recurring not yet stopped
 }
 
 export type InviteStatus = "not-invited" | "invited" | "stalled" | "expired" | "migrated";
@@ -114,6 +117,7 @@ export function computeReadiness(
     billingByCustomer: Map<string, BillingTemplateInfo>;
     now: number;
     invitation?: { accepted_at: string | null; expires_at: string | null; wave_id?: string | null } | null;
+    freshbooksStoppedAt?: string | null;
   },
 ): ReadinessRow {
   // ── WARNINGS (informational only — softened 2026-06-16; do NOT block ready) ─
@@ -169,5 +173,7 @@ export function computeReadiness(
     billingStaged, billingReason, templateConfirmed, eligible, eligibleReason, ready,
     settingsMissing, logoMissing, zeroInventory, warnings,
     inviteStatus, invitedAt: d.invited_at ?? null, waveId: ctx.invitation?.wave_id ?? null,
+    freshbooksStoppedAt: ctx.freshbooksStoppedAt ?? null,
+    freshbooksStopPending: inviteStatus === "migrated" && !ctx.freshbooksStoppedAt,
   };
 }
