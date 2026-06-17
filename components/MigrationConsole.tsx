@@ -22,6 +22,8 @@ interface Row {
 interface Summary { total: number; ready: number; eligible: number; billingStaged: number; templateConfirmed: number; readyPool: number; settingsMissing: number; logoMissing: number; zeroInventory: number; }
 interface ApiResp { rows: Row[]; summary: Summary; flagsColumnPresent: boolean; billingTemplatesLoaded: number; note: string; }
 
+const NAVY = "#2a2b3c";
+
 const Check = ({ ok, title }: { ok: boolean; title?: string }) => (
   <span title={title} style={{ color: ok ? "#2e7d32" : "#c62828", fontWeight: 700 }}>{ok ? "✓" : "✗"}</span>
 );
@@ -31,6 +33,12 @@ export default function MigrationConsole() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
+
+  // wave selection (Ready rows only) + send
+  const CAP = 100;
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [sending, setSending] = useState(false);
+  const [waveResult, setWaveResult] = useState<{ summary: { requested: number; sent: number; failed: number; blocked: number }; failed: { name: string; error: string }[]; blocked: { name: string; reason: string }[] } | null>(null);
 
   // filters
   const [readyOnly, setReadyOnly] = useState(false);
@@ -115,6 +123,24 @@ export default function MigrationConsole() {
     };
   }, [data]);
 
+  const toggleSelect = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  async function sendWave() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    if (ids.length > CAP) { alert(`Select ${CAP} or fewer (weekly cap).`); return; }
+    if (!confirm(`Send migration invites to ${ids.length} dealer${ids.length === 1 ? "" : "s"}? Each gets a one-time code to self-migrate. This does NOT change their billing.`)) return;
+    setSending(true); setWaveResult(null);
+    try {
+      const res = await fetch("/api/migration/send-wave", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealerIds: ids }) });
+      const j = await res.json();
+      if (!res.ok) { alert(j.error ?? "Wave failed"); return; }
+      setWaveResult({ summary: j.summary, failed: j.failed ?? [], blocked: j.blocked ?? [] });
+      setSelected(new Set());
+      await load(); // refresh
+    } catch (e) { alert(e instanceof Error ? e.message : "Wave failed"); } finally { setSending(false); }
+  }
+
   if (loading) return <p style={{ color: "var(--text-muted)", fontSize: 14 }}>Loading readiness…</p>;
   if (err) return <p style={{ color: "#c62828", fontSize: 14 }}>Error: {err}</p>;
   if (!data) return null;
@@ -162,16 +188,48 @@ export default function MigrationConsole() {
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }}>
           <input type="checkbox" checked={readyOnly} onChange={(e) => setReadyOnly(e.target.checked)} /> Ready only
         </label>
+        <button
+          type="button"
+          onClick={() => setSelected((prev) => { const n = new Set(prev); const readyVisible = filtered.filter((r) => r.ready); const allSel = readyVisible.length > 0 && readyVisible.every((r) => n.has(r.id)); readyVisible.forEach((r) => allSel ? n.delete(r.id) : n.add(r.id)); return n; })}
+          style={{ height: 34, padding: "0 10px", border: "1px solid #cccccc", borderRadius: 6, fontSize: 13, background: "#fff", cursor: "pointer" }}
+        >
+          Select all Ready (shown)
+        </button>
         <span style={{ fontSize: 12, color: "var(--text-muted, #78828c)", marginLeft: "auto" }}>
           Showing {filtered.length} of {s.total}
         </span>
       </div>
+
+      {/* Wave action bar — appears once Ready dealers are selected */}
+      {selected.size > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 14, background: selected.size > CAP ? "#fff3e0" : "#eef6ff", border: `1px solid ${selected.size > CAP ? "#ffcc80" : "#bcdcff"}`, borderRadius: 8, padding: "10px 14px", marginBottom: 12 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: NAVY }}>{selected.size} selected</span>
+          {selected.size > CAP
+            ? <span style={{ fontSize: 13, color: "#b06a00" }}>⚠ Over the weekly cap of {CAP} — deselect {selected.size - CAP}.</span>
+            : <span style={{ fontSize: 12, color: "#55595c" }}>Inviting doesn’t change billing — that happens on each dealer’s own confirm.</span>}
+          <button type="button" onClick={() => setSelected(new Set())} style={{ marginLeft: "auto", height: 32, padding: "0 10px", border: "1px solid #cccccc", borderRadius: 6, background: "#fff", fontSize: 13, cursor: "pointer" }}>Clear</button>
+          <button type="button" onClick={sendWave} disabled={sending || selected.size > CAP}
+            style={{ height: 32, padding: "0 16px", border: "none", borderRadius: 6, background: sending || selected.size > CAP ? "#9bbfe6" : "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: sending || selected.size > CAP ? "default" : "pointer" }}>
+            {sending ? "Sending…" : `Send migration invites (${Math.min(selected.size, CAP)})`}
+          </button>
+        </div>
+      )}
+
+      {/* Last wave result */}
+      {waveResult && (
+        <div style={{ background: "#f1faf2", border: "1px solid #cfe8d2", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#2e7d32" }}>
+          Wave sent — <strong>{waveResult.summary.sent}</strong> invited{waveResult.summary.failed ? `, ${waveResult.summary.failed} failed` : ""}{waveResult.summary.blocked ? `, ${waveResult.summary.blocked} blocked (not ready)` : ""}.
+          {waveResult.failed.length > 0 && <div style={{ color: "#c62828", marginTop: 4 }}>Failed: {waveResult.failed.map((f) => `${f.name} (${f.error})`).join("; ")}</div>}
+          {waveResult.blocked.length > 0 && <div style={{ color: "#b06a00", marginTop: 4 }}>Blocked: {waveResult.blocked.map((b) => `${b.name} (${b.reason})`).join("; ")}</div>}
+        </div>
+      )}
 
       {/* Table */}
       <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 8, overflow: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
+              <th style={{ ...th, width: 34, textAlign: "center" }} title="Select Ready dealers for a wave"> </th>
               <th style={th}>Dealer</th>
               <th style={th}>Group</th>
               <th style={th}>State</th>
@@ -185,6 +243,12 @@ export default function MigrationConsole() {
           <tbody>
             {filtered.map((r) => (
               <tr key={r.id} style={{ background: r.ready ? "#f4fbf4" : undefined }}>
+                <td style={{ ...td, textAlign: "center" }}>
+                  <input type="checkbox" checked={selected.has(r.id)} disabled={!r.ready}
+                    onChange={() => toggleSelect(r.id)}
+                    title={r.ready ? "Select for a migration wave" : "Only Ready dealers can be invited"}
+                    style={{ cursor: r.ready ? "pointer" : "not-allowed" }} />
+                </td>
                 <td style={td}>
                   <div style={{ fontWeight: 600 }}>{r.name}</div>
                   <div style={{ fontSize: 11, color: "#9aa0a6" }}>{r.dealer_id}</div>
@@ -220,7 +284,7 @@ export default function MigrationConsole() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td style={{ ...td, textAlign: "center", color: "#9aa0a6" }} colSpan={8}>No dealers match these filters.</td></tr>
+              <tr><td style={{ ...td, textAlign: "center", color: "#9aa0a6" }} colSpan={9}>No dealers match these filters.</td></tr>
             )}
           </tbody>
         </table>

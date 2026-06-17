@@ -31,6 +31,7 @@ export interface ReadinessDealer {
   subscription_billed_to: string | null;
   billing_customer_id: string | null;
   logo_url: string | null;
+  primary_contact_email: string | null;
   // core ETL fields used by the etl-complete check
   address: string | null;
   city: string | null;
@@ -79,6 +80,7 @@ export function computeReadiness(
     groupBillingCustomerId: string | null;
     hasSettings: boolean;
     hasOptions: boolean;
+    hasDealerAdmin: boolean;
     billingByCustomer: Map<string, BillingTemplateInfo>;
     now: number;
   },
@@ -112,12 +114,18 @@ export function computeReadiness(
   }
 
   // ── Eligible ───────────────────────────────────────────────────────────────
+  // 13c: a self-serve invite needs a deliverable contact (the dealer's own
+  // primary email or a dealer_admin user). A group-member dealer with neither is
+  // operated by the group as a service (service-provider model) and never
+  // self-serves → route to white-glove, don't invite.
+  const hasSelfServeContact = present(d.primary_contact_email) || ctx.hasDealerAdmin;
   let eligible = true;
   let eligibleReason = 'eligible';
   if (d.migration_status === 'migrated') { eligible = false; eligibleReason = 'already migrated'; }
   else if (d.is_test || (d.account_purpose && d.account_purpose !== 'real')) { eligible = false; eligibleReason = 'test/demo account'; }
   else if (isWhiteGloveGroup(ctx.groupName)) { eligible = false; eligibleReason = `white-glove group (${ctx.groupName})`; }
   else if (d.migration_complex) { eligible = false; eligibleReason = 'flagged complex'; }
+  else if (!hasSelfServeContact) { eligible = false; eligibleReason = 'no self-serve contact (operator/group-managed)'; }
 
   // ── Ready = the THREE hard gates only (warnings excluded) ──────────────────
   const templateConfirmed = !!d.template_confirmed;
