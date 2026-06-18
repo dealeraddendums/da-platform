@@ -352,7 +352,9 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
       });
       const json = await res.json() as { cleared_vehicles?: number; error?: string };
       if (!res.ok) {
-        alert(json.error ?? "Failed to clear print history");
+        // Surface the real server message (|| not ?? so an empty string still
+        // shows a useful fallback) instead of a generic alert.
+        alert(json.error || `Failed to clear print history (HTTP ${res.status})`);
         return;
       }
       setCheckedIds(new Set());

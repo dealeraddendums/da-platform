@@ -846,7 +846,9 @@ function PrintHistorySection({ dealerId }: { dealerId: string }) {
         method: "POST",
       });
       const json = await res.json() as { cleared_vehicles?: number; error?: string };
-      if (!res.ok) throw new Error(json.error ?? "Failed to clear");
+      // Surface the real server message (|| not ?? so an empty string still shows
+      // a useful fallback) — the misleading generic alert hid a 500 root cause.
+      if (!res.ok) throw new Error(json.error || `Failed to clear print history (HTTP ${res.status})`);
       setOpen(false);
       setToast(`Print history cleared for ${json.cleared_vehicles ?? 0} active vehicles`);
       if (toastTimer.current) clearTimeout(toastTimer.current);
