@@ -9,6 +9,7 @@ import { fireConversionWebhook } from "@/lib/marketing-webhook";
 import { normalizeSubscriptionType, isPayingAccount } from "@/lib/hubspot";
 import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 import { fireSuperAdminGroupAssignCascade } from "@/lib/group-billing-cascade";
+import { applyDealerSubscriptionChange, type SubscriptionBillingResult } from "@/lib/billing-subscription";
 
 type Params = { params: { id: string } };
 
@@ -434,6 +435,18 @@ export async function PATCH(
   //   - Non-lifecycle edits (address, phone, logo, etc.) stay on plain
   //     fire-and-forget — failures still land in hubspot_sync_errors
   //     for super_admin review.
+  // da-billing propagation — synchronous so the operator sees the result. Only
+  // on a super_admin account_type change (the single choke point both the
+  // profile Subscription editor and any other account_type PATCH flow through).
+  // Mutates the dealer's own template, or the group's template when group-billed;
+  // Free/Trial cancels the recurring line. Never rolls back the platform change —
+  // a failure/block is returned in `billing` for the UI + logged.
+  let billing: SubscriptionBillingResult | undefined;
+  if (accountTypeChanged && claims.role === "super_admin") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    billing = await applyDealerSubscriptionChange(dealerUuid, patchAny.account_type ?? null);
+  }
+
   if (accountTypeChanged) {
     const ctx = lifecycleTransition === "downgrade"
       ? "dealer update (paying → Free downgrade — Downgraded workflow)"
@@ -455,7 +468,7 @@ export async function PATCH(
     fireDealerSync(dealerUuid);
   }
 
-  return NextResponse.json({ data: data as DealerRow });
+  return NextResponse.json({ data: data as DealerRow, billing });
 }
 
 /**

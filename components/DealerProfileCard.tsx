@@ -9,6 +9,30 @@ import DealerLogoUploader from "@/components/DealerLogoUploader";
 import { PageHeader } from "@/components/PageHeader";
 import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
 import { DMS_PROVIDERS, OTHER_PROVIDERS, isDmsProvider } from "@/lib/inventory-providers";
+import type { SubscriptionBillingResult } from "@/lib/billing-subscription";
+
+// Subscription-tier options for the super_admin inline editor. Values are the
+// human account_type forms (matching the self-serve conversion path + migrated
+// data); subscriptionDescriptorFor() maps them to da-billing "sub-*" productIds.
+const SUBSCRIPTION_TIER_OPTIONS: { value: string; label: string }[] = [
+  { value: "Trial", label: "Trial" },
+  { value: "Manual", label: "Manual" },
+  { value: "Automatic Web", label: "Automatic Web" },
+  { value: "Automatic DMS", label: "Automatic DMS" },
+  { value: "Free", label: "Free" },
+];
+
+// Canonicalize any stored account_type (legacy "$price"-tagged, "sub-*",
+// "Monthly Subscription …", null) to one of the option values above.
+function canonicalSubTier(accountType: string | null): string {
+  if (!accountType) return "Free";
+  const t = accountType.split(" $")[0].trim().toLowerCase();
+  if (t === "trial") return "Trial";
+  if (t === "manual" || t === "monthly subscription manual" || t === "sub-manual") return "Manual";
+  if (t === "automatic web" || t === "monthly subscription automatic web" || t === "sub-auto-web" || t === "auto-web" || t === "automatic_web") return "Automatic Web";
+  if (t === "automatic dms" || t === "monthly subscription automatic dms" || t === "sub-auto-dms" || t === "auto-dms" || t === "automatic_dms") return "Automatic DMS";
+  return "Free";
+}
 
 type Props = {
   dealer: DealerRow;
@@ -132,6 +156,56 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
   const [invProvSaving, setInvProvSaving] = useState(false);
   const [invProvError, setInvProvError] = useState<string | null>(null);
   const [invProvSuccess, setInvProvSuccess] = useState<string | null>(null);
+
+  // Subscription tier inline edit state (super_admin only). A save writes
+  // account_type AND propagates to da-billing synchronously (route returns the
+  // billing result).
+  const [subEditing, setSubEditing] = useState(false);
+  const [subValue, setSubValue] = useState(canonicalSubTier(initialDealer.account_type));
+  const [subSaving, setSubSaving] = useState(false);
+  const [subError, setSubError] = useState<string | null>(null);
+  const [subSuccess, setSubSuccess] = useState<string | null>(null);
+  const [subWarn, setSubWarn] = useState<string | null>(null);
+
+  async function handleSubSave() {
+    const newType = subValue;
+    if (newType === canonicalSubTier(dealer.account_type)) { setSubEditing(false); return; }
+    setSubSaving(true);
+    setSubError(null);
+    setSubWarn(null);
+    setSubSuccess(null);
+    try {
+      const res = await fetch(`/api/dealers/${dealer.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_type: newType }),
+      });
+      const j = (await res.json()) as { data?: DealerRow; billing?: SubscriptionBillingResult; error?: string };
+      if (!res.ok || !j.data) {
+        setSubError(j.error ?? "Failed to update subscription");
+        return;
+      }
+      setDealer(j.data);
+      setSubEditing(false);
+      const b = j.billing;
+      if (b?.ok) {
+        setSubSuccess(`✓ Subscription updated. ${b.message}`);
+      } else if (b && !b.ok) {
+        // Platform tier saved, but da-billing wasn't updated — surface as a
+        // warning (amber), not a hard error.
+        setSubWarn(`Subscription saved on the platform, but ${b.blocked ? "needs manual da-billing follow-up" : "da-billing was not updated"}: ${b.message}`);
+      } else {
+        setSubSuccess("✓ Subscription updated.");
+      }
+      setTimeout(() => setSubSuccess(null), 8000);
+      // Refresh server-rendered surfaces (list/header) like the other editors.
+      router.refresh();
+    } catch (e) {
+      setSubError(e instanceof Error ? e.message : "Network error — try again");
+    } finally {
+      setSubSaving(false);
+    }
+  }
 
   function startEdit() {
     setForm(dealerToForm(dealer));
@@ -985,6 +1059,68 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                 )}
               </>
             )}
+
+            {/* Subscription tier — super_admin only. Saving writes account_type
+                AND propagates to da-billing (dealer's own template, or the
+                group's template when group-billed; Free/Trial cancels the
+                recurring line). Result shown inline. */}
+            {isSuperAdmin && (subEditing ? (
+              <div>
+                <label className="label">Subscription</label>
+                <select
+                  className="input"
+                  value={subValue}
+                  onChange={(e) => setSubValue(e.target.value)}
+                  autoFocus
+                  disabled={subSaving}
+                >
+                  {SUBSCRIPTION_TIER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                  Updates the platform tier + HubSpot, and syncs the da-billing template
+                  ({dealer.subscription_billed_to === "group" ? "group" : "dealer"}-billed). Paid tiers take effect on the next invoice; Free cancels recurring billing.
+                </p>
+                {subError && <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{subError}</p>}
+                <div className="flex gap-2 mt-2">
+                  <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={() => void handleSubSave()} disabled={subSaving}>
+                    {subSaving ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: 13 }}
+                    onClick={() => { setSubEditing(false); setSubError(null); setSubValue(canonicalSubTier(dealer.account_type)); }}
+                    disabled={subSaving}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-start justify-between gap-4">
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Subscription</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-right" style={{ color: "var(--text-primary)" }}>
+                      {canonicalSubTier(dealer.account_type)}
+                    </span>
+                    {!editing && (
+                      <button
+                        onClick={() => { setSubValue(canonicalSubTier(dealer.account_type)); setSubEditing(true); setSubError(null); setSubWarn(null); setSubSuccess(null); }}
+                        title="Edit Subscription"
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "var(--text-muted)", display: "flex", alignItems: "center" }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {subSuccess && <p className="text-xs mt-1" style={{ color: "var(--success, #2e7d32)" }}>{subSuccess}</p>}
+                {subWarn && <p className="text-xs mt-1" style={{ color: "#e65100" }}>{subWarn}</p>}
+              </div>
+            ))}
 
             {/* Account Purpose (migration 096) — super_admin only. Test & Sales
                 Demo set the Test flag (is_test), excluding the account from BI /
