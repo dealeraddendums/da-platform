@@ -3,11 +3,14 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import {
   getCustomer,
+  getTemplate,
+  getPricing,
   listInvoices,
   billingConfigured,
   subscriptionTierLabel,
   type BillingCustomerDetail,
   type BillingInvoice,
+  type BillingPriceEntry,
 } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +34,15 @@ interface GroupBilledResponse {
   dealer: DealerBillingDealer;
 }
 
+/** Current subscription, derived from the customer's template first product —
+ *  same shape /api/billing/me returns. null when there's no template/customer. */
+interface SubscriptionInfo {
+  productId: string | null;
+  name: string | null;
+  price: number | null;
+  nextInvoiceDate: string | null;
+}
+
 interface DealerBilledResponse {
   scenario: "dealer_billed";
   dealer: DealerBillingDealer;
@@ -40,6 +52,11 @@ interface DealerBilledResponse {
   /** Paid only. */
   paidInvoices: BillingInvoice[];
   outstandingAmount: number;
+  /** Current plan from the da-billing template (null when no template/customer). */
+  subscription: SubscriptionInfo | null;
+  /** Full tier list (same getPricing() /api/billing/me uses) so the Change Plan
+   *  picker can show every tier — returned even when there's no customer yet. */
+  pricing: BillingPriceEntry[];
 }
 
 /**
@@ -118,7 +135,11 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
   }
 
   // ── Scenario B: dealer billed ─────────────────────────────────────────────
+  // No customer yet: still return the full pricing list so the Change Plan
+  // picker can show every tier (picking one provisions via PATCH). subscription
+  // stays null. Pricing is best-effort — a /pricing hiccup must not 500 the tab.
   if (!dealer.billing_customer_id) {
+    const pricing = await getPricing().catch(() => [] as BillingPriceEntry[]);
     const payload: DealerBilledResponse = {
       scenario: "dealer_billed",
       dealer,
@@ -126,17 +147,33 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
       outstandingInvoices: [],
       paidInvoices: [],
       outstandingAmount: 0,
+      subscription: null,
+      pricing,
     };
     return NextResponse.json(payload);
   }
 
   try {
-    const [customer, invoiceResult] = await Promise.all([
+    const [customer, invoiceResult, template, pricing] = await Promise.all([
       getCustomer(dealer.billing_customer_id),
       listInvoices(dealer.billing_customer_id),
+      // template + pricing are best-effort (soft fallback) so an invoice view
+      // never breaks on a template/pricing hiccup — mirrors /api/billing/me.
+      getTemplate(dealer.billing_customer_id).catch(() => null),
+      getPricing().catch(() => [] as BillingPriceEntry[]),
     ]);
     const outstanding = invoiceResult.invoices.filter(i => i.status === "pending" || i.status === "overdue");
     const paid = invoiceResult.invoices.filter(i => i.status === "paid");
+    let subscription: SubscriptionInfo | null = null;
+    if (template && template.products.length > 0) {
+      const first = template.products[0];
+      subscription = {
+        productId: first.productId ?? null,
+        name: first.name ?? null,
+        price: first.price ?? null,
+        nextInvoiceDate: template.nextInvoiceDate ?? null,
+      };
+    }
     const payload: DealerBilledResponse = {
       scenario: "dealer_billed",
       dealer,
@@ -144,6 +181,8 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
       outstandingInvoices: outstanding,
       paidInvoices: paid,
       outstandingAmount: invoiceResult.outstandingAmount,
+      subscription,
+      pricing,
     };
     return NextResponse.json(payload);
   } catch (err) {
