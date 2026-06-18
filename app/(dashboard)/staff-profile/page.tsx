@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { resolveSessionProfile } from "@/lib/profile-session";
 import StaffProfileClient from "./StaffProfileClient";
 
 export const metadata = { title: "My Profile — DA Platform" };
@@ -11,11 +12,7 @@ export default async function StaffProfilePage() {
   if (!session) redirect("/login?next=/staff-profile");
 
   const admin = createAdminSupabaseClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("role, full_name, created_at")
-    .eq("id", session.user.id)
-    .single<{ role: string; full_name: string | null; created_at: string }>();
+  const profile = await resolveSessionProfile<{ role: string; full_name: string | null; created_at: string }>(admin, session, "role, full_name, created_at");
 
   const role = profile?.role ?? "dealer_user";
 

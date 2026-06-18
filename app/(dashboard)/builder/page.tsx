@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
+import { resolveSessionProfile } from "@/lib/profile-session";
 import { verifyGhostToken } from "@/lib/ghost";
 import BuilderPage from "@/components/builder/BuilderPage";
 
@@ -13,11 +14,7 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
 
   // Use admin client to bypass RLS — user-scoped client can return null if JWT is stale
   const admin = createAdminSupabaseClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("dealer_id, role, group_id, active_dealer_id")
-    .eq("id", session.user.id)
-    .maybeSingle<{ dealer_id: string | null; role: string; group_id: string | null; active_dealer_id: string | null }>();
+  const profile = await resolveSessionProfile<{ dealer_id: string | null; role: string; group_id: string | null; active_dealer_id: string | null }>(admin, session, "dealer_id, role, group_id, active_dealer_id");
 
   const role = profile?.role ?? "dealer_user";
   const isGroupAdmin = role === "group_admin";

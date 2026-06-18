@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { resolveSessionProfile } from "@/lib/profile-session";
 import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import UsersPageClient from "./UsersPageClient";
@@ -14,11 +15,7 @@ export default async function UsersPage() {
   if (!session) redirect("/login?next=/users");
 
   const admin = createAdminSupabaseClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("role, dealer_id, group_id, active_dealer_id")
-    .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null; group_id: string | null; active_dealer_id: string | null }>();
+  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; group_id: string | null; active_dealer_id: string | null }>(admin, session, "role, dealer_id, group_id, active_dealer_id");
 
   const role = (profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { resolveSessionProfile } from "@/lib/profile-session";
 import BiClient from "./BiClient";
 
 export const dynamic = "force-dynamic";
@@ -18,11 +19,7 @@ export default async function BiPage() {
   if (!session) redirect("/login");
 
   const admin = createAdminSupabaseClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("role, email")
-    .eq("id", session.user.id)
-    .single<{ role: string; email: string | null }>();
+  const profile = await resolveSessionProfile<{ role: string; email: string | null }>(admin, session, "role, email");
 
   const role = profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined

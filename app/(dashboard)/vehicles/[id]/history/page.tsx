@@ -1,5 +1,6 @@
 import { redirect, notFound } from "next/navigation";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
+import { resolveSessionProfile } from "@/lib/profile-session";
 import type { AddendumHistoryRow } from "@/lib/db";
 
 export const metadata = { title: "Print History — DA Platform" };
@@ -24,11 +25,7 @@ export default async function HistoryPage({ params, searchParams }: PageProps) {
 
   if (!dv) notFound();
 
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("role, dealer_id")
-    .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null }>();
+  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null }>(admin, session, "role, dealer_id");
 
   if (profile?.role === "dealer_admin" || profile?.role === "dealer_user") {
     if (profile.dealer_id && dv.dealer_id !== profile.dealer_id) redirect("/vehicles");

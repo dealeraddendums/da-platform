@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { resolveSessionProfile } from "@/lib/profile-session";
 import StaffProfileClient from "../StaffProfileClient";
 
 export const metadata = { title: "Staff Profile — DA Platform" };
@@ -17,11 +18,7 @@ export default async function StaffProfileByIdPage({
   const admin = createAdminSupabaseClient();
 
   // Only super_admin may view/edit other staff profiles
-  const { data: viewer } = await admin
-    .from("profiles")
-    .select("role")
-    .eq("id", session.user.id)
-    .single<{ role: string }>();
+  const viewer = await resolveSessionProfile<{ role: string }>(admin, session, "role");
 
   if (viewer?.role !== "super_admin") redirect("/dashboard");
 

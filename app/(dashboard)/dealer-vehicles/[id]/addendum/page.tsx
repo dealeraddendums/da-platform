@@ -1,6 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
+import { resolveSessionProfile } from "@/lib/profile-session";
 import { verifyGhostToken } from "@/lib/ghost";
 import AddendumEditor from "@/components/AddendumEditor";
 import VehicleHistoryButton from "@/components/VehicleHistoryButton";
@@ -21,11 +22,7 @@ export default async function DealerVehicleAddendumPage({
 
   const admin = createAdminSupabaseClient();
 
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("role, dealer_id")
-    .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null }>();
+  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null }>(admin, session, "role, dealer_id");
 
   const cookieStore = cookies();
   const ghostCtx = profile?.role === "super_admin"

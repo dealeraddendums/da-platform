@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { resolveSessionProfile } from "@/lib/profile-session";
 import type { DealerRow } from "@/lib/db";
 import DealerProfileCard from "@/components/DealerProfileCard";
 import DealerBillingTab from "@/components/DealerBillingTab";
@@ -20,11 +21,7 @@ export default async function DealerPage({ params }: Props) {
   if (!session) redirect("/login");
 
   const admin = createAdminSupabaseClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("role, dealer_id, group_id")
-    .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null; group_id: string | null }>();
+  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; group_id: string | null }>(admin, session, "role, dealer_id, group_id");
 
   const role = profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { resolveSessionProfile } from "@/lib/profile-session";
 
 export const metadata = { title: "FTP Server — DA Platform" };
 
@@ -10,11 +11,7 @@ export default async function FtpServerPage() {
   if (!session) redirect("/login");
 
   const admin = createAdminSupabaseClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("role")
-    .eq("id", session.user.id)
-    .single<{ role: string }>();
+  const profile = await resolveSessionProfile<{ role: string }>(admin, session, "role");
 
   const role =
     profile?.role ??

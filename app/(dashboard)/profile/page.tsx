@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { resolveSessionProfile } from "@/lib/profile-session";
 import type { DealerRow } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import { getRecommendedAddendumPaperSizes } from "@/lib/recommended-labels";
@@ -15,11 +16,7 @@ export default async function ProfilePage() {
   if (!session) redirect("/login");
 
   const admin = createAdminSupabaseClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("role, dealer_id, full_name, active_dealer_id, created_at")
-    .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null; full_name: string | null; active_dealer_id: string | null; created_at: string }>();
+  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; full_name: string | null; active_dealer_id: string | null; created_at: string }>(admin, session, "role, dealer_id, full_name, active_dealer_id, created_at");
 
   const role = profile?.role ?? "dealer_user";
   const userEmail = session.user.email ?? "";

@@ -1,5 +1,6 @@
 import { redirect, notFound } from "next/navigation";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
+import { resolveSessionProfile } from "@/lib/profile-session";
 import type { VehicleRow } from "@/lib/vehicles";
 import AddendumEditor from "@/components/AddendumEditor";
 
@@ -26,11 +27,7 @@ export default async function AddendumPage({
   if (!session) redirect(`/login?next=/vehicles/${params.id}/addendum`);
 
   const admin = createAdminSupabaseClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("role, dealer_id")
-    .eq("id", session.user.id)
-    .single<{ role: string; dealer_id: string | null }>();
+  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null }>(admin, session, "role, dealer_id");
 
   const role = profile?.role ?? "dealer_user";
   const isDealer = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";

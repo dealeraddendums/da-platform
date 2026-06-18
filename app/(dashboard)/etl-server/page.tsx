@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { resolveSessionProfile } from "@/lib/profile-session";
 import { PageHeader } from "@/components/PageHeader";
 
 export const metadata = { title: "ETL Server — DA Platform" };
@@ -11,11 +12,7 @@ export default async function EtlServerPage() {
   if (!session) redirect("/login");
 
   const admin = createAdminSupabaseClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("role")
-    .eq("id", session.user.id)
-    .single<{ role: string }>();
+  const profile = await resolveSessionProfile<{ role: string }>(admin, session, "role");
 
   const role = profile?.role ?? (session.user.app_metadata as Record<string, unknown>)?.role;
   if (role !== "super_admin") redirect("/dashboard");
