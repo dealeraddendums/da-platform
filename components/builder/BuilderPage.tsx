@@ -2069,6 +2069,10 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Eps>MSRP Line</Eps>
           <Fd label="Label"><input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} /></Fd>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0' }}>
+            <span style={{ fontSize: 11, color: '#55595c' }}>Divider line above</span>
+            <TogSwitch checked={!!d.dividerAbove} onChange={v => u('dividerAbove', v)} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0' }}>
             <span style={{ fontSize: 11, color: '#55595c' }}>Divider line below</span>
             <TogSwitch checked={d.divider !== false} onChange={v => u('divider', v)} />
           </div>
@@ -2163,6 +2167,17 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
             {[['#1a1916','Black'],['#374151','Slate'],['#2563EB','Blue'],['#DC2626','Red'],['#15803D','Green'],['#7C3AED','Purple'],['#D97706','Gold'],['#ffffff','White']].map(([c,n]) => (
               <div key={c} title={n} onClick={() => u('color', c)}
                 style={{ width: 22, height: 22, borderRadius: 4, background: c, cursor: 'pointer', border: `1.5px solid ${(d.color as string) === c ? '#1976d2' : (c === '#ffffff' ? '#ccc' : 'transparent')}`, boxShadow: (d.color as string) === c ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }} />
+            ))}
+          </div>
+          <FontStepper label="Font size" fkey="fontSize" base={11} d={d} fontScale={fontScale} af={af} />
+          <Eps style={{ marginTop: 8 }}>Font color</Eps>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+            {/* Auto = auto-contrast against the bar color (current default). */}
+            <div title="Auto (contrast)" onClick={() => u('fontColor', '')}
+              style={{ width: 22, height: 22, borderRadius: 4, background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#55595c', border: `1.5px solid ${!d.fontColor ? '#1976d2' : '#ccc'}`, boxShadow: !d.fontColor ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }}>A</div>
+            {[['#1a1916','Black'],['#374151','Slate'],['#2563EB','Blue'],['#DC2626','Red'],['#15803D','Green'],['#7C3AED','Purple'],['#D97706','Gold'],['#ffffff','White']].map(([c,n]) => (
+              <div key={c} title={n} onClick={() => u('fontColor', c)}
+                style={{ width: 22, height: 22, borderRadius: 4, background: c, cursor: 'pointer', border: `1.5px solid ${(d.fontColor as string) === c ? '#1976d2' : (c === '#ffffff' ? '#ccc' : 'transparent')}`, boxShadow: (d.fontColor as string) === c ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }} />
             ))}
           </div>
         </EpSection>

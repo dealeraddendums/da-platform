@@ -117,7 +117,7 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     fontSize: 1.0,
     headerFontSize: 1.0,
   },
-  msrp: { label: 'Manufacturer Retail Price:', value: '$27,100.00', divider: true, fontSize: 1.0 },
+  msrp: { label: 'Manufacturer Retail Price:', value: '$27,100.00', divider: true, dividerAbove: false, fontSize: 1.0 },
   options: {
     sectionLabel: 'Dealer Installed Products:',
     fontSize: 1.0,
@@ -143,7 +143,7 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     text: 'Subaru of North Tampa\n11111 N Florida Ave\nTampa FL 33612\n8137973114',
     fontSize: 1.0,
   },
-  headerbar: { text: 'PRE-OWNED VEHICLES', color: '#1a1916' },
+  headerbar: { text: 'PRE-OWNED VEHICLES', color: '#1a1916', fontSize: 1.0 },
   customtext: {
     text: 'Disclaimer: The information contained in this pricing sheet is provided for general informational purposes only. While we make every effort to ensure accuracy, some data may be AI-generated and should not be relied upon as definitive or guaranteed. Actual vehicle pricing, availability, and condition may vary and are subject to verification. Prices are subject to change without notice.',
     align: 'left',

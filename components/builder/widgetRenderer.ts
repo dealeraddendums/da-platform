@@ -120,7 +120,8 @@ export function renderW(type: string, d: D, fontScale: number): string {
 
   if (type === 'msrp') {
     const sz = Math.round(11 * fs * ((d.fontSize as number) || 1));
-    return `<div style="padding:3px 0"><div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:${sz}px;font-weight:700;color:#1a1916">${d.label}</span><span style="font-size:${sz}px;font-weight:700;color:#1a1916;font-family:monospace">${d.value}</span></div>${d.divider !== false ? '<div style="height:1px;background:#1a1916;margin-top:3px"></div>' : ''}</div>`;
+    const aboveLine = d.dividerAbove ? '<div style="height:1px;background:#1a1916;margin-bottom:3px"></div>' : '';
+    return `<div style="padding:3px 0">${aboveLine}<div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:${sz}px;font-weight:700;color:#1a1916">${d.label}</span><span style="font-size:${sz}px;font-weight:700;color:#1a1916;font-family:monospace">${d.value}</span></div>${d.divider !== false ? '<div style="height:1px;background:#1a1916;margin-top:3px"></div>' : ''}</div>`;
   }
 
   if (type === 'options') {
@@ -186,7 +187,8 @@ export function renderW(type: string, d: D, fontScale: number): string {
   if (type === 'headerbar') {
     const bg = (d.color as string) || '#1a1916';
     const txt = readableText(bg);
-    return `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;background:${bg}"><div style="font-size:11px;font-weight:700;color:${txt};text-transform:uppercase;letter-spacing:.06em">${d.text || 'HEADER'}</div></div>`;
+    const hbSz = Math.round(11 * fs * ((d.fontSize as number) || 1));
+    return `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;background:${bg}"><div style="font-size:${hbSz}px;font-weight:700;color:${(d.fontColor as string) || txt};text-transform:uppercase;letter-spacing:.06em">${d.text || 'HEADER'}</div></div>`;
   }
 
   if (type === 'customtext') {
