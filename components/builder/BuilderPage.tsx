@@ -262,9 +262,15 @@ interface Props {
   canAddCustomSize?: boolean;
   /** Gates super_admin-only controls (currently: the canvas background upload, which posts to a super_admin-only API). */
   canAdminUpload?: boolean;
+  /** Platform-starter authoring mode (super_admin). Load/save target
+   *  /api/starter-templates instead of dealer/group templates; no dealer/group
+   *  context; simplified Save modal. */
+  starterMode?: boolean;
+  /** When editing an existing starter in starterMode, its id (load source). */
+  starterTemplateId?: string;
 }
 
-export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, canAddCustomSize = false, canAdminUpload = false }: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, canAddCustomSize = false, canAdminUpload = false, starterMode = false, starterTemplateId }: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
@@ -306,7 +312,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [customWidgets, setCustomWidgets] = useState<CustomWidgetDef[]>(DEFAULT_CUSTOM_WIDGETS);
   const [saveVtypes, setSaveVtypes] = useState<Set<string>>(new Set(['new']));
   const [saveTname, setSaveTname] = useState('');
-  const [saveDocType, setSaveDocType] = useState<'addendum' | 'infosheet'>('addendum');
+  const [saveDocType, setSaveDocType] = useState<'addendum' | 'infosheet' | 'buyers_guide'>('addendum');
   // In a group context (?group=… in the URL → groupId set) the only sensible
   // save target is the group template library — group_admin / ghost-mode
   // doesn't have a dealer to write to under /api/templates. Default the
@@ -784,10 +790,13 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // group-templates route so super_admin / group_admin can edit shared templates;
   // otherwise the dealer-templates route is used.
   useEffect(() => {
-    if (!templateId) return;
-    const url = groupId
-      ? `/api/group-templates/${groupId}/${templateId}`
-      : `/api/templates/${templateId}`;
+    const editId = starterMode ? starterTemplateId : templateId;
+    if (!editId) return;
+    const url = starterMode
+      ? `/api/starter-templates/${editId}`
+      : groupId
+        ? `/api/group-templates/${groupId}/${editId}`
+        : `/api/templates/${editId}`;
     fetch(url)
       .then(r => r.ok ? r.json() : null)
       .then(payload => {
@@ -818,12 +827,16 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (json?.fontScale) setFontScale(json.fontScale);
         if (json?.paperSize) setPaperSize(json.paperSize);
         setTemplateName((data.name as string) || 'Template');
-        setLoadedTemplateId(templateId);
+        setLoadedTemplateId(editId);
         setLoadedTemplateLocked(data.source === 'group' && data.is_locked !== false);
+        if (starterMode) {
+          const dt = data.doc_type as string | undefined;
+          if (dt === 'addendum' || dt === 'infosheet' || dt === 'buyers_guide') setSaveDocType(dt);
+        }
         isDirtyRef.current = false;
       })
       .catch(() => {});
-  }, [templateId, groupId]);
+  }, [templateId, groupId, starterMode, starterTemplateId]);
 
   // ── Paper size switch ──────────────────────────────────────────────
   const switchPaperSize = useCallback((size: string) => {
@@ -1026,6 +1039,32 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
 
   // ── Save template ──────────────────────────────────────────────────
   const saveTemplate = useCallback(async () => {
+    // Platform-starter mode: save to /api/starter-templates (name + doc_type +
+    // paper + layout). No dealer/group context, no vehicle-type defaults.
+    if (starterMode) {
+      const name = saveTname.trim() || templateName;
+      if (!name) { showToast('Name is required'); return; }
+      const body = {
+        name,
+        doc_type: saveDocType,
+        paper: paperSize,
+        template_json: { widgets: widgetsRef.current, nid, bgUrl, fontScale, paperSize },
+      };
+      try {
+        const editId = starterTemplateId ?? loadedTemplateId;
+        const r = editId
+          ? await fetch(`/api/starter-templates/${editId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+          : await fetch('/api/starter-templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!r.ok) { const j = await r.json().catch(() => ({})); showToast((j as { error?: string }).error || 'Save failed — try again'); return; }
+        const { data } = await r.json() as { data?: { id: string } };
+        if (data?.id) setLoadedTemplateId(data.id);
+        setTemplateName(name);
+        setShowSave(false);
+        isDirtyRef.current = false;
+        showToast(`✓ Starter layout saved: ${name}`);
+      } catch { showToast('Save failed — try again'); }
+      return;
+    }
     if (loadedTemplateLocked) {
       showToast('Group templates cannot be saved — contact your group admin');
       return;
@@ -1121,10 +1160,21 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {
       showToast('Save failed — try again');
     }
-  }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, showToast, loadedTemplateId, loadedTemplateLocked, savedTemplates, dealerId, vehicle?.dealer_id]);
+  }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, paperSize, showToast, loadedTemplateId, loadedTemplateLocked, savedTemplates, dealerId, vehicle?.dealer_id, starterMode, starterTemplateId]);
 
   // ── Load templates list ────────────────────────────────────────────
   const openTemplates = useCallback(async () => {
+    // Starter mode lists platform starters; no per-dealer defaults.
+    if (starterMode) {
+      try {
+        const r = await fetch('/api/starter-templates');
+        if (r.ok) { const j = await r.json(); setSavedTemplates(j.data ?? []); }
+      } catch {}
+      setDefaultTemplateIds(new Set());
+      setDeleteConfirmId(null);
+      setShowOpenModal(true);
+      return;
+    }
     try {
       const eid = dealerId ?? vehicle?.dealer_id ?? null;
       const qs = eid ? `?dealer_id=${encodeURIComponent(eid)}` : '';
@@ -1148,17 +1198,19 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {}
     setDeleteConfirmId(null);
     setShowOpenModal(true);
-  }, [dealerId, vehicle?.dealer_id, groupId]);
+  }, [dealerId, vehicle?.dealer_id, groupId, starterMode]);
 
   const loadTemplate = useCallback(async (id: string) => {
     try {
-      // Match the read path used by openTemplates — group_templates when the
-      // Builder is scoped to a group, dealer templates otherwise.
-      const url = groupId ? `/api/group-templates/${groupId}/${id}` : `/api/templates/${id}`;
+      // Match the read path used by openTemplates — starter templates in
+      // starter mode, group_templates when scoped to a group, dealer otherwise.
+      const url = starterMode
+        ? `/api/starter-templates/${id}`
+        : groupId ? `/api/group-templates/${groupId}/${id}` : `/api/templates/${id}`;
       const r = await fetch(url);
       if (!r.ok) { showToast('Failed to load template'); return; }
       const resp = await r.json();
-      const tmpl = resp.data as { template_json?: Record<string, unknown>; name?: string; is_locked?: boolean; source?: string } | null;
+      const tmpl = resp.data as { template_json?: Record<string, unknown>; name?: string; is_locked?: boolean; source?: string; doc_type?: string } | null;
       if (!tmpl?.template_json || Object.keys(tmpl.template_json).length === 0) {
         showToast('This template has no saved layout. Please re-save it from the Builder.');
         return;
@@ -1186,6 +1238,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       if (json.bgUrl) { setBgUrl(json.bgUrl); }
       if (json.fontScale) setFontScale(json.fontScale);
       if (json.paperSize) { setPaperSize(json.paperSize); paperSizeRef.current = json.paperSize; }
+      if (starterMode && (tmpl.doc_type === 'addendum' || tmpl.doc_type === 'infosheet' || tmpl.doc_type === 'buyers_guide')) {
+        setSaveDocType(tmpl.doc_type);
+      }
       setTemplateName(tmpl.name || 'Template');
       setLoadedTemplateId(id);
       setSelId(null);
@@ -1195,7 +1250,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {
       showToast('Failed to load template');
     }
-  }, [showToast, groupId]);
+  }, [showToast, groupId, starterMode]);
 
   // ── New template ───────────────────────────────────────────────────
   // Resets the canvas to the default blank layout. Mirrors the work the
@@ -1672,56 +1727,71 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
 
       {/* SAVE TEMPLATE MODAL */}
       {showSave && (
-        <Modal onClose={() => setShowSave(false)} title="Save Template">
+        <Modal onClose={() => setShowSave(false)} title={starterMode ? 'Save Starter Layout' : 'Save Template'}>
           <div style={{ padding: '24px' }}>
             <div style={{ marginBottom: 20 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#55595c', textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 6 }}>Template Name</label>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#55595c', textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 6 }}>{starterMode ? 'Starter Name' : 'Template Name'}</label>
               <input value={saveTname} onChange={e => setSaveTname(e.target.value)}
                 style={{ width: '100%', padding: '8px 12px', border: '1px solid #e0e0e0', borderRadius: 6, fontSize: 15, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }}
-                placeholder="e.g. Subaru Standard, Used Cars — Black V5"
+                placeholder={starterMode ? 'e.g. Classic Addendum, Modern Infosheet' : 'e.g. Subaru Standard, Used Cars — Black V5'}
                 autoFocus />
             </div>
             <div style={{ marginBottom: 20 }}>
               <label style={{ fontSize: 12, fontWeight: 600, color: '#55595c', textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 6 }}>Document Type</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {([['addendum', 'Addendum'], ['infosheet', 'Infosheet']] as const).map(([dt, dl]) => (
-                  <button key={dt} onClick={() => setSaveDocType(dt)}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {(starterMode
+                  ? [['addendum', 'Addendum'], ['infosheet', 'Infosheet'], ['buyers_guide', "Buyer's Guide"]]
+                  : [['addendum', 'Addendum'], ['infosheet', 'Infosheet']]).map(([dt, dl]) => (
+                  <button key={dt} onClick={() => setSaveDocType(dt as 'addendum' | 'infosheet' | 'buyers_guide')}
                     style={{ padding: '7px 16px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: `2px solid ${saveDocType === dt ? '#1976d2' : '#e0e0e0'}`, background: saveDocType === dt ? '#1976d2' : '#fff', color: saveDocType === dt ? '#fff' : '#55595c', fontFamily: 'inherit' }}>
                     {dl}
                   </button>
                 ))}
               </div>
             </div>
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#55595c', textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 8 }}>Apply to vehicle type</label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {[['new','New'],['used','Used'],['cpo','CPO'],['all','All'],['draft','Save for later (Draft)']].map(([v,l]) => {
-                  const on = saveVtypes.has(v);
-                  return (
-                    <button key={v} onClick={() => {
-                      setSaveVtypes(prev => {
-                        const next = new Set(prev);
-                        if (v === 'all' || v === 'draft') { next.clear(); next.add(v); }
-                        else {
-                          next.delete('all'); next.delete('draft');
-                          if (next.has(v)) next.delete(v); else next.add(v);
-                          if (next.size === 0) next.add('new');
-                        }
-                        return next;
-                      });
-                    }}
-                    style={{ padding: '7px 16px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: `2px solid ${on ? '#1976d2' : '#e0e0e0'}`, background: on ? '#1976d2' : '#fff', color: on ? '#fff' : '#55595c', fontFamily: 'inherit' }}>
-                      {l}
-                    </button>
-                  );
-                })}
+            {starterMode ? (
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#55595c', textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 6 }}>Paper</label>
+                <select value={paperSize} onChange={e => switchPaperSize(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #e0e0e0', borderRadius: 6, fontSize: 14, fontFamily: 'inherit', background: '#fff', boxSizing: 'border-box' }}>
+                  {Object.keys(PAPERS).map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
+                  {localCustomSizes.map(cs => <option key={cs.id} value={`custom:${cs.id}`}>{cs.name}</option>)}
+                </select>
               </div>
-            </div>
+            ) : (
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#55595c', textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 8 }}>Apply to vehicle type</label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {[['new','New'],['used','Used'],['cpo','CPO'],['all','All'],['draft','Save for later (Draft)']].map(([v,l]) => {
+                    const on = saveVtypes.has(v);
+                    return (
+                      <button key={v} onClick={() => {
+                        setSaveVtypes(prev => {
+                          const next = new Set(prev);
+                          if (v === 'all' || v === 'draft') { next.clear(); next.add(v); }
+                          else {
+                            next.delete('all'); next.delete('draft');
+                            if (next.has(v)) next.delete(v); else next.add(v);
+                            if (next.size === 0) next.add('new');
+                          }
+                          return next;
+                        });
+                      }}
+                      style={{ padding: '7px 16px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: `2px solid ${on ? '#1976d2' : '#e0e0e0'}`, background: on ? '#1976d2' : '#fff', color: on ? '#fff' : '#55595c', fontFamily: 'inherit' }}>
+                        {l}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div style={{ background: '#f5f6f7', borderRadius: 6, padding: '12px 14px', fontSize: 12, color: '#55595c', lineHeight: 1.8 }}>
-              <div><strong>Template:</strong> <span style={{ color: '#333' }}>{saveTname || templateName || '—'}</span></div>
-              <div><strong>Document type:</strong> <span style={{ color: '#333' }}>{saveDocType === 'infosheet' ? 'Infosheet' : 'Addendum'}</span></div>
+              <div><strong>{starterMode ? 'Starter' : 'Template'}:</strong> <span style={{ color: '#333' }}>{saveTname || templateName || '—'}</span></div>
+              <div><strong>Document type:</strong> <span style={{ color: '#333' }}>{saveDocType === 'infosheet' ? 'Infosheet' : saveDocType === 'buyers_guide' ? "Buyer's Guide" : 'Addendum'}</span></div>
               <div><strong>Widgets:</strong> <span style={{ color: '#333' }}>{Object.keys(widgets).length} widgets</span></div>
-              <div><strong>Applies to:</strong> <span style={{ color: '#1976d2', fontWeight: 600 }}>{Array.from(saveVtypes).map(v => v.charAt(0).toUpperCase() + v.slice(1)).join(', ')}</span></div>
+              {starterMode
+                ? <div><strong>Paper:</strong> <span style={{ color: '#333' }}>{paperSize}</span></div>
+                : <div><strong>Applies to:</strong> <span style={{ color: '#1976d2', fontWeight: 600 }}>{Array.from(saveVtypes).map(v => v.charAt(0).toUpperCase() + v.slice(1)).join(', ')}</span></div>}
             </div>
           </div>
           {groupId && (
@@ -1747,7 +1817,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           )}
           <div style={{ padding: '16px 24px', borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, color: '#78828c' }}>
-              {saveAsGroupTemplate && groupId ? 'Saving to group template library' : 'Templates saved per dealer'}
+              {starterMode ? 'Saving as a platform starter layout' : saveAsGroupTemplate && groupId ? 'Saving to group template library' : 'Templates saved per dealer'}
             </span>
             <div style={{ display: 'flex', gap: 12 }}>
               <button onClick={() => setShowSave(false)} style={mfClose}>Cancel</button>
