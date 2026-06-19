@@ -163,7 +163,9 @@ export default function Topbar({ user }: Props) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dealerId: null }),
     });
-    window.location.href = "/dealers";
+    // Exit the dealer → back to the group_admin's My Group page (/groups
+    // redirects them to their group detail + member list), not the dealers list.
+    window.location.href = "/groups";
   }
 
   const displayName = user.fullName || user.email;

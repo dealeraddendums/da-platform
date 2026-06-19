@@ -533,6 +533,21 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId:
   const [removing, setRemoving] = useState<string | null>(null);
   const [impersonating, setImpersonating] = useState<string | null>(null);
   const [impersonateError, setImpersonateError] = useState<{ dealerId: string; message: string } | null>(null);
+  const [switching, setSwitching] = useState<string | null>(null);
+
+  // Switch into a member dealer and operate it with full dealer_admin control —
+  // mirrors GroupDealerList.handleSwitch. group_admin only (the active-dealer API
+  // is group_admin-gated + in-group verified); a super_admin impersonating the
+  // group is a group_admin here, so it works. A pure super_admin doesn't see it.
+  async function handleSwitch(dealerId: string) {
+    setSwitching(dealerId);
+    await fetch("/api/profiles/active-dealer", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dealerId }),
+    });
+    window.location.href = "/dashboard";
+  }
 
   // Client-side search + sort over the already-loaded dealers (no refetch).
   type SortCol = "name" | "dealer_id" | "inventory_dealer_id";
@@ -871,6 +886,24 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId:
                 <td className="px-4 py-3 text-right">
                   {(isSuperAdmin || isGroupAdmin) ? (
                     <div className="flex items-center justify-end gap-3">
+                      {/* Switch into the dealer — group_admin only (the
+                          active-dealer API would 403 a pure super_admin, who
+                          uses Ghost/Impersonate instead). */}
+                      {isGroupAdmin && (
+                        <button
+                          onClick={() => void handleSwitch(d.id)}
+                          disabled={switching === d.id}
+                          style={{
+                            height: 28, padding: "0 12px", fontSize: 12, fontWeight: 600, borderRadius: 4,
+                            background: "#1976d2", color: "#fff", border: "none",
+                            cursor: switching === d.id ? "not-allowed" : "pointer",
+                            opacity: switching === d.id ? 0.7 : 1,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {switching === d.id ? "Switching…" : "Switch to Dealer"}
+                        </button>
+                      )}
                       <Link href={`/dealers/${d.id}`} className="text-xs font-medium" style={{ color: "var(--blue)" }}>
                         View
                       </Link>

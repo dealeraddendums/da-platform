@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, type JwtClaims } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { BG_KEYS, type BgKey } from "@/lib/buyers-guide-constants";
 import {
   checkDealerPdfExists,
@@ -25,14 +26,16 @@ async function authorize(claims: JwtClaims, dealerId: string): Promise<{ dealerU
 
   if (!dealer) return { authError: NextResponse.json({ error: "Dealer not found" }, { status: 404 }) };
 
-  if (claims.role !== "super_admin") {
-    if (dealer.dealer_id !== claims.dealer_id) {
-      return { authError: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
-    }
-    if (claims.role !== "dealer_admin") {
-      return { authError: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
-    }
+  // Buyers-guide PDF management is an admin task — dealer_user / dealer_restricted
+  // are excluded (preserves prior behavior; not loosened).
+  if (claims.role === "dealer_user" || claims.role === "dealer_restricted") {
+    return { authError: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
+  // super_admin → any; dealer_admin → own; group_admin → in-group (the
+  // active dealer they've switched into). Mirrors the logo route's authz so a
+  // group_admin operating an in-group dealer can manage its buyer's-guide PDFs.
+  const authz = await authorizeDealerAction(claims, dealer.dealer_id as string);
+  if (!authz.ok) return { authError: authz.response };
 
   return { dealerUuid: dealer.id as string };
 }
