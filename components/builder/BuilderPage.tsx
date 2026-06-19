@@ -326,6 +326,10 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [showLogoPicker, setShowLogoPicker] = useState(false);
   const [showInfoboxLibPicker, setShowInfoboxLibPicker] = useState(false);
   const [showBgLibPicker, setShowBgLibPicker] = useState(false);
+  // "+ New" starter picker (dealer/group Builder only). List of platform
+  // starters offered alongside "Blank".
+  const [showNewPicker, setShowNewPicker] = useState(false);
+  const [starterPickerList, setStarterPickerList] = useState<Array<{ id: string; name: string; doc_type: string }>>([]);
 
   // Canonical dealer logo — pre-resolved S3 URL from the page server component.
   // Stays constant for the lifetime of this builder session.
@@ -1257,10 +1261,10 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // init useEffect does on mount, plus history/state cleanup so the user
   // can't undo back into the previous template's state. Prompts when there
   // are unsaved changes (isDirtyRef tracks every user-side edit).
-  const newTemplate = useCallback(() => {
-    if (isDirtyRef.current) {
-      if (!window.confirm('Start a new template?\n\nUnsaved changes will be lost.')) return;
-    }
+  // Reset the canvas to the default blank layout (no dirty-confirm, no toast —
+  // callers handle those). Shared by the "+ New" picker's Blank option and the
+  // direct fallthrough paths.
+  const applyBlankCanvas = useCallback(() => {
     const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','bgimage'];
     let nextNid = 1;
     let ws: Record<string, Widget> = {};
@@ -1294,8 +1298,88 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     setHistory([JSON.stringify({ widgets: ws, nid: nextNid })]);
     setHistIdx(0);
     isDirtyRef.current = false;
-    showToast('New template');
-  }, [vehicle, showToast]);
+  }, [vehicle]);
+
+  // Clone a platform starter into a NEW, UNSAVED dealer document: load its
+  // bg + widgets + paper + fontScale, but clear loadedTemplateId/locked so a
+  // later Save creates the dealer's OWN template (POST /api/templates). The
+  // starter row is never mutated. Mirrors loadTemplate's template_json handling.
+  const loadStarterAsNew = useCallback(async (starterId: string) => {
+    try {
+      const r = await fetch(`/api/starter-templates/${starterId}`);
+      if (!r.ok) { showToast('Failed to load starter layout'); return; }
+      const resp = await r.json();
+      const tmpl = resp.data as { template_json?: Record<string, unknown>; name?: string; doc_type?: string } | null;
+      const json = (tmpl?.template_json ?? {}) as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: string };
+      if (!json.widgets || Object.keys(json.widgets).length === 0) {
+        showToast('This starter has no saved layout.');
+        return;
+      }
+      const psKey = json.paperSize ?? 'standard';
+      const { w: pw, h: ph } = getPaperDims(psKey, customSizesRef.current);
+      let ws = json.widgets;
+      let n = json.nid ?? 1;
+      ws = convertLegacyInfoboxes(ws);
+      [ws, n] = ensureAskbar(ws, n, psKey);
+      ws = clampWidgets(ws, pw, ph);
+      if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
+      else if (dealerInfoRef.current) ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
+      ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
+      ws = applyDisclaimerToWidgets(ws, disclaimersRef.current);
+      setWidgets(ws); widgetsRef.current = ws;
+      setNid(n);
+      if (json.bgUrl) setBgUrl(json.bgUrl);
+      setFontScale(typeof json.fontScale === 'number' ? json.fontScale : 1.0);
+      setPaperSize(psKey); paperSizeRef.current = psKey;
+      // NEW, UNSAVED doc — Save → POST /api/templates (dealer's own).
+      setLoadedTemplateId(null);
+      setLoadedTemplateLocked(false);
+      // Pre-fill the Save modal's doc_type from the starter (dealer picker only
+      // ever surfaces addendum/infosheet starters).
+      const dt = tmpl?.doc_type;
+      if (dt === 'addendum' || dt === 'infosheet') setSaveDocType(dt);
+      setTemplateName(tmpl?.name || 'New Template');
+      setSelId(null);
+      setHistory([JSON.stringify({ widgets: ws, nid: n })]);
+      setHistIdx(0);
+      isDirtyRef.current = false;
+      setShowNewPicker(false);
+      showToast(`Started from: ${tmpl?.name || 'starter'}`);
+    } catch {
+      showToast('Failed to load starter layout');
+    }
+  }, [showToast, vehicle]);
+
+  // "+ New" handler. super_admin starter-mode → new blank STARTER (unchanged).
+  // Dealer/group → offer Blank + platform starters; zero starters falls straight
+  // through to Blank.
+  const newTemplate = useCallback(async () => {
+    if (isDirtyRef.current) {
+      if (!window.confirm('Start a new document?\n\nUnsaved changes will be lost.')) return;
+    }
+    if (starterMode) {
+      applyBlankCanvas();
+      showToast('New starter');
+      return;
+    }
+    let list: Array<{ id: string; name: string; doc_type: string }> = [];
+    try {
+      const r = await fetch('/api/starter-templates');
+      if (r.ok) {
+        const j = await r.json() as { data?: Array<{ id: string; name: string; doc_type: string }> };
+        // Builder doc types only — buyer's guides are a separate (PDF) flow and
+        // the dealer templates API rejects them on save.
+        list = (j.data ?? []).filter(s => s.doc_type === 'addendum' || s.doc_type === 'infosheet');
+      }
+    } catch { /* ignore — fall through to Blank */ }
+    if (list.length === 0) {
+      applyBlankCanvas();
+      showToast('New document');
+      return;
+    }
+    setStarterPickerList(list);
+    setShowNewPicker(true);
+  }, [applyBlankCanvas, starterMode, showToast]);
 
   // ── Selected widget ────────────────────────────────────────────────
   const sel = selId ? widgets[selId] : null;
@@ -1410,7 +1494,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
               Editing: <strong style={{ color: '#fff', fontWeight: 600 }}>{templateName}</strong>
             </span>
           )}
-          <button onClick={newTemplate} style={tbBtn} title="Start a new blank template">+ New</button>
+          <button onClick={() => void newTemplate()} style={tbBtn} title={starterMode ? 'Start a new blank starter' : 'Start a new document — blank or from a starter layout'}>+ New</button>
           <button onClick={openTemplates} style={tbBtn}>All templates</button>
           <button
             onClick={async () => {
@@ -1721,6 +1805,38 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
               disabled={pdfLoading}
               style={{ ...mfSave, background: pdfLoading ? 'rgba(76,175,80,0.6)' : '#4caf50', borderColor: '#4caf50' }}
             >{pdfLoading ? '⟳ Generating…' : 'Download PDF'}</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* NEW DOCUMENT PICKER — Blank + platform starters (dealer/group Builder). */}
+      {showNewPicker && (
+        <Modal onClose={() => setShowNewPicker(false)} title="Start a new document">
+          <div style={{ padding: '16px 24px 24px', maxHeight: 460, overflowY: 'auto' }}>
+            <div style={{ fontSize: 12, color: '#78828c', marginBottom: 12 }}>
+              Start from a blank canvas or a platform starter layout. Picking a starter creates a new, editable document you save as your own.
+            </div>
+            <button
+              onClick={() => { applyBlankCanvas(); setShowNewPicker(false); showToast('New document'); }}
+              style={{ width: '100%', textAlign: 'left', padding: '12px 14px', marginBottom: 8, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14, color: '#2a2b3c' }}>Blank</div>
+                <div style={{ fontSize: 12, color: '#78828c', marginTop: 2 }}>Empty canvas with the default widgets.</div>
+              </div>
+            </button>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.05em', margin: '14px 0 6px' }}>Starter Layouts</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {starterPickerList.map(s => (
+                <button key={s.id}
+                  onClick={() => void loadStarterAsNew(s.id)}
+                  style={{ width: '100%', textAlign: 'left', padding: '10px 14px', border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13, color: '#333' }}>{s.name}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#1565c0', textTransform: 'uppercase', letterSpacing: '.04em', flexShrink: 0 }}>
+                    {s.doc_type === 'infosheet' ? 'Infosheet' : 'Addendum'}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         </Modal>
       )}
