@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { UserRole } from "@/lib/db";
 import { useBuilderBreadcrumb } from "@/contexts/BuilderBreadcrumb";
+import { rememberDealerReturnPath, takeDealerReturnPath } from "@/lib/dealer-return";
 
 const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super Admin",
@@ -154,6 +155,7 @@ export default function Topbar({ user }: Props) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dealerId: dealerUuid }),
     });
+    rememberDealerReturnPath();
     window.location.href = "/dashboard";
   }
 
@@ -163,9 +165,9 @@ export default function Topbar({ user }: Props) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dealerId: null }),
     });
-    // Exit the dealer → back to the group_admin's My Group page (/groups
-    // redirects them to their group detail + member list), not the dealers list.
-    window.location.href = "/groups";
+    // Exit the dealer → back to wherever the switch-in started (My Group detail
+    // or the Dealers list), falling back to /dealers when nothing was stored.
+    window.location.href = takeDealerReturnPath() ?? "/dealers";
   }
 
   const displayName = user.fullName || user.email;

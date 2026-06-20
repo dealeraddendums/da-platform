@@ -8,6 +8,7 @@ import { HubSpotEmail } from "@/components/HubSpotEmail";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
 import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
+import { rememberDealerReturnPath } from "@/lib/dealer-return";
 
 type Props = {
   group: GroupRow;
@@ -546,6 +547,7 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId:
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dealerId }),
     });
+    rememberDealerReturnPath();
     window.location.href = "/dashboard";
   }
 

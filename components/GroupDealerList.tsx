@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
+import { rememberDealerReturnPath } from "@/lib/dealer-return";
 
 type DealerRow = {
   id: string;
@@ -219,6 +220,7 @@ export default function GroupDealerList({ groupId }: Props) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dealerId }),
     });
+    rememberDealerReturnPath();
     window.location.href = "/dashboard";
   }
 
