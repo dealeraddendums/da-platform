@@ -8,6 +8,7 @@ import { fireAndForget } from "@/lib/billing-sync";
 import { fireGroupSync } from "@/lib/sync-hubspot";
 import { SOURCE_FORM } from "@/lib/hubspot";
 import { createGroupFolder, boxConfigured } from "@/lib/box";
+import { resolveTagId, tagsForGroups, groupIdsWithTag, groupIdsMatchingTagName } from "@/lib/tags";
 
 type SortableCol = "name" | "active" | "account_type" | "dealer_count" | "created_at" | "billing_contact";
 const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "billing_contact", "created_at"]);
@@ -32,8 +33,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const sortDir = searchParams.get("sort_dir") === "asc" ? true : false;
   const legacyIdGte = searchParams.get("legacy_id_gte");
 
+  // Tag filter (id or name) → restrict to that tag's group UUIDs.
+  // An unknown tag, or one with no groups → empty set (not "all").
+  const tagParam = searchParams.get("tag");
+  let tagUuids: string[] | null = null;
+  if (tagParam) {
+    const tagId = await resolveTagId(admin, tagParam);
+    if (!tagId) return NextResponse.json({ data: [], total: 0, page, per_page: perPage });
+    tagUuids = await groupIdsWithTag(admin, tagId);
+    if (!tagUuids.length) return NextResponse.json({ data: [], total: 0, page, per_page: perPage });
+  }
+
   let query = admin.from("groups").select("*", { count: "exact" });
-  if (q) query = query.or(`name.ilike.%${q}%,billing_contact.ilike.%${q}%,primary_contact.ilike.%${q}%`);
+  if (tagUuids) query = query.in("id", tagUuids);
+  if (q) {
+    // Free-text also matches tag names → fold in groups carrying a matching tag.
+    const tagMatchIds = await groupIdsMatchingTagName(admin, q);
+    const base = `name.ilike.%${q}%,billing_contact.ilike.%${q}%,primary_contact.ilike.%${q}%`;
+    query = query.or(tagMatchIds.length ? `${base},id.in.(${tagMatchIds.join(",")})` : base);
+  }
   if (legacyIdGte) query = query.gte("legacy_id", parseInt(legacyIdGte, 10));
 
   const dbSortCol = DB_SORT_COLS.has(sortCol)
@@ -62,12 +80,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  const tagMap = await tagsForGroups(admin, groupIds);
+
   // hubspot_company_id is stored directly in the Supabase groups table
   let enriched = (data ?? []).map((g: Record<string, unknown>) => ({
     ...g,
     dealer_count: dealerCounts[g.id as string] ?? 0,
     hubspot_company_id: g.hubspot_company_id ?? null,
     has_group_admin: groupsWithAdmin.has(g.id as string),
+    tags: tagMap[g.id as string] ?? [],
   }));
 
   if (sortCol === "dealer_count") {

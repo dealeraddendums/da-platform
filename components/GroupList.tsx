@@ -5,10 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import EntityRowActions from "@/components/EntityRowActions";
+import { TagChip, type Tag } from "@/components/TagPicker";
 import { createClient } from "@/lib/supabase/client";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
 
-type GroupListRow = GroupRow & { dealer_count: number; hubspot_company_id: number | null; has_group_admin: boolean };
+type GroupListRow = GroupRow & { dealer_count: number; hubspot_company_id: number | null; has_group_admin: boolean; tags: Tag[] };
 type GroupsResponse = {
   data: GroupListRow[];
   total: number;
@@ -31,6 +32,8 @@ export default function GroupList() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [loading, setLoading] = useState(true);
   const [showNewForm, setShowNewForm] = useState(false);
+  const [tagFilter, setTagFilter] = useState("");
+  const [tagOptions, setTagOptions] = useState<{ id: string; name: string }[]>([]);
 
   // Dealer count hover popover + dealer impersonation
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
@@ -54,6 +57,7 @@ export default function GroupList() {
       sort_dir: sortDir,
     });
     if (q) params.set("q", q);
+    if (tagFilter) params.set("tag", tagFilter);
 
     try {
       const res = await fetch(`/api/groups?${params.toString()}`);
@@ -65,9 +69,17 @@ export default function GroupList() {
     } finally {
       setLoading(false);
     }
-  }, [page, q, sortCol, sortDir]);
+  }, [page, q, tagFilter, sortCol, sortDir]);
 
   useEffect(() => { void fetchGroups(); }, [fetchGroups]);
+
+  // Load the tag list once for the filter dropdown.
+  useEffect(() => {
+    fetch("/api/tags")
+      .then((r) => (r.ok ? r.json() : { data: [] }))
+      .then((j: { data: { id: string; name: string }[] }) => setTagOptions(j.data ?? []))
+      .catch(() => { /* ignore */ });
+  }, []);
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -286,6 +298,23 @@ export default function GroupList() {
             </button>
           )}
         </form>
+        <div className="flex items-center gap-2 mt-3">
+          <span className="text-xs mr-1" style={{ color: "var(--text-muted)" }}>Tag:</span>
+          <select
+            className="input"
+            style={{ height: 32, fontSize: 13, maxWidth: 240 }}
+            value={tagFilter}
+            onChange={(e) => { setTagFilter(e.target.value); setPage(1); }}
+          >
+            <option value="">All tags</option>
+            {tagOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          {tagFilter && (
+            <button type="button" className="text-sm" style={{ color: "var(--text-muted)" }} onClick={() => { setTagFilter(""); setPage(1); }}>
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {groupActionError && (
@@ -368,6 +397,11 @@ export default function GroupList() {
                         </span>
                       )}
                     </div>
+                    {g.tags && g.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {g.tags.map((t) => <TagChip key={t.id} tag={t} />)}
+                      </div>
+                    )}
                   </td>
 
                   {/* Status */}

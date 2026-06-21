@@ -17,6 +17,7 @@ import { fireGroupAssignCascade } from "@/lib/group-billing-cascade";
 import { createDealerFolder, boxConfigured } from "@/lib/box";
 import { seedTrialSampleData } from "@/lib/provisioning";
 import { SOURCE_FORM } from "@/lib/hubspot";
+import { resolveTagId, tagsForDealers, dealerIdsWithTag, dealerIdsMatchingTagName } from "@/lib/tags";
 
 interface NewBillingCustomerArgs {
   adminClient: ReturnType<typeof createAdminSupabaseClient>;
@@ -240,17 +241,39 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const { searchParams } = req.nextUrl;
     const q = searchParams.get("q") ?? "";
     const activeFilter = searchParams.get("active");
+    const tagParam = searchParams.get("tag");
+
+    // Tag filter (id or name) → restrict to that tag's dealer UUIDs.
+    // An unknown tag, or a tag with no in-group dealers → empty set (not "all").
+    let tagUuids: string[] | null = null;
+    if (tagParam) {
+      const tagId = await resolveTagId(admin, tagParam);
+      if (!tagId) return NextResponse.json({ data: [], total: 0, page: 1, per_page: 0 });
+      tagUuids = await dealerIdsWithTag(admin, tagId);
+      if (!tagUuids.length) return NextResponse.json({ data: [], total: 0, page: 1, per_page: 0 });
+    }
+
     let query = admin
       .from("dealers")
       .select("id, dealer_id, name, active, is_test, city, state, phone, primary_contact, primary_contact_email, account_type, group_id, internal_id", { count: "exact" })
       .eq("group_id", claims.group_id)
       .order("name");
-    if (q) query = query.or(`name.ilike.%${q}%`);
+    if (tagUuids) query = query.in("id", tagUuids);
+    if (q) {
+      // Free-text also matches tag names → fold in in-group dealers carrying a matching tag.
+      const tagMatchIds = await dealerIdsMatchingTagName(admin, q);
+      const orClause = tagMatchIds.length
+        ? `name.ilike.%${q}%,id.in.(${tagMatchIds.join(",")})`
+        : `name.ilike.%${q}%`;
+      query = query.or(orClause);
+    }
     if (activeFilter === "true")  query = query.eq("active", true);
     if (activeFilter === "false") query = query.eq("active", false);
     const { data, count } = await query;
+
+    const tagMap = await tagsForDealers(admin, (data ?? []).map((d) => (d as { id: string }).id));
     return NextResponse.json({
-      data: (data ?? []).map(d => ({ ...d, lifetime_prints: 0, last_30_prints: 0, hubspot_company_id: null, group_name: null })),
+      data: (data ?? []).map(d => ({ ...d, lifetime_prints: 0, last_30_prints: 0, hubspot_company_id: null, group_name: null, tags: tagMap[(d as { id: string }).id] ?? [] })),
       total: count ?? 0, page: 1, per_page: count ?? 0,
     });
   }
@@ -315,9 +338,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ data: atRiskList.slice(from, from + perPage), total: atRiskList.length, page, per_page: perPage });
   }
 
+  // Tag filter (id or name) → restrict to that tag's dealer UUIDs.
+  // An unknown tag, or one with no dealers → empty set (not "all").
+  const tagParam = searchParams.get("tag");
+  let tagUuids: string[] | null = null;
+  if (tagParam) {
+    const tagId = await resolveTagId(admin, tagParam);
+    if (!tagId) return NextResponse.json({ data: [], total: 0, page, per_page: perPage });
+    tagUuids = await dealerIdsWithTag(admin, tagId);
+    if (!tagUuids.length) return NextResponse.json({ data: [], total: 0, page, per_page: perPage });
+  }
+
   // Build main query — DB sort for indexed columns only
   let query = admin.from("dealers").select("*, groups(name)", { count: "exact" });
-  if (q) query = query.or(`name.ilike.%${q}%,dealer_id.ilike.%${q}%,city.ilike.%${q}%,primary_contact.ilike.%${q}%`);
+  if (tagUuids) query = query.in("id", tagUuids);
+  if (q) {
+    // Free-text also matches tag names → fold in dealers carrying a matching tag.
+    const tagMatchIds = await dealerIdsMatchingTagName(admin, q);
+    const base = `name.ilike.%${q}%,dealer_id.ilike.%${q}%,city.ilike.%${q}%,primary_contact.ilike.%${q}%`;
+    query = query.or(tagMatchIds.length ? `${base},id.in.(${tagMatchIds.join(",")})` : base);
+  }
   if (active === "true") query = query.eq("active", true);
   else if (active === "false") query = query.eq("active", false);
   if (createdSinceIso) query = query.gte("created_at", createdSinceIso);
@@ -337,8 +377,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
 
   const dealerIds = (data ?? []).map((d: Record<string, unknown>) => d.dealer_id as string);
+  const dealerUuids = (data ?? []).map((d: Record<string, unknown>) => d.id as string);
   const hubspotMap = extractHubspotMap(data ?? []);
-  const [{ lifetime, recent }, profileRows] = await Promise.all([
+  const [{ lifetime, recent }, profileRows, tagMap] = await Promise.all([
     getPrintCounts(admin, dealerIds),
     admin
       .from("profiles")
@@ -346,6 +387,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .in("dealer_id", dealerIds)
       .in("role", ["dealer_admin", "dealer_user", "dealer_restricted"])
       .then(({ data: rows }) => rows ?? []),
+    tagsForDealers(admin, dealerUuids),
   ]);
   const dealersWithUsers = new Set((profileRows as { dealer_id: string }[]).map((p) => p.dealer_id));
 
@@ -357,6 +399,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     last_30_prints: recent[d.dealer_id as string] ?? 0,
     hubspot_company_id: hubspotMap[d.inventory_dealer_id as string] ?? null,
     has_users: dealersWithUsers.has(d.dealer_id as string),
+    tags: tagMap[d.id as string] ?? [],
   }));
 
   // In-memory sort for computed/joined columns

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
+import EntityTagsCard from "@/components/EntityTagsCard";
 import { PageHeader } from "@/components/PageHeader";
 import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
 import { DMS_PROVIDERS, OTHER_PROVIDERS, isDmsProvider } from "@/lib/inventory-providers";
@@ -1296,6 +1297,12 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
             }}
           />
         </div>
+      )}
+
+      {/* Tags — editable for super_admin (any) + group_admin (in-group);
+          hidden for pure dealer roles in v1. */}
+      {(isSuperAdmin || isGroupAdmin) && (
+        <EntityTagsCard kind="dealers" id={dealer.id} editable={isSuperAdmin || isGroupAdmin} />
       )}
 
       {/* Makes */}

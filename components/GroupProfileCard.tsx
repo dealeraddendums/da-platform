@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
 import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
+import EntityTagsCard from "@/components/EntityTagsCard";
 import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
 import { rememberDealerReturnPath } from "@/lib/dealer-return";
 
@@ -409,6 +410,11 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
           </div>
         </div>
       </div>
+
+      {/* Tags — editable for super_admin (any) + group_admin (own group). */}
+      {(isSuperAdmin || isGroupAdmin) && (
+        <EntityTagsCard kind="groups" id={group.id} editable={isSuperAdmin || isGroupAdmin} />
+      )}
 
       {/* Delete Group confirmation modal (test groups only) */}
       {showDeleteModal && (

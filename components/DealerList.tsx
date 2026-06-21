@@ -7,6 +7,7 @@ import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { createClient } from "@/lib/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
 import EntityRowActions from "@/components/EntityRowActions";
+import { TagChip, type Tag } from "@/components/TagPicker";
 import { decodeHtmlEntities } from "@/lib/format";
 
 type DealerListRow = DealerRow & {
@@ -15,6 +16,7 @@ type DealerListRow = DealerRow & {
   last_30_prints: number;
   hubspot_company_id: number | null;
   has_users: boolean;
+  tags: Tag[];
 };
 
 type DealersResponse = {
@@ -105,6 +107,8 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
   const [searchInput, setSearchInput] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false" | "at_risk">("true");
   const [dateRange, setDateRange] = useState<"all" | "week" | "30d" | "90d" | "year">("all");
+  const [tagFilter, setTagFilter] = useState("");
+  const [tagOptions, setTagOptions] = useState<{ id: string; name: string }[]>([]);
   const [sortCol, setSortCol] = useState<SortCol>("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
@@ -124,6 +128,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
       sort_dir: sortDir,
     });
     if (q) params.set("q", q);
+    if (tagFilter) params.set("tag", tagFilter);
     if (activeFilter === "at_risk") {
       params.set("at_risk", "true");
     } else if (activeFilter !== "all") {
@@ -151,9 +156,17 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
     } finally {
       setLoading(false);
     }
-  }, [page, q, activeFilter, dateRange, sortCol, sortDir]);
+  }, [page, q, tagFilter, activeFilter, dateRange, sortCol, sortDir]);
 
   useEffect(() => { void fetchDealers(); }, [fetchDealers]);
+
+  // Load the tag list once for the filter dropdown.
+  useEffect(() => {
+    fetch("/api/tags")
+      .then((r) => (r.ok ? r.json() : { data: [] }))
+      .then((j: { data: { id: string; name: string }[] }) => setTagOptions(j.data ?? []))
+      .catch(() => { /* ignore */ });
+  }, []);
 
   async function handleFileImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -425,6 +438,23 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
             );
           })}
         </div>
+        <div className="flex items-center gap-2 mt-2">
+          <span className="text-xs mr-1" style={{ color: "var(--text-muted)" }}>Tag:</span>
+          <select
+            className="input"
+            style={{ height: 32, fontSize: 13, maxWidth: 240 }}
+            value={tagFilter}
+            onChange={(e) => { setTagFilter(e.target.value); setPage(1); }}
+          >
+            <option value="">All tags</option>
+            {tagOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          {tagFilter && (
+            <button type="button" className="text-sm" style={{ color: "var(--text-muted)" }} onClick={() => { setTagFilter(""); setPage(1); }}>
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Table */}
@@ -536,6 +566,11 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                           </span>
                         )}
                       </div>
+                      {d.tags && d.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {d.tags.map((t) => <TagChip key={t.id} tag={t} />)}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm">
                       {d.group_name && d.group_id
