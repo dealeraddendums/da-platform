@@ -26,9 +26,10 @@ export default async function OptionsPage() {
     : null;
   const ghostDealerId = ghostCtx?.dealer_text_id ?? null;
 
-  // A group_admin who has switched into a dealer acts as that dealer here too.
+  // A group_admin OR group_user (regional manager) switched into a dealer acts
+  // as that dealer here too.
   let activeDealerTextId: string | null = null;
-  if (role === "group_admin" && profile?.active_dealer_id) {
+  if ((role === "group_admin" || role === "group_user") && profile?.active_dealer_id) {
     const { data: d } = await admin
       .from("dealers")
       .select("dealer_id")

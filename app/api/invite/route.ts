@@ -63,7 +63,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  const isGroupAdminContext = claims.role === "group_admin" && !!claims.active_dealer_id;
+  // group_admin OR group_user (regional manager) switched into a dealer may
+  // invite that dealer's staff (full dealer parity); role is constrained to
+  // DEALER_ROLES below, so neither can mint a group-level user here.
+  const isGroupAdminContext = (claims.role === "group_admin" || claims.role === "group_user") && !!claims.active_dealer_id;
   const isDealerAdmin = claims.role === "dealer_admin";
   const isSuperAdmin = claims.role === "super_admin";
 

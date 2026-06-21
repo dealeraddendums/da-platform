@@ -47,7 +47,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const { role, dealer_id } = claims;
   const isGhostMode           = claims.is_ghost === true;
-  const isGroupAdminContext    = role === "group_admin" && !!claims.active_dealer_id && !!dealer_id;
+  // group_admin OR group_user (regional manager) switched into a dealer get the
+  // dealer-scoped Users view (full dealer parity). group_user has no group-level
+  // context (no isGroupAdminGroupCtx equivalent).
+  const isGroupAdminContext    = (role === "group_admin" || role === "group_user") && !!claims.active_dealer_id && !!dealer_id;
   const isGroupAdminGroupCtx   = role === "group_admin" && !claims.active_dealer_id && !!claims.group_id;
   if (role !== "super_admin" && role !== "dealer_admin" && !isGroupAdminContext && !isGroupAdminGroupCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -225,7 +228,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (error) return error;
 
   const { role, dealer_id: callerDealerId } = claims;
-  const isGroupAdminCtx = role === "group_admin" && !!claims.active_dealer_id && !!callerDealerId;
+  // group_admin OR group_user switched into a dealer may add that dealer's staff
+  // (full dealer parity); the role whitelist below still limits them to DEALER_ROLES.
+  const isGroupAdminCtx = (role === "group_admin" || role === "group_user") && !!claims.active_dealer_id && !!callerDealerId;
   if (role !== "super_admin" && role !== "dealer_admin" && !isGroupAdminCtx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

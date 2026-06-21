@@ -47,6 +47,8 @@ export type DealerAuthz =
  *   - super_admin                  → any dealer
  *   - dealer_admin / dealer_user   → only their own dealer (`claims.dealer_id`)
  *   - group_admin                  → only a dealer in their group (`claims.group_id`)
+ *   - group_user                   → only an in-group dealer carrying one of the
+ *                                    manager's scope tags (`claims.scope_tag_ids`)
  *
  * Returns `{ ok: true, dealerId }` or `{ ok: false, response }` (a 400/403 to
  * return directly). The group membership lookup runs only for group_admin.
@@ -75,6 +77,33 @@ export async function authorizeDealerAction(
     return { ok: true, dealerId };
   }
 
+  // group_user (regional manager): in-group AND the dealer carries one of the
+  // manager's scope tags. Same dealer-level parity as a group_admin, but only
+  // over their tagged subset. Empty scope ⇒ no dealers.
+  if (claims.role === "group_user") {
+    if (!claims.group_id) return forbidden();
+    if (!claims.scope_tag_ids || claims.scope_tag_ids.length === 0) return forbidden();
+    const admin = createAdminSupabaseClient();
+    const { data: dealer } = await admin
+      .from("dealers")
+      .select("id, group_id")
+      .eq("dealer_id", dealerId)
+      .maybeSingle<{ id: string; group_id: string | null }>();
+    if (!dealer || dealer.group_id !== claims.group_id) return forbidden();
+    // dealer must carry one of the manager's scope tags (dealer_tags lookup).
+    // dealer_tags isn't in the generated Supabase types yet (migration 108).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: tagRow } = await (admin as any)
+      .from("dealer_tags")
+      .select("tag_id")
+      .eq("dealer_id", dealer.id)
+      .in("tag_id", claims.scope_tag_ids)
+      .limit(1)
+      .maybeSingle();
+    if (!tagRow) return forbidden();
+    return { ok: true, dealerId };
+  }
+
   return forbidden();
 }
 
@@ -100,8 +129,9 @@ export async function resolveDealerForRequest(
   if (DEALER_ROLES.has(claims.role)) {
     return authorizeDealerAction(claims, claims.dealer_id);
   }
-  // group_admin switched in, or super_admin ghosting: use the effective dealer.
-  if ((claims.role === "group_admin" || claims.role === "super_admin") && claims.dealer_id) {
+  // group_admin / group_user switched in, or super_admin ghosting: use the
+  // effective dealer (authorizeDealerAction re-verifies group + tag scope).
+  if ((claims.role === "group_admin" || claims.role === "group_user" || claims.role === "super_admin") && claims.dealer_id) {
     return authorizeDealerAction(claims, claims.dealer_id);
   }
   // No effective dealer: fall back to the explicit id (then authorize it).

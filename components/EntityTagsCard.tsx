@@ -14,7 +14,7 @@ export default function EntityTagsCard({
   id,
   editable,
 }: {
-  kind: "dealers" | "groups";
+  kind: "dealers" | "groups" | "users";
   id: string;
   editable: boolean;
 }) {

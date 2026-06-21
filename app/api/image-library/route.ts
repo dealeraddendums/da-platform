@@ -37,6 +37,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const canManageDealer =
     claims.role === "dealer_admin" ||
     (claims.role === "group_admin" && !!claims.active_dealer_id) ||
+    (claims.role === "group_user" && !!claims.active_dealer_id) ||
     (isSuper && claims.is_ghost);
 
   const out: OutImage[] = [];
@@ -195,6 +196,7 @@ async function canMutate(
   if (row.scope === "dealer") {
     if (claims.role === "dealer_admin") return !!row.dealer_id && row.dealer_id === claims.dealer_id;
     if (claims.role === "group_admin" && claims.active_dealer_id) return !!row.dealer_id && row.dealer_id === claims.dealer_id;
+    if (claims.role === "group_user" && claims.active_dealer_id) return !!row.dealer_id && row.dealer_id === claims.dealer_id;
     return false;
   }
   return false; // platform → super_admin only (handled above)

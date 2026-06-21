@@ -21,7 +21,9 @@ export default async function UsersPage() {
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user") as UserRole;
 
-  const isGroupAdminInDealerContext = role === "group_admin" && !!profile?.active_dealer_id;
+  // A switched-in group_admin OR group_user (regional manager) gets the
+  // dealer-scoped staff view for that dealer (full dealer parity).
+  const isGroupAdminInDealerContext = (role === "group_admin" || role === "group_user") && !!profile?.active_dealer_id;
   const isGroupAdminInGroupContext  = role === "group_admin" && !profile?.active_dealer_id;
 
   // Check for ghost mode
@@ -32,8 +34,9 @@ export default async function UsersPage() {
   const ghostDealerId = ghostCtx?.dealer_text_id ?? null;
   const isGhostMode = !!ghostDealerId;
 
-  // Access check: super_admin (incl. ghost), dealer_admin, group_admin (any context)
-  if (role !== "super_admin" && role !== "dealer_admin" && role !== "group_admin") {
+  // Access check: super_admin (incl. ghost), dealer_admin, group_admin (any
+  // context), or a switched-in group_user (dealer-scoped staff view only).
+  if (role !== "super_admin" && role !== "dealer_admin" && role !== "group_admin" && !isGroupAdminInDealerContext) {
     redirect("/dashboard");
   }
 

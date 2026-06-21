@@ -14,7 +14,9 @@ const ALLOWED_BUCKETS = new Set([
 // gets a 403. Previously this was a denylist (rejected dealer_user /
 // dealer_restricted) which was functionally equivalent but harder to
 // audit, and any unexpected role string fell through as "allowed".
-const UPLOAD_ROLES = new Set(["super_admin", "group_admin", "dealer_admin"]);
+// group_user (regional manager) is included for dealer-context parity (option
+// images, custom-size backgrounds); the consuming routes scope by dealer.
+const UPLOAD_ROLES = new Set(["super_admin", "group_admin", "dealer_admin", "group_user"]);
 
 const REGION = process.env.AWS_REGION || "us-east-1";
 const MAX_SIZE = 5 * 1024 * 1024;
@@ -73,6 +75,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // never land here — if they do, their profiles row is the thing to
     // check, not this route.
     console.warn(`[upload-image] denied — role=${claims.role} sub=${claims.sub} email=${claims.email}`);
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // This route writes to a caller-supplied keyPrefix (no per-dealer resolution),
+  // so a group_user (regional manager) may use it ONLY while switched into a
+  // tag-verified dealer (active_dealer_id is set by the in-group+tag-checked
+  // switch). The consuming routes (custom-sizes, options) re-authorize the
+  // dealer via authorizeDealerAction before attaching the image to any record.
+  if (claims.role === "group_user" && !claims.active_dealer_id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

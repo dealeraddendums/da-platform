@@ -13,6 +13,8 @@ type Params = { params: { id: string; invId: string } };
 async function authorizeDealer(dealerUuid: string) {
   const { claims, error } = await requireAuth();
   if (error) return { error };
+  // group_user (regional manager) flows through authorizeDealerAction → may
+  // manage invitations for their tagged dealers (full dealer parity).
   if (claims.role === "dealer_user" || claims.role === "dealer_restricted") {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }

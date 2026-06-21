@@ -17,7 +17,7 @@ import { fireGroupAssignCascade } from "@/lib/group-billing-cascade";
 import { createDealerFolder, boxConfigured } from "@/lib/box";
 import { seedTrialSampleData } from "@/lib/provisioning";
 import { SOURCE_FORM } from "@/lib/hubspot";
-import { resolveTagId, tagsForDealers, dealerIdsWithTag, dealerIdsMatchingTagName } from "@/lib/tags";
+import { resolveTagId, tagsForDealers, dealerIdsWithTag, dealerIdsWithAnyTag, dealerIdsMatchingTagName } from "@/lib/tags";
 
 interface NewBillingCustomerArgs {
   adminClient: ReturnType<typeof createAdminSupabaseClient>;
@@ -267,6 +267,50 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         : `name.ilike.%${q}%`;
       query = query.or(orClause);
     }
+    if (activeFilter === "true")  query = query.eq("active", true);
+    if (activeFilter === "false") query = query.eq("active", false);
+    const { data, count } = await query;
+
+    const tagMap = await tagsForDealers(admin, (data ?? []).map((d) => (d as { id: string }).id));
+    return NextResponse.json({
+      data: (data ?? []).map(d => ({ ...d, lifetime_prints: 0, last_30_prints: 0, hubspot_company_id: null, group_name: null, tags: tagMap[(d as { id: string }).id] ?? [] })),
+      total: count ?? 0, page: 1, per_page: count ?? 0,
+    });
+  }
+
+  // group_user (regional manager): only in-group dealers carrying one of their tags.
+  if (claims.role === "group_user") {
+    if (!claims.group_id || claims.scope_tag_ids.length === 0) {
+      return NextResponse.json({ data: [], total: 0, page: 1, per_page: 0 });
+    }
+    const admin = createAdminSupabaseClient();
+    const { searchParams } = req.nextUrl;
+    const q = searchParams.get("q") ?? "";
+    const activeFilter = searchParams.get("active");
+
+    // Manageable set = dealers tagged for this manager.
+    let scopedUuids = await dealerIdsWithAnyTag(admin, claims.scope_tag_ids);
+    if (!scopedUuids.length) return NextResponse.json({ data: [], total: 0, page: 1, per_page: 0 });
+
+    // Optional ?tag= narrows within their scope; a tag outside scope → empty.
+    const tagParam = searchParams.get("tag");
+    if (tagParam) {
+      const tagId = await resolveTagId(admin, tagParam);
+      if (!tagId || !claims.scope_tag_ids.includes(tagId)) {
+        return NextResponse.json({ data: [], total: 0, page: 1, per_page: 0 });
+      }
+      const tagUuids = new Set(await dealerIdsWithTag(admin, tagId));
+      scopedUuids = scopedUuids.filter((id) => tagUuids.has(id));
+      if (!scopedUuids.length) return NextResponse.json({ data: [], total: 0, page: 1, per_page: 0 });
+    }
+
+    let query = admin
+      .from("dealers")
+      .select("id, dealer_id, name, active, is_test, city, state, phone, primary_contact, primary_contact_email, account_type, group_id, internal_id", { count: "exact" })
+      .eq("group_id", claims.group_id)
+      .in("id", scopedUuids)
+      .order("name");
+    if (q) query = query.or(`name.ilike.%${q}%`);
     if (activeFilter === "true")  query = query.eq("active", true);
     if (activeFilter === "false") query = query.eq("active", false);
     const { data, count } = await query;

@@ -71,7 +71,9 @@ export default async function ProfilePage() {
   // it. Without an active dealer, group_admin gets the Security tab only.
   let effectiveDealerTextId: string | null = profile?.dealer_id ?? null;
   let actingAsDealer = false;
-  if (role === "group_admin") {
+  // group_admin OR group_user (regional manager) acting as a switched-in dealer
+  // sees that dealer's profile — edit, Order Supplies, and its billing.
+  if (role === "group_admin" || role === "group_user") {
     let resolvedActive: string | null = null;
     if (profile?.active_dealer_id) {
       const { data: d } = await admin

@@ -68,6 +68,11 @@ export function resolveUploadScope(claims: JwtClaims):
     if (claims.active_dealer_id && claims.dealer_id) return { scope: "dealer", dealer_id: claims.dealer_id };
     return claims.group_id ? { scope: "group", group_id: claims.group_id } : null;
   }
+  // group_user (regional manager): dealer-scope only, and only when switched in.
+  // No group-level image management (that would touch dealers outside their subset).
+  if (claims.role === "group_user") {
+    return claims.active_dealer_id && claims.dealer_id ? { scope: "dealer", dealer_id: claims.dealer_id } : null;
+  }
   if (claims.role === "super_admin") {
     if (claims.is_ghost && claims.dealer_id) return { scope: "dealer", dealer_id: claims.dealer_id };
     return { scope: "platform" };

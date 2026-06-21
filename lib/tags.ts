@@ -88,6 +88,13 @@ export async function dealerIdsWithTag(admin: Admin, tagId: string): Promise<str
   return Array.from(new Set((data ?? []).map((r: any) => r.dealer_id as string)));
 }
 
+/** Dealer UUIDs assigned ANY of the given tags (for group_user scope). */
+export async function dealerIdsWithAnyTag(admin: Admin, tagIds: string[]): Promise<string[]> {
+  if (!tagIds.length) return [];
+  const { data } = await (admin as any).from("dealer_tags").select("dealer_id").in("tag_id", tagIds);
+  return Array.from(new Set((data ?? []).map((r: any) => r.dealer_id as string)));
+}
+
 /** Group UUIDs assigned a specific tag (for list `?tag=` filtering). */
 export async function groupIdsWithTag(admin: Admin, tagId: string): Promise<string[]> {
   const { data } = await (admin as any).from("group_tags").select("group_id").eq("tag_id", tagId);

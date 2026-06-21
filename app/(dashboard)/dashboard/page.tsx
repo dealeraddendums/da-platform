@@ -206,6 +206,33 @@ export default async function DashboardPage() {
     }
   }
 
+  // group_user (regional manager). Switched into a tagged dealer → dealer view
+  // (full parity). Otherwise a minimal landing pointing to My Dealers — NOT the
+  // group-wide dashboard, which would surface metrics beyond their tagged subset.
+  if (role === "group_user") {
+    if (profile?.active_dealer_id) {
+      const { data: activeDlr } = await admin
+        .from("dealers")
+        .select("dealer_id")
+        .eq("id", profile.active_dealer_id)
+        .maybeSingle<{ dealer_id: string }>();
+      if (activeDlr?.dealer_id) {
+        return <DealerDashboardView dealerId={activeDlr.dealer_id} />;
+      }
+    }
+    return (
+      <div>
+        <PageHeader title="Dashboard" />
+        <div className="card p-6">
+          <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
+            Welcome{profile?.full_name ? `, ${profile.full_name}` : ""}. Select a dealership to manage.
+          </p>
+          <a href="/dealers" className="btn btn-primary">Go to My Dealers →</a>
+        </div>
+      </div>
+    );
+  }
+
   // Ghost token is read once at the top so both the dealer-ghost branch
   // (super_admin → dealer view) and the group-ghost branch (super_admin →
   // group_admin view) can see it. A group-ghost has group_id but no

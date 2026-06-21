@@ -106,7 +106,10 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
   if (error) return error;
 
   // Write action: only admins of the dealer may invite. Dealer-scope (own /
-  // in-group / any) is verified against the resolved dealer below.
+  // in-group / any) is verified against the resolved dealer below. A group_user
+  // (regional manager) flows through authorizeDealerAction → may manage staff of
+  // their tagged dealers (full dealer parity); the role whitelist below still
+  // limits them to DEALER_ROLES, so they can never mint a group-level user.
   if (claims.role === "dealer_user" || claims.role === "dealer_restricted") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

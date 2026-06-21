@@ -174,7 +174,11 @@ export default function Topbar({ user }: Props) {
   const roleLabel = ROLE_LABELS[user.role as UserRole] ?? user.role;
   const isDealerRole = DEALER_ROLES.includes(user.role as UserRole);
   const isGroupAdmin = user.role === "group_admin";
-  const isGroupAdminInDealerContext = isGroupAdmin && !!user.activeDealerName;
+  const isGroupUser = user.role === "group_user";
+  // A group_admin OR group_user (regional manager) switched into a dealer shows
+  // the dealer-context bar with a "Back" button. group_user returns to My Dealers.
+  const isGroupContextRole = isGroupAdmin || isGroupUser;
+  const isGroupAdminInDealerContext = isGroupContextRole && !!user.activeDealerName;
   const showDealerNameBar = (isDealerRole && !!user.dealerName) || isGroupAdminInDealerContext;
 
   return (
@@ -213,7 +217,7 @@ export default function Topbar({ user }: Props) {
                     padding: "3px 10px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
                   }}
                 >
-                  ← Back to Group
+                  {isGroupUser ? "← Back to My Dealers" : "← Back to Group"}
                 </button>
               )}
               <span style={{ fontWeight: 600, color: "#ffffff" }}>
@@ -222,7 +226,7 @@ export default function Topbar({ user }: Props) {
               <span style={{ color: "rgba(255,255,255,0.4)" }}>|</span>
               <span style={{ color: "rgba(255,255,255,0.6)", fontWeight: 400 }}>{displayName}</span>
             </div>
-          ) : isGroupAdmin ? (
+          ) : isGroupContextRole ? (
             /* Group admin: clean identity row — "Allan Tone — Allan's Test Group".
                Switching into a specific dealer is handled from the Dealers
                table (per-row impersonate), not a header dropdown. */

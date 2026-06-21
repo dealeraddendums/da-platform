@@ -31,8 +31,11 @@ export default async function DashboardLayout({
 
   const isDealerRole = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";
   const isGroupAdmin = role === "group_admin";
+  const isGroupUser = role === "group_user";
   const isSuperAdmin = role === "super_admin";
-  const activeDealerUuid = isGroupAdmin ? (profile?.active_dealer_id ?? null) : null;
+  // A group_user (regional manager) switches into a tagged dealer the same way a
+  // group_admin does — resolve their active dealer so the nav flips to dealer parity.
+  const activeDealerUuid = (isGroupAdmin || isGroupUser) ? (profile?.active_dealer_id ?? null) : null;
 
   // ── Ghost mode (super_admin only) ──────────────────────────────────────────
   let ghostDealerName: string | null = null;
@@ -80,7 +83,7 @@ export default async function DashboardLayout({
   let groupName: string | null = null;
   let activeDealerName: string | null = null;
 
-  if (isGroupAdmin) {
+  if (isGroupAdmin || isGroupUser) {
     const fetches: Promise<void>[] = [];
 
     if (profile?.group_id) {
@@ -106,7 +109,10 @@ export default async function DashboardLayout({
   // ── Sidebar role ───────────────────────────────────────────────────────────
   // When a group_admin has selected a dealer, or super_admin is in dealer ghost mode,
   // show dealer nav items. When super_admin is in group ghost mode, show group_admin nav.
-  const sidebarRole: UserRole = (isGroupAdmin && activeDealerUuid) ? "dealer_admin"
+  // A switched-in group_admin OR group_user gets the full dealer nav (dealer
+  // parity). Otherwise a group_user keeps their own scoped nav (Dashboard ·
+  // My Dealers · My Profile · Help) — handled by group_user entries in Sidebar.
+  const sidebarRole: UserRole = ((isGroupAdmin || isGroupUser) && activeDealerUuid) ? "dealer_admin"
     : (isSuperAdmin && isGhostMode && !ghostGroupId) ? "dealer_admin"
     : (isSuperAdmin && ghostGroupId) ? "group_admin"
     : role;

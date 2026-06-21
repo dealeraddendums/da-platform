@@ -6,6 +6,7 @@ import { resolveSessionProfile } from "@/lib/profile-session";
 import { verifyGhostToken } from "@/lib/ghost";
 import DealerList from "@/components/DealerList";
 import GroupDealerList from "@/components/GroupDealerList";
+import MyDealersList from "@/components/MyDealersList";
 import { PageHeader } from "@/components/PageHeader";
 
 export const metadata = { title: "Dealers — DA Platform" };
@@ -38,6 +39,12 @@ export default async function DealersPage() {
 
   if (role === "group_admin") {
     return <GroupDealerList groupId={profile?.group_id ?? null} />;
+  }
+
+  // group_user (regional manager): scoped to their tagged subset. GET /api/dealers
+  // returns only their group ∩ tags set server-side (no add-dealer affordance).
+  if (role === "group_user") {
+    return <MyDealersList />;
   }
 
   // dealer_admin / dealer_user: redirect to own dealer profile

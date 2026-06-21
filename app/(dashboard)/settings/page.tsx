@@ -31,10 +31,10 @@ export default async function SettingsPage() {
   const isDealer = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";
   let dealerId = isDealer ? (profile?.dealer_id ?? null) : (ghostDealerId ?? null);
 
-  // A group_admin who has switched into a dealer edits that dealer's settings.
-  // SettingsForm already scopes its API calls by dealer_id for group_admin and
-  // the /api/settings route verifies group membership — we just supply the id.
-  if (!dealerId && role === "group_admin" && profile?.active_dealer_id) {
+  // A group_admin OR group_user (regional manager) switched into a dealer edits
+  // that dealer's settings. SettingsForm scopes its API calls by dealer_id and
+  // /api/settings re-verifies scope (group + tags) — we just supply the id.
+  if (!dealerId && (role === "group_admin" || role === "group_user") && profile?.active_dealer_id) {
     const { data: d } = await admin
       .from("dealers")
       .select("dealer_id")

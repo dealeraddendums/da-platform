@@ -17,6 +17,12 @@ export type JwtClaims = {
   is_ghost: boolean;
   /** UUID of the dealer being ghosted; null otherwise. */
   ghost_dealer_uuid: string | null;
+  /**
+   * Tag ids that scope a `group_user` (regional manager): they may only see /
+   * manage in-group dealers carrying one of these tags. Empty ⇒ no dealers.
+   * Always `[]` for other roles.
+   */
+  scope_tag_ids: string[];
 };
 
 export type ServerProfile = {
@@ -92,7 +98,7 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
   const admin = createAdminSupabaseClient();
   const { data: profileById } = await admin
     .from("profiles")
-    .select("role, dealer_id, group_id, active_dealer_id")
+    .select("id, role, dealer_id, group_id, active_dealer_id")
     .eq("id", session.user.id)
     .maybeSingle();
 
@@ -103,7 +109,7 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
   if (!profile && session.user.email) {
     const { data: profileByEmail } = await admin
       .from("profiles")
-      .select("role, dealer_id, group_id, active_dealer_id")
+      .select("id, role, dealer_id, group_id, active_dealer_id")
       .eq("email", session.user.email)
       .maybeSingle();
     profile = profileByEmail;
@@ -131,7 +137,9 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
   // dealer (/api/profiles/active-dealer) or exit impersonation.
   let groupLevelReset = false;
   try { groupLevelReset = cookies().get("da_group_level")?.value === "1"; } catch { /* no req ctx */ }
-  if (role === "group_admin" && profile?.active_dealer_id && !groupLevelReset) {
+  // group_user (regional manager) switches into a tagged dealer the same way a
+  // group_admin does — resolve the active dealer's text id for downstream routes.
+  if ((role === "group_admin" || role === "group_user") && profile?.active_dealer_id && !groupLevelReset) {
     activeDealerUuid = profile.active_dealer_id;
     const { data: activeDlr } = await admin
       .from("dealers")
@@ -139,6 +147,18 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
       .eq("id", activeDealerUuid)
       .maybeSingle<{ dealer_id: string }>();
     if (activeDlr) dealerId = activeDlr.dealer_id;
+  }
+
+  // group_user scope: the tags assigned to this manager (user_tags). Keyed on
+  // the resolved profile id (email-fallback aware). Empty ⇒ no dealers.
+  let scopeTagIds: string[] = [];
+  if (role === "group_user") {
+    const uid = profile?.id ?? session.user.id;
+    // user_tags isn't in the generated Supabase types yet (migration 109).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: tagRows } = await (admin as any).from("user_tags").select("tag_id").eq("user_id", uid);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    scopeTagIds = (tagRows ?? []).map((r: any) => r.tag_id as string);
   }
 
   // Ghost mode: super_admin operates in dealer context without a real session swap
@@ -171,6 +191,7 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
     active_dealer_id: activeDealerUuid,
     is_ghost: isGhost,
     ghost_dealer_uuid: ghostDealerUuid,
+    scope_tag_ids: scopeTagIds,
   };
 }
 

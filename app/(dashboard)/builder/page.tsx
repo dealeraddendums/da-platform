@@ -18,6 +18,7 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
 
   const role = profile?.role ?? "dealer_user";
   const isGroupAdmin = role === "group_admin";
+  const isGroupUser = role === "group_user";
   const isSuperAdmin = role === "super_admin";
   const isDealerRole = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";
 
@@ -58,7 +59,7 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
 
   // Resolve effective dealer_id
   let dealerId = ghostDealerId ?? profile?.dealer_id ?? null;
-  if (!ghostDealerId && isGroupAdmin && profile?.active_dealer_id) {
+  if (!ghostDealerId && (isGroupAdmin || isGroupUser) && profile?.active_dealer_id) {
     const { data: activeDlr } = await admin
       .from("dealers")
       .select("dealer_id")
@@ -101,6 +102,6 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
   // canAdminUpload remains super_admin-only — that gates the platform background
   // library, a separate concern from dealer-scoped sizes.
   const canAddCustomSize = role === 'super_admin' || role === 'dealer_admin'
-    || (isGroupAdmin && !!profile?.active_dealer_id);
+    || ((isGroupAdmin || isGroupUser) && !!profile?.active_dealer_id);
   return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={canAddCustomSize} canAdminUpload={role === 'super_admin'} />;
 }

@@ -16,8 +16,9 @@ export default async function StaffProfilePage() {
 
   const role = profile?.role ?? "dealer_user";
 
-  // Only super_admin and group_admin may access this page
-  if (role !== "super_admin" && role !== "group_admin") {
+  // Only super_admin, group_admin, and group_user (regional manager) — all
+  // group/platform staff (no dealer-scoped /profile) — may access this page.
+  if (role !== "super_admin" && role !== "group_admin" && role !== "group_user") {
     redirect("/profile");
   }
 

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
 import { PageHeader } from "@/components/PageHeader";
+import EntityTagsCard from "@/components/EntityTagsCard";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,7 @@ type GroupOption  = { id: string; name: string };
 const ALL_ROLES = [
   { value: "super_admin",       label: "Super Admin" },
   { value: "group_admin",       label: "Group Admin" },
+  { value: "group_user",        label: "Regional Manager (Group User)" },
   { value: "dealer_admin",      label: "Dealer Admin" },
   { value: "dealer_user",       label: "Dealer User" },
   { value: "dealer_restricted", label: "Dealer Restricted" },
@@ -59,6 +61,7 @@ const DEALER_ROLES = [
 const ROLE_BADGE: Record<string, { bg: string; color: string }> = {
   super_admin:       { bg: "#e3f2fd", color: "#1565c0" },
   group_admin:       { bg: "#e3f2fd", color: "#1565c0" },
+  group_user:        { bg: "#fff8e1", color: "#e65100" },
   dealer_admin:      { bg: "#f5f6f7", color: "#55595c" },
   dealer_user:       { bg: "#f5f6f7", color: "#55595c" },
   dealer_restricted: { bg: "#f5f6f7", color: "#55595c" },
@@ -83,7 +86,7 @@ function formatDate(v: string | null) {
 
 function dealerGroupCell(u: UserRow) {
   if (isDealerRole(u.role)) return u.dealer_name ?? u.dealer_id ?? "—";
-  if (u.role === "group_admin") return u.group_name ?? "—";
+  if (u.role === "group_admin" || u.role === "group_user") return u.group_name ?? "—";
   return "—";
 }
 
@@ -313,7 +316,9 @@ function AddUserModal({ onClose, onSuccess, dealerMode, ownDealerId }: {
   const [err, setErr] = useState<string | null>(null);
 
   const needsDealer = !dealerMode && isDealerRole(form.role);
-  const needsGroup  = !dealerMode && form.role === "group_admin";
+  // group_admin AND group_user (regional manager) are both group-scoped. Tags
+  // for a new group_user are assigned afterward via Edit (no user id yet here).
+  const needsGroup  = !dealerMode && (form.role === "group_admin" || form.role === "group_user");
 
   function setField(k: keyof AddForm, v: string) {
     setForm(f => {
@@ -442,7 +447,8 @@ function EditUserModal({ user, onClose, onSuccess, dealerMode, canImpersonate, o
   const [err, setErr] = useState<string | null>(null);
 
   const needsDealer = !dealerMode && isDealerRole(form.role);
-  const needsGroup  = !dealerMode && form.role === "group_admin";
+  // group_admin AND group_user (regional manager) are both group-scoped.
+  const needsGroup  = !dealerMode && (form.role === "group_admin" || form.role === "group_user");
 
   function setField<K extends keyof EditForm>(k: K, v: EditForm[K]) {
     setForm(f => {
@@ -527,6 +533,17 @@ function EditUserModal({ user, onClose, onSuccess, dealerMode, canImpersonate, o
             <div>
               <label style={labelStyle}>Group</label>
               <GroupSearchSelect value={form.group} onChange={g => setField("group", g)} />
+            </div>
+          )}
+          {!dealerMode && form.role === "group_user" && (
+            <div>
+              <label style={labelStyle}>Scope Tags</label>
+              <p style={{ fontSize: 12, color: "#78828c", margin: "0 0 6px" }}>
+                This manager sees and controls only their group&apos;s dealers carrying one of these tags.
+                Saved immediately. Set the Group above and Save Changes to apply the role.
+              </p>
+              {/* Writes user_tags via PUT /api/users/[id]/tags (super_admin only). */}
+              <EntityTagsCard kind="users" id={user.id} editable />
             </div>
           )}
           <div style={{ borderTop: "1px solid #e0e0e0", paddingTop: 14 }}>

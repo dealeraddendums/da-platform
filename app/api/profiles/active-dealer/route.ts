@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 /**
  * PATCH /api/profiles/active-dealer
- * Sets or clears the active_dealer_id for a group_admin.
- * Body: { dealerId: string | null }
+ * Sets or clears the active_dealer_id for a group_admin or a group_user
+ * (regional manager). Body: { dealerId: string | null }
  */
 export async function PATCH(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  if (claims.role !== "group_admin") {
+  if (claims.role !== "group_admin" && claims.role !== "group_user") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -24,16 +25,20 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient();
 
   if (dealerUuid) {
-    // Security: verify this dealer belongs to the group_admin's group
+    // Verify the target dealer is switch-able for this caller:
+    //   group_admin → in their group · group_user → in-group AND tagged for them.
+    // authorizeDealerAction (by text dealer_id) centralizes both checks.
     const { data: dealer } = await admin
       .from("dealers")
-      .select("id, group_id")
+      .select("id, dealer_id, group_id")
       .eq("id", dealerUuid)
-      .maybeSingle<{ id: string; group_id: string | null }>();
+      .maybeSingle<{ id: string; dealer_id: string; group_id: string | null }>();
 
-    if (!dealer || dealer.group_id !== claims.group_id) {
+    if (!dealer) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const authz = await authorizeDealerAction(claims, dealer.dealer_id);
+    if (!authz.ok) return authz.response;
   }
 
   const { error: updateErr } = await admin

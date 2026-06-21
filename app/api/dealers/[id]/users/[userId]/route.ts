@@ -23,7 +23,9 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
   if (error) return error;
 
   // Write action: only admins of the dealer may edit users. Dealer-scope is
-  // verified against the resolved dealer below.
+  // verified against the resolved dealer below. A group_user (regional manager)
+  // flows through authorizeDealerAction → may manage staff of their tagged
+  // dealers (full dealer parity).
   if (claims.role === "dealer_user" || claims.role === "dealer_restricted") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
