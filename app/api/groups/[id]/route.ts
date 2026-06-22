@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow, GroupUpdate } from "@/lib/db";
 import { billingConfigured, updateCustomer } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
+import { invalidateBrandCache } from "@/lib/brand";
 
 type Params = { params: { id: string } };
 
@@ -93,6 +94,26 @@ export async function PATCH(
     patch.etl_locked_reason = body.etl_locked ? (body.etl_locked_reason ?? null) : null;
   }
 
+  // White-label (Phase 12a, migration 110) — super_admin only (operator-
+  // provisioned). A group_admin can never set their own domain/branding; a
+  // forged value is simply not copied into the patch.
+  let brandingTouched = false;
+  if (claims.role === "super_admin") {
+    if (body.custom_domain !== undefined) {
+      const d = (body.custom_domain ?? "").trim().toLowerCase();
+      patch.custom_domain = d || null;
+      brandingTouched = true;
+    }
+    if (body.branding !== undefined) {
+      patch.branding = body.branding ?? null;
+      brandingTouched = true;
+    }
+    if (body.custom_domain_status !== undefined) {
+      patch.custom_domain_status = body.custom_domain_status === "active" ? "active" : "pending";
+      brandingTouched = true;
+    }
+  }
+
   const admin = createAdminSupabaseClient();
 
   // Snapshot the prior name so we can detect a real rename for the da-billing
@@ -115,6 +136,10 @@ export async function PATCH(
     .single();
 
   if (dbError || !data) {
+    // Unique violation on custom_domain → friendly 409 (another group owns it).
+    if (dbError && (dbError.code === "23505" || /custom_domain/i.test(dbError.message))) {
+      return NextResponse.json({ error: "That custom domain is already assigned to another group." }, { status: 409 });
+    }
     return NextResponse.json(
       { error: dbError?.message ?? "Group not found" },
       { status: dbError ? 500 : 404 }
@@ -122,6 +147,10 @@ export async function PATCH(
   }
 
   const updatedGroup = data as GroupRow;
+
+  // White-label changes affect host→brand resolution — drop the cached map so
+  // the next request on the (old or new) domain re-resolves immediately.
+  if (brandingTouched) invalidateBrandCache();
 
   // Group rename → propagate the new name to the group's da-billing customer
   // (company field). NAME/COMPANY ONLY — pricing lives in template:{uuid} and is

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
-import type { GroupRow, GroupUpdate, DealerRow } from "@/lib/db";
+import type { GroupRow, GroupUpdate, DealerRow, GroupBranding } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
 import EntityTagsCard from "@/components/EntityTagsCard";
 import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
@@ -416,6 +416,11 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
         <EntityTagsCard kind="groups" id={group.id} editable={isSuperAdmin || isGroupAdmin} />
       )}
 
+      {/* White-Label domain & branding — super_admin only (operator-provisioned). */}
+      {isSuperAdmin && (
+        <WhiteLabelCard group={group} onSaved={(g) => setGroup((prev) => ({ ...prev, ...g }))} />
+      )}
+
       {/* Delete Group confirmation modal (test groups only) */}
       {showDeleteModal && (
         <div
@@ -527,6 +532,170 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+// ── White-Label domain & branding (super_admin only) ──────────────────────────
+
+function WhiteLabelCard({ group, onSaved }: { group: GroupRow; onSaved: (g: Partial<GroupRow>) => void }) {
+  const b: GroupBranding = group.branding ?? {};
+  const [domain, setDomain] = useState(group.custom_domain ?? "");
+  const [displayName, setDisplayName] = useState(b.display_name ?? "");
+  const [logoUrl, setLogoUrl] = useState(b.logo_url ?? "");
+  const [primary, setPrimary] = useState(b.primary_color ?? "#1976d2");
+  const [accent, setAccent] = useState(b.accent_color ?? "#ffa500");
+  const [status, setStatus] = useState<string>(group.custom_domain_status ?? "pending");
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function uploadLogo(file: File) {
+    setUploading(true);
+    setMsg(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("bucket", "new-dealer-logos");
+      fd.append("keyPrefix", `brand/${group.id}`);
+      const res = await fetch("/api/upload-image", { method: "POST", body: fd });
+      const json = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !json.url) { setMsg({ ok: false, text: json.error ?? "Logo upload failed" }); return; }
+      setLogoUrl(json.url);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function save() {
+    setSaving(true);
+    setMsg(null);
+    const branding: GroupBranding = {
+      display_name: displayName.trim() || null,
+      logo_url: logoUrl.trim() || null,
+      primary_color: primary,
+      accent_color: accent,
+    };
+    const res = await fetch(`/api/groups/${group.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ custom_domain: domain.trim() || null, branding, custom_domain_status: status }),
+    });
+    const json = (await res.json()) as { data?: GroupRow; error?: string };
+    setSaving(false);
+    if (!res.ok || !json.data) { setMsg({ ok: false, text: json.error ?? "Save failed" }); return; }
+    onSaved(json.data);
+    setMsg({ ok: true, text: "Branding saved." });
+  }
+
+  const labelStyle: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 4 };
+
+  return (
+    <div className="card p-6 mb-4">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+          White-Label Domain &amp; Branding
+        </p>
+        <span
+          className="text-xs font-semibold px-2 py-0.5 rounded-full"
+          style={status === "active"
+            ? { background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" }
+            : { background: "#fff8e1", color: "#e65100", border: "1px solid #ffe082" }}
+        >
+          {status === "active" ? "Active" : "Pending"}
+        </span>
+      </div>
+      <p className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
+        Operator-provisioned. The reseller&apos;s branding shows only on this domain; everyone on
+        app.dealeraddendums.com sees default DA.
+      </p>
+
+      <div className="space-y-4">
+        <div>
+          <label style={labelStyle}>Custom Domain</label>
+          <input
+            className="input"
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            placeholder="addendums.autonation.com"
+          />
+          {domain.trim() && (
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+              DNS target to give the reseller: <code style={{ fontFamily: "monospace" }}>{domain.trim()}</code> → CNAME →{" "}
+              <code style={{ fontFamily: "monospace" }}>app.dealeraddendums.com</code> (cert/DNS provisioned in Phase 12b).
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label style={labelStyle}>Display Name</label>
+            <input className="input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="AutoNation Addendums" />
+          </div>
+          <div>
+            <label style={labelStyle}>Provisioning Status</label>
+            <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="pending">Pending (not yet live)</option>
+              <option value="active">Active (branding live on the domain)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label style={labelStyle}>Logo</label>
+          <div className="flex items-center gap-3">
+            <div style={{ width: 48, height: 48, borderRadius: 8, background: "#2a2b3c", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+              {logoUrl
+                ? <img src={logoUrl} alt="logo" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+                : <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 11 }}>none</span>}
+            </div>
+            <label className="btn btn-secondary" style={{ cursor: uploading ? "wait" : "pointer", fontSize: 13 }}>
+              {uploading ? "Uploading…" : "Upload Logo"}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                style={{ display: "none" }}
+                disabled={uploading}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadLogo(f); e.target.value = ""; }}
+              />
+            </label>
+            {logoUrl && (
+              <button type="button" className="text-xs" style={{ color: "var(--error)" }} onClick={() => setLogoUrl("")}>
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label style={labelStyle}>Primary Color (buttons / links)</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={primary} onChange={(e) => setPrimary(e.target.value)} style={{ width: 40, height: 34, padding: 0, border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer" }} />
+              <input className="input" value={primary} onChange={(e) => setPrimary(e.target.value)} style={{ fontFamily: "monospace" }} placeholder="#1976d2" />
+            </div>
+          </div>
+          <div>
+            <label style={labelStyle}>Accent Color (active nav)</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} style={{ width: 40, height: 34, padding: 0, border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer" }} />
+              <input className="input" value={accent} onChange={(e) => setAccent(e.target.value)} style={{ fontFamily: "monospace" }} placeholder="#ffa500" />
+            </div>
+          </div>
+        </div>
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+          The navy chrome stays structural for contrast; pick a primary dark enough for white button text.
+        </p>
+
+        {msg && (
+          <p className="text-sm" style={{ color: msg.ok ? "#2e7d32" : "var(--error)" }}>{msg.text}</p>
+        )}
+        <div>
+          <button className="btn btn-primary" onClick={() => void save()} disabled={saving || uploading}>
+            {saving ? "Saving…" : "Save Branding"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -8,6 +8,8 @@
 // inside a client tree is fine and avoids re-rendering the backdrop on every
 // form state change.
 
+import BrandLoginLogo from "@/components/BrandLoginLogo";
+
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "5.0.0";
 const BUILD_NUMBER = process.env.NEXT_PUBLIC_BUILD_NUMBER ?? "209";
 
@@ -397,9 +399,7 @@ export function AuthShell({
         <MotionGradient />
 
         <header className="lp-topbar">
-          <a href="/" className="lp-logo" aria-label="Dealer Addendums home">
-            <img src="/images/login-logo.svg" alt="Dealer Addendums" />
-          </a>
+          <BrandLoginLogo />
           <div className="lp-topbar-right">
             <span className="lp-status-pill">
               <span className="lp-live-dot" aria-hidden />

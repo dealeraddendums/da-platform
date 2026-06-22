@@ -110,8 +110,23 @@ export type GroupRow = {
   billing_customer_id: string | null;
   /** Box.com folder id created on group save. (Migration 072) */
   box_folder_id: string | null;
+  /** Reseller white-label custom domain (null = none). (Migration 110) */
+  custom_domain: string | null;
+  /** Reseller branding theme. (Migration 110) */
+  branding: GroupBranding | null;
+  /** Custom-domain provisioning status: pending | active. (Migration 110) */
+  custom_domain_status: string | null;
   created_at: string;
   updated_at: string;
+};
+
+/** Reseller white-label branding (groups.branding jsonb). All fields optional. */
+export type GroupBranding = {
+  display_name?: string | null;
+  logo_url?: string | null;
+  primary_color?: string | null;
+  accent_color?: string | null;
+  favicon_url?: string | null;
 };
 
 type GroupInsert = {
@@ -145,6 +160,9 @@ type GroupInsert = {
   hubspot_company_id?: string | null;
   feed_supplier?: string | null;
   created_at?: string | null;
+  custom_domain?: string | null;
+  branding?: GroupBranding | null;
+  custom_domain_status?: string | null;
 };
 
 export type GroupUpdate = {
@@ -179,6 +197,9 @@ export type GroupUpdate = {
   billing_date?: string | null;
   hubspot_company_id?: string | null;
   feed_supplier?: string | null;
+  custom_domain?: string | null;
+  branding?: GroupBranding | null;
+  custom_domain_status?: string | null;
 };
 
 export type DealerRow = {

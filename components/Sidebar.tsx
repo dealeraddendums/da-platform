@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { UserRole } from "@/lib/db";
+import { useBrand } from "@/contexts/Brand";
 import pkg from "../package.json";
 
 type NavItem = {
@@ -436,6 +437,7 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
+  const brand = useBrand();
   // hideBuilder is set when the dealer's group has taken over template
   // management (dealers.group_controls_templates = true) — Builder is then
   // off-limits for dealer roles. group_admin / super_admin always see it.
@@ -460,23 +462,23 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
       className="flex-shrink-0 flex flex-col h-full"
       style={{ width: 220, background: "var(--navy)" }}
     >
-      {/* Logo */}
+      {/* Logo — host-resolved brand (reseller logo + name on a branded host). */}
       <div
         className="flex items-center gap-2 px-4 h-14 flex-shrink-0"
         style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
       >
         <img
-          src="/images/da-logo.png"
-          alt="DA"
+          src={brand.logoUrl}
+          alt={brand.displayName}
           width={36}
           height={36}
-          style={{ borderRadius: "50%", flexShrink: 0 }}
+          style={{ borderRadius: "50%", flexShrink: 0, objectFit: "contain", background: "rgba(255,255,255,0.06)" }}
         />
         <span
           className="font-semibold text-sm truncate"
           style={{ color: "var(--text-inverse)" }}
         >
-          DA Platform
+          {brand.displayName}
         </span>
       </div>
 
