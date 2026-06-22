@@ -818,7 +818,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
     setInviteAllSending(true);
     setInviteAllResult(null);
     try {
-      const res = await fetch("/api/migration/invite-dealer", {
+      const res = await fetch("/api/users/invite-all-staff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ inventory_dealer_id: viewerDealerId }),
@@ -905,7 +905,13 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
         action={
           activeTab === "users" ? (
             <div className="flex gap-2">
-              {viewerRole === "super_admin" && isGhostMode && viewerDealerId && (
+              {/* Bulk staff-login invite (/api/users/invite-all-staff) — any
+                  authorized single-dealer context with a resolved dealer:
+                  super_admin Ghost, or a group_admin / group_user (regional
+                  manager) switched into a dealer. A real dealer_admin is NOT
+                  offered it (operator/group action). The API (authorizeDealerAction)
+                  is the real gate; this just mirrors it. */}
+              {(isGhostMode || isGroupAdminContext) && viewerDealerId && (
                 <button
                   className="btn btn-primary"
                   onClick={() => { setShowInviteAll(true); setInviteAllResult(null); }}
