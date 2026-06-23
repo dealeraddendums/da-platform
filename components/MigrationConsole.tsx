@@ -29,6 +29,10 @@ interface Wave { waveId: string; sentAt: string | null; sent: number; migrated: 
 interface Operator { id: string; name: string; }
 interface Summary { total: number; ready: number; eligible: number; billingStaged: number; templateConfirmed: number; readyPool: number; settingsMissing: number; logoMissing: number; zeroInventory: number; freshbooksStopPending: number; unassigned: number; }
 interface ApiResp { rows: Row[]; summary: Summary; operators: Operator[]; currentUserId: string; flagsColumnPresent: boolean; billingTemplatesLoaded: number; note: string; }
+// Billing Pending tab rows — migrated dealers whose da-billing template is still
+// paused. Fetched from /api/migration/billing-pending (NOT derived from readiness
+// rows, which exclude migrated dealers — that's why the tab was always empty).
+interface BillingPendingDealer { id: string; name: string; group_name: string | null; account_type: string | null; billing_customer_id: string | null; }
 
 const NAVY = "#2a2b3c";
 
@@ -90,28 +94,39 @@ export default function MigrationConsole() {
   const operators = data?.operators ?? [];
   const opName = (id: string | null) => !id ? null : (id === me ? "Me" : (operators.find((o) => o.id === id)?.name ?? "—"));
 
-  // Dealers who completed /migrate but still need billing activated.
-  const billingPending = useMemo(
-    () => (data?.rows ?? []).filter((r) => r.inviteStatus === "migrated"),
-    [data],
-  );
+  // Dealers who completed /migrate but still need billing activated — fetched
+  // from a dedicated endpoint (migrated dealers + paused da-billing template).
+  const [billingPending, setBillingPending] = useState<BillingPendingDealer[]>([]);
+  const [bpErr, setBpErr] = useState<string | null>(null);
 
-  async function activateBilling(row: Row) {
-    setActivateStates((s) => ({ ...s, [row.id]: { status: "loading" } }));
+  const loadBillingPending = async () => {
+    setBpErr(null);
+    try {
+      const res = await fetch("/api/migration/billing-pending");
+      const j = await res.json() as { dealers?: BillingPendingDealer[]; error?: string };
+      if (!res.ok) throw new Error(j.error ?? "Failed to load billing-pending");
+      setBillingPending(j.dealers ?? []);
+    } catch (e) {
+      setBpErr(e instanceof Error ? e.message : "Failed to load billing-pending");
+    }
+  };
+
+  async function activateBilling(dealerId: string) {
+    setActivateStates((s) => ({ ...s, [dealerId]: { status: "loading" } }));
     try {
       const res = await fetch("/api/migration/activate-billing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealer_id: row.id }),
+        body: JSON.stringify({ dealer_id: dealerId }),
       });
       const j = await res.json() as { ok?: boolean; error?: string };
       if (!res.ok) {
-        setActivateStates((s) => ({ ...s, [row.id]: { status: "error", message: j.error ?? "Activation failed" } }));
+        setActivateStates((s) => ({ ...s, [dealerId]: { status: "error", message: j.error ?? "Activation failed" } }));
       } else {
-        setActivateStates((s) => ({ ...s, [row.id]: { status: "done" } }));
+        setActivateStates((s) => ({ ...s, [dealerId]: { status: "done" } }));
       }
     } catch (e) {
-      setActivateStates((s) => ({ ...s, [row.id]: { status: "error", message: e instanceof Error ? e.message : "Activation failed" } }));
+      setActivateStates((s) => ({ ...s, [dealerId]: { status: "error", message: e instanceof Error ? e.message : "Activation failed" } }));
     }
   }
 
@@ -131,7 +146,7 @@ export default function MigrationConsole() {
   const loadWaves = async () => {
     try { const r = await fetch("/api/migration/waves"); const j = await r.json(); if (r.ok) setWaves(j.waves ?? []); } catch { /* */ }
   };
-  useEffect(() => { void load(); void loadWaves(); }, []);
+  useEffect(() => { void load(); void loadWaves(); void loadBillingPending(); }, []);
 
   async function resend(row: Row) {
     if (!confirm(`Resend a migration invite to ${row.name}? A fresh one-time code goes to their contact (resets the stall clock).`)) return;
@@ -547,6 +562,11 @@ export default function MigrationConsole() {
         const bpTd: React.CSSProperties = { padding: "8px 10px", fontSize: 13, color: "#333", borderBottom: "1px solid #f0f0f0", verticalAlign: "middle" };
         return (
           <div>
+            {bpErr && (
+              <div style={{ background: "#ffebee", border: "1px solid #ffcdd2", color: "#c62828", borderRadius: 8, padding: "12px 16px", fontSize: 13, marginBottom: 12 }}>
+                {bpErr}
+              </div>
+            )}
             {billingPending.length === 0
               ? (
                 <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 8, padding: "24px 20px", textAlign: "center", color: "#78828c", fontSize: 14 }}>
@@ -571,10 +591,10 @@ export default function MigrationConsole() {
                           <tr key={r.id}>
                             <td style={bpTd}>
                               <div style={{ fontWeight: 600 }}>{r.name}</div>
-                              <div style={{ fontSize: 11, color: "#9aa0a6" }}>{r.dealer_id}</div>
+                              <div style={{ fontSize: 11, color: "#9aa0a6" }} title={`Billing customer ${r.billing_customer_id ?? ""}`}>{r.billing_customer_id ?? "—"}</div>
                             </td>
-                            <td style={bpTd}>{r.groupName ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
-                            <td style={bpTd}>{r.inviteStatus === "migrated" ? <span style={{ background: "#e8f5e9", color: "#2e7d32", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>Migrated</span> : r.inviteStatus}</td>
+                            <td style={bpTd}>{r.group_name ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
+                            <td style={bpTd}>{r.account_type ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
                             <td style={bpTd}>
                               {aState.status === "done"
                                 ? <span style={{ color: "#2e7d32", fontWeight: 600, fontSize: 13 }}>✓ Activated</span>
@@ -584,7 +604,7 @@ export default function MigrationConsole() {
                                     <button
                                       type="button"
                                       disabled={aState.status === "loading"}
-                                      onClick={() => void activateBilling(r)}
+                                      onClick={() => void activateBilling(r.id)}
                                       style={{
                                         height: 30,
                                         padding: "0 14px",
