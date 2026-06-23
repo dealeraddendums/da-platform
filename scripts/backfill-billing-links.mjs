@@ -323,15 +323,36 @@ async function run() {
         match_reason: matchReason,
       });
     } else {
-      results.push({
-        entity_type: "dealer",
-        platform_id: d.id,
-        platform_name: d.name,
-        da_billing_id: unique.map(c => c.id).join("|"),
-        da_billing_company: unique.map(c => c.company ?? c.name ?? "").join("|"),
-        category: "ambiguous",
-        match_reason: `${unique.length}_${matchReason}`,
-      });
+      // Compound disambiguation: shared-email clusters (many dealers on one
+      // billing email) blow up `unique`, but usually only one of those
+      // customers carries this dealer's actual company name. Narrow the
+      // email/name candidates to those whose da-billing company equals the
+      // dealer name (case-insensitive). Exactly one survivor → safe to link.
+      const compound = unique.filter(c => norm(c.company) === nameKey);
+
+      if (compound.length === 1) {
+        results.push({
+          entity_type: "dealer",
+          platform_id: d.id,
+          platform_name: d.name,
+          da_billing_id: compound[0].id,
+          da_billing_company: compound[0].company ?? compound[0].name ?? "",
+          category: "link-missing",
+          match_reason: `${matchReason}+company_name_match`,
+        });
+      } else {
+        results.push({
+          entity_type: "dealer",
+          platform_id: d.id,
+          platform_name: d.name,
+          da_billing_id: unique.map(c => c.id).join("|"),
+          da_billing_company: unique.map(c => c.company ?? c.name ?? "").join("|"),
+          category: "ambiguous",
+          // suffix records why it stayed ambiguous: compound0 = no company-name
+          // match in the cluster, compoundN(>1) = still multiple company matches
+          match_reason: `${unique.length}_${matchReason}_compound${compound.length}`,
+        });
+      }
     }
   }
 
