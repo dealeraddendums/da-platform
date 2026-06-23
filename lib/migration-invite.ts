@@ -198,7 +198,16 @@ export async function sendPasskeyInvite(opts: {
  */
 export async function sendOtpCode(
   email: string,
-  opts: { purpose: "login" | "onboard"; fullName?: string | null; entityName?: string }
+  opts: {
+    purpose: "login" | "onboard";
+    fullName?: string | null;
+    entityName?: string;
+    // White-label overrides (Phase 12a). When the sign-in request originated on a
+    // reseller host, the caller passes the brand's platform name + login URL so the
+    // email reads/links to that brand instead of the default DealerAddendums host.
+    brandName?: string;
+    loginUrl?: string;
+  }
 ): Promise<void> {
   const admin = createAdminSupabaseClient();
   const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
@@ -222,19 +231,25 @@ export async function sendOtpCode(
       html: buildWelcomeEmail(firstName, entityName, code, email),
     });
   } else {
+    // Default DA wording unless a white-label brand was passed in.
+    const brandName = opts.brandName ?? "DealerAddendums Platform";
+    const loginUrl = opts.loginUrl ?? "https://app.dealeraddendums.com/login";
     await sendMandrillEmail({
-      subject: "Your DealerAddendums sign-in code",
+      subject: opts.brandName ? `Your ${opts.brandName} sign-in code` : "Your DealerAddendums sign-in code",
       from_email: "noreply@dealeraddendums.com",
-      from_name: "DealerAddendums",
+      from_name: opts.brandName ?? "DealerAddendums",
       to: [{ email, name: opts.fullName ?? email, type: "to" }],
-      html: buildSignInCodeEmail(firstName, code),
+      html: buildSignInCodeEmail(firstName, code, brandName, loginUrl),
     });
   }
 }
 
-function buildSignInCodeEmail(firstName: string, code: string): string {
+function buildSignInCodeEmail(firstName: string, code: string, brandName: string, loginUrl: string): string {
   // Tokenless — the email carries only the code (no consumable auth link).
   const spacedCode = code.split("").join(" ");
+  // Display host for the "Enter it at <host>" line, derived from the login URL.
+  let loginHost = "app.dealeraddendums.com";
+  try { loginHost = new URL(loginUrl).host; } catch { /* keep default */ }
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -244,8 +259,8 @@ function buildSignInCodeEmail(firstName: string, code: string): string {
       <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
         <tr>
           <td style="background:#2a2b3c;border-radius:6px 6px 0 0;padding:28px 32px;text-align:center;">
-            <img src="${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/images/da-logo.png" alt="DA Platform" width="48" height="48" style="border-radius:50%;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;" />
-            <div style="color:#fff;font-size:20px;font-weight:700;letter-spacing:-0.02em;">DealerAddendums Platform</div>
+            <img src="${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/images/da-logo.png" alt="${escapeHtml(brandName)}" width="48" height="48" style="border-radius:50%;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;" />
+            <div style="color:#fff;font-size:20px;font-weight:700;letter-spacing:-0.02em;">${escapeHtml(brandName)}</div>
             <div style="color:rgba(255,255,255,0.65);font-size:13px;margin-top:4px;">Your sign-in code</div>
           </td>
         </tr>
@@ -253,7 +268,7 @@ function buildSignInCodeEmail(firstName: string, code: string): string {
           <td style="background:#fff;padding:32px;border-left:1px solid #e0e0e0;border-right:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;border-radius:0 0 6px 6px;">
             <p style="font-size:16px;font-weight:500;color:#1a1a2e;margin:0 0 8px;">Hi ${escapeHtml(firstName)},</p>
             <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 20px;">
-              Here's your sign-in code. Enter it at <strong>app.dealeraddendums.com</strong> to sign in:
+              Here's your sign-in code. Enter it at <strong>${escapeHtml(loginHost)}</strong> to sign in:
             </p>
             <div style="text-align:center;margin:0 0 24px;">
               <div style="display:inline-block;background:#f5f6f7;border:1px solid #e0e0e0;border-radius:8px;padding:18px 28px;font-family:'Courier New',Courier,monospace;font-size:34px;font-weight:700;letter-spacing:6px;color:#1a1a2e;">
@@ -261,7 +276,7 @@ function buildSignInCodeEmail(firstName: string, code: string): string {
               </div>
             </div>
             <div style="text-align:center;margin-bottom:24px;">
-              <a href="https://app.dealeraddendums.com/login" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;letter-spacing:-0.01em;">
+              <a href="${loginUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;letter-spacing:-0.01em;">
                 Go to sign in &rarr;
               </a>
             </div>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendOtpCode } from "@/lib/migration-invite";
 import { rateLimit } from "@/lib/rate-limit";
+import { resolveBrandForHost, normalizeHost } from "@/lib/brand";
 
 // POST /api/auth/otp-login  { email }
 // Passwordless sign-in fallback: emails a one-time code to an EXISTING auth
@@ -44,7 +45,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .maybeSingle<{ full_name: string | null }>();
 
     if (profile) {
-      await sendOtpCode(email, { purpose: "login", fullName: profile.full_name });
+      // White-label: when the request originated on a reseller host, brand the
+      // email to that host (name + login URL). Canonical/unknown hosts resolve
+      // to the default DA brand and get the unchanged DealerAddendums email.
+      const host = normalizeHost(req.headers.get("host"));
+      const brand = await resolveBrandForHost(host);
+      await sendOtpCode(email, {
+        purpose: "login",
+        fullName: profile.full_name,
+        ...(brand.isDefault ? {} : { brandName: brand.displayName, loginUrl: `https://${host}/login` }),
+      });
     }
   } catch (err) {
     console.error("[auth/otp-login] failed:", err instanceof Error ? err.message : err);

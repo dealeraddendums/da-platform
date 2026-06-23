@@ -9,6 +9,7 @@
 // form state change.
 
 import BrandLoginLogo from "@/components/BrandLoginLogo";
+import LoginFooter from "@/components/LoginFooter";
 
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "5.0.0";
 const BUILD_NUMBER = process.env.NEXT_PUBLIC_BUILD_NUMBER ?? "209";
@@ -418,14 +419,9 @@ export function AuthShell({
           </div>
         </main>
 
-        <footer className="lp-footer">
-          <div>
-            © {new Date().getFullYear()} Dealer Addendums ·{" "}
-            <a href="/terms">Terms</a> ·{" "}
-            <a href="/privacy">Privacy</a>
-          </div>
-          <div className="lp-footer-version">v {APP_VERSION} · build {BUILD_NUMBER}</div>
-        </footer>
+        {/* Footer (© · Terms · Privacy · version) — default brand only; hidden
+            entirely on white-label reseller hosts (resolved via useBrand). */}
+        <LoginFooter version={APP_VERSION} build={BUILD_NUMBER} />
       </div>
     </>
   );
