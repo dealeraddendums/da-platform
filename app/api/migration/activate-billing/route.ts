@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { billingConfigured, setTemplateStatus } from "@/lib/billing";
+import { billingConfigured, setTemplateStatus, setBillingState } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +88,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: `Billing activation failed: ${msg}` }, { status: 502 });
   }
 
+  // Also take the customer OUT of setup mode so invoices actually email (the
+  // template is now live). Best-effort: the template is already activated above,
+  // so a failure here is surfaced as a warning rather than failing the whole
+  // action. (billingState absent/'active' already emails; this matters when the
+  // dealer was explicitly in 'setup'.)
+  let billingStateWarning: string | undefined;
+  try {
+    await setBillingState(customerId, "active");
+  } catch (e) {
+    billingStateWarning = e instanceof Error ? e.message : String(e);
+    console.warn("[activate-billing] template activated but set-billing-state failed:", billingStateWarning);
+  }
+
   // Insert into migration_log. If the table doesn't exist yet (migration 111 not
   // applied) the error is caught and logged without failing the request.
   try {
@@ -110,5 +123,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     console.warn("[activate-billing] migration_log insert threw:", logEx);
   }
 
-  return NextResponse.json({ ok: true, customerId, dealer: dealer.name });
+  return NextResponse.json({
+    ok: true,
+    customerId,
+    dealer: dealer.name,
+    billingState: billingStateWarning ? "setup?" : "active",
+    ...(billingStateWarning ? { billingStateWarning } : {}),
+  });
 }

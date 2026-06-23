@@ -253,6 +253,31 @@ export function deactivateTemplate(customerId: string) {
 }
 
 /**
+ * Set a customer's billing lifecycle in da-billing: 'setup' (invoices generate
+ * but the dealer email is held) or 'active' (fully live — generate + email).
+ * Used by the migration activate-billing action to take a dealer out of setup
+ * mode when its template is un-paused. Throws on failure.
+ */
+export async function setBillingState(
+  customerId: string,
+  billingState: "setup" | "active",
+): Promise<{ billingState: string }> {
+  const res = await fetch(`${BASE}/customers/${encodeURIComponent(customerId)}/set-billing-state`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ billingState }),
+  });
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `setBillingState ${res.status}`, text);
+  try {
+    const parsed = JSON.parse(text) as { billingState?: string };
+    return { billingState: parsed.billingState ?? billingState };
+  } catch (err) {
+    throw new BillingError(res.status, `setBillingState parse: ${(err as Error).message}`, text);
+  }
+}
+
+/**
  * Bulk-list every da-billing recurring template (one big-page call) → a map of
  * customerId → { active, nextInvoiceDate }. Used by the migration readiness
  * console to compute "billing template staged" for many dealers without a
