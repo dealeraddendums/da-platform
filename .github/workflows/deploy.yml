@@ -15,42 +15,28 @@ concurrency:
 # (ec2-18-145-132-52), so the deploy executes locally — no inbound SSH and no
 # security-group opening for GitHub-hosted runner IPs. The runner is a systemd
 # service (actions.runner.dealeraddendums-da-platform.da-platform-prod).
+#
+# Delegates to the canonical zero-downtime deploy.sh (separate repo/ checkout →
+# build in a fresh releases/<sha>/ → atomic `current` symlink swap → pm2 reload
+# → health gate → auto-revert). This is the SAME mechanism used for manual
+# deploys and, critically, builds the directory PM2 actually serves from
+# (/var/www/da-platform/current).
+#
+# The previous in-place `git reset --hard` + build in the repo ROOT was broken
+# two ways: (1) PM2 serves `current/` (a release dir), NOT the root, so even a
+# "successful" in-place build never updated the live app; (2) its 2 GB
+# NODE_OPTIONS cap OOM'd `next build`'s type-check phase on this codebase, so
+# every deploy failed outright. deploy.sh builds with ample heap (7.6 GB box,
+# ~4 GB free) and only cuts over after a verified, healthy build.
 jobs:
   deploy:
     runs-on: self-hosted
     steps:
-      - name: Deploy
+      - name: Deploy via deploy.sh (origin/main)
         run: |
           set -e
           export PATH="/usr/bin:/usr/local/bin:$PATH"
-          # Cap Node heap so a runaway build cannot OOM the box (PM2 + active
-          # users are also resident). 2 GB is comfortable for Next 14 here.
-          export NODE_OPTIONS="--max-old-space-size=2048"
-
-          cd /var/www/da-platform
-          git fetch origin
-          git reset --hard origin/main
-          sudo rm -rf node_modules .next
-          npm install
-
-          # Next.js occasionally races on the .next/export → .next/server
-          # rename (ENOENT / ENOTEMPTY); the same code builds cleanly on retry.
-          build_ok=0
-          for attempt in 1 2 3; do
-            if npm run build; then
-              build_ok=1
-              break
-            fi
-            echo "Build attempt $attempt failed — cleaning .next and retrying"
-            sudo rm -rf .next
-            sync
-            sleep 2
-          done
-          if [ "$build_ok" != "1" ]; then
-            echo "Build failed after 3 attempts" >&2
-            exit 1
-          fi
-
-          # --update-env so newly-added .env.production vars take effect on restart.
-          pm2 restart da-platform --update-env || pm2 start ecosystem.config.js --update-env
-          echo "Deploy complete"
+          # Generous heap for next build's type-check (the old 2 GB cap OOM'd),
+          # still well under the box's free RAM.
+          export NODE_OPTIONS="--max-old-space-size=4096"
+          bash /var/www/da-platform/deploy.sh
