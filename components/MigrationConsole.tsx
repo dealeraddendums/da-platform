@@ -49,11 +49,18 @@ const StatusBadge = ({ status, invitedAt }: { status: string; invitedAt: string 
   return <span title={date ? `invited ${date}` : s.label} style={{ background: s.bg, color: s.fg, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>{s.label}{date ? ` · ${date}` : ""}</span>;
 };
 
+// Per-row billing activation state.
+type ActivateState = { status: "idle" | "loading" | "done" | "error"; message?: string };
+
 export default function MigrationConsole() {
   const [data, setData] = useState<ApiResp | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
+
+  // Tab: "readiness" (default) | "billing-pending"
+  const [activeTab, setActiveTab] = useState<"readiness" | "billing-pending">("readiness");
+  const [activateStates, setActivateStates] = useState<Record<string, ActivateState>>({});
 
   // wave selection (Ready rows only) + send
   const CAP = 100;
@@ -82,6 +89,31 @@ export default function MigrationConsole() {
   const me = data?.currentUserId ?? "";
   const operators = data?.operators ?? [];
   const opName = (id: string | null) => !id ? null : (id === me ? "Me" : (operators.find((o) => o.id === id)?.name ?? "—"));
+
+  // Dealers who completed /migrate but still need billing activated.
+  const billingPending = useMemo(
+    () => (data?.rows ?? []).filter((r) => r.inviteStatus === "migrated"),
+    [data],
+  );
+
+  async function activateBilling(row: Row) {
+    setActivateStates((s) => ({ ...s, [row.id]: { status: "loading" } }));
+    try {
+      const res = await fetch("/api/migration/activate-billing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dealer_id: row.id }),
+      });
+      const j = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) {
+        setActivateStates((s) => ({ ...s, [row.id]: { status: "error", message: j.error ?? "Activation failed" } }));
+      } else {
+        setActivateStates((s) => ({ ...s, [row.id]: { status: "done" } }));
+      }
+    } catch (e) {
+      setActivateStates((s) => ({ ...s, [row.id]: { status: "error", message: e instanceof Error ? e.message : "Activation failed" } }));
+    }
+  }
 
   const load = async () => {
     setLoading(true); setErr(null);
@@ -263,7 +295,24 @@ export default function MigrationConsole() {
   const warnChip: React.CSSProperties = { background: "#fff8e1", color: "#8a6d00", border: "1px solid #ffe082", borderRadius: 10, padding: "1px 6px", fontSize: 10, fontWeight: 600, whiteSpace: "nowrap" };
 
   return (
-    <div style={{ fontFamily: "'Roboto', sans-serif" }}>
+    <div style={{ fontFamily: "’Roboto’, sans-serif" }}>
+      {/* Tab bar */}
+      {(() => {
+        const tabBase: React.CSSProperties = { padding: "8px 20px", fontSize: 13, fontWeight: 600, border: "none", borderRadius: "6px 6px 0 0", cursor: "pointer", background: "transparent", color: "#78828c" };
+        const tabActive: React.CSSProperties = { ...tabBase, background: "#fff", color: NAVY, borderBottom: "2px solid #1976d2" };
+        return (
+          <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #e0e0e0", marginBottom: 16 }}>
+            <button type="button" style={activeTab === "readiness" ? tabActive : tabBase} onClick={() => setActiveTab("readiness")}>
+              Readiness
+            </button>
+            <button type="button" style={activeTab === "billing-pending" ? tabActive : tabBase} onClick={() => setActiveTab("billing-pending")}>
+              Billing Pending{billingPending.length > 0 ? ` (${billingPending.length})` : ""}
+            </button>
+          </div>
+        );
+      })()}
+
+      {activeTab === "readiness" && <>
       {!data.flagsColumnPresent && (
         <div style={{ background: "#fff8e1", border: "1px solid #ffe082", color: "#8a6d00", borderRadius: 6, padding: "10px 14px", marginBottom: 14, fontSize: 13 }}>
           ⚠️ The <code>template_confirmed</code> column isn’t applied yet — run migration{" "}
@@ -491,6 +540,77 @@ export default function MigrationConsole() {
       </div>
 
       <p style={{ fontSize: 11, color: "var(--text-muted, #78828c)", marginTop: 10 }}>{data.note}</p>
+      </>}
+
+      {activeTab === "billing-pending" && (() => {
+        const bpTh: React.CSSProperties = { textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 600, color: "#55595c", textTransform: "uppercase", letterSpacing: ".04em", borderBottom: "1px solid #e0e0e0", whiteSpace: "nowrap" };
+        const bpTd: React.CSSProperties = { padding: "8px 10px", fontSize: 13, color: "#333", borderBottom: "1px solid #f0f0f0", verticalAlign: "middle" };
+        return (
+          <div>
+            {billingPending.length === 0
+              ? (
+                <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 8, padding: "24px 20px", textAlign: "center", color: "#78828c", fontSize: 14 }}>
+                  All caught up — no billing activations pending.
+                </div>
+              )
+              : (
+                <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 8, overflow: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th style={bpTh}>Dealer</th>
+                        <th style={bpTh}>Group</th>
+                        <th style={bpTh}>Account type</th>
+                        <th style={{ ...bpTh, width: 160 }}>Billing</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {billingPending.map((r) => {
+                        const aState = activateStates[r.id] ?? { status: "idle" };
+                        return (
+                          <tr key={r.id}>
+                            <td style={bpTd}>
+                              <div style={{ fontWeight: 600 }}>{r.name}</div>
+                              <div style={{ fontSize: 11, color: "#9aa0a6" }}>{r.dealer_id}</div>
+                            </td>
+                            <td style={bpTd}>{r.groupName ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
+                            <td style={bpTd}>{r.inviteStatus === "migrated" ? <span style={{ background: "#e8f5e9", color: "#2e7d32", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>Migrated</span> : r.inviteStatus}</td>
+                            <td style={bpTd}>
+                              {aState.status === "done"
+                                ? <span style={{ color: "#2e7d32", fontWeight: 600, fontSize: 13 }}>✓ Activated</span>
+                                : aState.status === "error"
+                                  ? <span style={{ color: "#c62828", fontSize: 12 }} title={aState.message}>Error: {aState.message}</span>
+                                  : (
+                                    <button
+                                      type="button"
+                                      disabled={aState.status === "loading"}
+                                      onClick={() => void activateBilling(r)}
+                                      style={{
+                                        height: 30,
+                                        padding: "0 14px",
+                                        border: "none",
+                                        borderRadius: 6,
+                                        backgroundColor: aState.status === "loading" ? "#9bbfe6" : "#1976d2",
+                                        color: "#fff",
+                                        fontSize: 12,
+                                        fontWeight: 600,
+                                        cursor: aState.status === "loading" ? "default" : "pointer",
+                                      }}
+                                    >
+                                      {aState.status === "loading" ? "Activating…" : "Activate Billing"}
+                                    </button>
+                                  )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
