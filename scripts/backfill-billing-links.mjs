@@ -391,9 +391,26 @@ async function run() {
 
   const csvPath = resolve(process.cwd(), "billing-links-audit.csv");
   const stream  = createWriteStream(csvPath);
-  stream.write(csvRow(["entity_type", "platform_id", "platform_name", "da_billing_id", "da_billing_company", "category", "match_reason"]));
+  // Column order optimised for spreadsheet review: the verdict (category +
+  // match_reason) sits up front so it's always on screen, the bulky id fields
+  // come after, and the giant pipe-joined match dump for ambiguous rows is
+  // pushed to the very last column so it never shoves anything off-screen.
+  stream.write(csvRow(["entity_type", "platform_name", "category", "match_reason", "platform_id", "da_billing_id", "da_billing_company", "all_matches"]));
   for (const r of results) {
-    stream.write(csvRow([r.entity_type, r.platform_id, r.platform_name, r.da_billing_id, r.da_billing_company, r.category, r.match_reason]));
+    let billingId = r.da_billing_id;
+    let billingCompany = r.da_billing_company;
+    let allMatches = "";
+    if (r.category === "ambiguous") {
+      // da_billing_id/company hold parallel pipe-joined lists of every
+      // candidate. Collapse the mid-sheet cells to a count, and move the full
+      // readable "Company (id)" list to the trailing all_matches column.
+      const ids = r.da_billing_id ? r.da_billing_id.split("|") : [];
+      const companies = r.da_billing_company ? r.da_billing_company.split("|") : [];
+      allMatches = ids.map((id, i) => `${companies[i] ?? ""} (${id})`).join(" | ");
+      billingId = `${ids.length} matches`;
+      billingCompany = "";
+    }
+    stream.write(csvRow([r.entity_type, r.platform_name, r.category, r.match_reason, r.platform_id, billingId, billingCompany, allMatches]));
   }
   await new Promise((res, rej) => stream.end(err => err ? rej(err) : res()));
   console.log(`\nCSV written to: ${csvPath}`);
