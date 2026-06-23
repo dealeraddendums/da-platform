@@ -11,18 +11,21 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
   "Content-Security-Policy": [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    // ProductFruits in-app tours (docs/in-app-tours.md) load their script + assets
+    // from *.productfruits.com and talk to their API/websocket — allow-listed here
+    // so the CSP doesn't block the widget.
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.productfruits.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.productfruits.com",
+    "font-src 'self' https://fonts.gstatic.com https://*.productfruits.com",
     "img-src 'self' data: https: blob:",
     // S3 hosts: the global `*.s3.amazonaws.com` wildcard matches `bucket.s3.amazonaws.com`
     // but NOT the regional `bucket.s3.{region}.amazonaws.com` form, so each region the app
     // fetches/frames must be enumerated explicitly. Buckets in play: dealer-addendums
     // (us-west-1 — print output PDFs); new-addendum-backgrounds / new-infosheet-backgrounds /
     // new-infobox-images / new-dealer-logos / addendum-product-images (us-east-1).
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com https://*.s3.us-east-1.amazonaws.com https://xpsshipper.com https://api.anthropic.com https://api.qrserver.com https://api.mapbox.com https://events.mapbox.com",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com https://*.s3.us-east-1.amazonaws.com https://xpsshipper.com https://api.anthropic.com https://api.qrserver.com https://api.mapbox.com https://events.mapbox.com https://*.productfruits.com wss://*.productfruits.com",
     "worker-src blob:",
-    "frame-src 'self' blob: https://etl2.dealeraddendums.com https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com https://*.s3.us-east-1.amazonaws.com",
+    "frame-src 'self' blob: https://etl2.dealeraddendums.com https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com https://*.s3.us-east-1.amazonaws.com https://*.productfruits.com",
     "object-src blob:",
     "frame-ancestors 'none'",
     "base-uri 'self'",

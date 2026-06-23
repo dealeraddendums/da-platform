@@ -11,6 +11,7 @@ import Topbar from "@/components/Topbar";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import MainContent from "@/components/MainContent";
 import HelpWidget from "@/components/HelpWidget";
+import ProductFruitsWidget from "@/components/ProductFruitsWidget";
 import { BuilderBreadcrumbProvider } from "@/contexts/BuilderBreadcrumb";
 
 export default async function DashboardLayout({
@@ -23,7 +24,7 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
 
   const admin = createAdminSupabaseClient();
-  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; full_name: string | null; group_id: string | null; active_dealer_id: string | null; }>(admin, session, "role, dealer_id, full_name, group_id, active_dealer_id");
+  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; full_name: string | null; group_id: string | null; active_dealer_id: string | null; created_at: string | null; }>(admin, session, "role, dealer_id, full_name, group_id, active_dealer_id, created_at");
 
   const role: UserRole = (profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
@@ -134,6 +135,22 @@ export default async function DashboardLayout({
   // dealer (active-dealer or ghost mode), nor for dealer_user/restricted.
   const showUpgrade = role === "dealer_admin" && !isPaidAccountType(dealerAccountType);
 
+  // ProductFruits in-app tours — identify the signed-in user (real role/identity,
+  // so tours can target by role). username = the stable Supabase auth user id.
+  const [pfFirstName, ...pfRest] = (profile?.full_name ?? "").trim().split(/\s+/);
+  const pfProps: Record<string, string> = {};
+  if (profile?.dealer_id) pfProps.dealerId = profile.dealer_id;
+  if (profile?.group_id) pfProps.groupId = profile.group_id;
+  const productFruitsUser = {
+    username: session.user.id,
+    email: session.user.email ?? undefined,
+    firstname: pfFirstName || undefined,
+    lastname: pfRest.join(" ") || undefined,
+    signUpAt: profile?.created_at ?? undefined,
+    role,
+    props: pfProps,
+  };
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar role={sidebarRole} hideBuilder={isDealerRole && templatesLocked} showUpgrade={showUpgrade} />
@@ -146,6 +163,8 @@ export default async function DashboardLayout({
       </div>
       {/* Global Help/Support widget — every authenticated page; own-data-only assistant. */}
       <HelpWidget />
+      {/* ProductFruits in-app tours/onboarding (client-only; renders nothing visible). */}
+      <ProductFruitsWidget user={productFruitsUser} />
     </div>
   );
 }
