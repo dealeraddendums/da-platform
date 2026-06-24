@@ -60,6 +60,11 @@ export interface BillingCustomerInput {
   phone?: string;
   state?: string;
   isGroup?: boolean;
+  /** Billing lifecycle on create. Omit for the default ('setup' — invoices
+   *  generate but email is held until go-live, used for migration onboarding);
+   *  pass 'active' only when the dealer is paying now and must be billed
+   *  immediately (self-pay upgrade paths). */
+  billingState?: "setup" | "active";
 }
 
 export interface BillingCustomerResponse {
@@ -81,6 +86,9 @@ export async function createCustomer(input: BillingCustomerInput): Promise<Billi
       phone: input.phone,
       state: input.state,
       isGroup: input.isGroup ?? false,
+      // Only sent when explicitly provided; omitted => da-billing defaults to
+      // 'setup' (migration onboarding). Self-pay upgrade paths pass 'active'.
+      ...(input.billingState ? { billingState: input.billingState } : {}),
     }),
   });
   const text = await readBody(res);

@@ -171,7 +171,9 @@ async function setDealerTier(
     if (dealer.billing_id && (await customerExists(dealer.billing_id))) {
       key = dealer.billing_id;
     } else {
-      const cust = await createCustomer({ name: dealer.name, company: dealer.name, isGroup: false });
+      // Self-pay Trial→paid upgrade: the dealer is paying now, so bill
+      // immediately (not held in setup). billingState:'active' => cron emails.
+      const cust = await createCustomer({ name: dealer.name, company: dealer.name, isGroup: false, billingState: "active" });
       key = cust.id;
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

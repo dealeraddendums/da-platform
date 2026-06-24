@@ -160,6 +160,8 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         address: dealer.address ?? undefined,
         state: dealer.state ?? undefined,
         isGroup: false,
+        // Self-serve subscription: dealer is paying now → bill immediately.
+        billingState: "active",
       });
       effectiveCustomerKey = cust.id;
       createdCustomerId = cust.id;
