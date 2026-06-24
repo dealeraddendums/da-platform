@@ -114,12 +114,13 @@ function clampWidgets(ws: Record<string, Widget>, pw: number, ph: number): Recor
   return changed ? result : ws;
 }
 
-// For non-infosheet layouts: add askbar at default position if it was somehow removed
-function ensureAskbar(ws: Record<string, Widget>, nid: number, ps: string): [Record<string, Widget>, number] {
-  if (ps === 'infosheet') return [ws, nid];
-  if (Object.values(ws).some(w => w.type === 'askbar')) return [ws, nid];
-  const id = 'w' + nid;
-  return [{ ...ws, [id]: makeWidget('askbar', id) }, nid + 1];
+// Asking-price (askbar) is OPTIONAL — the user can delete it from a template and
+// it must STAY deleted. This previously re-added an askbar on every load if none
+// was present, so a deleted asking-price kept reappearing. Now a pass-through:
+// loading a saved template respects exactly what was saved. New/blank canvases
+// still include an askbar via the default widget order in applyBlankCanvas.
+function ensureAskbar(ws: Record<string, Widget>, nid: number, _ps: string): [Record<string, Widget>, number] {
+  return [ws, nid];
 }
 
 // Override all logo widgets with the canonical dealer logo.
@@ -794,6 +795,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         setTemplateName((tmpl.name as string) || 'Template');
         setLoadedTemplateId(pick.id);
         setLoadedTemplateSource(pick.source === 'group' ? 'group' : 'dealer');
+        setSaveAsGroupTemplate(pick.source === 'group');
         const locked = pick.source === 'group' && pick.is_locked !== false;
         setLoadedTemplateLocked(locked);
         isDirtyRef.current = false;
@@ -1282,7 +1284,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       }
       setTemplateName(tmpl.name || 'Template');
       setLoadedTemplateId(id);
-      setLoadedTemplateSource(tmpl.source === 'group' ? 'group' : 'dealer');
+      // The group-templates detail GET doesn't tag rows with `source`, so derive
+      // scope from the load PATH: loaded via the group endpoint (groupId set,
+      // non-starter) ⇒ group, else dealer. Sync the "Save as Group Template"
+      // toggle to match so re-saving UPDATES the loaded template rather than
+      // creating a duplicate.
+      const loadedViaGroup = !starterMode && !!groupId;
+      setLoadedTemplateSource(loadedViaGroup ? 'group' : 'dealer');
+      if (!starterMode) setSaveAsGroupTemplate(loadedViaGroup);
       setSelId(null);
       setShowOpenModal(false);
       isDirtyRef.current = false;
@@ -1325,16 +1334,20 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     setTemplateName(vehicle ? `${vehicle.year || ''} ${vehicle.make || ''} ${vehicle.model || ''}`.trim() || 'New Template' : 'New Template');
     setLoadedTemplateId(null);
     setLoadedTemplateLocked(false);
+    setLoadedTemplateSource(null);
+    // Fresh canvas: reset the group-toggle to the context default (dealer-scoped
+    // once switched into a dealer; group-scoped at group level).
+    setSaveAsGroupTemplate(Boolean(groupId) && !dealerId);
     setPaperSize('standard');
     paperSizeRef.current = 'standard';
     setBgUrl(BG_DEFAULT);
-    setFontScale(1.0);
+    setFontScale(1.0); // applyBlankCanvas
     // History is reset to this single baseline so undo can't reach the
     // previous template — that template is unrelated to the new one.
     setHistory([JSON.stringify({ widgets: ws, nid: nextNid })]);
     setHistIdx(0);
     isDirtyRef.current = false;
-  }, [vehicle]);
+  }, [vehicle, groupId, dealerId]);
 
   // Clone a platform starter into a NEW, UNSAVED dealer document: load its
   // bg + widgets + paper + fontScale, but clear loadedTemplateId/locked so a
