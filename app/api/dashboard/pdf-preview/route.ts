@@ -1,17 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { requireSuperAdmin } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 /**
  * GET /api/dashboard/pdf-preview?dealer_id=UUID&printed_at=ISO
- * super_admin only. Returns a fresh 1-hour signed URL for the PDF, suitable
- * for inline rendering in an iframe.
+ * super_admin (any dealer) or group_admin (dealers in their own group — the
+ * white-label dashboard's Live Activity runs as a group_admin). Returns a fresh
+ * 1-hour signed URL for the PDF, suitable for inline rendering in an iframe.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const { error } = await requireSuperAdmin();
+  const { claims, error } = await requireAuth();
   if (error) return error;
+  if (claims.role !== "super_admin" && claims.role !== "group_admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const params = req.nextUrl.searchParams;
   const dealerUuid = params.get("dealer_id");
@@ -22,6 +26,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const admin = createAdminSupabaseClient();
+
+  // group_admin may only preview PDFs for dealers in their own group (same
+  // scoping as /api/dashboard/recent-prints). super_admin: any dealer.
+  if (claims.role === "group_admin") {
+    const { data: d } = await admin
+      .from("dealers")
+      .select("group_id")
+      .eq("id", dealerUuid)
+      .maybeSingle<{ group_id: string | null }>();
+    if (!d || !claims.group_id || d.group_id !== claims.group_id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  }
 
   // ±90 second window — addendum_data.printed_at is set after print_history.created_at
   const ts = new Date(printedAt);
