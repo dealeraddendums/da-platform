@@ -356,6 +356,15 @@ export async function upsertObject(args: {
    * key is left untouched for these.
    */
   createOnlyProperties?: CompanyProperties;
+  /**
+   * Refresh-only paths (e.g. the nightly computed-fields cron) set this so the
+   * function NEVER creates a new object. If the stored id 404s AND the natural
+   * key search misses, it throws HubspotNoExistingObjectError instead of POSTing
+   * a half-populated record. Prevents the daily blank-company bug: the cron's
+   * payload is computed fields only (no name/platformid), so a create-fallthrough
+   * for a dealer whose company was deleted in HubSpot manufactured a blank.
+   */
+  updateOnly?: boolean;
 }): Promise<{ hubspotId: string; created: boolean }> {
   // Strip null/undefined values — HubSpot rejects null on enumerations
   // and treats empty string as "set to empty" which clobbers operator
@@ -403,9 +412,27 @@ export async function upsertObject(args: {
     if (hit) throw new DedupSkipError(hit.id, hit.matchedOn);
   }
 
+  // Refresh-only caller: do NOT create. The stored id is stale (404) and no
+  // natural-key match exists — the company was deleted in HubSpot. Creating from
+  // a computed-only payload would manufacture a blank record. Signal the caller
+  // to clear the stale id and skip (the backfill / event-driven path re-creates
+  // it later with full data).
+  if (args.updateOnly) {
+    throw new HubspotNoExistingObjectError(args.object, args.searchValue);
+  }
+
   // (3) Create. Create-only properties (source_form, industry) are merged in
   //     here ONLY — they never reach the PATCH paths above, so a re-sync of an
   //     existing record can't overwrite an operator's manual edit.
   const created = await createObject(args.object, { ...clean, ...cleanCreateOnly });
   return { hubspotId: created.id, created: true };
+}
+
+/** Thrown by upsertObject({ updateOnly: true }) when there's no existing object
+ *  to update — so refresh paths never create a blank record. */
+export class HubspotNoExistingObjectError extends Error {
+  constructor(public objectType: string, public searchValue: string | null) {
+    super(`No existing ${objectType} to update (updateOnly; searchValue=${searchValue ?? "null"})`);
+    this.name = "HubspotNoExistingObjectError";
+  }
 }

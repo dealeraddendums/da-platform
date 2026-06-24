@@ -291,6 +291,14 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
       .maybeSingle() as { data: DealerForHubspot | null };
     if (!dealer) return;
 
+    // Defensive guard: never create/patch a HubSpot Company for a nameless
+    // dealer (would produce a blank "--" record). No such dealers exist today,
+    // but this keeps the create path safe if one ever appears.
+    if (!dealer.name || dealer.name.trim() === "") {
+      console.warn(`[sync-hubspot] skipping dealer ${dealer.id} — no name`);
+      return;
+    }
+
     let groupName: string | null = null;
     let groupNumericId: string | null = null;
     if (dealer.group_id) {

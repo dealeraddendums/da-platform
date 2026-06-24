@@ -8,6 +8,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import {
   hubspotConfigured,
   upsertObject,
+  HubspotNoExistingObjectError,
   LIFECYCLE,
   isPayingAccount,
 } from "@/lib/hubspot";
@@ -80,8 +81,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       dealers_processed: 0,
       dealers_updated: 0,
       dealers_expired: 0,
+      dealers_stale_cleared: 0,
       groups_processed: 0,
       groups_updated: 0,
+      groups_stale_cleared: 0,
       errors: 0,
     };
 
@@ -130,7 +133,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           if (expired) stats.dealers_expired++;
         }
 
-        await upsertObject({
+        const res = await upsertObject({
           object: "companies",
           properties: {
             prints_last_30:   prints30 ?? 0,
@@ -140,13 +143,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           existingHubspotId: d.hubspot_company_id,
           searchProperty: "platformid",
           searchValue: d.dealer_id,
+          updateOnly: true, // refresh only — never create a blank company
         });
+        // Self-heal: if the stored id was stale but the platformid search re-linked
+        // to the real company, persist the fresh id over the stale one.
+        if (res.created && res.hubspotId && res.hubspotId !== d.hubspot_company_id) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any).from("dealers").update({ hubspot_company_id: res.hubspotId }).eq("id", d.id);
+        }
         stats.dealers_updated++;
         if (stats.dealers_updated % 500 === 0) {
           console.log(`[cron/sync-hubspot-computed] progress: dealers ${stats.dealers_updated}/${dealers?.length ?? 0}`);
         }
         await new Promise(r => setTimeout(r, PROD_PATCH_RATE_MS));
       } catch (err) {
+        if (err instanceof HubspotNoExistingObjectError) {
+          // Stored company id 404s AND no platformid match → company was deleted in
+          // HubSpot. Don't manufacture a blank; clear the stale id so the backfill /
+          // next event-driven sync recreates it with full data.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any).from("dealers").update({ hubspot_company_id: null }).eq("id", d.id);
+          stats.dealers_stale_cleared++;
+          console.warn(`[cron/sync-hubspot-computed] dealer ${d.id} cleared stale hubspot_company_id ${d.hubspot_company_id} (company missing — skipped blank create)`);
+          continue;
+        }
         stats.errors++;
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[cron/sync-hubspot-computed] dealer ${d.id} failed:`, message);
@@ -183,10 +203,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           existingHubspotId: g.hubspot_company_id,
           searchProperty: "groupid",
           searchValue: null,
+          updateOnly: true, // refresh only — never create a blank company
         });
         stats.groups_updated++;
         await new Promise(r => setTimeout(r, PROD_PATCH_RATE_MS));
       } catch (err) {
+        if (err instanceof HubspotNoExistingObjectError) {
+          // Stale group company id (deleted in HubSpot) — clear it instead of
+          // creating a blank; backfill/event-driven sync recreates it with data.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any).from("groups").update({ hubspot_company_id: null }).eq("id", g.id);
+          stats.groups_stale_cleared++;
+          console.warn(`[cron/sync-hubspot-computed] group ${g.id} cleared stale hubspot_company_id ${g.hubspot_company_id} (company missing — skipped blank create)`);
+          continue;
+        }
         stats.errors++;
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[cron/sync-hubspot-computed] group ${g.id} failed:`, message);
