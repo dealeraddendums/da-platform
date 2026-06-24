@@ -1118,7 +1118,10 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       if (loadedTemplateId && name === templateName) {
         existingId = loadedTemplateId;
       } else {
-        const match = savedTemplates.find(t => t.name.trim() === name);
+        // Only an OWN (dealer) template can be PATCHed via /api/templates/[id].
+        // Never match a group-source row — its id is a group_templates id, which
+        // 404s on the dealer endpoint ("Template not found").
+        const match = savedTemplates.find(t => t.name.trim() === name && t.source !== 'group');
         if (match) existingId = match.id;
       }
 
@@ -1131,11 +1134,21 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
 
       if (existingId) {
         const r = await fetch(`/api/templates/${existingId}${dqs}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (!r.ok) { const j = await r.json().catch(() => ({})); showToast((j as { error?: string }).error || 'Save failed — try again'); return; }
-        const { data } = await r.json() as { data?: { id: string } };
-        savedId = data?.id ?? existingId;
-        wasUpdate = true;
-      } else {
+        if (r.ok) {
+          const { data } = await r.json() as { data?: { id: string } };
+          savedId = data?.id ?? existingId;
+          wasUpdate = true;
+        } else if (r.status === 404) {
+          // The loaded id isn't THIS dealer's template — e.g. a group template was
+          // auto-loaded into the canvas (its id is a group_templates id), or the
+          // row was since deleted. Fall through to create a new dealer template
+          // instead of failing with "Template not found".
+          existingId = null;
+        } else {
+          const j = await r.json().catch(() => ({})); showToast((j as { error?: string }).error || 'Save failed — try again'); return;
+        }
+      }
+      if (!savedId) {
         const r = await fetch(`/api/templates${dqs}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!r.ok) { const j = await r.json().catch(() => ({})); showToast((j as { error?: string }).error || 'Save failed — try again'); return; }
         const { data: savedData } = await r.json() as { data?: { id: string } };
