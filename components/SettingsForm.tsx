@@ -624,7 +624,7 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
                       >
                         <option value="">— No default —</option>
                         {filtered.map((t) => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
+                          <option key={t.id} value={t.id}>{t.name}{(t as { source?: string }).source === "group" ? " (Group)" : ""}</option>
                         ))}
                       </select>
                     )}

@@ -305,6 +305,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // assignment — Save must refuse so the dealer can't overwrite corporate
   // content. Cleared when a fresh template is loaded or the canvas is reset.
   const [loadedTemplateLocked, setLoadedTemplateLocked] = useState(false);
+  // Scope of the currently-loaded template: 'group' (a group_templates row) vs
+  // 'dealer' (own templates row). Drives upsert-on-save so editing a loaded
+  // template UPDATES it instead of creating a duplicate (a group template must
+  // PATCH /api/group-templates, a dealer template must PATCH /api/templates).
+  const [loadedTemplateSource, setLoadedTemplateSource] = useState<'dealer' | 'group' | null>(null);
   // Effective disclaimers for this dealer + current document_type, fetched
   // once on mount and re-applied to Disclaimer widgets at load/save time so
   // canvas preview matches print output.
@@ -788,6 +793,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (tj.paperSize) { setPaperSize(tj.paperSize); paperSizeRef.current = tj.paperSize; }
         setTemplateName((tmpl.name as string) || 'Template');
         setLoadedTemplateId(pick.id);
+        setLoadedTemplateSource(pick.source === 'group' ? 'group' : 'dealer');
         const locked = pick.source === 'group' && pick.is_locked !== false;
         setLoadedTemplateLocked(locked);
         isDirtyRef.current = false;
@@ -1100,13 +1106,22 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       is_active: !isDraft,
     };
     try {
-      // Group template path: save to group_templates table
+      // Group template path: save to group_templates table.
       if (saveAsGroupTemplate && groupId) {
-        const r = await fetch(`/api/group-templates/${groupId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        // UPDATE the loaded group template (same name) instead of POSTing a
+        // duplicate — the always-POST behaviour created multiple identical
+        // group templates. A rename, or saving a non-group-sourced template as
+        // a group template, still creates a new one.
+        const editGroupId = (loadedTemplateSource === 'group' && loadedTemplateId && name === templateName) ? loadedTemplateId : null;
+        const r = editGroupId
+          ? await fetch(`/api/group-templates/${groupId}/${editGroupId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+          : await fetch(`/api/group-templates/${groupId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!r.ok) { const j = await r.json().catch(() => ({})); showToast((j as { error?: string }).error || 'Save failed — try again'); return; }
+        const { data: savedGt } = await r.json().catch(() => ({ data: null })) as { data?: { id: string } };
+        if (savedGt?.id) { setLoadedTemplateId(savedGt.id); setLoadedTemplateSource('group'); }
         setShowSave(false);
         isDirtyRef.current = false;
-        showToast(`✓ Group template saved: ${name}`);
+        showToast(`✓ Group template ${editGroupId ? 'updated' : 'saved'}: ${name}`);
         return;
       }
 
@@ -1115,7 +1130,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       // 2. If a template with this name already exists for this dealer → PATCH it
       // 3. Otherwise → POST (create new)
       let existingId: string | null = null;
-      if (loadedTemplateId && name === templateName) {
+      if (loadedTemplateId && name === templateName && loadedTemplateSource !== 'group') {
         existingId = loadedTemplateId;
       } else {
         // Only an OWN (dealer) template can be PATCHed via /api/templates/[id].
@@ -1156,7 +1171,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       }
 
       setTemplateName(name);
-      if (savedId) setLoadedTemplateId(savedId);
+      if (savedId) { setLoadedTemplateId(savedId); setLoadedTemplateSource('dealer'); }
       setShowSave(false);
       isDirtyRef.current = false;
 
@@ -1184,7 +1199,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {
       showToast('Save failed — try again');
     }
-  }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, paperSize, showToast, loadedTemplateId, loadedTemplateLocked, savedTemplates, dealerId, vehicle?.dealer_id, starterMode, starterTemplateId]);
+  }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, paperSize, showToast, loadedTemplateId, loadedTemplateLocked, loadedTemplateSource, savedTemplates, dealerId, vehicle?.dealer_id, starterMode, starterTemplateId]);
 
   // ── Load templates list ────────────────────────────────────────────
   const openTemplates = useCallback(async () => {
@@ -1267,6 +1282,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       }
       setTemplateName(tmpl.name || 'Template');
       setLoadedTemplateId(id);
+      setLoadedTemplateSource(tmpl.source === 'group' ? 'group' : 'dealer');
       setSelId(null);
       setShowOpenModal(false);
       isDirtyRef.current = false;
