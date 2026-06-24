@@ -317,7 +317,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // save target is the group template library — group_admin / ghost-mode
   // doesn't have a dealer to write to under /api/templates. Default the
   // toggle ON so Save Template works on first try.
-  const [saveAsGroupTemplate, setSaveAsGroupTemplate] = useState<boolean>(() => Boolean(groupId));
+  // Default to GROUP-scoped only at GROUP level. Once a group_admin has switched
+  // into a dealer (dealerId set — active dealer), default to DEALER-scoped so the
+  // save lands on that dealer (they're operating as the dealer, per the
+  // group-admin-dealer-parity model). Previously this defaulted to true for ANY
+  // group_admin, so a switched-in group_admin's save was routed to the group
+  // template library instead of the dealer. They can still toggle it on to author
+  // a group template.
+  const [saveAsGroupTemplate, setSaveAsGroupTemplate] = useState<boolean>(() => Boolean(groupId) && !dealerId);
   const [nudge, setNudge] = useState({ left: 0, right: 0, top: 0, bottom: 0 });
   const [printAiOverride, setPrintAiOverride] = useState<'db'|'ai'|'default'>('default');
   const [localCustomSizes, setLocalCustomSizes] = useState<CustomSize[]>(customSizes);
@@ -1096,7 +1103,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       // Group template path: save to group_templates table
       if (saveAsGroupTemplate && groupId) {
         const r = await fetch(`/api/group-templates/${groupId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (!r.ok) { showToast('Save failed — try again'); return; }
+        if (!r.ok) { const j = await r.json().catch(() => ({})); showToast((j as { error?: string }).error || 'Save failed — try again'); return; }
         setShowSave(false);
         isDirtyRef.current = false;
         showToast(`✓ Group template saved: ${name}`);
@@ -1124,13 +1131,13 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
 
       if (existingId) {
         const r = await fetch(`/api/templates/${existingId}${dqs}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (!r.ok) { showToast('Save failed — try again'); return; }
+        if (!r.ok) { const j = await r.json().catch(() => ({})); showToast((j as { error?: string }).error || 'Save failed — try again'); return; }
         const { data } = await r.json() as { data?: { id: string } };
         savedId = data?.id ?? existingId;
         wasUpdate = true;
       } else {
         const r = await fetch(`/api/templates${dqs}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (!r.ok) { showToast('Save failed — try again'); return; }
+        if (!r.ok) { const j = await r.json().catch(() => ({})); showToast((j as { error?: string }).error || 'Save failed — try again'); return; }
         const { data: savedData } = await r.json() as { data?: { id: string } };
         savedId = savedData?.id ?? null;
       }
