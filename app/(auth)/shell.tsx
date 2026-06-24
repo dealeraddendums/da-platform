@@ -10,6 +10,7 @@
 
 import BrandLoginLogo from "@/components/BrandLoginLogo";
 import LoginFooter from "@/components/LoginFooter";
+import AuthHeaderLinks from "@/components/AuthHeaderLinks";
 
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "5.0.0";
 const BUILD_NUMBER = process.env.NEXT_PUBLIC_BUILD_NUMBER ?? "209";
@@ -406,8 +407,7 @@ export function AuthShell({
               <span className="lp-live-dot" aria-hidden />
               All systems normal
             </span>
-            <a href="mailto:support@dealeraddendums.com">Help</a>
-            <a href="https://status.dealeraddendums.com" target="_blank" rel="noopener noreferrer">Status</a>
+            <AuthHeaderLinks />
           </div>
         </header>
 

@@ -17,8 +17,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   let email: string | undefined;
+  let next: string | undefined;
   try {
-    ({ email } = (await req.json()) as { email?: string });
+    ({ email, next } = (await req.json()) as { email?: string; next?: string });
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -53,6 +54,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       await sendOtpCode(email, {
         purpose: "login",
         fullName: profile.full_name,
+        ...(next ? { next } : {}),
         ...(brand.isDefault ? {} : { brandName: brand.displayName, loginUrl: `https://${host}/login` }),
       });
     }

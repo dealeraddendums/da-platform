@@ -207,6 +207,9 @@ export async function sendOtpCode(
     // email reads/links to that brand instead of the default DealerAddendums host.
     brandName?: string;
     loginUrl?: string;
+    // Where the "next" redirect should land after sign-in (forwarded into the
+    // email button so the deep-link preserves it). Optional.
+    next?: string;
   }
 ): Promise<void> {
   const admin = createAdminSupabaseClient();
@@ -233,7 +236,14 @@ export async function sendOtpCode(
   } else {
     // Default DA wording unless a white-label brand was passed in.
     const brandName = opts.brandName ?? "DealerAddendums Platform";
-    const loginUrl = opts.loginUrl ?? "https://app.dealeraddendums.com/login";
+    const baseLoginUrl = opts.loginUrl ?? "https://app.dealeraddendums.com/login";
+    // Deep-link the "Go to sign in" button straight to the code-entry step with
+    // the email pre-filled (the user already has the code — don't make them
+    // re-request it). NEVER include the code itself in the URL — only the email
+    // + mode flag (+ next, when provided).
+    const params = new URLSearchParams({ email, mode: "otp" });
+    if (opts.next) params.set("next", opts.next);
+    const loginUrl = `${baseLoginUrl}?${params.toString()}`;
     await sendMandrillEmail({
       subject: opts.brandName ? `Your ${opts.brandName} sign-in code` : "Your DealerAddendums sign-in code",
       from_email: "noreply@dealeraddendums.com",

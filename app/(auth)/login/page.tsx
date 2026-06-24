@@ -130,7 +130,8 @@ function LoginForm() {
       await fetch("/api/auth/otp-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        // Forward an explicit ?next so the email's deep-link preserves it.
+        body: JSON.stringify({ email, ...(searchParams.get("next") ? { next: searchParams.get("next") } : {}) }),
       });
     } catch {
       // otp-login always reports success; ignore transport errors and proceed
@@ -153,6 +154,16 @@ function LoginForm() {
     }
     goNext();
   }
+
+  // Deep-link from the OTP email's "Go to sign in" button (?email=…&mode=otp):
+  // land directly on the code-entry step with the email pre-filled. The user
+  // already has the code in hand — no re-request, no auto-submit.
+  useEffect(() => {
+    const qpEmail = searchParams.get("email");
+    if (qpEmail) { setEmail(qpEmail); setCodeEmail(qpEmail); }
+    if (searchParams.get("mode") === "otp") { setMode("code"); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (
