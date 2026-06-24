@@ -63,6 +63,25 @@ function isCorsExempt(pathname: string): boolean {
   return EXTERNAL_API_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
+// An Origin is allowed when it's a known static origin, is SAME-ORIGIN (the app
+// calling its own host), or is any *.addendums.ai white-label host. Same-origin
+// covers every reseller domain served by this same app — <reseller>.addendums.ai
+// and reseller vanity domains — without enumerating them. Without this, a browser
+// POST from a white-label subdomain (Origin: https://<reseller>.addendums.ai) was
+// 403'd before reaching the route, e.g. the OTP sign-in code silently never sent
+// from an.addendums.ai (the frontend shows "we emailed a code" regardless).
+function isAllowedOrigin(origin: string, host: string | null): boolean {
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  try {
+    const oHost = new URL(origin).host.toLowerCase();
+    if (host && oHost === host.toLowerCase()) return true; // same-origin
+    if (oHost === "addendums.ai" || oHost.endsWith(".addendums.ai")) return true; // white-label
+  } catch {
+    /* malformed Origin → not allowed */
+  }
+  return false;
+}
+
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 
 type RateLimitEntry = { count: number; resetAt: number };
@@ -127,11 +146,12 @@ export async function middleware(request: NextRequest) {
   // ── CORS restriction on API routes ───────────────────────────────────────────
   if (pathname.startsWith("/api/") && !isCorsExempt(pathname)) {
     const origin = request.headers.get("origin");
+    const host = request.headers.get("host");
 
     // Handle OPTIONS preflight
     if (method === "OPTIONS") {
       const allowedOrigin =
-        origin && ALLOWED_ORIGINS.includes(origin) ? origin : "";
+        origin && isAllowedOrigin(origin, host) ? origin : "";
       const res = new NextResponse(null, { status: 204 });
       if (allowedOrigin) {
         res.headers.set("Access-Control-Allow-Origin", allowedOrigin);
@@ -150,7 +170,7 @@ export async function middleware(request: NextRequest) {
     }
 
     // Block cross-origin requests from unknown origins
-    if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+    if (origin && !isAllowedOrigin(origin, host)) {
       const res = new NextResponse("Forbidden", { status: 403 });
       applySecurityHeaders(res);
       return res;
