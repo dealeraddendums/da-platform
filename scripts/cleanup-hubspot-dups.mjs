@@ -44,8 +44,12 @@ const HOURS = (() => {
   return a ? Number(a.slice("--hours=".length)) : 36;
 })();
 const FLAGS = process.argv.filter(a => a.startsWith("--") && !a.startsWith("--hours=") && a !== "--apply").map(a => a.slice(2));
-const DO_DEALERS = FLAGS.length === 0 || FLAGS.includes("dealers");
-const DO_GROUPS  = FLAGS.length === 0 || FLAGS.includes("groups");
+// Also heal pairs whose older original carries a DIFFERENT, STALE key (verified
+// to belong to no live entity) — overwrites that key. Off by default.
+const INCLUDE_STALE_KEY = FLAGS.includes("include-stale-key");
+const OBJ_FLAGS  = FLAGS.filter(f => f === "dealers" || f === "groups");
+const DO_DEALERS = OBJ_FLAGS.length === 0 || OBJ_FLAGS.includes("dealers");
+const DO_GROUPS  = OBJ_FLAGS.length === 0 || OBJ_FLAGS.includes("groups");
 
 const HUBSPOT_BASE = "https://api.hubapi.com/crm/v3";
 const TOKEN = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
@@ -54,6 +58,9 @@ const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUP
 
 const RATE_MS = 60;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// HubSpot returns createdate as an ISO-8601 string in read/search results
+// (NOT epoch ms — only the *filter* value is epoch ms). Parse defensively.
+const ts = v => { const n = Date.parse(v); return Number.isFinite(n) ? n : 0; };
 
 async function hsFetch(method, path, body) {
   const res = await fetch(`${HUBSPOT_BASE}${path}`, {
@@ -132,21 +139,34 @@ async function main() {
 
     // Find same-name siblings created earlier than this one.
     const siblings = await companiesByName(name);
-    const older = siblings.filter(s => s.id !== c.id && Number(s.properties.createdate) < Number(p.createdate));
+    const older = siblings.filter(s => s.id !== c.id && ts(s.properties.createdate) < ts(p.createdate));
     if (older.length === 0) {
       noPair.push({ dup: c, name });
       continue;
     }
 
-    // Prefer an older sibling that LACKS the matching key (the true orphan original).
+    // The true orphan original LACKS the matching key. Only heal those — an
+    // older sibling that already carries a DIFFERENT non-empty key likely
+    // belongs to a different entity and must NOT be hijacked. Route those to
+    // manual review (mirrors the deployed fix, which only adopts keyless ones).
     const keyProp = kind === "group" ? "groupid" : "platformid";
-    const orphan = older.find(s => {
+    const keyless = older.find(s => {
       const v = s.properties[keyProp];
       return v == null || String(v).trim() === "";
-    }) || older[0];
+    });
+    const keyValue = kind === "group" ? p.groupid : p.platformid;
+    if (!keyless) {
+      const sib = older[0];
+      if (INCLUDE_STALE_KEY) {
+        heal.push({ dup: c, original: sib, kind: kind || "unknown", name, keyProp, keyValue,
+          staleKey: sib.properties[keyProp] });
+      } else {
+        review.push({ dup: c, name, reason: `older same-name "${name}" ${sib.id} already has ${keyProp}=${sib.properties[keyProp]} (≠ this ${keyProp}=${keyValue}) — may be a different entity; not auto-healed` });
+      }
+      continue;
+    }
 
-    heal.push({ dup: c, original: orphan, kind: kind || "unknown", name, keyProp,
-      keyValue: kind === "group" ? p.groupid : p.platformid });
+    heal.push({ dup: c, original: keyless, kind: kind || "unknown", name, keyProp, keyValue });
   }
 
   // Resolve Supabase rows + association counts for the heal set.
@@ -176,9 +196,9 @@ async function main() {
     const dupHasMoreContacts = typeof dupAssoc === "number" && typeof origAssoc === "number" && dupAssoc > origAssoc;
     const flag = dupHasMoreContacts ? "  ⚠️ DUP HAS MORE CONTACTS — review before archive" : "";
 
-    console.log(`${n}. "${h.name}" [${h.kind}] key ${h.keyProp}=${h.keyValue}`);
-    console.log(`     ORIGINAL keep:    ${origId}  created ${h.original.properties.createdate ? new Date(Number(h.original.properties.createdate)).toISOString() : "?"}  contacts=${origAssoc}  ${h.keyProp}=${h.original.properties[h.keyProp] ?? "(none)"}`);
-    console.log(`     DUP archive:      ${dupId}  created ${new Date(Number(h.dup.properties.createdate)).toISOString()}  contacts=${dupAssoc}`);
+    console.log(`${n}. "${h.name}" [${h.kind}] key ${h.keyProp}=${h.keyValue}${h.staleKey ? `  (overwrites STALE ${h.keyProp}=${h.staleKey} on original)` : ""}`);
+    console.log(`     ORIGINAL keep:    ${origId}  created ${h.original.properties.createdate ?? "?"}  contacts=${origAssoc}  ${h.keyProp}=${h.original.properties[h.keyProp] ?? "(none)"}`);
+    console.log(`     DUP archive:      ${dupId}  created ${h.dup.properties.createdate ?? "?"}  contacts=${dupAssoc}`);
     console.log(`     Supabase pointer: ${pointer}${flag}`);
 
     if (dupHasMoreContacts) { review.push({ dup: h.dup, reason: `dup ${dupId} has more contacts (${dupAssoc}) than original ${origId} (${origAssoc})`, name: h.name }); h._skip = true; }
@@ -209,13 +229,10 @@ async function main() {
   for (const h of actionable) {
     try {
       const origId = h.original.id, dupId = h.dup.id;
-      // 1. HEAL: copy the dup's full props (incl. the key) onto the original.
-      await hsFetch("PATCH", `/objects/companies/${origId}`, { properties: {
-        ...h.dup.properties,
-        // never overwrite the original's createdate / hs_object_id
-        createdate: undefined,
-        hs_object_id: undefined,
-      }});
+      // 1. HEAL: PATCH the natural key onto the original so future syncs match
+      //    it by key (no more orphan → no more dup). Other fields are refreshed
+      //    by the next event-driven / computed sync; we don't blindly overwrite.
+      await hsFetch("PATCH", `/objects/companies/${origId}`, { properties: { [h.keyProp]: String(h.keyValue) } });
       healed++;
       await sleep(RATE_MS);
       // 2. REPOINT Supabase.
