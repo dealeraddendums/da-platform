@@ -710,6 +710,40 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId:
   const [impersonating, setImpersonating] = useState<string | null>(null);
   const [impersonateError, setImpersonateError] = useState<{ dealerId: string; message: string } | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
+  // Per-row bulk staff-login invite (no switch-in). Keyed by dealers.id.
+  const [invitingAll, setInvitingAll] = useState<string | null>(null);
+  const [inviteAllResult, setInviteAllResult] = useState<Record<string, { text: string; ok: boolean }>>({});
+
+  // Fire the bulk staff-login invite for ONE dealer from the member list, without
+  // switching into it. POST /api/users/invite-all-staff enforces per-dealer authz
+  // (super_admin any / group_admin in-group), so a group_admin can run it for any
+  // of their stores from here. Identifier: inventory_dealer_id (preferred) or the
+  // text dealer_id — the endpoint resolves by either.
+  async function handleInviteAllStaff(d: DealerRow) {
+    const ident = (d.inventory_dealer_id ?? "").trim() || (d.dealer_id ?? "").trim();
+    if (!ident) return;
+    if (!confirm(`Invite all not-yet-activated staff at ${decodeHtmlEntities(d.name)}?\n\nThis emails real users a login-setup invite.`)) return;
+    setInvitingAll(d.id);
+    setInviteAllResult((r) => { const n = { ...r }; delete n[d.id]; return n; });
+    try {
+      const res = await fetch("/api/users/invite-all-staff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inventory_dealer_id: ident }),
+      });
+      const json = (await res.json()) as { invited?: number; already_existed?: number; failed?: number; error?: string };
+      if (!res.ok) {
+        setInviteAllResult((r) => ({ ...r, [d.id]: { text: json.error ?? "Failed", ok: false } }));
+      } else {
+        const inv = json.invited ?? 0, sk = json.already_existed ?? 0, fa = json.failed ?? 0;
+        setInviteAllResult((r) => ({ ...r, [d.id]: { text: `${inv} invited · ${sk} already had logins${fa ? ` · ${fa} failed` : ""}`, ok: true } }));
+      }
+    } catch (e) {
+      setInviteAllResult((r) => ({ ...r, [d.id]: { text: e instanceof Error ? e.message : "Failed", ok: false } }));
+    } finally {
+      setInvitingAll(null);
+    }
+  }
 
   // Switch into a member dealer and operate it with full dealer_admin control —
   // mirrors GroupDealerList.handleSwitch. group_admin only (the active-dealer API
@@ -1008,25 +1042,30 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId:
                 </td>
                 <td className="px-4 py-3">
                   {(isSuperAdmin || isGroupAdmin) ? (
-                    <button
-                      onClick={() => void toggleControlsTemplates(d.id, !d.group_controls_templates)}
-                      title={d.group_controls_templates ? "ON — dealer cannot access Builder or change Default Templates" : "OFF — dealer self-manages templates"}
-                      aria-pressed={d.group_controls_templates}
-                      style={{
-                        width: 36, height: 20, borderRadius: 10, padding: 0, border: "none",
-                        background: d.group_controls_templates ? "#1976d2" : "#e0e0e0",
-                        position: "relative", transition: "background 150ms", cursor: "pointer",
-                      }}
-                    >
-                      <span style={{
-                        position: "absolute", top: 2, left: d.group_controls_templates ? 18 : 2,
-                        width: 16, height: 16, borderRadius: "50%", background: "#fff",
-                        transition: "left 150ms",
-                      }} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => void toggleControlsTemplates(d.id, !d.group_controls_templates)}
+                        title={d.group_controls_templates ? "Group controls templates — dealer cannot access Builder or change Default Templates" : "Dealer self-manages templates — has full Builder access"}
+                        aria-pressed={d.group_controls_templates}
+                        style={{
+                          width: 36, height: 20, borderRadius: 10, padding: 0, border: "none",
+                          background: d.group_controls_templates ? "#1976d2" : "#e0e0e0",
+                          position: "relative", transition: "background 150ms", cursor: "pointer", flexShrink: 0,
+                        }}
+                      >
+                        <span style={{
+                          position: "absolute", top: 2, left: d.group_controls_templates ? 18 : 2,
+                          width: 16, height: 16, borderRadius: "50%", background: "#fff",
+                          transition: "left 150ms",
+                        }} />
+                      </button>
+                      <span className="text-xs font-semibold" style={{ color: d.group_controls_templates ? "#1976d2" : "#55595c", whiteSpace: "nowrap" }}>
+                        {d.group_controls_templates ? "Group" : "Dealer"}
+                      </span>
+                    </div>
                   ) : (
-                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                      {d.group_controls_templates ? "Yes" : "No"}
+                    <span className="text-xs font-semibold" style={{ color: d.group_controls_templates ? "#1976d2" : "#55595c" }}>
+                      {d.group_controls_templates ? "Group" : "Dealer"}
                     </span>
                   )}
                 </td>
@@ -1081,6 +1120,17 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId:
                           {switching === d.id ? "Switching…" : "Switch to Dealer"}
                         </button>
                       )}
+                      {/* Bulk staff-login invite for THIS dealer, no switch-in.
+                          super_admin + group_admin (endpoint enforces in-group). */}
+                      <button
+                        className="text-xs font-medium"
+                        style={{ color: "var(--blue)", background: "none", border: "none", padding: 0, cursor: invitingAll === d.id ? "wait" : "pointer", whiteSpace: "nowrap" }}
+                        disabled={invitingAll === d.id}
+                        title="Email a login-setup invite to this dealer's not-yet-activated staff"
+                        onClick={() => void handleInviteAllStaff(d)}
+                      >
+                        {invitingAll === d.id ? "Inviting…" : "Invite All"}
+                      </button>
                       <Link href={`/dealers/${d.id}`} className="text-xs font-medium" style={{ color: "var(--blue)" }}>
                         View
                       </Link>
@@ -1100,6 +1150,11 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId:
                     <Link href={`/dealers/${d.id}`} className="text-xs font-medium" style={{ color: "var(--blue)" }}>
                       View →
                     </Link>
+                  )}
+                  {inviteAllResult[d.id] && (
+                    <p className="text-xs mt-1" style={{ color: inviteAllResult[d.id].ok ? "#2e7d32" : "var(--error)" }}>
+                      {inviteAllResult[d.id].text}
+                    </p>
                   )}
                 </td>
               </tr>
