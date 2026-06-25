@@ -344,11 +344,11 @@ function OptionForm({
         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
           <button type="button" onClick={() => { setInsertTarget("description"); setShowImagePicker(true); }}
             style={{ padding: "4px 10px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#55595c", fontWeight: 600 }}>
-            + Add to description
+            ＋ Add image to description
           </button>
           <button type="button" onClick={() => { setInsertTarget("item_name"); setShowImagePicker(true); }}
             style={{ padding: "4px 10px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#55595c", fontWeight: 600 }}>
-            + Add to item name
+            ＋ Add image to item name
           </button>
         </div>
       </div>

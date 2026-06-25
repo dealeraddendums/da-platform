@@ -20,6 +20,7 @@ const COLORS: { hex: string; label: string }[] = [
   { hex: "#c62828", label: "Red" },
   { hex: "#ef6c00", label: "Orange" },
   { hex: "#1976d2", label: "Blue" },
+  { hex: "#1a237e", label: "Dark Blue" },
   { hex: "#2e7d32", label: "Green" },
   { hex: "#78828c", label: "Gray" },
 ];
@@ -242,7 +243,7 @@ export default function RichTextEditor({
             {colorOpen && (
               <div style={{
                 position: "absolute", top: 30, left: 0, zIndex: 10,
-                display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4,
+                display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 4,
                 padding: 6, background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6,
               }}>
                 {COLORS.map(c => (
@@ -259,7 +260,7 @@ export default function RichTextEditor({
                 <button type="button" title="Clear color" onClick={() => {
                   editor.chain().focus().unsetColor().run();
                   setColorOpen(false);
-                }} style={{ gridColumn: "span 7", height: 22, fontSize: 11, border: "1px solid #e0e0e0", borderRadius: 4, background: "#fff", cursor: "pointer" }}>
+                }} style={{ gridColumn: "span 8", height: 22, fontSize: 11, border: "1px solid #e0e0e0", borderRadius: 4, background: "#fff", cursor: "pointer" }}>
                   Clear
                 </button>
               </div>
