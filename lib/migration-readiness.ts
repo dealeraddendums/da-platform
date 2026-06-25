@@ -72,6 +72,8 @@ export interface ReadinessRow {
   freshbooksStopPending: boolean; // migrated but FreshBooks recurring not yet stopped
   // ── operator assignment (who owns this dealer's migration) ──────────────────
   assignedTo: string | null;
+  // ── staging: raw dealers.migration_status ('pending' = ETL frozen, queued) ──
+  migrationStatus: string | null;
 }
 
 export type InviteStatus = "not-invited" | "invited" | "stalled" | "expired" | "migrated";
@@ -179,5 +181,6 @@ export function computeReadiness(
     freshbooksStoppedAt: ctx.freshbooksStoppedAt ?? null,
     freshbooksStopPending: inviteStatus === "migrated" && !ctx.freshbooksStoppedAt,
     assignedTo: ctx.assignedTo ?? null,
+    migrationStatus: d.migration_status ?? null,
   };
 }

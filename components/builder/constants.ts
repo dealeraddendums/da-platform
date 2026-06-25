@@ -43,6 +43,9 @@ export const LAYOUT: Record<string, { x: number; y: number; w: number; h: number
   // Disclaimer — narrow strip near the bottom by default. Resizable like
   // any other widget; group admins typically own the placement decision.
   disclaimer:        { x: 16,  y: 1020, w: 376, h: 28  },
+  // Horizontal rule / divider line. Defaults to near-full canvas width; the
+  // line itself is centered vertically in the box (thickness + margins in `d`).
+  divider:           { x: 20,  y: 460, w: 368, h: 16  },
 };
 
 export const LAYOUT_INFOSHEET: Record<string, { x: number; y: number; w: number; h: number }> = {
@@ -59,6 +62,7 @@ export const LAYOUT_INFOSHEET: Record<string, { x: number; y: number; w: number;
   // Sized to straddle the EPA fuel-graphic pump art on the default
   // infosheet background; operator nudges to fit a custom background.
   mpg:         { x: 240, y: 720, w: 320, h: 60  },
+  divider:     { x: 40,  y: 600, w: 744, h: 16 },
 };
 
 export const WIDGET_LABELS: Record<string, string> = {
@@ -71,6 +75,7 @@ export const WIDGET_LABELS: Record<string, string> = {
   suggested_options: 'Suggested Products', suggested_price: 'Suggested Price',
   disclaimer: 'Disclaimer',
   mpg: 'MPG',
+  divider: 'Divider line',
 };
 
 // One-instance-only widgets. QR Code, VIN Barcode, Background Image, and
@@ -87,14 +92,14 @@ export const UNIQUE_WIDGETS = [
 
 export const ADDENDUM_WIDGETS = [
   'logo','vehicle','msrp','options','subtotal','askbar','dealer',
-  'headerbar','customtext','sigline','disclaimer',
+  'headerbar','customtext','sigline','disclaimer','divider',
   'suggested_options','suggested_price',
   // Dynamic content (replaces the old monolithic Infobox)
   'bgimage','qrcode','barcode','vehiclephoto',
 ];
 export const INFOSHEET_WIDGETS = [
   'logo','vehicle','description','features','askbar',
-  'qrcode','barcode','dealer','customtext','disclaimer',
+  'qrcode','barcode','dealer','customtext','disclaimer','divider',
   'bgimage','vehiclephoto','mpg',
 ];
 // Addendum hides only infosheet-specific content widgets. qrcode/barcode are
@@ -155,6 +160,9 @@ export const DEFS: Record<string, Record<string, unknown>> = {
   // array injected by applyDisclaimerToWidgets (canvas) or pdf-html.ts
   // (PDF). Falls back to a placeholder when nothing is configured.
   disclaimer: { fontSize: 7, lineHeight: 1.3, align: 'left', disclaimers: [] },
+  // Divider — a horizontal rule. thickness 1/2/3 px, color (default near-black),
+  // and top/bottom margin (px) spacing the line within its box.
+  divider: { thickness: 1, color: '#1a1916', topMargin: 0, bottomMargin: 0 },
   // Legacy monolithic infobox — kept in DEFS only so an old saved widget
   // dropped on the canvas before backward-compat conversion runs still has
   // sane defaults. New widgets should never use type='infobox'.

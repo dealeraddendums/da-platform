@@ -124,6 +124,16 @@ export function renderW(type: string, d: D, fontScale: number): string {
     return `<div style="padding:3px 0">${aboveLine}<div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:${sz}px;font-weight:700;color:#1a1916">${d.label}</span><span style="font-size:${sz}px;font-weight:700;color:#1a1916;font-family:monospace">${d.value}</span></div>${d.divider !== false ? '<div style="height:1px;background:#1a1916;margin-top:3px"></div>' : ''}</div>`;
   }
 
+  if (type === 'divider') {
+    // Horizontal rule. The line is centered vertically inside the widget box;
+    // thickness/color/margins come from `d`. fontScale is irrelevant (no text).
+    const thickness = Math.max(1, Number(d.thickness) || 1);
+    const color = (d.color as string) || '#1a1916';
+    const topMargin = Math.max(0, Number(d.topMargin) || 0);
+    const bottomMargin = Math.max(0, Number(d.bottomMargin) || 0);
+    return `<div style="display:flex;align-items:center;height:100%;box-sizing:border-box;padding:${topMargin}px 0 ${bottomMargin}px 0"><div style="width:100%;height:${thickness}px;background:${color}"></div></div>`;
+  }
+
   if (type === 'options') {
     const sz = Math.round(10 * fs * ((d.fontSize as number) || 1));
     const szm = Math.round(9 * fs * ((d.fontSize as number) || 1));

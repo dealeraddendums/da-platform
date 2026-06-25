@@ -31,6 +31,7 @@ const PALETTE_TILES = [
   { type: 'customtext',        emoji: 'T',  label: 'Custom text',       hint: 'Free content',          group: 'structural' },
   { type: 'sigline',           emoji: '✎',  label: 'Signature line',    hint: 'Buyer + date',          group: 'structural' },
   { type: 'disclaimer',        emoji: '⚖️', label: 'Disclaimer',        hint: 'State or group disclaimer text', group: 'structural' },
+  { type: 'divider',           emoji: '─',  label: 'Divider line',      hint: 'Horizontal rule',       group: 'structural' },
   // Dynamic content — independent, multi-instance widgets that replaced the
   // monolithic Infobox. Drop as many as needed; mix and match freely.
   { type: 'bgimage',           emoji: '🖼️', label: 'Background Image',   hint: 'Full-width image',      group: 'dynamic' },
@@ -2415,6 +2416,39 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
                 style={{ width: 22, height: 22, borderRadius: 4, background: c, cursor: 'pointer', border: `1.5px solid ${(d.fontColor as string) === c ? '#1976d2' : (c === '#ffffff' ? '#ccc' : 'transparent')}`, boxShadow: (d.fontColor as string) === c ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }} />
             ))}
           </div>
+        </EpSection>
+      )}
+
+      {w.type === 'divider' && (
+        <EpSection>
+          <Eps>Divider Line</Eps>
+          <Eps style={{ marginTop: 4 }}>Thickness</Eps>
+          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+            {[1, 2, 3].map(px => {
+              const active = (Number(d.thickness) || 1) === px;
+              return (
+                <button key={px} type="button" onClick={() => u('thickness', px)}
+                  style={{ flex: 1, padding: '6px 0', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                    border: `1.5px solid ${active ? '#1976d2' : '#e0e0e0'}`, background: active ? '#e3f2fd' : '#fff', color: active ? '#1976d2' : '#55595c' }}>
+                  {px}px
+                </button>
+              );
+            })}
+          </div>
+          <Eps style={{ marginTop: 8 }}>Color</Eps>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+            {[['#1a1916','Black'],['#374151','Slate'],['#2563EB','Blue'],['#1a237e','Dark Blue'],['#DC2626','Red'],['#15803D','Green'],['#9aa0a6','Gray'],['#ffffff','White']].map(([c,n]) => (
+              <div key={c} title={n} onClick={() => u('color', c)}
+                style={{ width: 22, height: 22, borderRadius: 4, background: c, cursor: 'pointer', border: `1.5px solid ${(d.color as string) === c ? '#1976d2' : (c === '#ffffff' ? '#ccc' : 'transparent')}`, boxShadow: (d.color as string) === c ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }} />
+            ))}
+          </div>
+          <Fd label="Top margin (px)" style={{ marginTop: 8 }}>
+            <input type="number" min={0} max={48} value={(d.topMargin as number) ?? 0} onChange={e => u('topMargin', Math.max(0, +e.target.value))} style={{ ...fiStyle, width: '100%' }} />
+          </Fd>
+          <Fd label="Bottom margin (px)">
+            <input type="number" min={0} max={48} value={(d.bottomMargin as number) ?? 0} onChange={e => u('bottomMargin', Math.max(0, +e.target.value))} style={{ ...fiStyle, width: '100%' }} />
+          </Fd>
+          <p style={{ fontSize: 11, color: '#78828c', marginTop: 8, marginBottom: 0 }}>Drag the widget edges on the canvas to set the line&apos;s width.</p>
         </EpSection>
       )}
 

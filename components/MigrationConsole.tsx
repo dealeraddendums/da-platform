@@ -24,6 +24,7 @@ interface Row {
   freshbooksStoppedAt: string | null;
   freshbooksStopPending: boolean;
   assignedTo: string | null;
+  migrationStatus: string | null;
 }
 interface Wave { waveId: string; sentAt: string | null; sent: number; migrated: number; pending: number; }
 interface Operator { id: string; name: string; }
@@ -75,6 +76,8 @@ export default function MigrationConsole() {
   // filters
   const [readyOnly, setReadyOnly] = useState(false);
   const [fbPending, setFbPending] = useState(false);
+  const [stagedOnly, setStagedOnly] = useState(false);
+  const [stagingId, setStagingId] = useState<string | null>(null);
   const [group, setGroup] = useState("");
   const [state, setState] = useState("");
   const [search, setSearch] = useState("");
@@ -160,6 +163,20 @@ export default function MigrationConsole() {
     } catch { alert("Resend failed"); } finally { setResendingId(null); }
   }
 
+  // Stage a dealer for an upcoming wave → migration_status='pending', which
+  // FREEZES the DA Legacy ETL for that dealer (it stops overwriting their
+  // settings before migration). Reflected optimistically; full reload after.
+  async function stageDealer(row: Row) {
+    if (!confirm(`Stage ${row.name} for migration? This freezes the ETL for this dealer (it stops overwriting their settings) until they're migrated.`)) return;
+    setStagingId(row.id);
+    try {
+      const res = await fetch("/api/migration/stage-dealer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealer_id: row.id }) });
+      const j = await res.json();
+      if (!res.ok) { alert(j.error ?? "Stage failed"); return; }
+      setData((d) => d && { ...d, rows: d.rows.map((r) => r.id === row.id ? { ...r, migrationStatus: "pending" } : r) });
+    } catch { alert("Stage failed"); } finally { setStagingId(null); }
+  }
+
   async function markFbStopped(row: Row, stopped: boolean) {
     try {
       const res = await fetch("/api/migration/freshbooks-stopped", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealerId: row.id, stopped }) });
@@ -236,6 +253,7 @@ export default function MigrationConsole() {
     let rows = data?.rows ?? [];
     if (readyOnly) rows = rows.filter((r) => r.ready);
     if (fbPending) rows = rows.filter((r) => r.freshbooksStopPending);
+    if (stagedOnly) rows = rows.filter((r) => r.migrationStatus === "pending");
     if (assignFilter === "me") rows = rows.filter((r) => r.assignedTo === me);
     else if (assignFilter === "unassigned") rows = rows.filter((r) => !r.assignedTo);
     else if (assignFilter) rows = rows.filter((r) => r.assignedTo === assignFilter);
@@ -247,7 +265,7 @@ export default function MigrationConsole() {
       rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.dealer_id.toLowerCase().includes(q) || (r.groupName ?? "").toLowerCase().includes(q));
     }
     return rows;
-  }, [data, readyOnly, fbPending, assignFilter, me, statusFilter, group, state, search]);
+  }, [data, readyOnly, fbPending, stagedOnly, assignFilter, me, statusFilter, group, state, search]);
 
   // "My batch" — dealers assigned to me, by stage.
   const myBatch = useMemo(() => {
@@ -274,6 +292,7 @@ export default function MigrationConsole() {
       stalled: rows.filter((r) => r.inviteStatus === "stalled" || r.inviteStatus === "expired").length,
       migrated: rows.filter((r) => r.inviteStatus === "migrated").length,
       fbPending: rows.filter((r) => r.freshbooksStopPending).length,
+      staged: rows.filter((r) => r.migrationStatus === "pending").length,
       unassigned: rows.filter((r) => r.eligible && !r.assignedTo).length,
     };
   }, [data]);
@@ -411,6 +430,9 @@ export default function MigrationConsole() {
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }} title="Migrated dealers whose FreshBooks recurring still needs stopping">
           <input type="checkbox" checked={fbPending} onChange={(e) => setFbPending(e.target.checked)} /> FB stop pending
         </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }} title="Dealers staged for a wave (migration_status=pending) — ETL is frozen for them">
+          <input type="checkbox" checked={stagedOnly} onChange={(e) => setStagedOnly(e.target.checked)} /> Staged{live.staged ? ` (${live.staged})` : ""}
+        </label>
         <button
           type="button"
           onClick={() => setSelected((prev) => { const n = new Set(prev); const readyVisible = filtered.filter((r) => r.ready); const allSel = readyVisible.length > 0 && readyVisible.every((r) => n.has(r.id)); readyVisible.forEach((r) => allSel ? n.delete(r.id) : n.add(r.id)); return n; })}
@@ -525,6 +547,19 @@ export default function MigrationConsole() {
                         title="Resend the migration invite (fresh code)"
                         style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
                         {resendingId === r.id ? "…" : "resend"}
+                      </button>
+                    )}
+                    {r.migrationStatus === "pending" && (
+                      <span title="Staged for a wave — DA Legacy ETL is frozen for this dealer (settings no longer overwritten)"
+                        style={{ background: "#fff3e0", color: "#e65100", border: "1px solid #ffe0b2", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" }}>
+                        ⏸ Pending · ETL frozen
+                      </span>
+                    )}
+                    {r.migrationStatus !== "pending" && r.inviteStatus !== "migrated" && (
+                      <button type="button" onClick={() => void stageDealer(r)} disabled={stagingId === r.id}
+                        title="Stage for migration — freezes the ETL so it stops overwriting this dealer's settings"
+                        style={{ fontSize: 11, color: "#e65100", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+                        {stagingId === r.id ? "…" : "stage"}
                       </button>
                     )}
                   </div>

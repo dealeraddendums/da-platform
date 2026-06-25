@@ -15,7 +15,7 @@ export type WidgetType =
   | 'askbar' | 'dealer' | 'infobox' | 'headerbar' | 'customtext'
   | 'sigline' | 'description' | 'features' | 'barcode' | 'qrcode' | 'custom'
   | 'suggested_options' | 'suggested_price'
-  | 'bgimage' | 'vehiclephoto' | 'disclaimer' | 'mpg';
+  | 'bgimage' | 'vehiclephoto' | 'disclaimer' | 'mpg' | 'divider';
 
 export interface OptionItem {
   name: string;
