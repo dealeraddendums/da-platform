@@ -160,7 +160,7 @@ export default async function DashboardLayout({
           <MainContent>{children}</MainContent>
         </BuilderBreadcrumbProvider>
       </div>
-      {/* ProductFruits — in-app tours/onboarding + the published "Elvin" chat
+      {/* ProductFruits — in-app tours/onboarding + the published "Vin" chat
           widget (replaces the old custom HelpWidget bubble). Client-only;
           initializes the SDK for the signed-in user. The full Help Center page
           + its /api/help routes remain for browsing articles. */}
