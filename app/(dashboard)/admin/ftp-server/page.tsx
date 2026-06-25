@@ -525,6 +525,57 @@ function fmtSize(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+// FTP LIST dates arrive as "Jun 25 07:02" (recent files: month day time, in the
+// server's UTC) or "Jun 25 2025" (older files: month day year). Parse as UTC and
+// render in Pacific (America/Los_Angeles) so the times match the operator's wall
+// clock instead of showing UTC.
+const FTP_MONTHS: Record<string, number> = {
+  Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
+};
+function fmtFtpDate(raw: string): string {
+  if (!raw) return "—";
+  const parts = raw.trim().split(/\s+/);
+  if (parts.length < 3) return raw;
+  const [mon, dayStr, last] = parts;
+  const m = FTP_MONTHS[mon];
+  const day = Number(dayStr);
+  if (m === undefined || !Number.isFinite(day)) return raw;
+
+  let year: number, hour = 0, minute = 0;
+  if (last.includes(":")) {
+    const [h, mi] = last.split(":").map(Number);
+    hour = h; minute = mi;
+    // FTP omits the year for recent files — infer the most recent occurrence
+    // (this month/day in the future means it was last year).
+    const now = new Date();
+    year = now.getUTCFullYear();
+    if (Date.UTC(year, m, day, hour, minute) > now.getTime() + 86_400_000) year -= 1;
+  } else {
+    year = Number(last);
+    if (!Number.isFinite(year)) return raw;
+  }
+  const d = new Date(Date.UTC(year, m, day, hour, minute));
+  if (isNaN(d.getTime())) return raw;
+  return d.toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles",
+    month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
+// Self-contained spinner (SMIL-animated SVG — no CSS keyframes needed) for the
+// "Preparing download…" button state.
+function BtnSpinner() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" style={{ display: "block" }} aria-hidden="true">
+      <circle cx="12" cy="12" r="9" fill="none" stroke="#fff" strokeWidth="3" strokeOpacity="0.3" />
+      <path d="M12 3 a9 9 0 0 1 9 9" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round">
+        <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.7s" repeatCount="indefinite" />
+      </path>
+    </svg>
+  );
+}
+
 function joinPath(base: string, seg: string): string {
   const cleanBase = base === "/" ? "" : base.replace(/\/+$/, "");
   return `${cleanBase}/${seg}`;
@@ -548,6 +599,7 @@ function FileBrowserModal({ row, onClose, onFlash }: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<string | null>(null);
 
   const load = useCallback(async (p: string) => {
     setLoading(true);
@@ -584,14 +636,43 @@ function FileBrowserModal({ row, onClose, onFlash }: {
   }
 
   async function download(name: string) {
-    const url = `/api/admin/ftp/download/${encodeURIComponent(row.username)}?path=${encodeURIComponent(path)}&file=${encodeURIComponent(name)}`;
-    // Trigger native download via hidden anchor.
+    if (downloading) return;
+    setError(null);
+    setDownloading(name);
+
+    // Download-cookie handshake: the route echoes our token back as a
+    // (non-HttpOnly) cookie the moment it starts streaming the response — i.e.
+    // when the browser's native download + progress bar take over. We poll for
+    // that cookie so we can drop the "Preparing…" state exactly then, WITHOUT
+    // buffering the (multi-GB) file in JS memory. A 30s watchdog surfaces an
+    // error if the stream never starts.
+    const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const cookieName = `ftpdl_${token}`;
+    const url = `/api/admin/ftp/download/${encodeURIComponent(row.username)}`
+      + `?path=${encodeURIComponent(path)}&file=${encodeURIComponent(name)}`
+      + `&dl_token=${encodeURIComponent(token)}`;
+
+    // Trigger native streaming download via hidden anchor.
     const a = document.createElement("a");
     a.href = url;
     a.download = name;
     document.body.appendChild(a);
     a.click();
     a.remove();
+
+    const startedAt = Date.now();
+    const poll = setInterval(() => {
+      const seen = document.cookie.split("; ").some(c => c.startsWith(`${cookieName}=`));
+      if (seen) {
+        document.cookie = `${cookieName}=; Path=/; Max-Age=0`;  // consume it
+        clearInterval(poll);
+        setDownloading(null);
+      } else if (Date.now() - startedAt > 30_000) {
+        clearInterval(poll);
+        setDownloading(null);
+        setError(`Download failed — try again ("${name}")`);
+      }
+    }, 500);
   }
 
   async function remove(name: string) {
@@ -715,7 +796,7 @@ function FileBrowserModal({ row, onClose, onFlash }: {
                   <td style={{ padding: "8px 12px", textAlign: "right", color: "#666", fontSize: 12 }}>
                     {f.isDir ? "—" : fmtSize(f.size)}
                   </td>
-                  <td style={{ padding: "8px 12px", color: "#666", fontSize: 12 }}>{f.date}</td>
+                  <td style={{ padding: "8px 12px", color: "#666", fontSize: 12 }}>{fmtFtpDate(f.date)}</td>
                   <td style={{ padding: "8px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
                     {f.isDir ? (
                       <button
@@ -728,9 +809,11 @@ function FileBrowserModal({ row, onClose, onFlash }: {
                       <>
                         <button
                           onClick={() => void download(f.name)}
-                          style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", marginRight: 6 }}
+                          disabled={downloading !== null}
+                          title={downloading === f.name ? "Preparing download…" : undefined}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", fontSize: 11, fontWeight: 600, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: downloading ? "wait" : "pointer", fontFamily: "inherit", marginRight: 6, opacity: downloading && downloading !== f.name ? 0.55 : 1 }}
                         >
-                          Download
+                          {downloading === f.name ? (<><BtnSpinner /> Preparing…</>) : "Download"}
                         </button>
                         <button
                           onClick={() => void remove(f.name)}
