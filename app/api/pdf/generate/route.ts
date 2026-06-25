@@ -132,7 +132,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const libDescMap: Record<string, string | null> = {};
     const libRequiredMap: Record<string, boolean> = {};
     const libLayoutMap: Record<string, { separator_above: boolean; separator_below: boolean; spaces: number }> = {};
-    const libRuleByName = new Map<string, Parameters<typeof matchesRulesRow>[0]>();
+    // Keyed by option_name → ARRAY of rules: a dealer can have multiple library
+    // rows with the same name (e.g. an accidental duplicate). Collapsing them to
+    // one (Map<name, rule>) let a misconfigured "applies to none" duplicate win
+    // the slot and drop the real product at print time (KARR-on-Maverick bug).
+    const libRulesByName = new Map<string, Parameters<typeof matchesRulesRow>[0][]>();
     if (allOptNames.length > 0) {
       const { data: libRows } = await admin
         .from("addendum_library")
@@ -148,7 +152,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           separator_below: lr.separator_below === true,
           spaces: typeof lr.spaces === "number" ? lr.spaces : 0,
         };
-        libRuleByName.set(name, {
+        const ruleRow = {
           applies_to: lr.applies_to as string | null,
           ad_types: lr.ad_types as string[] | null,
           makes: lr.makes as string | null,
@@ -165,7 +169,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           msrp_condition: (lr.msrp_condition as number | null) ?? 0,
           msrp1: lr.msrp1 as number | null,
           msrp2: lr.msrp2 as number | null,
-        });
+        };
+        const existingRules = libRulesByName.get(name);
+        if (existingRules) existingRules.push(ruleRow);
+        else libRulesByName.set(name, [ruleRow]);
       }
     }
 
@@ -209,9 +216,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Drop saved options whose library row exists but doesn't match this
     // vehicle. Custom saves (no library row) are kept.
     const savedFiltered = (optionRows ?? []).filter(r => {
-      const rule = libRuleByName.get(r.option_name as string);
-      if (!rule) return true;
-      return matchesRulesRow(rule, vehicleData);
+      const rules = libRulesByName.get(r.option_name as string);
+      if (!rules || rules.length === 0) return true;
+      // Keep the saved option if ANY library definition for this name matches
+      // the vehicle. A single misconfigured "applies to none" duplicate sharing
+      // the same name must not drop the real (e.g. ALL-vehicles) product.
+      return rules.some(rule => matchesRulesRow(rule, vehicleData));
     });
 
     const options = [
