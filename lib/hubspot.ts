@@ -240,6 +240,33 @@ async function searchByProperty(
   return parsed.results?.[0] ?? null;
 }
 
+// Find a same-named record that is MISSING the natural key (keyProperty) — an
+// orphaned early-import "original". Used by upsertObject's name-dedup so we
+// adopt+heal it instead of creating a duplicate. The missing-key filter means
+// we never match a record that already belongs to another dealer/group.
+async function searchByNameMissingKey(
+  object: "companies" | "contacts",
+  name: string,
+  keyProperty: string,
+): Promise<HubspotObject | null> {
+  const res = await fetch(`${BASE}/objects/${object}/search`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      filterGroups: [{ filters: [
+        { propertyName: "name", operator: "EQ", value: name },
+        { propertyName: keyProperty, operator: "NOT_HAS_PROPERTY" },
+      ] }],
+      limit: 1,
+    }),
+  });
+  if (!res.ok) {
+    throw new HubspotError(res.status, `search ${object} by name ${res.status}`, await readBody(res));
+  }
+  const parsed = await res.json() as SearchResponse;
+  return parsed.results?.[0] ?? null;
+}
+
 async function createObject(
   object: "companies" | "contacts",
   properties: CompanyProperties,
@@ -365,6 +392,13 @@ export async function upsertObject(args: {
    * for a dealer whose company was deleted in HubSpot manufactured a blank.
    */
   updateOnly?: boolean;
+  /**
+   * Exact name to dedup on before creating. When the natural-key search misses
+   * but a same-named record exists WITHOUT the key (an orphaned early-import
+   * original), adopt + PATCH it (healing the key) rather than creating a dup.
+   * Pass the dealer/group name on create-capable paths.
+   */
+  dedupByName?: string;
 }): Promise<{ hubspotId: string; created: boolean }> {
   // Strip null/undefined values — HubSpot rejects null on enumerations
   // and treats empty string as "set to empty" which clobbers operator
@@ -410,6 +444,21 @@ export async function upsertObject(args: {
   if (args.dedupCheck) {
     const hit = await args.dedupCheck();
     if (hit) throw new DedupSkipError(hit.id, hit.matchedOn);
+  }
+
+  // (2.6) Name-dedup heal — the #1 source of duplicate Companies: an early-import
+  //       "original" shares this object's name but has NO natural key
+  //       (platformid/groupid), so stage 2's key search missed it and we'd create
+  //       a duplicate. Adopt + PATCH that orphan instead — the PATCH applies the
+  //       caller's properties (which include the key), healing it so future runs
+  //       match by key. Matches ONLY name + missing-key, so it never hijacks a
+  //       record that already belongs to another dealer/group.
+  if (args.dedupByName) {
+    const orphan = await searchByNameMissingKey(args.object, args.dedupByName, args.searchProperty);
+    if (orphan) {
+      const updated = await updateObject(args.object, orphan.id, { ...clean, ...cleanCreateOnly });
+      return { hubspotId: updated.id, created: true /* caller writes id back */ };
+    }
   }
 
   // Refresh-only caller: do NOT create. The stored id is stale (404) and no

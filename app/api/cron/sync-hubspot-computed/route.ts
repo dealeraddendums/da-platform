@@ -89,14 +89,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     };
 
     // ── Dealers ──────────────────────────────────────────────────────────
+    // PostgREST caps a single select at 1000 rows, so page through ALL active
+    // dealers with a hubspot_company_id (there are >2000 — the old un-paged
+    // query silently refreshed only the first 1000 every night).
     // `as any` because Supabase types don't know about downgraded_at yet
     // (migration 083). Runtime is fine; only TS is stale.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: dealers } = await (admin as any)
-      .from("dealers")
-      .select("id, dealer_id, account_type, created_at, last30, hubspot_company_id, group_id, downgraded_at")
-      .not("hubspot_company_id", "is", null)
-      .eq("active", true) as { data: Array<{ id: string; dealer_id: string; account_type: string | null; created_at: string | null; last30: number | null; hubspot_company_id: string; group_id: string | null; downgraded_at: string | null }> | null };
+    type DealerRow = { id: string; dealer_id: string; account_type: string | null; created_at: string | null; last30: number | null; hubspot_company_id: string; group_id: string | null; downgraded_at: string | null };
+    const dealers: DealerRow[] = [];
+    for (let from = 0; ; from += 1000) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: page } = await (admin as any)
+        .from("dealers")
+        .select("id, dealer_id, account_type, created_at, last30, hubspot_company_id, group_id, downgraded_at")
+        .not("hubspot_company_id", "is", null)
+        .eq("active", true)
+        .order("id", { ascending: true })
+        .range(from, from + 999) as { data: DealerRow[] | null };
+      const rows = page ?? [];
+      dealers.push(...rows);
+      if (rows.length < 1000) break;
+    }
 
     const twelveMonthsAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
     const thirtyDaysAgo   = new Date(Date.now() -  30 * 24 * 60 * 60 * 1000).toISOString();

@@ -120,6 +120,20 @@ async function searchByProperty(object, propertyName, value) {
   return r.json?.results?.[0] ?? null;
 }
 
+// Same-name record that's MISSING the natural key — an orphaned early-import
+// original. Adopt+heal it instead of creating a duplicate (mirrors
+// lib/hubspot.ts upsertObject). Never matches a record that already has the key.
+async function searchByNameMissingKey(object, name, keyProperty) {
+  const r = await hsFetch("POST", `/objects/${object}/search`, {
+    filterGroups: [{ filters: [
+      { propertyName: "name", operator: "EQ", value: name },
+      { propertyName: keyProperty, operator: "NOT_HAS_PROPERTY" },
+    ] }],
+    limit: 1,
+  });
+  return r.json?.results?.[0] ?? null;
+}
+
 async function upsert({ object, properties, existingId, searchProperty, searchValue }) {
   const clean = {};
   for (const [k, v] of Object.entries(properties)) {
@@ -144,6 +158,16 @@ async function upsert({ object, properties, existingId, searchProperty, searchVa
     if (found) {
       const r = await hsFetch("PATCH", `/objects/${object}/${encodeURIComponent(found.id)}`, { properties: clean });
       return { hubspotId: r.json.id, created: true };
+    }
+  }
+  // Name-dedup heal: adopt a same-name orphan lacking the natural key (the
+  // early-import originals that the key search above missed) instead of
+  // creating a duplicate. PATCH applies the key, healing it. Companies only.
+  if (object === "companies" && clean.name) {
+    const orphan = await searchByNameMissingKey(object, clean.name, searchProperty);
+    if (orphan) {
+      const upd = await hsFetch("PATCH", `/objects/${object}/${encodeURIComponent(orphan.id)}`, { properties: clean });
+      return { hubspotId: upd.json.id, created: true };
     }
   }
   const r = await hsFetch("POST", `/objects/${object}`, { properties: clean });

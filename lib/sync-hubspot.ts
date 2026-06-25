@@ -18,7 +18,6 @@ import {
   INDUSTRY,
   normalizeSubscriptionType,
   isPayingAccount,
-  findUnlinkedOriginal,
   DedupSkipError,
 } from "@/lib/hubspot";
 import { isOverAllowance, isFreeAccountType } from "@/lib/print-eligibility";
@@ -339,11 +338,11 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
       existingHubspotId: dealer.hubspot_company_id,
       searchProperty: "platformid",
       searchValue: dealer.dealer_id,
-      dedupCheck: () => findUnlinkedOriginal({
-        name: dealer.name,
-        phone: dealer.phone,
-        ownKey: "platformid",
-      }),
+      // Adopt + heal an orphaned early-import original (same name, no platformid)
+      // instead of creating a duplicate — the PATCH sets platformid so future
+      // runs match by key. (Replaces the old findUnlinkedOriginal skip-and-alert,
+      // which left such dealers unlinked and let the backfill create dups.)
+      dedupByName: dealer.name,
     });
 
     if (created || hubspotId !== dealer.hubspot_company_id) {
@@ -400,11 +399,9 @@ export async function syncGroupToHubspot(groupId: string, opts?: { sourceForm?: 
       existingHubspotId: group.hubspot_company_id,
       searchProperty: "groupid",
       searchValue: group.internal_id,
-      dedupCheck: () => findUnlinkedOriginal({
-        name: group.name,
-        phone: group.phone,
-        ownKey: "groupid",
-      }),
+      // Adopt + heal an orphaned same-name original lacking groupid, instead of
+      // creating a duplicate (sets groupid via the PATCH). See dealer path above.
+      dedupByName: group.name ?? undefined,
     });
 
     if (created || hubspotId !== group.hubspot_company_id) {
