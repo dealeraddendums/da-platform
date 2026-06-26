@@ -214,7 +214,9 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const inv = bar.toLowerCase() === '#ffffff' ? '#000000' : '#ffffff';
     const labelSec = `<div style="flex:1;min-width:0;display:flex;align-items:center;box-sizing:border-box;background:${bar};color:${inv};padding:5px 8px;font-size:${lfs}px;font-weight:800;letter-spacing:-.01em">${d.label}</div>`;
     const priceSec = `<div style="display:flex;align-items:center;justify-content:flex-end;box-sizing:border-box;background:${inv};color:${bar};padding:5px 10px;font-size:${vfs}px;font-weight:800;font-family:monospace;min-width:120px;text-align:right;white-space:nowrap">${d.value}</div>`;
-    return `<div style="display:flex;align-items:stretch;width:100%;min-height:100%;line-height:1.4;border:2px solid #000;box-sizing:border-box">${labelSec}${priceSec}</div>`;
+    // Natural height (no min-height:100%) so the widget sits flush to the bar —
+    // a taller bounding box no longer leaves trailing whitespace below it.
+    return `<div style="display:flex;align-items:stretch;width:100%;line-height:1.4;border:2px solid #000;box-sizing:border-box">${labelSec}${priceSec}</div>`;
   }
 
   if (type === 'subtotal') {
@@ -246,7 +248,9 @@ export function renderW(type: string, d: D, fontScale: number): string {
     // Subtitle: full-width strip below the bar, bar-color background + inverse
     // text, with ≥12px bottom padding so it isn't cramped.
     const sub = hasSub ? `<div style="width:100%;box-sizing:border-box;background:${bar};color:${inv};font-size:${sfs}px;font-style:italic;padding:3px 8px 12px">${d.subtitle}</div>` : '';
-    return `<div style="display:flex;flex-direction:column;width:100%;min-height:100%;line-height:1.4;border:2px solid #000;box-sizing:border-box">${barRow}${sub}</div>`;
+    // Natural height (no min-height:100%): with no subtitle the widget is flush
+    // to the bar; the subtitle strip is the ONLY thing that adds height below it.
+    return `<div style="display:flex;flex-direction:column;width:100%;line-height:1.4;border:2px solid #000;box-sizing:border-box">${barRow}${sub}</div>`;
   }
 
   if (type === 'dealer') {
