@@ -144,11 +144,11 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     label: 'Dealer Asking Price:',
     value: '$28,596.00',
     subtitle: "",
-    // Built-in filled bar so dealers needn't bake a price bar into the bg image.
-    // Default black box + white text matches the old baked-bar look. (Legacy
-    // saved widgets have no bgColor → renderer draws no box → unchanged.)
-    bgColor: '#000000',
-    textColor: '#ffffff',
+    // Two-tone inverse bar: barColor is the LABEL section background; the price
+    // box is its inverse. Default black (white label / black-on-white price).
+    // Legacy widgets with no barColor keep the overlay render via labelColor/
+    // valueColor.
+    barColor: '#000000',
     labelColor: '#ffffff',
     valueColor: '#000000',
     labelFontSize: 1.0,
@@ -202,7 +202,7 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     bgColor: '#000000',
     textColor: '#ffffff',
   },
-  suggested_price: { label: 'Suggested Asking Price:', value: '$29,000.00', labelColor: '#ffffff', valueColor: '#000000', labelFontSize: 1.0, valueFontSize: 1.0 },
+  suggested_price: { label: 'Suggested Asking Price:', value: '$29,000.00', barColor: '#000000', labelColor: '#ffffff', valueColor: '#000000', labelFontSize: 1.0, valueFontSize: 1.0 },
   // Two numbers (no labels — the background graphic supplies "CITY"/"HWY").
   // `order` flips which side prints first; `gap` is px between the two
   // numbers so the operator can clear the center pump art.

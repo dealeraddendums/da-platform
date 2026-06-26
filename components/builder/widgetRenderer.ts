@@ -203,9 +203,18 @@ export function renderW(type: string, d: D, fontScale: number): string {
   if (type === 'suggested_price') {
     const lfs = Math.round(12 * fs * ((d.labelFontSize as number) || 1));
     const vfs = Math.round(13 * fs * ((d.valueFontSize as number) || 1));
-    const lc = (d.labelColor as string) || '#ffffff';
-    const vc = (d.valueColor as string) || '#000000';
-    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5"><div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div></div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}</div></div>`;
+    // Two-tone inverse bar (same pattern as askbar). Legacy widgets (no barColor)
+    // keep the original overlay render via labelColor/valueColor.
+    const bar = (d.barColor as string) || '';
+    if (!bar) {
+      const lc = (d.labelColor as string) || '#ffffff';
+      const vc = (d.valueColor as string) || '#000000';
+      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5"><div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div></div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}</div></div>`;
+    }
+    const inv = bar.toLowerCase() === '#ffffff' ? '#000000' : '#ffffff';
+    const labelSec = `<div style="flex:1;min-width:0;display:flex;align-items:center;box-sizing:border-box;background:${bar};color:${inv};padding:5px 8px;font-size:${lfs}px;font-weight:800;letter-spacing:-.01em">${d.label}</div>`;
+    const priceSec = `<div style="display:flex;align-items:center;justify-content:flex-end;box-sizing:border-box;background:${inv};color:${bar};padding:5px 10px;font-size:${vfs}px;font-weight:800;font-family:monospace;min-width:120px;text-align:right;white-space:nowrap">${d.value}</div>`;
+    return `<div style="display:flex;align-items:stretch;width:100%;min-height:100%;line-height:1.4">${labelSec}${priceSec}</div>`;
   }
 
   if (type === 'subtotal') {
@@ -217,25 +226,27 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const lfs = Math.round(12 * fs * ((d.labelFontSize as number) || 1));
     const vfs = Math.round(13 * fs * ((d.valueFontSize as number) || 1));
     const sfs = Math.round(8 * fs * ((d.labelFontSize as number) || 1));
-    // textColor (new, default white) drives both label + price; falls back to
-    // the legacy per-element labelColor/valueColor so existing saved widgets
-    // render unchanged. bgColor draws the filled bar; legacy widgets have none.
-    const bg = (d.bgColor as string) || '';
-    const tc = (d.textColor as string) || '';
-    const lc = tc || (d.labelColor as string) || '#ffffff';
-    const vc = tc || (d.valueColor as string) || '#000000';
     const hasSub = !!d.subtitle;
-    const labelBlock = `<div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div>${hasSub ? `<div style="font-size:${sfs}px;color:${lc};font-style:italic;margin-top:1px">${d.subtitle}</div>` : ''}</div>`;
-    const valueBlock = `<div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}${(d.priceSuffix as string) || ''}</div>`;
-    if (bg) {
-      // Filled box: fills the widget (min-height:100%) and grows if content is
-      // taller; extra bottom padding when a subtitle is present so it isn't
-      // cramped against the bottom edge.
-      const padBottom = hasSub ? 12 : 6;
-      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;min-height:100%;box-sizing:border-box;background:${bg};padding:5px 6px ${padBottom}px;line-height:1.5">${labelBlock}${valueBlock}</div>`;
+    // Two-tone inverse bar: barColor sets the LABEL section background; the price
+    // box uses the inverse. barColor falls back to the brief bgColor field, then
+    // legacy: a widget with neither barColor nor bgColor keeps the original
+    // overlay-on-bg-image render (labelColor/valueColor), unchanged.
+    const bar = (d.barColor as string) || (d.bgColor as string) || '';
+    if (!bar) {
+      const lc = (d.labelColor as string) || '#ffffff';
+      const vc = (d.valueColor as string) || '#000000';
+      const labelBlock = `<div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div>${hasSub ? `<div style="font-size:${sfs}px;color:${lc};font-style:italic;margin-top:1px">${d.subtitle}</div>` : ''}</div>`;
+      const valueBlock = `<div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}${(d.priceSuffix as string) || ''}</div>`;
+      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5">${labelBlock}${valueBlock}</div>`;
     }
-    // Legacy (no bgColor): byte-for-byte the original overlay-on-bg-image style.
-    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5">${labelBlock}${valueBlock}</div>`;
+    const inv = bar.toLowerCase() === '#ffffff' ? '#000000' : '#ffffff';
+    const labelSec = `<div style="flex:1;min-width:0;display:flex;align-items:center;box-sizing:border-box;background:${bar};color:${inv};padding:5px 8px;font-size:${lfs}px;font-weight:800;letter-spacing:-.01em">${d.label}</div>`;
+    const priceSec = `<div style="display:flex;align-items:center;justify-content:flex-end;box-sizing:border-box;background:${inv};color:${bar};padding:5px 10px;font-size:${vfs}px;font-weight:800;font-family:monospace;min-width:120px;text-align:right;white-space:nowrap">${d.value}${(d.priceSuffix as string) || ''}</div>`;
+    const barRow = `<div style="display:flex;align-items:stretch;width:100%">${labelSec}${priceSec}</div>`;
+    // Subtitle: full-width strip below the bar, bar-color background + inverse
+    // text, with ≥12px bottom padding so it isn't cramped.
+    const sub = hasSub ? `<div style="width:100%;box-sizing:border-box;background:${bar};color:${inv};font-size:${sfs}px;font-style:italic;padding:3px 8px 12px">${d.subtitle}</div>` : '';
+    return `<div style="display:flex;flex-direction:column;width:100%;min-height:100%;line-height:1.4">${barRow}${sub}</div>`;
   }
 
   if (type === 'dealer') {
@@ -256,13 +267,16 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const ta = (d.textAlign as string) || (d.align as string) || 'left';
     const lh = (d.lineHeight as number) || 1.5;
     const rawText = (d.text as string) || '';
-    // Replace {{token}} patterns with grey italic placeholders for canvas preview.
-    // At PDF time, pdf-html.ts pre-resolves these before calling renderW.
+    // Rich HTML from the widget's RichTextEditor toolbar (bold/italic/underline,
+    // font color + size) is preserved via the description allowlist; the
+    // .description-html class resets <p>/<ul> margins on canvas AND PDF (same as
+    // the Description widget). Legacy plain text still works: \n→<br>, and any
+    // {{token}} previews as a grey placeholder (the PDF path pre-resolves them).
     const html = rawText
       .replace(/\n/g, '<br>')
       .replace(/\{\{([^}]+)\}\}/g, (_, key: string) =>
         `<em style="color:#bbb;font-style:italic">[${key.trim()}]</em>`);
-    return `<div style="padding:4px 0"><div style="font-size:${d.fs || 10}px;text-align:${ta};color:#555;line-height:${lh}">${sanitizeProductHtml(html)}</div></div>`;
+    return `<div style="padding:4px 0"><div class="description-html" style="font-size:${d.fs || 10}px;text-align:${ta};color:#555;line-height:${lh}">${sanitizeProductDescription(html)}</div></div>`;
   }
 
   if (type === 'sigline') {

@@ -8,6 +8,7 @@ import {
   DEFS, DEFAULT_CUSTOM_WIDGETS, snapV, makeWidget, getPaperDims,
 } from './constants';
 import { renderW } from './widgetRenderer';
+import RichTextEditor from '@/components/RichTextEditor';
 import { WATERMARK_BRANDS, watermarkUrl } from '@/lib/watermarks';
 import type { Widget, PaperSize, CustomWidgetDef, VehiclePreload, SavedTemplate, CustomSize } from './types';
 import { useBuilderBreadcrumb } from '@/contexts/BuilderBreadcrumb';
@@ -2224,9 +2225,6 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
 
   const [qrSavingDefault, setQrSavingDefault] = useState(false);
   const [qrDefaultSaved, setQrDefaultSaved] = useState(false);
-  // Must be unconditional — calling useRef inside a conditional IIFE causes React error #310
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
   // BG Image upload state — used by the bgimage property panel
   const bgUploadRef = useRef<HTMLInputElement>(null);
   const [bgUploading, setBgUploading] = useState(false);
@@ -2358,12 +2356,10 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Eps>Suggested Price Bar</Eps>
           <Fd label="Label"><input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} /></Fd>
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Displays MSRP + all options (required + suggested). Updates automatically at print time.</div>
-          <Fd label="Label color">
-            <ColorPair value={(d.labelColor as string) || '#ffffff'} onChange={v => u('labelColor', v)} />
+          <Fd label="Bar Color">
+            <ColorPair value={(d.barColor as string) || '#000000'} onChange={v => u('barColor', v)} />
           </Fd>
-          <Fd label="Price color">
-            <ColorPair value={(d.valueColor as string) || '#000000'} onChange={v => u('valueColor', v)} />
-          </Fd>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Two-tone bar: the price box uses the inverse color automatically.</div>
         </EpSection>
       )}
 
@@ -2380,12 +2376,10 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Fd label="Label"><input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} /></Fd>
           <Fd label="Subtitle (optional)"><input value={(d.subtitle as string) || ''} onChange={e => u('subtitle', e.target.value)} style={fiStyle} /></Fd>
           <Fd label="Symbol after price (optional)"><input value={(d.priceSuffix as string) || ''} maxLength={3} placeholder="e.g. *" onChange={e => u('priceSuffix', e.target.value)} style={fiStyle} /></Fd>
-          <Fd label="Background Color">
-            <ColorSwatches value={(d.bgColor as string) || '#000000'} onChange={v => u('bgColor', v)} />
+          <Fd label="Bar Color">
+            <ColorPair value={(d.barColor as string) || '#000000'} onChange={v => u('barColor', v)} />
           </Fd>
-          <Fd label="Text Color">
-            <ColorSwatches value={(d.textColor as string) || '#ffffff'} onChange={v => u('textColor', v)} />
-          </Fd>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Two-tone bar: the price box uses the inverse color automatically. A subtitle prints below the bar in the bar color.</div>
         </EpSection>
       )}
 
@@ -2545,23 +2539,22 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
 
       {w.type === 'customtext' && (() => {
         function insertToken(token: string) {
-          const el = textareaRef.current;
           const cur = (d.text as string) || '';
-          if (!el) { u('text', cur + token); return; }
-          const start = el.selectionStart ?? cur.length;
-          const end = el.selectionEnd ?? cur.length;
-          const next = cur.slice(0, start) + token + cur.slice(end);
-          u('text', next);
-          requestAnimationFrame(() => {
-            el.focus();
-            el.setSelectionRange(start + token.length, start + token.length);
-          });
+          // RichTextEditor is a contentEditable (tiptap); append the token to the
+          // stored HTML — tiptap normalizes it into the doc and the operator can
+          // reposition/format it. Tokens resolve at print time.
+          u('text', cur ? `${cur} ${token}` : token);
         }
         return (
           <EpSection>
             <Eps>Custom Text</Eps>
-            <textarea ref={textareaRef} value={(d.text as string) || ''} onChange={e => u('text', e.target.value)} rows={3}
-              style={{ ...fiStyle, resize: 'none', width: '100%', boxSizing: 'border-box' }} />
+            <RichTextEditor
+              value={(d.text as string) || ''}
+              onChange={html => u('text', html)}
+              placeholder="Custom text — use the toolbar for bold, italic, underline, color, and size"
+              minHeight={72}
+              toolbarOpen={true}
+            />
             <Fd label="Alignment" style={{ marginTop: 8 }}>
               <div style={{ display: 'flex', gap: 2 }}>
                 {(['left','center','right'] as const).map(a => {
