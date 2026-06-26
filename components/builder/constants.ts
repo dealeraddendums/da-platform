@@ -144,6 +144,11 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     label: 'Dealer Asking Price:',
     value: '$28,596.00',
     subtitle: "",
+    // Built-in filled bar so dealers needn't bake a price bar into the bg image.
+    // Default black box + white text matches the old baked-bar look. (Legacy
+    // saved widgets have no bgColor → renderer draws no box → unchanged.)
+    bgColor: '#000000',
+    textColor: '#ffffff',
     labelColor: '#ffffff',
     valueColor: '#000000',
     labelFontSize: 1.0,
@@ -191,6 +196,11 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     fontSize: 1.0,
     lineSpacing: 1.2,
     items: [],
+    // Filled header box (same pattern as the asking-price bar): the section
+    // label sits on the colored box; the product list renders below uncolored.
+    // Legacy widgets have no bgColor → no box → unchanged.
+    bgColor: '#000000',
+    textColor: '#ffffff',
   },
   suggested_price: { label: 'Suggested Asking Price:', value: '$29,000.00', labelColor: '#ffffff', valueColor: '#000000', labelFontSize: 1.0, valueFontSize: 1.0 },
   // Two numbers (no labels — the background graphic supplies "CITY"/"HWY").

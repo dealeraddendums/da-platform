@@ -178,10 +178,18 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const ls = (d.lineSpacing as number) || 1.2;
     type OptItem = { name: string; desc: string; price: string; separator_above?: boolean; separator_below?: boolean; spaces?: number };
     const items = (d.items as OptItem[]) || [];
+    // Filled header box (bgColor set ⇒ box; legacy widgets have none ⇒ plain
+    // text header, unchanged). The label sits on the colored box; the product
+    // list renders below in the normal, uncolored area of the widget.
+    const bg = (d.bgColor as string) || '';
+    const tc = (d.textColor as string) || '#ffffff';
+    const header = bg
+      ? `<div style="background:${bg};color:${tc};font-size:${sz}px;font-weight:700;padding:4px 8px;box-sizing:border-box;margin-bottom:4px">${rich(d.sectionLabel)}</div>`
+      : `<div style="font-size:${sz}px;color:#555;margin-bottom:4px">${rich(d.sectionLabel)}</div>`;
     if (items.length === 0) {
-      return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${rich(d.sectionLabel)}</div><div style="font-size:${szm}px;color:#bbb;font-style:italic">Suggested products will appear here at print time.</div></div>`;
+      return `<div style="padding:3px 0">${header}<div style="font-size:${szm}px;color:#bbb;font-style:italic;padding:0 ${bg ? '8px' : '0'}">Suggested products will appear here at print time.</div></div>`;
     }
-    return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${rich(d.sectionLabel)}</div>${items.map(it =>
+    return `<div style="padding:3px 0">${header}${items.map(it =>
       renderProductRow(it, sz, szm, ls)
     ).join('')}</div>`;
   }
@@ -209,9 +217,25 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const lfs = Math.round(12 * fs * ((d.labelFontSize as number) || 1));
     const vfs = Math.round(13 * fs * ((d.valueFontSize as number) || 1));
     const sfs = Math.round(8 * fs * ((d.labelFontSize as number) || 1));
-    const lc = (d.labelColor as string) || '#ffffff';
-    const vc = (d.valueColor as string) || '#000000';
-    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5"><div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div>${d.subtitle ? `<div style="font-size:${sfs}px;color:${lc};font-style:italic;margin-top:1px">${d.subtitle}</div>` : ''}</div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}${(d.priceSuffix as string) || ''}</div></div>`;
+    // textColor (new, default white) drives both label + price; falls back to
+    // the legacy per-element labelColor/valueColor so existing saved widgets
+    // render unchanged. bgColor draws the filled bar; legacy widgets have none.
+    const bg = (d.bgColor as string) || '';
+    const tc = (d.textColor as string) || '';
+    const lc = tc || (d.labelColor as string) || '#ffffff';
+    const vc = tc || (d.valueColor as string) || '#000000';
+    const hasSub = !!d.subtitle;
+    const labelBlock = `<div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div>${hasSub ? `<div style="font-size:${sfs}px;color:${lc};font-style:italic;margin-top:1px">${d.subtitle}</div>` : ''}</div>`;
+    const valueBlock = `<div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}${(d.priceSuffix as string) || ''}</div>`;
+    if (bg) {
+      // Filled box: fills the widget (min-height:100%) and grows if content is
+      // taller; extra bottom padding when a subtitle is present so it isn't
+      // cramped against the bottom edge.
+      const padBottom = hasSub ? 12 : 6;
+      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;min-height:100%;box-sizing:border-box;background:${bg};padding:5px 6px ${padBottom}px;line-height:1.5">${labelBlock}${valueBlock}</div>`;
+    }
+    // Legacy (no bgColor): byte-for-byte the original overlay-on-bg-image style.
+    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5">${labelBlock}${valueBlock}</div>`;
   }
 
   if (type === 'dealer') {

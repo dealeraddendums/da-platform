@@ -2329,7 +2329,13 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
         <EpSection>
           <Eps>Suggested Products Table</Eps>
           <Fd label="Section label"><input value={(d.sectionLabel as string) || ''} onChange={e => u('sectionLabel', e.target.value)} style={fiStyle} /></Fd>
-          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Shows Suggested options only. Requires a Combo background template to separate sections visually.</div>
+          <Fd label="Background Color">
+            <ColorSwatches value={(d.bgColor as string) || '#000000'} onChange={v => u('bgColor', v)} />
+          </Fd>
+          <Fd label="Text Color">
+            <ColorSwatches value={(d.textColor as string) || '#ffffff'} onChange={v => u('textColor', v)} />
+          </Fd>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>The header label sits on the colored box; the product list prints below it.</div>
         </EpSection>
       )}
 
@@ -2360,11 +2366,11 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Fd label="Label"><input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} /></Fd>
           <Fd label="Subtitle (optional)"><input value={(d.subtitle as string) || ''} onChange={e => u('subtitle', e.target.value)} style={fiStyle} /></Fd>
           <Fd label="Symbol after price (optional)"><input value={(d.priceSuffix as string) || ''} maxLength={3} placeholder="e.g. *" onChange={e => u('priceSuffix', e.target.value)} style={fiStyle} /></Fd>
-          <Fd label="Label color">
-            <ColorPair value={(d.labelColor as string) || '#ffffff'} onChange={v => u('labelColor', v)} />
+          <Fd label="Background Color">
+            <ColorSwatches value={(d.bgColor as string) || '#000000'} onChange={v => u('bgColor', v)} />
           </Fd>
-          <Fd label="Price color">
-            <ColorPair value={(d.valueColor as string) || '#ffffff'} onChange={v => u('valueColor', v)} />
+          <Fd label="Text Color">
+            <ColorSwatches value={(d.textColor as string) || '#ffffff'} onChange={v => u('textColor', v)} />
           </Fd>
         </EpSection>
       )}
@@ -3031,6 +3037,23 @@ function ColorPair({ value, onChange }: { value: string; onChange: (v: string) =
           <div style={{ width: 24, height: 24, background: c, border: `2px solid ${value === c ? '#2563EB' : '#ccc'}`, borderRadius: 3, flexShrink: 0 }} />
           <span style={{ fontSize: 11, color: '#55595c' }}>{n}</span>
         </div>
+      ))}
+    </div>
+  );
+}
+
+// Richer swatch palette (matches the Header Bar / Divider pickers) for the
+// background + text color controls on the price/suggested bars.
+const BAR_SWATCHES: [string, string][] = [
+  ['#000000', 'Black'], ['#1a1916', 'Ink'], ['#374151', 'Slate'], ['#1976d2', 'Blue'],
+  ['#1a237e', 'Navy'], ['#c62828', 'Red'], ['#15803D', 'Green'], ['#ffffff', 'White'],
+];
+function ColorSwatches({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+      {BAR_SWATCHES.map(([c, n]) => (
+        <div key={c} title={n} onClick={() => onChange(c)}
+          style={{ width: 22, height: 22, borderRadius: 4, background: c, cursor: 'pointer', border: `1.5px solid ${value === c ? '#1976d2' : (c === '#ffffff' ? '#ccc' : 'transparent')}`, boxShadow: value === c ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }} />
       ))}
     </div>
   );
