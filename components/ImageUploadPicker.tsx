@@ -150,7 +150,7 @@ export default function ImageUploadPicker({
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200 }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ background: "#fff", borderRadius: 6, width: 560, maxWidth: "92vw", maxHeight: "82vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "92vw", maxHeight: "82vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
 
         {/* Header */}
         <div style={{ padding: "14px 18px", background: "#2a2b3c", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
@@ -185,13 +185,22 @@ export default function ImageUploadPicker({
                 </div>
               ) : (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-                  {filtered.map(img => (
-                    <div key={img.key} onClick={() => setSelectedUrl(img.url)}
-                      style={{ cursor: "pointer", border: `2px solid ${selectedUrl === img.url ? "#1976d2" : "#e0e0e0"}`, borderRadius: 4, overflow: "hidden", background: "#f5f6f7", aspectRatio: "1" }}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                    </div>
-                  ))}
+                  {filtered.map(img => {
+                    const name = img.key.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
+                    return (
+                      <div key={img.key} onClick={() => setSelectedUrl(img.url)}
+                        style={{ cursor: "pointer", border: `2px solid ${selectedUrl === img.url ? "#1976d2" : "#e0e0e0"}`, borderRadius: 4, overflow: "hidden", background: "#fff" }}>
+                        {/* 4:3 container with contain so logos/images are never cropped */}
+                        <div style={{ aspectRatio: "4 / 3", overflow: "hidden", background: "#fff" }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={img.url} alt={name} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
+                        </div>
+                        {name && (
+                          <div style={{ padding: "3px 5px", fontSize: 9, color: "#55595c", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", borderTop: "1px solid #f0f0f0", background: "#fafafa" }}>{name}</div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

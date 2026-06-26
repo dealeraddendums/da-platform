@@ -154,7 +154,7 @@ export default function ImagePickerModal({ bucket, title, onSelect, onClose }: I
                     const label = img.display_name ?? img.key.split("/").pop() ?? img.key;
                     return (
                       <div key={img.id ?? img.key} title={label}
-                        style={{ position: "relative", cursor: "pointer", border: "2px solid #e0e0e0", borderRadius: 6, overflow: "hidden", background: "#f5f6f7", transition: "border-color .15s" }}
+                        style={{ position: "relative", cursor: "pointer", border: "2px solid #e0e0e0", borderRadius: 6, overflow: "hidden", background: "#fff", transition: "border-color .15s" }}
                         onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "#1976d2"; }}
                         onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "#e0e0e0"; }}
                         onClick={() => onSelect(img.url)}
@@ -166,9 +166,12 @@ export default function ImagePickerModal({ bucket, title, onSelect, onClose }: I
                             style={{ position: "absolute", top: 4, right: 4, zIndex: 2, width: 22, height: 22, borderRadius: "50%", border: "none", background: "rgba(0,0,0,.55)", color: "#fff", cursor: "pointer", fontSize: 13, lineHeight: "22px", padding: 0 }}
                           >×</button>
                         )}
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={img.url} alt={label} style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }} />
-                        <div style={{ padding: "5px 8px", fontSize: 10, color: "#55595c", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+                        {/* Portrait aspect ratio matches addendum paper (8.5×11); contain shows the full background */}
+                        <div style={{ aspectRatio: "8.5 / 11", overflow: "hidden", background: "#fff" }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={img.url} alt={label} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
+                        </div>
+                        <div style={{ padding: "5px 8px", fontSize: 10, color: "#55595c", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", borderTop: "1px solid #f0f0f0" }}>{label}</div>
                       </div>
                     );
                   })}
