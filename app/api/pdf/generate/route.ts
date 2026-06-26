@@ -522,6 +522,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
     }
 
+    // ── Resolve auto-mode watermark URL from the vehicle make ──────────────────
+    // mode='auto' watermarks resolve their brand image at print time from the
+    // vehicle's make. We ALWAYS set d.imgUrl (to a resolved URL, or '' when the
+    // make has no matching brand file) so the renderer never prints the canvas
+    // "Auto watermark" placeholder. fixed-mode watermarks render from d.brand in
+    // the renderer and need no injection here.
+    if (widgets.some(w => w.type === 'watermark' && (w.d.mode as string) === 'auto')) {
+      const { resolveBrandForMake, watermarkUrl } = await import('@/lib/watermarks');
+      const brand = resolveBrandForMake(vehicleData.MAKE);
+      const autoUrl = brand ? watermarkUrl(brand) : '';
+      widgets = widgets.map(w =>
+        (w.type === 'watermark' && (w.d.mode as string) === 'auto')
+          ? { ...w, d: { ...w.d, imgUrl: autoUrl } }
+          : w
+      );
+    }
+
     // ── Fetch AI content for infosheet description/features + {{ai.}} tokens ───
     // Always fetch for infosheet PDFs — ai_content_default controls preference (AI vs DB),
     // but we always want content available so placeholders never appear in generated PDFs.

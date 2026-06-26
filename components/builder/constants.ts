@@ -46,6 +46,9 @@ export const LAYOUT: Record<string, { x: number; y: number; w: number; h: number
   // Horizontal rule / divider line. Defaults to near-full canvas width; the
   // line itself is centered vertically in the box (thickness + margins in `d`).
   divider:           { x: 20,  y: 460, w: 368, h: 16  },
+  // Brand watermark — a faint logo stamp. Default to a medium square; operator
+  // resizes/positions (often large + behind content).
+  watermark:         { x: 84,  y: 300, w: 240, h: 240 },
 };
 
 export const LAYOUT_INFOSHEET: Record<string, { x: number; y: number; w: number; h: number }> = {
@@ -63,6 +66,7 @@ export const LAYOUT_INFOSHEET: Record<string, { x: number; y: number; w: number;
   // infosheet background; operator nudges to fit a custom background.
   mpg:         { x: 240, y: 720, w: 320, h: 60  },
   divider:     { x: 40,  y: 600, w: 744, h: 16 },
+  watermark:   { x: 272, y: 360, w: 240, h: 240 },
 };
 
 export const WIDGET_LABELS: Record<string, string> = {
@@ -76,6 +80,7 @@ export const WIDGET_LABELS: Record<string, string> = {
   disclaimer: 'Disclaimer',
   mpg: 'MPG',
   divider: 'Divider line',
+  watermark: 'Watermark',
 };
 
 // One-instance-only widgets. QR Code, VIN Barcode, Background Image, and
@@ -95,12 +100,12 @@ export const ADDENDUM_WIDGETS = [
   'headerbar','customtext','sigline','disclaimer','divider',
   'suggested_options','suggested_price',
   // Dynamic content (replaces the old monolithic Infobox)
-  'bgimage','qrcode','barcode','vehiclephoto',
+  'bgimage','qrcode','barcode','vehiclephoto','watermark',
 ];
 export const INFOSHEET_WIDGETS = [
   'logo','vehicle','description','features','askbar',
   'qrcode','barcode','dealer','customtext','disclaimer','divider',
-  'bgimage','vehiclephoto','mpg',
+  'bgimage','vehiclephoto','mpg','watermark',
 ];
 // Addendum hides only infosheet-specific content widgets. qrcode/barcode are
 // now first-class addendum widgets too.
@@ -163,6 +168,9 @@ export const DEFS: Record<string, Record<string, unknown>> = {
   // Divider — a horizontal rule. thickness 1/2/3 px, color (default near-black),
   // and top/bottom margin (px) spacing the line within its box.
   divider: { thickness: 1, color: '#1a1916', topMargin: 0, bottomMargin: 0 },
+  // Watermark — faint brand logo. mode none|auto|fixed; brand (for fixed);
+  // opacity 0.05–0.50. auto resolves the image from the vehicle make at print.
+  watermark: { mode: 'auto', brand: null, opacity: 0.15 },
   // Legacy monolithic infobox — kept in DEFS only so an old saved widget
   // dropped on the canvas before backward-compat conversion runs still has
   // sane defaults. New widgets should never use type='infobox'.

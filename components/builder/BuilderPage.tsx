@@ -8,6 +8,7 @@ import {
   DEFS, DEFAULT_CUSTOM_WIDGETS, snapV, makeWidget, getPaperDims,
 } from './constants';
 import { renderW } from './widgetRenderer';
+import { WATERMARK_BRANDS, watermarkUrl } from '@/lib/watermarks';
 import type { Widget, PaperSize, CustomWidgetDef, VehiclePreload, SavedTemplate, CustomSize } from './types';
 import { useBuilderBreadcrumb } from '@/contexts/BuilderBreadcrumb';
 import CustomSizesModal from '@/components/CustomSizesModal';
@@ -38,6 +39,7 @@ const PALETTE_TILES = [
   { type: 'qrcode',            emoji: '⊞',  label: 'QR Code',           hint: 'Scan for more info',    group: 'dynamic' },
   { type: 'barcode',           emoji: '▐▌', label: 'VIN Barcode',       hint: 'Vehicle barcode',       group: 'dynamic' },
   { type: 'vehiclephoto',      emoji: '📷', label: 'Vehicle Photo',     hint: 'Color-matched photo',   group: 'dynamic' },
+  { type: 'watermark',         emoji: '💧', label: 'Watermark',         hint: 'Faint brand logo',      group: 'dynamic' },
   { type: 'suggested_options', emoji: '💭', label: 'Suggested Products', hint: 'Optional buyer add-ons', group: 'suggested', addendum: true },
   { type: 'suggested_price',   emoji: '💰', label: 'Suggested Price',   hint: 'MSRP + all options',    group: 'suggested', addendum: true },
 ];
@@ -2451,6 +2453,75 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <p style={{ fontSize: 11, color: '#78828c', marginTop: 8, marginBottom: 0 }}>Drag the widget edges on the canvas to set the line&apos;s width.</p>
         </EpSection>
       )}
+
+      {w.type === 'watermark' && (() => {
+        const mode = (d.mode as string) || 'none';
+        const opacity = Math.min(0.5, Math.max(0.05, Number(d.opacity) || 0.15));
+        const MODES: { val: string; label: string }[] = [
+          { val: 'none', label: 'None' },
+          { val: 'auto', label: 'Auto' },
+          { val: 'fixed', label: 'Fixed' },
+        ];
+        return (
+          <EpSection>
+            <Eps>Watermark</Eps>
+            <Eps style={{ marginTop: 4 }}>Mode</Eps>
+            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+              {MODES.map(m => {
+                const active = mode === m.val;
+                return (
+                  <button key={m.val} type="button" onClick={() => u('mode', m.val)}
+                    title={m.val === 'auto' ? 'Use the vehicle’s make to pick the logo at print time' : m.val === 'fixed' ? 'Always use the brand you choose below' : 'No watermark'}
+                    style={{ flex: 1, padding: '6px 0', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                      border: `1.5px solid ${active ? '#1976d2' : '#e0e0e0'}`, background: active ? '#e3f2fd' : '#fff', color: active ? '#1976d2' : '#55595c' }}>
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+            {mode === 'auto' && (
+              <p style={{ fontSize: 11, color: '#78828c', marginTop: 6, marginBottom: 0 }}>The brand logo is chosen from the vehicle’s make when the PDF is generated.</p>
+            )}
+
+            {mode === 'fixed' && (
+              <>
+                <Eps style={{ marginTop: 10 }}>Brand{d.brand ? <span style={{ fontWeight: 400, color: '#55595c' }}> — {d.brand as string}</span> : null}</Eps>
+                {d.brand && (
+                  <div style={{ marginTop: 6, marginBottom: 6, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f7f8fa', border: '1px solid #e0e0e0', borderRadius: 6 }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={watermarkUrl(d.brand as string)} alt={d.brand as string} style={{ maxHeight: 52, maxWidth: '90%', objectFit: 'contain' }} />
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 4, maxHeight: 220, overflowY: 'auto', padding: 2, border: '1px solid #eee', borderRadius: 6 }}>
+                  {WATERMARK_BRANDS.map(b => {
+                    const selected = d.brand === b;
+                    return (
+                      <button key={b} type="button" onClick={() => u('brand', b)} title={b}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: '6px 2px', cursor: 'pointer',
+                          border: `1.5px solid ${selected ? '#1976d2' : '#e8e8e8'}`, borderRadius: 6, background: selected ? '#e3f2fd' : '#fff' }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={watermarkUrl(b)} alt={b} loading="lazy" style={{ height: 28, maxWidth: '100%', objectFit: 'contain' }} />
+                        <span style={{ fontSize: 9, color: '#55595c', textAlign: 'center', lineHeight: 1.1 }}>{b}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {mode !== 'none' && (
+              <>
+                <Eps style={{ marginTop: 10 }}>Opacity</Eps>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                  <input type="range" min={5} max={50} step={1} value={Math.round(opacity * 100)}
+                    onChange={e => u('opacity', +e.target.value / 100)} style={{ flex: 1 }} />
+                  <span style={{ minWidth: 36, textAlign: 'right', fontSize: 12, fontFamily: 'monospace', color: '#1976d2' }}>{Math.round(opacity * 100)}%</span>
+                </div>
+              </>
+            )}
+          </EpSection>
+        );
+      })()}
 
       {w.type === 'customtext' && (() => {
         function insertToken(token: string) {

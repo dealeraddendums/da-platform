@@ -1,5 +1,6 @@
 import { IB_DEFAULT, VEHICLE_PHOTO_COMING_SOON } from './constants';
 import { sanitizeProductHtml, sanitizeProductDescription } from '@/lib/product-name';
+import { watermarkUrl } from '@/lib/watermarks';
 
 type D = Record<string, unknown>;
 
@@ -132,6 +133,32 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const topMargin = Math.max(0, Number(d.topMargin) || 0);
     const bottomMargin = Math.max(0, Number(d.bottomMargin) || 0);
     return `<div style="display:flex;align-items:center;height:100%;box-sizing:border-box;padding:${topMargin}px 0 ${bottomMargin}px 0"><div style="width:100%;height:${thickness}px;background:${color}"></div></div>`;
+  }
+
+  if (type === 'watermark') {
+    // Faint brand-logo stamp. mode none|auto|fixed; opacity 0.05–0.50.
+    //   fixed → URL computed from d.brand (works on canvas AND print).
+    //   auto  → URL is injected as d.imgUrl at PRINT time from the vehicle make
+    //           (lib/watermarks.resolveBrandForMake). On the canvas d.imgUrl is
+    //           undefined, so we show the "Auto" placeholder instead.
+    const mode = (d.mode as string) || 'none';
+    if (mode === 'none') return '';
+    const op = Math.min(0.5, Math.max(0.05, Number(d.opacity) || 0.15));
+    const imgHtml = (url: string) =>
+      `<div style="position:absolute;inset:0;width:100%;height:100%;overflow:hidden"><img src="${url}" alt="Watermark" style="width:100%;height:100%;object-fit:contain;opacity:${op};display:block" /></div>`;
+    const placeholder = (title: string, sub?: string) =>
+      `<div style="position:absolute;inset:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f3f4f6;border:1px dashed #c0c6cc;color:#9aa0a6;font-size:11px;text-align:center;box-sizing:border-box;padding:4px">${title}${sub ? `<div style="font-size:9px;margin-top:2px">${sub}</div>` : ''}</div>`;
+
+    if (mode === 'auto') {
+      // Print path injects d.imgUrl (a resolved URL, or '' when the make has no
+      // brand file). undefined ⇒ canvas ⇒ show the placeholder.
+      if (d.imgUrl === undefined) return placeholder('Auto watermark', 'based on vehicle make');
+      const url = (d.imgUrl as string) || '';
+      return url ? imgHtml(url) : '';
+    }
+    // mode === 'fixed'
+    if (d.brand) return imgHtml(watermarkUrl(d.brand as string));
+    return placeholder('Watermark', 'pick a brand');
   }
 
   if (type === 'options') {
