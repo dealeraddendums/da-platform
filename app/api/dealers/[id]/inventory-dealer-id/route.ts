@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
+import { applyInventoryDealerIdChange, DealerIdSyncError } from "@/lib/dealer-id-sync";
 
 type Params = { params: { id: string } };
 
@@ -60,17 +61,31 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
 
   const oldId = dealer.inventory_dealer_id;
 
-  const { data: updatedDealer, error: updateErr } = await admin
-    .from("dealers")
-    .update({ inventory_dealer_id: newId })
-    .eq("id", params.id)
-    .select()
-    .single();
-
-  if (updateErr) {
-    return NextResponse.json({ error: updateErr.message }, { status: 500 });
+  // Keep dealer_id in sync. If dealer_id == old inventory_dealer_id (they were
+  // in sync), this cascades the rename across templates / dealer_settings /
+  // vehicle_options / print_history / addendum_library / profiles AND sets both
+  // text ids to newId — atomically, in one DB transaction. If already drifted,
+  // it updates inventory_dealer_id only (and warns), leaving dealer_id alone.
+  let syncResult;
+  try {
+    syncResult = await applyInventoryDealerIdChange(admin, dealer, newId);
+  } catch (e) {
+    if (e instanceof DealerIdSyncError) {
+      return NextResponse.json({ error: e.message }, { status: e.needsMigration ? 409 : 500 });
+    }
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Update failed" }, { status: 500 });
   }
 
+  // Re-read for the response — dealer_id may have changed too when cascaded.
+  const { data: updatedDealer } = await admin
+    .from("dealers")
+    .select()
+    .eq("id", params.id)
+    .single();
+
+  // Deactivate the OLD-id vehicles (dealer.dealer_id captured above). They get
+  // re-ingested under the new feed id by DA Pulse. dealer_vehicles.dealer_id is
+  // intentionally not cascaded — the feed change replaces the inventory.
   if (vehicleCount > 0) {
     await admin
       .from("dealer_vehicles")
@@ -87,8 +102,16 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       old_value: oldId ?? null,
       new_value: newId,
       vehicles_deactivated: vehicleCount,
+      // Did dealer_id cascade with it? (true when they were in sync.)
+      dealer_id_cascaded: syncResult.changed && syncResult.cascaded,
+      dealer_id_old: dealer.dealer_id,
+      dealer_id_new: (syncResult.changed && syncResult.cascaded) ? newId : dealer.dealer_id,
     },
   });
 
-  return NextResponse.json({ data: updatedDealer as DealerRow, vehicle_count: vehicleCount });
+  return NextResponse.json({
+    data: updatedDealer as DealerRow,
+    vehicle_count: vehicleCount,
+    dealer_id_cascaded: syncResult.changed && syncResult.cascaded,
+  });
 }

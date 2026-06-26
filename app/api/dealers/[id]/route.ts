@@ -10,6 +10,7 @@ import { normalizeSubscriptionType, isPayingAccount } from "@/lib/hubspot";
 import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 import { fireSuperAdminGroupAssignCascade } from "@/lib/group-billing-cascade";
 import { applyDealerSubscriptionChange, type SubscriptionBillingResult } from "@/lib/billing-subscription";
+import { applyInventoryDealerIdChange, DealerIdSyncError } from "@/lib/dealer-id-sync";
 
 type Params = { params: { id: string } };
 
@@ -242,12 +243,37 @@ export async function PATCH(
     prevAccountType = snap?.account_type ?? null;
   }
 
-  const { data, error: dbError } = await admin
-    .from("dealers")
-    .update(patch)
-    .eq("id", dealerUuid)
-    .select()
-    .single();
+  // inventory_dealer_id change must keep dealer_id in sync. Route it through the
+  // shared cascade helper (atomic dealer_id rename when the two were in sync;
+  // inventory-only update otherwise), then drop it from the combined patch so
+  // the bulk update below doesn't re-write it / bypass the cascade.
+  if (patch.inventory_dealer_id !== undefined) {
+    const { data: invDealer } = await admin
+      .from("dealers")
+      .select("id, dealer_id, inventory_dealer_id, name")
+      .eq("id", dealerUuid)
+      .maybeSingle<{ id: string; dealer_id: string; inventory_dealer_id: string | null; name: string | null }>();
+    if (invDealer) {
+      try {
+        await applyInventoryDealerIdChange(admin, invDealer, String(patch.inventory_dealer_id));
+      } catch (e) {
+        if (e instanceof DealerIdSyncError) {
+          return NextResponse.json({ error: e.message }, { status: e.needsMigration ? 409 : 500 });
+        }
+        return NextResponse.json({ error: e instanceof Error ? e.message : "Update failed" }, { status: 500 });
+      }
+    }
+    delete patch.inventory_dealer_id;
+  }
+
+  // Apply the remaining fields. When inventory_dealer_id was the only change the
+  // helper already wrote it, so skip an empty update and just re-read the row —
+  // downstream side-effects are gated on active/group_id/name/account_type, none
+  // of which are touched here.
+  const hasOtherFields = Object.keys(patch).length > 0;
+  const { data, error: dbError } = hasOtherFields
+    ? await admin.from("dealers").update(patch).eq("id", dealerUuid).select().single()
+    : await admin.from("dealers").select().eq("id", dealerUuid).single();
 
   if (dbError || !data) {
     return NextResponse.json(
