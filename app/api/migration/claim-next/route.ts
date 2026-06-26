@@ -9,7 +9,9 @@ const DEFAULT_BATCH = 25;
 
 /**
  * POST /api/migration/claim-next — grab the next batch of UNASSIGNED eligible
- * dealers for me. super_admin only. Body: { count?: number } (default 25).
+ * STANDALONE (group_id IS NULL) dealers for me. super_admin only. Body:
+ * { count?: number } (default 25). Group dealers are excluded — they're claimed
+ * as a unit via the group "Claim group" action so a group keeps one owner.
  *
  * Prioritizes the one-toggle-from-ready set (billing-staged ∩ eligible) so the
  * first batches need only template-confirm + invite. Overlap-safe: the claiming
@@ -25,12 +27,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const count = typeof body.count === "number" && body.count > 0 ? Math.min(Math.floor(body.count), 100) : DEFAULT_BATCH;
 
   const { rows } = await loadReadinessRows();
-  // Eligible + unassigned, one-toggle-from-ready (billing-staged) first.
+  // Standalone (group_id IS NULL) + eligible + unassigned, one-toggle-from-ready
+  // (billing-staged) first. Group dealers are NEVER auto-claimed here — a group is
+  // claimed explicitly as a unit (Claim group) so it always has a single owner.
   const candidates = rows
-    .filter((r) => r.eligible && !r.assignedTo && r.inviteStatus !== "migrated")
+    .filter((r) => !r.groupId && r.eligible && !r.assignedTo && r.inviteStatus !== "migrated")
     .sort((a, b) => Number(b.billingStaged) - Number(a.billingStaged) || a.name.localeCompare(b.name))
     .map((r) => r.id);
-  if (candidates.length === 0) return NextResponse.json({ ok: true, claimed: 0, ids: [], note: "No unassigned eligible dealers left to claim." });
+  if (candidates.length === 0) return NextResponse.json({ ok: true, claimed: 0, ids: [], note: "No unassigned eligible standalone dealers left to claim. (Group dealers are claimed per-group.)" });
 
   const wanted = candidates.slice(0, count);
   const admin = createAdminSupabaseClient();

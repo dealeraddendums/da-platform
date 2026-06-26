@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 interface Row {
   id: string;
   dealer_id: string;
   name: string;
+  groupId: string | null;
   groupName: string | null;
   state: string | null;
   billingStaged: boolean;
@@ -92,6 +93,7 @@ export default function MigrationConsole() {
   const [assignTarget, setAssignTarget] = useState("me"); // "me" | "unassign" | <operatorId>
   const [assigning, setAssigning] = useState(false);
   const [claiming, setClaiming] = useState(false);
+  const [claimingGroup, setClaimingGroup] = useState<string | null>(null);
 
   const me = data?.currentUserId ?? "";
   const operators = data?.operators ?? [];
@@ -212,6 +214,35 @@ export default function MigrationConsole() {
     } catch { alert("Claim failed"); } finally { setClaiming(false); }
   }
 
+  // Claim an entire group as one unit so the group always has a single owner.
+  // assignTo omitted → me; a UUID → that operator (super_admin "Assign to…").
+  // Acts on ALL of the group's un-migrated dealers (full set, not the filtered
+  // view) and reuses /api/migration/assign (bulk assign by IDs). Confirms when
+  // some members are already owned by someone else.
+  async function claimGroup(groupId: string, groupName: string | null, assignTo?: string) {
+    const members = (data?.rows ?? []).filter((r) => r.groupId === groupId);
+    if (members.length === 0) return;
+    const target = assignTo ?? me;
+    const destName = assignTo ? (opName(assignTo) ?? "that staff member") : "you";
+    const conflicting = members.filter((m) => m.assignedTo && m.assignedTo !== target);
+    if (conflicting.length > 0) {
+      const owners = Array.from(new Set(conflicting.map((m) => opName(m.assignedTo) ?? "—")));
+      const who = owners.length === 1 ? owners[0] : `${owners.length} different people`;
+      if (!confirm(`${conflicting.length} dealer${conflicting.length === 1 ? "" : "s"} in ${groupName ?? "this group"} ${conflicting.length === 1 ? "is" : "are"} assigned to ${who}. Reassign all ${members.length} to ${destName}?`)) return;
+    } else if (assignTo) {
+      if (!confirm(`Assign all ${members.length} dealer${members.length === 1 ? "" : "s"} in ${groupName ?? "this group"} to ${destName}?`)) return;
+    }
+    setClaimingGroup(groupId);
+    try {
+      const body = assignTo ? { dealerIds: members.map((m) => m.id), assignTo } : { dealerIds: members.map((m) => m.id) };
+      const res = await fetch("/api/migration/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await res.json();
+      if (!res.ok) { alert(j.error ?? "Claim group failed"); return; }
+      if (!assignTo) setAssignFilter("me");
+      await load();
+    } catch { alert("Claim group failed"); } finally { setClaimingGroup(null); }
+  }
+
   const toggleConfirmed = async (row: Row) => {
     if (!data?.flagsColumnPresent) return;
     setSavingId(row.id);
@@ -266,6 +297,28 @@ export default function MigrationConsole() {
     }
     return rows;
   }, [data, readyOnly, fbPending, stagedOnly, assignFilter, me, statusFilter, group, state, search]);
+
+  // Full (unfiltered) group membership — claim-group acts on every un-migrated
+  // dealer in the group, even ones the current filters hide.
+  const fullGroupMembers = useMemo(() => {
+    const m = new Map<string, Row[]>();
+    (data?.rows ?? []).forEach((r) => { if (r.groupId) { const a = m.get(r.groupId) ?? []; a.push(r); m.set(r.groupId, a); } });
+    return m;
+  }, [data]);
+
+  // Render blocks: cluster each group's visible rows under one header (at the
+  // group's first appearance in the filtered list); standalone dealers stay inline.
+  const blocks = useMemo(() => {
+    const seen = new Set<string>();
+    const out: ({ kind: "solo"; row: Row } | { kind: "group"; groupId: string; groupName: string | null; shown: Row[] })[] = [];
+    for (const r of filtered) {
+      if (!r.groupId) { out.push({ kind: "solo", row: r }); continue; }
+      if (seen.has(r.groupId)) continue;
+      seen.add(r.groupId);
+      out.push({ kind: "group", groupId: r.groupId, groupName: r.groupName, shown: filtered.filter((x) => x.groupId === r.groupId) });
+    }
+    return out;
+  }, [filtered]);
 
   // "My batch" — dealers assigned to me, by stage.
   const myBatch = useMemo(() => {
@@ -327,6 +380,127 @@ export default function MigrationConsole() {
   const th: React.CSSProperties = { textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 600, color: "#55595c", textTransform: "uppercase", letterSpacing: ".04em", borderBottom: "1px solid #e0e0e0", whiteSpace: "nowrap" };
   const td: React.CSSProperties = { padding: "8px 10px", fontSize: 13, color: "#333", borderBottom: "1px solid #f0f0f0", verticalAlign: "middle" };
   const warnChip: React.CSSProperties = { background: "#fff8e1", color: "#8a6d00", border: "1px solid #ffe082", borderRadius: 10, padding: "1px 6px", fontSize: 10, fontWeight: 600, whiteSpace: "nowrap" };
+
+  // One dealer <tr>. Shared by solo dealers and group-clustered members.
+  const renderDealerRow = (r: Row, grouped = false) => (
+    <tr key={r.id} style={{ background: r.ready ? "#f4fbf4" : undefined }}>
+      <td style={{ ...td, textAlign: "center" }}>
+        <input type="checkbox" checked={selected.has(r.id)} disabled={r.inviteStatus === "migrated"}
+          onChange={() => toggleSelect(r.id)}
+          title={r.inviteStatus === "migrated" ? "Already migrated" : "Select to assign and/or invite"}
+          style={{ cursor: r.inviteStatus === "migrated" ? "not-allowed" : "pointer" }} />
+      </td>
+      <td style={td}>
+        <div style={{ fontWeight: 600, paddingLeft: grouped ? 16 : 0 }}>{r.name}</div>
+        <div style={{ fontSize: 11, color: "#9aa0a6", paddingLeft: grouped ? 16 : 0 }}>{r.dealer_id}</div>
+      </td>
+      <td style={td}>
+        {r.assignedTo
+          ? <span style={{ fontSize: 12, fontWeight: r.assignedTo === me ? 600 : 400, color: r.assignedTo === me ? "#1565c0" : "#55595c" }}>{opName(r.assignedTo)}</span>
+          : <span style={{ color: "#9aa0a6", fontSize: 12 }}>Unassigned</span>}
+      </td>
+      <td style={td}>{r.groupName ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
+      <td style={td}>{r.state ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
+      <td style={{ ...td, textAlign: "center" }}><Check ok={r.billingStaged} title={r.billingReason} /></td>
+      <td style={{ ...td, textAlign: "center" }}>
+        <input
+          type="checkbox"
+          checked={r.templateConfirmed}
+          disabled={!data.flagsColumnPresent || savingId === r.id}
+          onChange={() => void toggleConfirmed(r)}
+          title={data.flagsColumnPresent ? "Operator: template applied + reviewed" : "Apply migration 100 to enable"}
+          style={{ cursor: data.flagsColumnPresent ? "pointer" : "not-allowed" }}
+        />
+      </td>
+      <td style={{ ...td, textAlign: "center" }}><Check ok={r.eligible} title={r.eligibleReason} /></td>
+      <td style={{ ...td, textAlign: "center" }}>
+        {r.ready
+          ? <span style={{ background: "#2e7d32", color: "#fff", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20 }}>READY</span>
+          : <span style={{ color: "#9aa0a6", fontSize: 12 }}>—</span>}
+      </td>
+      <td style={td}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <StatusBadge status={r.inviteStatus} invitedAt={r.invitedAt} />
+          {(r.inviteStatus === "invited" || r.inviteStatus === "stalled" || r.inviteStatus === "expired") && (
+            <button type="button" onClick={() => void resend(r)} disabled={resendingId === r.id}
+              title="Resend the migration invite (fresh code)"
+              style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+              {resendingId === r.id ? "…" : "resend"}
+            </button>
+          )}
+          {r.migrationStatus === "pending" && (
+            <span title="Staged for a wave — DA Legacy ETL is frozen for this dealer (settings no longer overwritten)"
+              style={{ background: "#fff3e0", color: "#e65100", border: "1px solid #ffe0b2", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" }}>
+              ⏸ Pending · ETL frozen
+            </span>
+          )}
+          {r.migrationStatus !== "pending" && r.inviteStatus !== "migrated" && (
+            <button type="button" onClick={() => void stageDealer(r)} disabled={stagingId === r.id}
+              title="Stage for migration — freezes the ETL so it stops overwriting this dealer's settings"
+              style={{ fontSize: 11, color: "#e65100", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+              {stagingId === r.id ? "…" : "stage"}
+            </button>
+          )}
+        </div>
+        {r.inviteStatus === "migrated" && (
+          <div style={{ fontSize: 11, marginTop: 4 }}>
+            {r.freshbooksStoppedAt
+              ? <span style={{ color: "#2e7d32" }} title={`stopped ${new Date(r.freshbooksStoppedAt).toLocaleString()}`}>FreshBooks stopped ✓ <button type="button" onClick={() => void markFbStopped(r, false)} style={{ fontSize: 10, color: "#9aa0a6", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>undo</button></span>
+              : <span style={{ color: "#b06a00" }}>FreshBooks stop pending <button type="button" onClick={() => void markFbStopped(r, true)} style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>mark stopped</button></span>}
+          </div>
+        )}
+      </td>
+      <td style={{ ...td, textAlign: "center" }}>
+        {r.warnings.length === 0
+          ? <span style={{ color: "#cfd8dc" }}>—</span>
+          : <span title={`Non-blocking: ${r.warnings.join(", ")}`} style={{ display: "inline-flex", gap: 4, flexWrap: "wrap", justifyContent: "center" }}>
+              {r.logoMissing && <span style={warnChip}>no logo</span>}
+              {r.settingsMissing && <span style={warnChip}>no settings</span>}
+              {r.zeroInventory && <span style={warnChip}>no products</span>}
+            </span>}
+      </td>
+    </tr>
+  );
+
+  // Group header <tr> — name + counts + ownership summary + claim/assign actions.
+  const renderGroupHeader = (groupId: string, groupName: string | null, shownCount: number) => {
+    const members = fullGroupMembers.get(groupId) ?? [];
+    const owners = new Map<string, number>();
+    let unassigned = 0;
+    members.forEach((m) => { if (m.assignedTo) owners.set(m.assignedTo, (owners.get(m.assignedTo) ?? 0) + 1); else unassigned++; });
+    const ownerParts = Array.from(owners.entries()).map(([id, n]) => `${opName(id)} ×${n}`);
+    if (unassigned) ownerParts.push(`unassigned ×${unassigned}`);
+    const allMine = members.length > 0 && owners.size === 1 && owners.has(me) && unassigned === 0;
+    const busy = claimingGroup === groupId;
+    return (
+      <tr key={`g-${groupId}`} style={{ background: "#eef3fb" }}>
+        <td colSpan={11} style={{ padding: "8px 10px", borderBottom: "1px solid #d6e1f2", borderTop: "2px solid #d6e1f2" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 700, color: NAVY, fontSize: 13 }}>▦ {groupName ?? "Group"}</span>
+            <span style={{ fontSize: 12, color: "#78828c" }}>
+              {members.length} dealer{members.length === 1 ? "" : "s"}{shownCount !== members.length ? ` · ${shownCount} shown` : ""}
+            </span>
+            <span style={{ fontSize: 12, color: allMine ? "#2e7d32" : "#55595c" }}>
+              {allMine ? "owned by you" : `owner: ${ownerParts.join(", ")}`}
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+              <button type="button" onClick={() => void claimGroup(groupId, groupName)} disabled={busy}
+                title="Assign every dealer in this group to you (one owner per group)"
+                style={{ height: 28, padding: "0 12px", border: "1px solid #1976d2", borderRadius: 6, background: allMine ? "#e3f2fd" : "#fff", color: "#1976d2", fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}>
+                {busy ? "Claiming…" : "Claim group"}
+              </button>
+              <select value="" disabled={busy} onChange={(e) => { const v = e.target.value; e.currentTarget.value = ""; if (v) void claimGroup(groupId, groupName, v); }}
+                title="Assign the whole group to a specific staff member"
+                style={{ height: 28, padding: "0 8px", border: "1px solid #cccccc", borderRadius: 6, fontSize: 12, background: "#fff", cursor: busy ? "default" : "pointer" }}>
+                <option value="">Assign to…</option>
+                {operators.filter((o) => o.id !== me).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </div>
+          </div>
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <div style={{ fontFamily: "’Roboto’, sans-serif" }}>
@@ -392,9 +566,9 @@ export default function MigrationConsole() {
         <span style={{ fontSize: 13, color: "#55595c" }}>{myBatch.total} assigned · <strong style={{ color: "#2e7d32" }}>{myBatch.ready} ready</strong> · {myBatch.invited} invited · {myBatch.migrated} migrated</span>
         <span style={{ fontSize: 12, color: "#78828c" }}>· {s.unassigned} unassigned eligible</span>
         <button type="button" onClick={claimNext} disabled={claiming}
-          title="Claim the next 25 unassigned eligible dealers (one-toggle-from-ready first)"
+          title="Claim the next 25 unassigned eligible STANDALONE dealers (one-toggle-from-ready first). Group dealers are claimed per-group from the group header."
           style={{ marginLeft: "auto", height: 32, padding: "0 16px", border: "none", borderRadius: 6, background: claiming ? "#9bbfe6" : "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: claiming ? "default" : "pointer" }}>
-          {claiming ? "Claiming…" : "Claim next 25"}
+          {claiming ? "Claiming…" : "Claim next 25 (standalone)"}
         </button>
       </div>
 
@@ -503,85 +677,14 @@ export default function MigrationConsole() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r) => (
-              <tr key={r.id} style={{ background: r.ready ? "#f4fbf4" : undefined }}>
-                <td style={{ ...td, textAlign: "center" }}>
-                  <input type="checkbox" checked={selected.has(r.id)} disabled={r.inviteStatus === "migrated"}
-                    onChange={() => toggleSelect(r.id)}
-                    title={r.inviteStatus === "migrated" ? "Already migrated" : "Select to assign and/or invite"}
-                    style={{ cursor: r.inviteStatus === "migrated" ? "not-allowed" : "pointer" }} />
-                </td>
-                <td style={td}>
-                  <div style={{ fontWeight: 600 }}>{r.name}</div>
-                  <div style={{ fontSize: 11, color: "#9aa0a6" }}>{r.dealer_id}</div>
-                </td>
-                <td style={td}>
-                  {r.assignedTo
-                    ? <span style={{ fontSize: 12, fontWeight: r.assignedTo === me ? 600 : 400, color: r.assignedTo === me ? "#1565c0" : "#55595c" }}>{opName(r.assignedTo)}</span>
-                    : <span style={{ color: "#9aa0a6", fontSize: 12 }}>Unassigned</span>}
-                </td>
-                <td style={td}>{r.groupName ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
-                <td style={td}>{r.state ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
-                <td style={{ ...td, textAlign: "center" }}><Check ok={r.billingStaged} title={r.billingReason} /></td>
-                <td style={{ ...td, textAlign: "center" }}>
-                  <input
-                    type="checkbox"
-                    checked={r.templateConfirmed}
-                    disabled={!data.flagsColumnPresent || savingId === r.id}
-                    onChange={() => void toggleConfirmed(r)}
-                    title={data.flagsColumnPresent ? "Operator: template applied + reviewed" : "Apply migration 100 to enable"}
-                    style={{ cursor: data.flagsColumnPresent ? "pointer" : "not-allowed" }}
-                  />
-                </td>
-                <td style={{ ...td, textAlign: "center" }}><Check ok={r.eligible} title={r.eligibleReason} /></td>
-                <td style={{ ...td, textAlign: "center" }}>
-                  {r.ready
-                    ? <span style={{ background: "#2e7d32", color: "#fff", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20 }}>READY</span>
-                    : <span style={{ color: "#9aa0a6", fontSize: 12 }}>—</span>}
-                </td>
-                <td style={td}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <StatusBadge status={r.inviteStatus} invitedAt={r.invitedAt} />
-                    {(r.inviteStatus === "invited" || r.inviteStatus === "stalled" || r.inviteStatus === "expired") && (
-                      <button type="button" onClick={() => void resend(r)} disabled={resendingId === r.id}
-                        title="Resend the migration invite (fresh code)"
-                        style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
-                        {resendingId === r.id ? "…" : "resend"}
-                      </button>
-                    )}
-                    {r.migrationStatus === "pending" && (
-                      <span title="Staged for a wave — DA Legacy ETL is frozen for this dealer (settings no longer overwritten)"
-                        style={{ background: "#fff3e0", color: "#e65100", border: "1px solid #ffe0b2", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" }}>
-                        ⏸ Pending · ETL frozen
-                      </span>
-                    )}
-                    {r.migrationStatus !== "pending" && r.inviteStatus !== "migrated" && (
-                      <button type="button" onClick={() => void stageDealer(r)} disabled={stagingId === r.id}
-                        title="Stage for migration — freezes the ETL so it stops overwriting this dealer's settings"
-                        style={{ fontSize: 11, color: "#e65100", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
-                        {stagingId === r.id ? "…" : "stage"}
-                      </button>
-                    )}
-                  </div>
-                  {r.inviteStatus === "migrated" && (
-                    <div style={{ fontSize: 11, marginTop: 4 }}>
-                      {r.freshbooksStoppedAt
-                        ? <span style={{ color: "#2e7d32" }} title={`stopped ${new Date(r.freshbooksStoppedAt).toLocaleString()}`}>FreshBooks stopped ✓ <button type="button" onClick={() => void markFbStopped(r, false)} style={{ fontSize: 10, color: "#9aa0a6", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>undo</button></span>
-                        : <span style={{ color: "#b06a00" }}>FreshBooks stop pending <button type="button" onClick={() => void markFbStopped(r, true)} style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>mark stopped</button></span>}
-                    </div>
-                  )}
-                </td>
-                <td style={{ ...td, textAlign: "center" }}>
-                  {r.warnings.length === 0
-                    ? <span style={{ color: "#cfd8dc" }}>—</span>
-                    : <span title={`Non-blocking: ${r.warnings.join(", ")}`} style={{ display: "inline-flex", gap: 4, flexWrap: "wrap", justifyContent: "center" }}>
-                        {r.logoMissing && <span style={warnChip}>no logo</span>}
-                        {r.settingsMissing && <span style={warnChip}>no settings</span>}
-                        {r.zeroInventory && <span style={warnChip}>no products</span>}
-                      </span>}
-                </td>
-              </tr>
-            ))}
+            {blocks.map((b) => b.kind === "solo"
+              ? renderDealerRow(b.row)
+              : (
+                <Fragment key={`block-${b.groupId}`}>
+                  {renderGroupHeader(b.groupId, b.groupName, b.shown.length)}
+                  {b.shown.map((m) => renderDealerRow(m, true))}
+                </Fragment>
+              ))}
             {filtered.length === 0 && (
               <tr><td style={{ ...td, textAlign: "center", color: "#9aa0a6" }} colSpan={11}>No dealers match these filters.</td></tr>
             )}

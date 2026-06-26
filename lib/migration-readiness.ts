@@ -49,6 +49,7 @@ export interface ReadinessRow {
   id: string;
   dealer_id: string;
   name: string;
+  groupId: string | null;
   groupName: string | null;
   state: string | null;
   // ── HARD gates (these three determine `ready`) ──────────────────────────
@@ -174,7 +175,7 @@ export function computeReadiness(
   const inviteStatus = computeInviteStatus(d.migration_status, d.invited_at, ctx.invitation ?? null, ctx.now);
 
   return {
-    id: d.id, dealer_id: d.dealer_id, name: d.name, groupName: ctx.groupName, state: d.state,
+    id: d.id, dealer_id: d.dealer_id, name: d.name, groupId: d.group_id ?? null, groupName: ctx.groupName, state: d.state,
     billingStaged, billingReason, templateConfirmed, eligible, eligibleReason, ready,
     settingsMissing, logoMissing, zeroInventory, warnings,
     inviteStatus, invitedAt: d.invited_at ?? null, waveId: ctx.invitation?.wave_id ?? null,
