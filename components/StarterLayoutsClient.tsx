@@ -10,6 +10,7 @@ interface StarterRow {
   paper: string;
   sort_order: number;
   updated_at: string;
+  is_blank_default?: boolean;
 }
 
 const DOC_LABELS: Record<string, string> = {
@@ -110,7 +111,12 @@ export default function StarterLayoutsClient() {
             <tbody>
               {rows.map((r, i) => (
                 <tr key={r.id} style={{ borderBottom: i < rows.length - 1 ? "1px solid #f0f0f0" : "none" }}>
-                  <td style={{ padding: "10px 16px", fontWeight: 500, color: "#2a2b3c" }}>{r.name}</td>
+                  <td style={{ padding: "10px 16px", fontWeight: 500, color: "#2a2b3c" }}>
+                    {r.is_blank_default ? "Blank" : r.name}
+                    {r.is_blank_default && (
+                      <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#e3f2fd", color: "#1565c0", border: "1px solid #bbdefb", textTransform: "uppercase", letterSpacing: ".04em" }}>Default</span>
+                    )}
+                  </td>
                   <td style={{ padding: "10px 16px", color: "#555" }}>{DOC_LABELS[r.doc_type] ?? r.doc_type}</td>
                   <td style={{ padding: "10px 16px", color: "#78828c", fontSize: 13 }}>{fmtDate(r.updated_at)}</td>
                   <td style={{ padding: "10px 16px", textAlign: "right" }}>
@@ -121,12 +127,15 @@ export default function StarterLayoutsClient() {
                       >
                         Edit
                       </button>
-                      <button
-                        onClick={() => setDeleteId(r.id)}
-                        style={{ height: 30, padding: "0 12px", background: "#fff", color: "#c62828", border: "1px solid #ffcdd2", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
-                      >
-                        Delete
-                      </button>
+                      {/* The Blank default is permanent — Edit only, no Delete. */}
+                      {!r.is_blank_default && (
+                        <button
+                          onClick={() => setDeleteId(r.id)}
+                          style={{ height: 30, padding: "0 12px", background: "#fff", color: "#c62828", border: "1px solid #ffcdd2", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                        >
+                          Delete
+                        </button>
+                      )}
                     </span>
                   </td>
                 </tr>

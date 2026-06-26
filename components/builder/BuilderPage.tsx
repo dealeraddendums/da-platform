@@ -346,6 +346,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // starters offered alongside "Blank".
   const [showNewPicker, setShowNewPicker] = useState(false);
   const [starterPickerList, setStarterPickerList] = useState<Array<{ id: string; name: string; doc_type: string }>>([]);
+  // The is_blank_default starter row id (migration 114). The "Blank" option loads
+  // it instead of the hardcoded applyBlankCanvas; null = no record → fall back.
+  const [blankStarterId, setBlankStarterId] = useState<string | null>(null);
 
   // Canonical dealer logo — pre-resolved S3 URL from the page server component.
   // Stays constant for the lifetime of this builder session.
@@ -1361,9 +1364,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       const r = await fetch(`/api/starter-templates/${starterId}`);
       if (!r.ok) { showToast('Failed to load starter layout'); return; }
       const resp = await r.json();
-      const tmpl = resp.data as { template_json?: Record<string, unknown>; name?: string; doc_type?: string } | null;
+      const tmpl = resp.data as { template_json?: Record<string, unknown>; name?: string; doc_type?: string; is_blank_default?: boolean } | null;
       const json = (tmpl?.template_json ?? {}) as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: string };
       if (!json.widgets || Object.keys(json.widgets).length === 0) {
+        // Blank default with an empty payload → fall back to the hardcoded set.
+        if (tmpl?.is_blank_default) { applyBlankCanvas(); setShowNewPicker(false); return; }
         showToast('This starter has no saved layout.');
         return;
       }
@@ -1390,17 +1395,18 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       // ever surfaces addendum/infosheet starters).
       const dt = tmpl?.doc_type;
       if (dt === 'addendum' || dt === 'infosheet') setSaveDocType(dt);
-      setTemplateName(tmpl?.name || 'New Template');
+      // The Blank default seeds a fresh doc — don't carry its "Blank" name.
+      setTemplateName(tmpl?.is_blank_default ? 'New Template' : (tmpl?.name || 'New Template'));
       setSelId(null);
       setHistory([JSON.stringify({ widgets: ws, nid: n })]);
       setHistIdx(0);
       isDirtyRef.current = false;
       setShowNewPicker(false);
-      showToast(`Started from: ${tmpl?.name || 'starter'}`);
+      showToast(tmpl?.is_blank_default ? 'New document' : `Started from: ${tmpl?.name || 'starter'}`);
     } catch {
       showToast('Failed to load starter layout');
     }
-  }, [showToast, vehicle]);
+  }, [showToast, vehicle, applyBlankCanvas]);
 
   // "+ New" handler. super_admin starter-mode → new blank STARTER (unchanged).
   // Dealer/group → offer Blank + platform starters; zero starters falls straight
@@ -1414,24 +1420,32 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       showToast('New starter');
       return;
     }
-    let list: Array<{ id: string; name: string; doc_type: string }> = [];
+    type SRow = { id: string; name: string; doc_type: string; is_blank_default?: boolean };
+    let all: SRow[] = [];
     try {
       const r = await fetch('/api/starter-templates');
       if (r.ok) {
-        const j = await r.json() as { data?: Array<{ id: string; name: string; doc_type: string }> };
-        // Builder doc types only — buyer's guides are a separate (PDF) flow and
-        // the dealer templates API rejects them on save.
-        list = (j.data ?? []).filter(s => s.doc_type === 'addendum' || s.doc_type === 'infosheet');
+        const j = await r.json() as { data?: SRow[] };
+        all = j.data ?? [];
       }
     } catch { /* ignore — fall through to Blank */ }
-    if (list.length === 0) {
-      applyBlankCanvas();
-      showToast('New document');
+    // The blank-default backs the dedicated "Blank" button (loaded from the DB,
+    // hardcode fallback); it's not listed among the other starters.
+    const blank = all.find(s => s.is_blank_default);
+    const blankId = blank?.id ?? null;
+    setBlankStarterId(blankId);
+    // Builder doc types only — buyer's guides are a separate (PDF) flow and the
+    // dealer templates API rejects them on save.
+    const others = all.filter(s => !s.is_blank_default && (s.doc_type === 'addendum' || s.doc_type === 'infosheet'));
+    if (others.length === 0) {
+      // Only Blank available — load it straight away (record or hardcode).
+      if (blankId) await loadStarterAsNew(blankId);
+      else { applyBlankCanvas(); showToast('New document'); }
       return;
     }
-    setStarterPickerList(list);
+    setStarterPickerList(others);
     setShowNewPicker(true);
-  }, [applyBlankCanvas, starterMode, showToast]);
+  }, [applyBlankCanvas, loadStarterAsNew, starterMode, showToast]);
 
   // ── Selected widget ────────────────────────────────────────────────
   const sel = selId ? widgets[selId] : null;
@@ -1869,7 +1883,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
               Start from a blank canvas or a platform starter layout. Picking a starter creates a new, editable document you save as your own.
             </div>
             <button
-              onClick={() => { applyBlankCanvas(); setShowNewPicker(false); showToast('New document'); }}
+              onClick={() => { if (blankStarterId) { void loadStarterAsNew(blankStarterId); } else { applyBlankCanvas(); setShowNewPicker(false); showToast('New document'); } }}
               style={{ width: '100%', textAlign: 'left', padding: '12px 14px', marginBottom: 8, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 14, color: '#2a2b3c' }}>Blank</div>

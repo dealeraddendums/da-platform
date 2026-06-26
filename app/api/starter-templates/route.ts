@@ -24,7 +24,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const sdb = admin as any;
   let q = sdb
     .from("starter_templates")
-    .select("id, name, doc_type, paper, sort_order, updated_at")
+    .select("id, name, doc_type, paper, sort_order, updated_at, is_blank_default")
     .order("sort_order", { ascending: true })
     .order("updated_at", { ascending: false });
   if (docType) {

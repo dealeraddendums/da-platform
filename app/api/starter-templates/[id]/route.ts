@@ -94,6 +94,17 @@ export async function DELETE(_req: NextRequest, { params }: Params): Promise<Nex
   // newer-table routes (account_closures, billing_sync_errors, …).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sdb = admin as any;
+
+  // The blank default is permanent — it backs the Builder's "Blank" option.
+  const { data: row } = await sdb
+    .from("starter_templates")
+    .select("is_blank_default")
+    .eq("id", params.id)
+    .maybeSingle();
+  if (row?.is_blank_default) {
+    return NextResponse.json({ error: "The Blank default can't be deleted — edit it instead." }, { status: 400 });
+  }
+
   const { error: delErr } = await sdb
     .from("starter_templates")
     .delete()
