@@ -209,12 +209,12 @@ export function renderW(type: string, d: D, fontScale: number): string {
     if (!bar) {
       const lc = (d.labelColor as string) || '#ffffff';
       const vc = (d.valueColor as string) || '#000000';
-      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5"><div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div></div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}</div></div>`;
+      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5;border:2px solid #000;box-sizing:border-box"><div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div></div><div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}</div></div>`;
     }
     const inv = bar.toLowerCase() === '#ffffff' ? '#000000' : '#ffffff';
     const labelSec = `<div style="flex:1;min-width:0;display:flex;align-items:center;box-sizing:border-box;background:${bar};color:${inv};padding:5px 8px;font-size:${lfs}px;font-weight:800;letter-spacing:-.01em">${d.label}</div>`;
     const priceSec = `<div style="display:flex;align-items:center;justify-content:flex-end;box-sizing:border-box;background:${inv};color:${bar};padding:5px 10px;font-size:${vfs}px;font-weight:800;font-family:monospace;min-width:120px;text-align:right;white-space:nowrap">${d.value}</div>`;
-    return `<div style="display:flex;align-items:stretch;width:100%;min-height:100%;line-height:1.4">${labelSec}${priceSec}</div>`;
+    return `<div style="display:flex;align-items:stretch;width:100%;min-height:100%;line-height:1.4;border:2px solid #000;box-sizing:border-box">${labelSec}${priceSec}</div>`;
   }
 
   if (type === 'subtotal') {
@@ -237,7 +237,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
       const vc = (d.valueColor as string) || '#000000';
       const labelBlock = `<div style="vertical-align:top"><div style="font-size:${lfs}px;font-weight:800;color:${lc};letter-spacing:-.01em">${d.label}</div>${hasSub ? `<div style="font-size:${sfs}px;color:${lc};font-style:italic;margin-top:1px">${d.subtitle}</div>` : ''}</div>`;
       const valueBlock = `<div style="font-size:${vfs}px;font-weight:800;color:${vc};font-family:monospace;padding:2px 8px;border-radius:2px;min-width:110px;text-align:right;vertical-align:top">${d.value}${(d.priceSuffix as string) || ''}</div>`;
-      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5">${labelBlock}${valueBlock}</div>`;
+      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;height:100%;padding:0 4px;line-height:1.5;border:2px solid #000;box-sizing:border-box">${labelBlock}${valueBlock}</div>`;
     }
     const inv = bar.toLowerCase() === '#ffffff' ? '#000000' : '#ffffff';
     const labelSec = `<div style="flex:1;min-width:0;display:flex;align-items:center;box-sizing:border-box;background:${bar};color:${inv};padding:5px 8px;font-size:${lfs}px;font-weight:800;letter-spacing:-.01em">${d.label}</div>`;
@@ -246,7 +246,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
     // Subtitle: full-width strip below the bar, bar-color background + inverse
     // text, with ≥12px bottom padding so it isn't cramped.
     const sub = hasSub ? `<div style="width:100%;box-sizing:border-box;background:${bar};color:${inv};font-size:${sfs}px;font-style:italic;padding:3px 8px 12px">${d.subtitle}</div>` : '';
-    return `<div style="display:flex;flex-direction:column;width:100%;min-height:100%;line-height:1.4">${barRow}${sub}</div>`;
+    return `<div style="display:flex;flex-direction:column;width:100%;min-height:100%;line-height:1.4;border:2px solid #000;box-sizing:border-box">${barRow}${sub}</div>`;
   }
 
   if (type === 'dealer') {
