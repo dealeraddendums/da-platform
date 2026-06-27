@@ -71,9 +71,9 @@ export default async function DashboardLayout({
   if (isDealerRole && profile?.dealer_id) {
     const { data: dealerData } = await admin
       .from("dealers")
-      .select("name, group_id, group_controls_templates, account_type")
+      .select("name, dealer_id, group_id, group_controls_templates, account_type, migration_status")
       .eq("dealer_id", profile.dealer_id)
-      .maybeSingle<{ name: string; group_id: string | null; group_controls_templates: boolean | null; account_type: string | null }>();
+      .maybeSingle<{ name: string; dealer_id: string | null; group_id: string | null; group_controls_templates: boolean | null; account_type: string | null; migration_status: string | null }>();
     dealerName = dealerData?.name ?? null;
     templatesLocked = Boolean(dealerData?.group_controls_templates && dealerData?.group_id);
     dealerAccountType = dealerData?.account_type ?? null;
