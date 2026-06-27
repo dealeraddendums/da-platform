@@ -65,18 +65,42 @@ export default async function DashboardLayout({
   // (e.g. from a prior group assignment that wasn't fully cleaned up)
   // would otherwise have Builder silently hidden from their nav and the
   // /builder page redirect them back to /dashboard.
+  type DealerRow = {
+    name: string;
+    dealer_id: string | null;
+    group_id: string | null;
+    group_controls_templates: boolean | null;
+    account_type: string | null;
+    migration_status: string | null;
+  };
   let dealerName: string | null = null;
   let templatesLocked = false;
   let dealerAccountType: string | null = null;
+  let dealerData: DealerRow | null = null;
   if (isDealerRole && profile?.dealer_id) {
-    const { data: dealerData } = await admin
+    ({ data: dealerData } = await admin
       .from("dealers")
       .select("name, dealer_id, group_id, group_controls_templates, account_type, migration_status")
       .eq("dealer_id", profile.dealer_id)
-      .maybeSingle<{ name: string; dealer_id: string | null; group_id: string | null; group_controls_templates: boolean | null; account_type: string | null; migration_status: string | null }>();
+      .maybeSingle<DealerRow>());
     dealerName = dealerData?.name ?? null;
     templatesLocked = Boolean(dealerData?.group_controls_templates && dealerData?.group_id);
     dealerAccountType = dealerData?.account_type ?? null;
+  }
+
+  // ── V5.0 access gate ──────────────────────────────────────────────────────
+  // A real dealer-role login may use the V5.0 dashboard only if it's V5-native
+  // (self-serve dealer_id, "ss_" prefix) or explicitly migrated; everyone else
+  // is still on Platform 4.0 and is bounced to /not-migrated. Super-admin
+  // impersonation keeps role=super_admin (isDealerRole=false), so admins
+  // previewing a dealer are unaffected. Fails open: if the dealer record
+  // couldn't be read we don't lock anyone out.
+  if (isDealerRole && dealerData) {
+    const isV5Native = dealerData.dealer_id?.startsWith("ss_") === true;
+    const isMigrated = dealerData.migration_status === "migrated";
+    if (!isV5Native && !isMigrated) {
+      redirect("/not-migrated");
+    }
   }
 
   // ── Group context (group_admin) ────────────────────────────────────────────
