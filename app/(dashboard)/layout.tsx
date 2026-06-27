@@ -91,13 +91,13 @@ export default async function DashboardLayout({
   // ── V5.0 access gate ──────────────────────────────────────────────────────
   // A real dealer-role login may use the V5.0 dashboard only if it's V5-native
   // (self-serve dealer_id, "ss_" prefix) or explicitly migrated; everyone else
-  // is still on Platform 4.0 and is bounced to /not-migrated. Super-admin
-  // impersonation keeps role=super_admin (isDealerRole=false), so admins
-  // previewing a dealer are unaffected. Fails open: if the dealer record
-  // couldn't be read we don't lock anyone out.
-  if (isDealerRole && dealerData) {
-    const isV5Native = dealerData.dealer_id?.startsWith("ss_") === true;
-    const isMigrated = dealerData.migration_status === "migrated";
+  // — including any dealer whose record can't be read — is still on Platform
+  // 4.0 and is bounced to /not-migrated. Super-admin impersonation keeps
+  // role=super_admin (isDealerRole=false), so admins previewing a dealer are
+  // unaffected.
+  if (isDealerRole) {
+    const isV5Native = dealerData?.dealer_id?.startsWith("ss_") === true;
+    const isMigrated = dealerData?.migration_status === "migrated";
     if (!isV5Native && !isMigrated) {
       redirect("/not-migrated");
     }
