@@ -352,6 +352,39 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           if (ftj.paperSize) savedTemplatePaperSize = ftj.paperSize as PaperSize;
         }
       }
+
+      // Fallback: no dealer/group default addendum template configured —
+      // bootstrap from the SuperAdmin blank-default starter (the same layout
+      // the Builder applies on first open and "+ New → Blank"), so Print Now
+      // matches the Builder instead of the legacy hardcoded LAYOUT defaults.
+      // Routed through savedTemplateWidgets so it gets the identical live-price
+      // / dealer-logo / address normalization a real saved template gets.
+      if (!savedTemplateWidgets && docType === "addendum") {
+        // starter_templates isn't in the generated Database types yet; cast like
+        // the /api/starter-templates routes do.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sdb = admin as any;
+        const { data: blankStarter } = await sdb
+          .from("starter_templates")
+          .select("template_json")
+          .eq("is_blank_default", true)
+          .limit(1)
+          .maybeSingle() as { data: { template_json: Record<string, unknown> } | null };
+        if (blankStarter?.template_json) {
+          const btj = blankStarter.template_json as {
+            widgets?: Record<string, Widget>;
+            bgUrl?: string;
+            fontScale?: number;
+            paperSize?: string;
+          };
+          if (btj.widgets && Object.keys(btj.widgets).length > 0) {
+            savedTemplateWidgets = Object.values(btj.widgets);
+          }
+          if (btj.bgUrl) savedTemplateBgUrl = btj.bgUrl;
+          if (typeof btj.fontScale === "number") savedTemplateFontScale = btj.fontScale;
+          if (btj.paperSize) savedTemplatePaperSize = btj.paperSize as PaperSize;
+        }
+      }
     }
 
     // ── Resolve custom paper size dimensions ──────────────────────────────────

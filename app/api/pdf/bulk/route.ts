@@ -366,6 +366,39 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           }
         }
 
+        // Fallback: no dealer/group default addendum template — bootstrap from
+        // the SuperAdmin blank-default starter (same as Builder first-open and
+        // "+ New → Blank"), routed through templateWidgets so it gets the same
+        // live-price/dealer normalization a saved template gets. Mirrors the
+        // single-vehicle pdf/generate route. Cached globally (platform starter).
+        if (!templateWidgets && docType === "addendum") {
+          const blankKey = "blank_default_starter";
+          if (!templateCache.has(blankKey)) {
+            // starter_templates isn't in the generated Database types yet; cast
+            // like the /api/starter-templates routes do.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const sdb = admin as any;
+            const { data: bs } = await sdb
+              .from("starter_templates")
+              .select("template_json")
+              .eq("is_blank_default", true)
+              .limit(1)
+              .maybeSingle() as { data: { template_json: Record<string, unknown> } | null };
+            if (bs?.template_json) {
+              const btj = bs.template_json as { widgets?: Record<string, Widget>; bgUrl?: string; fontScale?: number; paperSize?: string };
+              templateCache.set(blankKey, btj.widgets ? Object.values(btj.widgets) : null);
+              templateMetaCache.set(blankKey, { bgUrl: btj.bgUrl, fontScale: btj.fontScale, paperSizeStr: btj.paperSize });
+            } else {
+              templateCache.set(blankKey, null);
+            }
+          }
+          templateWidgets = templateCache.get(blankKey) ?? null;
+          if (templateWidgets) {
+            const meta = templateMetaCache.get(blankKey);
+            if (meta) { templateBgUrl = meta.bgUrl; templateFontScale = meta.fontScale; if (meta.paperSizeStr) templatePaperSizeStr = meta.paperSizeStr; }
+          }
+        }
+
         // ── Effective paper size ─────────────────────────────────────────────
         const effectivePaperSizeStr =
           (body.paperSize && knownSizes.has(body.paperSize) ? body.paperSize : null)
