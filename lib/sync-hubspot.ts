@@ -16,6 +16,7 @@ import {
   associateContactToCompany,
   LIFECYCLE,
   INDUSTRY,
+  COMPANY_TYPE,
   normalizeSubscriptionType,
   isPayingAccount,
   DedupSkipError,
@@ -334,10 +335,10 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
 
     // Create-only: a dealer Company is always industry "Automotive Dealer"; the
     // source_form (creation-path attribution) is whatever the caller passed.
-    // `type` mirrors industry (sync-owned per the QA walkthrough). All applied
-    // only when this sync POSTs a new Company — never on a PATCH — so they never
-    // clobber a later operator edit.
-    const createOnlyProperties: Record<string, string | null> = { industry: INDUSTRY.DEALER, type: INDUSTRY.DEALER };
+    // `type` is the constrained dropdown — "Dealership" (NOT the industry label,
+    // which 400s). All applied only when this sync POSTs a new Company — never on
+    // a PATCH — so they never clobber a later operator edit.
+    const createOnlyProperties: Record<string, string | null> = { industry: INDUSTRY.DEALER, type: COMPANY_TYPE.DEALER };
     if (opts?.sourceForm) createOnlyProperties.source_form = opts.sourceForm;
 
     const { hubspotId, created } = await upsertObject({
@@ -397,8 +398,9 @@ export async function syncGroupToHubspot(groupId: string, opts?: { sourceForm?: 
     // Create-only: groups map to "Automotive Dealer Group" (reseller groups
     // would use INDUSTRY.RESELLER once the data models that distinction — there
     // is no reseller flag on groups today). source_form per creation path.
-    // `type` mirrors industry (sync-owned). Applied on POST only, never on PATCH.
-    const createOnlyProperties: Record<string, string | null> = { industry: INDUSTRY.GROUP, type: INDUSTRY.GROUP };
+    // `type` is the constrained dropdown — "Dealer Group" (NOT the industry
+    // label). Applied on POST only, never on PATCH.
+    const createOnlyProperties: Record<string, string | null> = { industry: INDUSTRY.GROUP, type: COMPANY_TYPE.GROUP };
     if (opts?.sourceForm) createOnlyProperties.source_form = opts.sourceForm;
 
     const { hubspotId, created } = await upsertObject({

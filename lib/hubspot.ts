@@ -141,6 +141,15 @@ export const INDUSTRY = {
   RESELLER: "Reseller",
 } as const;
 
+// HubSpot's company `type` is a CONSTRAINED dropdown — its options are not the
+// same as `industry`. Allowed: Dealership, Dealer Group, VENDOR, PROSPECT,
+// PARTNER, Feed Company, OTHER, Advertising. Sending the industry label
+// "Automotive Dealer" 400s the company create with INVALID_OPTION.
+export const COMPANY_TYPE = {
+  DEALER: "Dealership",
+  GROUP:  "Dealer Group",
+} as const;
+
 const V4_BASE = "https://api.hubapi.com/crm/v4";
 
 /**
