@@ -67,7 +67,7 @@ function authHeaders(extra: Record<string, string> = {}): HeadersInit {
   return { Authorization: `Bearer ${tok}`, ...extra };
 }
 
-class HubspotError extends Error {
+export class HubspotError extends Error {
   status: number;
   body: string;
   constructor(status: number, message: string, body: string) {

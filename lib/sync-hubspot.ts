@@ -19,6 +19,7 @@ import {
   normalizeSubscriptionType,
   isPayingAccount,
   DedupSkipError,
+  HubspotError,
 } from "@/lib/hubspot";
 import { isOverAllowance, isFreeAccountType } from "@/lib/print-eligibility";
 import { printedVehicleCount } from "@/lib/print-counts";
@@ -111,7 +112,10 @@ function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, 
   return {
     // Identity / four-ID block
     name:        d.name,
-    dealerid:    d.inventory_dealer_id != null ? String(d.inventory_dealer_id) : null,
+    // dealerid is a Number-type property in HubSpot — only send when the value
+    // is a pure numeric CDK/Aurora dealer ID. Self-serve dealers have
+    // inventory_dealer_id = "ss_…" which is not numeric and would 400.
+    dealerid:    (d.inventory_dealer_id != null && /^\d+$/.test(String(d.inventory_dealer_id))) ? String(d.inventory_dealer_id) : null,
     platformid:  platformId,
     da_dealer_:  platformId,                                          // legacy export field — write same value as platformid
     billingid:   billingId,
@@ -212,7 +216,12 @@ async function logError(
   payload: Record<string, unknown>,
   hubspotId: string | null = null,
 ): Promise<void> {
-  const message = err instanceof Error ? err.message : String(err);
+  // Include the HubSpot response body when available — the raw body has the
+  // specific property/validation error that caused the 400, which err.message
+  // alone ("create companies 400") doesn't capture.
+  const message = err instanceof HubspotError && err.body
+    ? `${err.message} — ${err.body.slice(0, 800)}`
+    : err instanceof Error ? err.message : String(err);
   console.error(`[hubspot-sync] ${objectType} ${objectId} ${op} failed:`, message);
   try {
     const admin = createAdminSupabaseClient();
