@@ -37,13 +37,18 @@ export default async function DashboardLayout({
   // group_admin does — resolve their active dealer so the nav flips to dealer parity.
   const activeDealerUuid = (isGroupAdmin || isGroupUser) ? (profile?.active_dealer_id ?? null) : null;
 
-  // ── Ghost mode (super_admin only) ──────────────────────────────────────────
+  // ── Ghost mode (super_admin only) + impersonation flag ──────────────────────
+  // cookieStore is read here (once) for both ghost-token and da_impersonating so
+  // the migration gate below can also check it without a second cookies() call.
+  const cookieStore = cookies();
+  // da_impersonating=1 means a super_admin has session-switched into a dealer.
+  // The gate must respect this so admins can preview unmigrated dealers.
+  const isImpersonating = cookieStore.get("da_impersonating")?.value === "1";
   let ghostDealerName: string | null = null;
   let ghostGroupId: string | null = null;
   let ghostGroupName: string | null = null;
   let isGhostMode = false;
   if (isSuperAdmin) {
-    const cookieStore = cookies();
     const ghostToken = cookieStore.get("da_ghost_token")?.value;
     if (ghostToken) {
       const ghostCtx = verifyGhostToken(ghostToken);
@@ -91,11 +96,11 @@ export default async function DashboardLayout({
   // ── V5.0 access gate ──────────────────────────────────────────────────────
   // A real dealer-role login may use the V5.0 dashboard only if it's V5-native
   // (self-serve dealer_id, "ss_" prefix) or explicitly migrated; everyone else
-  // — including any dealer whose record can't be read — is still on Platform
-  // 4.0 and is bounced to /not-migrated. Super-admin impersonation keeps
-  // role=super_admin (isDealerRole=false), so admins previewing a dealer are
-  // unaffected.
-  if (isDealerRole) {
+  // is still on Platform 4.0 and is bounced to /not-migrated.
+  // Bypassed when a super_admin has session-switched into the dealer
+  // (da_impersonating=1) so admins can preview unmigrated dealer accounts
+  // without getting trapped on the /not-migrated page.
+  if (isDealerRole && !isImpersonating) {
     const isV5Native = dealerData?.dealer_id?.startsWith("ss_") === true;
     const isMigrated = dealerData?.migration_status === "migrated";
     if (!isV5Native && !isMigrated) {
