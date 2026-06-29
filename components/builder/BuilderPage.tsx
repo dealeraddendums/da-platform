@@ -765,10 +765,54 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         const rows = listJson.data ?? [];
         if (cancelled) return;
         if (rows.length === 0) {
-          // First-time open — no saved templates yet. Apply blank canvas
-          // defaults so new dealers start with the standard widget layout
-          // instead of an empty canvas.
-          applyBlankCanvas();
+          // First-time open — no saved templates yet. Bootstrap from the
+          // SuperAdmin-curated blank-default starter so the canvas matches
+          // what "+ New → Blank" produces. Fall back to the hardcoded
+          // defaults only if no blank starter exists or it has no layout.
+          try {
+            const sListRes = await fetch('/api/starter-templates');
+            if (!cancelled && sListRes.ok) {
+              const sListJson = await sListRes.json() as { data?: Array<{ id: string; is_blank_default?: boolean }> };
+              const blankRow = (sListJson.data ?? []).find(s => s.is_blank_default);
+              if (!cancelled && blankRow) {
+                const sRes = await fetch(`/api/starter-templates/${blankRow.id}`);
+                if (!cancelled && sRes.ok) {
+                  const sPayload = await sRes.json();
+                  const sTmpl = sPayload?.data as { template_json?: Record<string, unknown>; is_blank_default?: boolean } | null;
+                  const sTj = (sTmpl?.template_json ?? {}) as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: string };
+                  if (sTj.widgets && Object.keys(sTj.widgets).length > 0) {
+                    const ps = sTj.paperSize ?? 'standard';
+                    const { w: pw, h: ph } = getPaperDims(ps, customSizesRef.current);
+                    let ws = sTj.widgets;
+                    let n = sTj.nid ?? 1;
+                    ws = convertLegacyInfoboxes(ws);
+                    [ws, n] = ensureAskbar(ws, n, ps);
+                    ws = clampWidgets(ws, pw, ph);
+                    if (dealerInfoRef.current) ws = applyDealerInfoToWidgets(ws, dealerInfoRef.current);
+                    ws = applyLogoToWidgets(ws, canonicalLogoRef.current);
+                    ws = applyDisclaimerToWidgets(ws, disclaimersRef.current);
+                    if (cancelled) return;
+                    setWidgets(ws); widgetsRef.current = ws;
+                    setNid(n);
+                    if (sTj.bgUrl) setBgUrl(sTj.bgUrl);
+                    setFontScale(typeof sTj.fontScale === 'number' ? sTj.fontScale : 1.0);
+                    setPaperSize(ps); paperSizeRef.current = ps;
+                    setLoadedTemplateId(null);
+                    setLoadedTemplateLocked(false);
+                    setLoadedTemplateSource(null);
+                    setSelId(null);
+                    setTemplateName('New Template');
+                    setHistory([JSON.stringify({ widgets: ws, nid: n })]);
+                    setHistIdx(0);
+                    isDirtyRef.current = false;
+                    return;
+                  }
+                }
+              }
+            }
+          } catch { /* fall through to applyBlankCanvas */ }
+          // No blank starter with a saved layout — use hardcoded defaults.
+          if (!cancelled) applyBlankCanvas();
           return;
         }
         // Sort by updated_at DESC; prefer the dealer's own templates over
