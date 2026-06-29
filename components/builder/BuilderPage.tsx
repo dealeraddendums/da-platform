@@ -763,7 +763,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (!listRes.ok) return;
         const listJson = await listRes.json() as { data?: SavedTemplate[] };
         const rows = listJson.data ?? [];
-        if (cancelled || rows.length === 0) return;
+        if (cancelled) return;
+        if (rows.length === 0) {
+          // First-time open — no saved templates yet. Apply blank canvas
+          // defaults so new dealers start with the standard widget layout
+          // instead of an empty canvas.
+          applyBlankCanvas();
+          return;
+        }
         // Sort by updated_at DESC; prefer the dealer's own templates over
         // assigned (locked) group templates so the auto-open never surprises
         // the user with a 🔒 Locked surface.
