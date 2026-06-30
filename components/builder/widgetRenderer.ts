@@ -215,7 +215,9 @@ export function renderW(type: string, d: D, fontScale: number): string {
     if (bar === 'clear') {
       const labelSec = `<div style="flex:1;min-width:0;display:flex;align-items:center;box-sizing:border-box;color:#000;padding:5px 8px;font-size:${lfs}px;font-weight:800;letter-spacing:-.01em">${d.label}</div>`;
       const priceSec = `<div style="display:flex;align-items:center;justify-content:flex-end;box-sizing:border-box;color:#000;padding:5px 10px;font-size:${vfs}px;font-weight:800;font-family:monospace;min-width:120px;text-align:right;white-space:nowrap">${d.value}</div>`;
-      return `<div style="display:flex;align-items:stretch;width:100%;line-height:1.4;border:2px solid #000;box-sizing:border-box">${labelSec}${priceSec}</div>`;
+      // Clear bar → transparent frame too (same 2px geometry so switching bar
+      // color doesn't shift the widget, just invisible).
+      return `<div style="display:flex;align-items:stretch;width:100%;line-height:1.4;border:2px solid transparent;box-sizing:border-box">${labelSec}${priceSec}</div>`;
     }
     const inv = bar.toLowerCase() === '#ffffff' ? '#000000' : '#ffffff';
     const labelSec = `<div style="flex:1;min-width:0;display:flex;align-items:center;box-sizing:border-box;background:${bar};color:${inv};padding:5px 8px;font-size:${lfs}px;font-weight:800;letter-spacing:-.01em">${d.label}</div>`;
@@ -254,7 +256,8 @@ export function renderW(type: string, d: D, fontScale: number): string {
       const priceSec = `<div style="display:flex;align-items:center;justify-content:flex-end;box-sizing:border-box;color:#000;padding:5px 10px;font-size:${vfs}px;font-weight:800;font-family:monospace;min-width:120px;text-align:right;white-space:nowrap">${d.value}${(d.priceSuffix as string) || ''}</div>`;
       const barRow = `<div style="display:flex;align-items:stretch;width:100%">${labelSec}${priceSec}</div>`;
       const sub = hasSub ? `<div style="width:100%;box-sizing:border-box;color:#000;font-size:${sfs}px;font-style:italic;padding:3px 8px 12px">${d.subtitle}</div>` : '';
-      return `<div style="display:flex;flex-direction:column;width:100%;line-height:1.4;border:2px solid #000;box-sizing:border-box">${barRow}${sub}</div>`;
+      // Clear bar → transparent frame too (same 2px geometry, just invisible).
+      return `<div style="display:flex;flex-direction:column;width:100%;line-height:1.4;border:2px solid transparent;box-sizing:border-box">${barRow}${sub}</div>`;
     }
     const inv = bar.toLowerCase() === '#ffffff' ? '#000000' : '#ffffff';
     const labelSec = `<div style="flex:1;min-width:0;display:flex;align-items:center;box-sizing:border-box;background:${bar};color:${inv};padding:5px 8px;font-size:${lfs}px;font-weight:800;letter-spacing:-.01em">${d.label}</div>`;
