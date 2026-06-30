@@ -27,6 +27,19 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <head>
+        {/* Pre-hydration stale-chunk auto-reload. Registers error/rejection
+            listeners as the document parses — BEFORE any chunk loads or React
+            hydrates — so a ChunkLoadError during the initial hydrate (when the
+            <ChunkErrorReloader> effect hasn't attached its listeners yet) still
+            triggers a single reload. Shares the __chunkReloadAt sessionStorage
+            key + 30s guard with that component so they can't double-reload or
+            spin. import() failures surface as unhandledrejection. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              '(function(){try{var K="__chunkReloadAt",G=30000,RE=/Loading (CSS )?chunk [\\w-]+ failed|ChunkLoadError|Failed to find Server Action/;function go(m){if(!m||!RE.test(String(m)))return;try{var l=+(sessionStorage.getItem(K)||0);if(Date.now()-l<G)return;sessionStorage.setItem(K,String(Date.now()));}catch(e){}location.reload();}addEventListener("error",function(e){go(e&&e.error&&e.error.message||e.message);});addEventListener("unhandledrejection",function(e){var r=e&&e.reason;go(r&&r.message?r.message:r);});}catch(e){}})();',
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link

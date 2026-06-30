@@ -11,16 +11,24 @@
 // This listener catches the error globally (window.onerror +
 // window.onunhandledrejection) and triggers a single page reload so
 // the user picks up the new HTML + new chunks. Guarded by a
-// sessionStorage flag with a 10-minute window so a genuine bug that
-// throws the same error class never causes a reload loop.
+// sessionStorage flag with a short window so a genuine bug that throws
+// the same error class never causes a tight reload loop.
+//
+// NOTE: the primary catch is an inline <head> script in app/layout.tsx that
+// attaches the SAME listeners before hydration (chunk failures during the
+// initial hydrate happen before this effect runs). This component is a
+// belt-and-suspenders backup; both share RELOAD_FLAG so they can't double-fire.
 //
 // Mount once in the root layout.
 
 import { useEffect } from "react";
 
 const RELOAD_FLAG = "__chunkReloadAt";
-const RELOAD_GUARD_MS = 10 * 60 * 1000;
-const CHUNK_ERROR_RE = /Loading chunk \w+ failed|ChunkLoadError|Failed to find Server Action/;
+// Short window: a single deploy's stale-chunk errors cluster within seconds, so
+// one reload covers them; a LATER deploy (>30s) recovers again. (Was 10 min,
+// which suppressed recovery across rapid back-to-back deploys.)
+const RELOAD_GUARD_MS = 30 * 1000;
+const CHUNK_ERROR_RE = /Loading (CSS )?chunk [\w-]+ failed|ChunkLoadError|Failed to find Server Action/;
 
 export default function ChunkErrorReloader() {
   useEffect(() => {
