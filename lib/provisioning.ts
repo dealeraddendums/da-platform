@@ -13,6 +13,20 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { syncDealerCreateReliable, syncGroupToHubspot, fireProfileSync } from "@/lib/sync-hubspot";
 import { SOURCE_FORM } from "@/lib/hubspot";
 import { sendPasskeyInvite } from "@/lib/migration-invite";
+import { sendMandrillEmail } from "@/lib/mandrill";
+
+const SUPPORT_EMAIL = process.env.SUPPORT_NOTIFICATION_EMAIL ?? "support@dealeraddendums.com";
+
+/** Fire-and-forget staff notification — swallows errors so it never blocks the main flow. */
+function notifySupport(subject: string, html: string): void {
+  sendMandrillEmail({
+    subject,
+    html,
+    from_email: "noreply@dealeraddendums.com",
+    from_name: "DA Platform",
+    to: [{ email: SUPPORT_EMAIL, name: "DA Support" }],
+  }).catch(err => console.error("[notify-support]", err instanceof Error ? err.message : err));
+}
 
 export type Attribution = Record<string, string | null> | null | undefined;
 
@@ -75,6 +89,19 @@ export async function createTrialDealer(input: {
   // Seed sample data so the fresh standalone trial isn't an empty account.
   // Self-guarded (Trial + group_id NULL + not-yet-seeded) and never throws.
   await seedTrialSampleData(data.dealer_id as string);
+
+  // Staff notification — fire-and-forget.
+  notifySupport(
+    `New Trial Signup: ${input.dealership}`,
+    `<p><strong>New trial account created on DA Platform.</strong></p>
+<table style="font-family:sans-serif;font-size:14px;border-collapse:collapse">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Dealership</td><td><strong>${input.dealership}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Contact</td><td>${input.contactName} &lt;${input.email}&gt;</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Phone</td><td>${input.phone ?? "—"}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Dealer ID</td><td>${data.dealer_id as string}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Signed up</td><td>${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT</td></tr>
+</table>`,
+  );
 
   return { dealerUuid: data.id as string, dealerId: data.dealer_id as string, internalId };
 }

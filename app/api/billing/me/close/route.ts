@@ -29,6 +29,9 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { billingConfigured, deleteTemplate, listInvoices } from "@/lib/billing";
 import { fireDealerReliable } from "@/lib/sync-hubspot";
+import { sendMandrillEmail } from "@/lib/mandrill";
+
+const SUPPORT_EMAIL = process.env.SUPPORT_NOTIFICATION_EMAIL ?? "support@dealeraddendums.com";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
@@ -181,6 +184,22 @@ async function finalizeClose(
   // Reliable variant retries + Mandrill-alerts on terminal failure — the
   // workflow trigger for "Account Downgraded" depends on this landing.
   fireDealerReliable(dealer.id, "dealer self-close (Free downgrade)");
+
+  // Staff notification — fire-and-forget.
+  sendMandrillEmail({
+    subject: `Account Downgraded to Free: ${dealer.name}`,
+    html: `<p><strong>Dealer has downgraded to Free (self-close).</strong></p>
+<table style="font-family:sans-serif;font-size:14px;border-collapse:collapse">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Dealership</td><td><strong>${dealer.name}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Dealer ID</td><td>${dealer.dealer_id}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Was</td><td>${dealer.account_type ?? "Unknown"}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Closed</td><td>${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT</td></tr>
+  ${reason ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Reason</td><td>${reason}${detail ? ` — ${detail}` : ""}</td></tr>` : ""}
+</table>`,
+    from_email: "noreply@dealeraddendums.com",
+    from_name: "DA Platform",
+    to: [{ email: SUPPORT_EMAIL, name: "DA Support" }],
+  }).catch(err => console.error("[notify-support] paid→free:", err instanceof Error ? err.message : err));
 
   return NextResponse.json({
     ok: true,

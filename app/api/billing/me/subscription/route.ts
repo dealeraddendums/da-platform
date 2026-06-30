@@ -9,6 +9,7 @@ import {
   createTemplate,
   archiveCustomer,
   customerExists,
+  setBillingState,
   firstOfNextMonthIso,
   subscriptionDescriptorFor,
   billingConfigured,
@@ -16,6 +17,9 @@ import {
 } from "@/lib/billing";
 import { fireDealerReliable } from "@/lib/sync-hubspot";
 import { fireConversionWebhook } from "@/lib/marketing-webhook";
+import { sendMandrillEmail } from "@/lib/mandrill";
+
+const SUPPORT_EMAIL = process.env.SUPPORT_NOTIFICATION_EMAIL ?? "support@dealeraddendums.com";
 
 // dealers.account_type value for each tier — flips Trial → a paying type on
 // conversion so the print gate unblocks and HubSpot moves Trial → Customer.
@@ -174,6 +178,13 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       .eq("id", dealer.id);
   }
 
+  // Ensure billing state is 'active' for any conversion — a pre-existing
+  // customer may still be in 'setup' mode (invoices held). Best-effort so it
+  // never blocks the upgrade if the billing-state endpoint is unreachable.
+  if (!wasPaying && effectiveCustomerKey) {
+    try { await setBillingState(effectiveCustomerKey, "active"); } catch { /* non-blocking */ }
+  }
+
   // No price is sent — da-billing is the sole price authority and canonicalizes
   // sub-*/dms-setup server-side; discounts apply via subscriptionDiscount.
   // See docs/billing-price-integrity.md.
@@ -263,6 +274,21 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       convertedAt: new Date().toISOString(),
       plan: descriptor.name,
     });
+    // Staff notification — fire-and-forget.
+    sendMandrillEmail({
+      subject: `Trial Converted to Paid: ${dealer.name}`,
+      html: `<p><strong>Trial account has upgraded to a paid subscription.</strong></p>
+<table style="font-family:sans-serif;font-size:14px;border-collapse:collapse">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Dealership</td><td><strong>${dealer.name}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Plan</td><td>${descriptor.name}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Contact</td><td>${dealer.primary_contact ?? "—"} &lt;${dealer.primary_contact_email ?? "—"}&gt;</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Dealer ID</td><td>${dealerTextId}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Converted</td><td>${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT</td></tr>
+</table>`,
+      from_email: "noreply@dealeraddendums.com",
+      from_name: "DA Platform",
+      to: [{ email: SUPPORT_EMAIL, name: "DA Support" }],
+    }).catch(err => console.error("[notify-support] trial→paid:", err instanceof Error ? err.message : err));
   }
 
   return NextResponse.json({
