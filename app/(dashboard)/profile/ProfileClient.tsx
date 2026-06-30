@@ -757,6 +757,50 @@ function OrderLabelsTab({
     message: string;
   } | null>(null);
 
+  // One-time free trial label sample (Trial dealers only). See /api/trial-labels.
+  const [trialLabelStep, setTrialLabelStep] = useState<'idle' | 'form' | 'placing' | 'done'>('idle');
+  const [trialLabelSku, setTrialLabelSku] = useState('8300-1');
+  const [trialLabelShipTo, setTrialLabelShipTo] = useState({
+    name: dealer.primary_contact ?? '',
+    company: dealer.name ?? '',
+    address1: '',
+    city: '',
+    state: '',
+    zip: '',
+    country: 'US',
+    phone: '',
+  });
+  const [trialLabelResult, setTrialLabelResult] = useState<string | null>(null);
+
+  async function placeTrialLabels() {
+    setTrialLabelResult(null);
+    if (!trialLabelShipTo.name || !trialLabelShipTo.address1 || !trialLabelShipTo.city || !trialLabelShipTo.state || !trialLabelShipTo.zip) {
+      setTrialLabelResult('Please fill in name, address, city, state, and ZIP.');
+      return;
+    }
+    setTrialLabelStep('placing');
+    try {
+      const res = await fetch('/api/trial-labels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dealerUuid: dealer.id, labelSku: trialLabelSku, shipTo: trialLabelShipTo }),
+      });
+      const json = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (res.ok && (json as { success?: boolean }).success) {
+        setTrialLabelStep('done');
+      } else if (res.status === 409 || (json as { error?: string }).error === 'already_claimed') {
+        setTrialLabelStep('done'); // already claimed elsewhere — show the done state
+      } else {
+        setTrialLabelStep('form');
+        const err = (json as { error?: string }).error;
+        setTrialLabelResult(err ? `Could not place order: ${err}` : 'Could not place order. Please try again or contact support.');
+      }
+    } catch {
+      setTrialLabelStep('form');
+      setTrialLabelResult('Network error — please try again.');
+    }
+  }
+
   // Clear any stale orderResult from a previous interaction. Initial
   // useState(null) is enough on a hard navigation, but soft navigation
   // within /profile (e.g. tab switching back to labels after seeing an
@@ -879,6 +923,7 @@ function OrderLabelsTab({
   return (
     <div>
       {noSubscriptionAccess && (
+        <>
         <div
           style={{
             background: "#fff8e1",
@@ -904,6 +949,103 @@ function OrderLabelsTab({
           </a>{" "}
           to upgrade your account.
         </div>
+
+        {accountType === "Trial" && (
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e0e0e0",
+              borderRadius: 6,
+              padding: "18px 20px",
+              marginBottom: 20,
+              fontFamily: "Roboto, sans-serif",
+            }}
+          >
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#2a2b3c", marginBottom: 6 }}>
+              🏷 Try before you buy — get 25 free labels
+            </div>
+            <div style={{ fontSize: 14, color: "#55595c", lineHeight: 1.6, marginBottom: 14 }}>
+              We&apos;ll send you a free sample pack so you can test our labels before subscribing.
+            </div>
+
+            {(dealer.trial_labels_claimed_at || trialLabelStep === "done") ? (
+              <div style={{ fontSize: 14, color: "#15803D", fontWeight: 600 }}>
+                ✓{" "}
+                {trialLabelStep === "done" && !dealer.trial_labels_claimed_at
+                  ? "Your free sample is on its way!"
+                  : `Free sample requested${
+                      dealer.trial_labels_claimed_at
+                        ? " on " +
+                          new Date(dealer.trial_labels_claimed_at).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })
+                        : ""
+                    }.`}
+              </div>
+            ) : trialLabelStep === "placing" ? (
+              <div style={{ fontSize: 14, color: "#55595c" }}>Placing order…</div>
+            ) : trialLabelStep === "form" ? (
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#55595c", marginBottom: 4 }}>
+                  Label type
+                </label>
+                <select
+                  value={trialLabelSku}
+                  onChange={e => setTrialLabelSku(e.target.value)}
+                  style={{ width: "100%", padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 14, marginBottom: 12, fontFamily: "inherit", boxSizing: "border-box" }}
+                >
+                  <option value="8300-1">Regular Addendums (4.25&quot;×11&quot;)</option>
+                  <option value="8300-3">Narrow Addendums (3.125&quot;×11&quot;)</option>
+                  <option value="8300">Full Sheet Labels (8.5&quot;×11&quot;)</option>
+                </select>
+                {([
+                  ["name", "Name *"],
+                  ["company", "Company"],
+                  ["address1", "Address *"],
+                  ["city", "City *"],
+                  ["state", "State *"],
+                  ["zip", "ZIP *"],
+                  ["phone", "Phone"],
+                ] as [keyof typeof trialLabelShipTo, string][]).map(([k, lbl]) => (
+                  <input
+                    key={k}
+                    placeholder={lbl}
+                    value={trialLabelShipTo[k]}
+                    onChange={e => setTrialLabelShipTo(prev => ({ ...prev, [k]: e.target.value }))}
+                    style={{ width: "100%", padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 14, marginBottom: 8, boxSizing: "border-box", fontFamily: "inherit" }}
+                  />
+                ))}
+                {trialLabelResult && (
+                  <div style={{ fontSize: 13, color: "#c62828", marginBottom: 8 }}>{trialLabelResult}</div>
+                )}
+                <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                  <button
+                    onClick={placeTrialLabels}
+                    style={{ background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, padding: "9px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+                  >
+                    Request Free Labels
+                  </button>
+                  <button
+                    onClick={() => { setTrialLabelStep("idle"); setTrialLabelResult(null); }}
+                    style={{ background: "#fff", color: "#55595c", border: "1px solid #e0e0e0", borderRadius: 4, padding: "9px 16px", fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setTrialLabelStep("form")}
+                style={{ background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+              >
+                Get Free Labels →
+              </button>
+            )}
+          </div>
+        )}
+        </>
       )}
 
       {!canOrder && !noSubscriptionAccess && (

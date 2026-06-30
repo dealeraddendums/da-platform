@@ -286,6 +286,8 @@ export type DealerRow = {
   acquisition: Record<string, unknown> | null;
   /** When a trial dealer became a paying account (Trial -> paid). (Migration 095) */
   converted_at: string | null;
+  /** When this Trial dealer claimed their one-time free 25-label sample. NULL = not yet claimed. (Migration 115) */
+  trial_labels_claimed_at?: string | null;
   /** Creation-time classification: real | test | sales_demo. is_test is kept
    *  in sync as (account_purpose <> 'real'). (Migration 096) */
   account_purpose: "real" | "test" | "sales_demo";
