@@ -1581,10 +1581,24 @@ interface BillingMeData {
 }
 
 const SUBSCRIPTION_TIERS: Array<{ key: string; productKey: string; name: string; description: string }> = [
-  { key: "manual",    productKey: "sub-manual",   name: "Monthly Subscription Manual",        description: "Manual data entry — addendums created one at a time" },
-  { key: "auto-web",  productKey: "sub-auto-web", name: "Monthly Subscription Automatic Web", description: "Automatic ingest from your website inventory feed" },
-  { key: "auto-dms",  productKey: "sub-auto-dms", name: "Monthly Subscription Automatic DMS", description: "Direct DMS integration — fastest sync" },
+  { key: "manual",    productKey: "sub-manual",   name: "Monthly Subscription Manual",        description: "You manage addendum options for each vehicle manually, one at a time. Best for lower-volume lots or dealers who prefer direct control over every addendum." },
+  { key: "auto-web",  productKey: "sub-auto-web", name: "Monthly Subscription Automatic Web", description: "Your vehicle inventory is pulled automatically from your website inventory feed provider. Addendums stay in sync as vehicles are added, updated, or sold. Requires your feed provider info and approval from someone at your dealership authorized to set up the connection." },
+  { key: "auto-dms",  productKey: "sub-auto-dms", name: "Monthly Subscription Automatic DMS", description: "DA Platform connects directly to your Dealer Management System for the fastest, most reliable inventory sync. Addendums update automatically as your DMS changes. Requires your DMS provider info and approval from an authorized contact at your dealership." },
 ];
+
+// Provider option lists for the Auto-tier feed-setup forms.
+const FEED_WEB_PROVIDERS = [
+  "Reynolds & Reynolds", "CDK / Fortellis", "DealerSocket", "Tekion",
+  "Dealertrack (Cox Automotive)", "VinSolutions", "PBS Systems", "Quorum",
+  "Frazer", "Auto/Mate", "Dealer.com", "Other",
+];
+const FEED_DMS_PROVIDERS = [
+  "Reynolds & Reynolds", "CDK Global / Fortellis", "DealerSocket DMS", "Tekion",
+  "Dealertrack DMS (Cox Automotive)", "PBS Systems", "Quorum", "Frazer",
+  "Auto/Mate", "Titan DMS", "Procede Software", "Other",
+];
+const feedLabelStyle: React.CSSProperties = { display: "block", fontSize: 12, color: "#55595c", marginBottom: 4, marginTop: 10 };
+const feedInputStyle: React.CSSProperties = { width: "100%", padding: "7px 10px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
 function money(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
@@ -1606,6 +1620,12 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
   const [closeStep, setCloseStep] = useState<null | "reason" | "closing">(null);
   const [closeReason, setCloseReason] = useState<string>("");
   const [closeDetail, setCloseDetail] = useState<string>("");
+  // Two-step plan-change: which tier card is expanded + the Auto-tier feed form.
+  const [selectedTier, setSelectedTier] = useState<string | null>(null);
+  const [feedProvider, setFeedProvider] = useState("");
+  const [feedAuthName, setFeedAuthName] = useState("");
+  const [feedAuthEmail, setFeedAuthEmail] = useState("");
+  const [feedFormError, setFeedFormError] = useState<string | null>(null);
 
   const refresh = useCallbackFetch(setData, setLoading, setError);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -1635,7 +1655,10 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
     }
   }
 
-  async function changeTier(tier: { key: string; productKey: string; name: string }) {
+  async function changeTier(
+    tier: { key: string; productKey: string; name: string },
+    feed?: { provider: string; authorizedName: string; authorizedEmail: string; isDms: boolean },
+  ) {
     setSavingTier(tier.key);
     setToast(null);
     try {
@@ -1644,7 +1667,14 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
         headers: { "Content-Type": "application/json" },
         // Send the productKey ("sub-auto-web"), not the short key ("auto-web") —
         // subscriptionDescriptorFor keys off the product slug / full name.
-        body: JSON.stringify({ tier: tier.productKey }),
+        body: JSON.stringify({
+          tier: tier.productKey,
+          ...(feed && {
+            feedProvider:        feed.provider,
+            feedAuthorizedName:  feed.authorizedName,
+            feedAuthorizedEmail: feed.authorizedEmail,
+          }),
+        }),
       });
       const j = await res.json().catch(() => ({})) as { error?: string };
       if (!res.ok) {
@@ -1653,6 +1683,10 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
       }
       setToast(`✓ Plan updated to ${tier.name}. Takes effect on the next invoice.`);
       setChangeOpen(false);
+      setSelectedTier(null);
+      setFeedProvider("");
+      setFeedAuthName("");
+      setFeedAuthEmail("");
       await refresh();
     } finally {
       setSavingTier(null);
@@ -1755,92 +1789,153 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
                 const priceEntry = data.pricing.find((p) => p.name.toLowerCase() === tier.productKey.toLowerCase());
                 const tierPrice = priceEntry?.price ?? null;
                 const isCurrent = sub?.productId === tier.productKey;
-                const isSaving = savingTier === tier.key;
+                const isSelected = selectedTier === tier.key;
+                const isAuto = tier.key === "auto-web" || tier.key === "auto-dms";
                 return (
-                  <button
-                    key={tier.key}
-                    disabled={isCurrent || isSaving}
-                    onClick={() => void changeTier(tier)}
-                    style={{
-                      textAlign: "left",
-                      padding: "10px 14px",
-                      border: `1px solid ${isCurrent ? "#1976d2" : "#e0e0e0"}`,
-                      background: isCurrent ? "#e3f2fd" : "#fff",
-                      borderRadius: 6,
-                      cursor: isCurrent ? "default" : isSaving ? "wait" : "pointer",
-                      fontFamily: "inherit",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 12,
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13, color: "#333" }}>
-                        {tier.name}
-                        {isCurrent && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#1565c0" }}>CURRENT</span>}
+                  <div key={tier.key}>
+                    <button
+                      disabled={isCurrent}
+                      onClick={() => { if (isCurrent) return; setFeedFormError(null); setSelectedTier(isSelected ? null : tier.key); }}
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "10px 14px",
+                        border: `1px solid ${isCurrent ? "#1976d2" : "#e0e0e0"}`,
+                        borderLeft: isSelected ? "3px solid #1976d2" : undefined,
+                        background: isCurrent ? "#e3f2fd" : "#fff",
+                        borderRadius: isSelected ? "6px 6px 0 0" : 6,
+                        cursor: isCurrent ? "default" : "pointer",
+                        fontFamily: "inherit",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: "#333" }}>
+                          {tier.name}
+                          {isCurrent && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#1565c0" }}>CURRENT</span>}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 11, color: "#78828c", marginTop: 2 }}>{tier.description}</div>
-                    </div>
-                    <div style={{ fontFamily: "monospace", fontSize: 13, color: "#333", whiteSpace: "nowrap" }}>
-                      {money(tierPrice)}/mo
-                    </div>
-                  </button>
+                      <div style={{ fontFamily: "monospace", fontSize: 13, color: "#333", whiteSpace: "nowrap" }}>
+                        {money(tierPrice)}/mo
+                      </div>
+                    </button>
+                    {isSelected && (
+                      <div style={{ borderLeft: "3px solid #1976d2", marginLeft: 0, padding: "14px 16px", background: "#f8f9fb", borderRadius: "0 0 6px 6px", marginBottom: 8 }}>
+                        <p style={{ fontSize: 13, color: "#444", lineHeight: 1.6, margin: "0 0 12px" }}>{tier.description}</p>
+                        {isAuto && (
+                          <>
+                            <label style={feedLabelStyle}>{tier.key === "auto-dms" ? "DMS Provider" : "Inventory Provider"}</label>
+                            <select value={feedProvider} onChange={e => setFeedProvider(e.target.value)} style={feedInputStyle}>
+                              <option value="">{tier.key === "auto-dms" ? "— select your DMS —" : "— select your provider —"}</option>
+                              {(tier.key === "auto-dms" ? FEED_DMS_PROVIDERS : FEED_WEB_PROVIDERS).map(p => (
+                                <option key={p} value={p}>{p}</option>
+                              ))}
+                            </select>
+                            <label style={feedLabelStyle}>Authorized Contact Name</label>
+                            <input type="text" value={feedAuthName} onChange={e => setFeedAuthName(e.target.value)} placeholder="Full name of person approving feed access" style={feedInputStyle} />
+                            <label style={feedLabelStyle}>Authorized Contact Email</label>
+                            <input type="email" value={feedAuthEmail} onChange={e => setFeedAuthEmail(e.target.value)} placeholder="email@dealership.com" style={feedInputStyle} />
+                          </>
+                        )}
+                        {feedFormError && <div style={{ color: "#c62828", fontSize: 12, marginBottom: 8, marginTop: 10 }}>{feedFormError}</div>}
+                        <div style={{ marginTop: 14 }}>
+                          <button
+                            onClick={async () => {
+                              setFeedFormError(null);
+                              if (isAuto) {
+                                if (!feedProvider) { setFeedFormError("Please select a provider."); return; }
+                                if (!feedAuthName.trim()) { setFeedFormError("Authorized contact name is required."); return; }
+                                if (!feedAuthEmail.trim() || !feedAuthEmail.includes("@")) { setFeedFormError("A valid authorized contact email is required."); return; }
+                              }
+                              await changeTier(tier, isAuto ? {
+                                provider: feedProvider,
+                                authorizedName: feedAuthName,
+                                authorizedEmail: feedAuthEmail,
+                                isDms: tier.key === "auto-dms",
+                              } : undefined);
+                            }}
+                            disabled={savingTier === tier.key}
+                            style={{
+                              padding: "8px 18px", background: "#1976d2", color: "#fff",
+                              border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600,
+                              cursor: savingTier === tier.key ? "wait" : "pointer", fontFamily: "inherit",
+                            }}
+                          >
+                            {savingTier === tier.key ? "Saving…" : "Confirm Subscription Change"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
-              {/* ── Free / close-account option ──────────────────────────────
-                  Per spec: rendered as a real choice in the picker so the
-                  consequence is visible before the dealer commits. Selecting
-                  does NOT call changeTier (that PATCHes to a paid plan);
-                  it launches the close flow — balance pre-check then a
-                  soft-reason modal. */}
+              {/* ── Free / close-account option (two-step) ─────────────────────
+                  Selecting expands a panel; the red confirm there launches the
+                  close flow (balance pre-check → soft-reason modal). */}
               {(() => {
                 const isCurrentFree = !sub || sub.productId == null;
                 const balanceDue = data.outstandingAmount > 0;
+                const isSelected = selectedTier === "free";
                 return (
-                  <button
-                    key="free"
-                    disabled={isCurrentFree || closeStep !== null}
-                    onClick={() => {
-                      if (balanceDue) {
-                        setToast(`Settle your balance (${money(data.outstandingAmount)}) before closing — see Outstanding Invoices below.`);
-                        return;
-                      }
-                      setCloseReason("");
-                      setCloseDetail("");
-                      setCloseStep("reason");
-                    }}
-                    style={{
-                      textAlign: "left",
-                      padding: "10px 14px",
-                      border: `1px solid ${isCurrentFree ? "#1976d2" : "#e0e0e0"}`,
-                      background: isCurrentFree ? "#e3f2fd" : "#fff",
-                      borderRadius: 6,
-                      cursor: isCurrentFree || closeStep !== null ? "default" : "pointer",
-                      fontFamily: "inherit",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: 12,
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13, color: "#333" }}>
-                        {isCurrentFree ? "Trial" : "Free"}
-                        {isCurrentFree && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#1565c0" }}>CURRENT</span>}
+                  <div key="free">
+                    <button
+                      disabled={isCurrentFree}
+                      onClick={() => { if (isCurrentFree) return; setFeedFormError(null); setSelectedTier(isSelected ? null : "free"); }}
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "10px 14px",
+                        border: `1px solid ${isCurrentFree ? "#1976d2" : "#e0e0e0"}`,
+                        borderLeft: isSelected ? "3px solid #1976d2" : undefined,
+                        background: isCurrentFree ? "#e3f2fd" : "#fff",
+                        borderRadius: isSelected ? "6px 6px 0 0" : 6,
+                        cursor: isCurrentFree ? "default" : "pointer",
+                        fontFamily: "inherit",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: "#333" }}>
+                          {isCurrentFree ? "Trial" : "Free"}
+                          {isCurrentFree && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#1565c0" }}>CURRENT</span>}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 11, color: "#78828c", marginTop: 2, lineHeight: 1.5 }}>
-                        {isCurrentFree
-                          ? (data.trial.overAllowance
-                              ? `Trial ended — you've reached the ${data.trial.daysCap}-day or ${data.trial.printsCap}-print limit. Upgrade to keep printing.`
-                              : `Trial — you're on day ${data.trial.dayN} of ${data.trial.daysCap} and have printed ${data.trial.printN} of ${data.trial.printsCap}. When you reach either limit, you'll need to upgrade to keep printing.`)
-                          : "Cancels your subscription and closes your account. Billing stops immediately. You keep log-in access for 60 days (view only — no printing), then the account is archived. Re-subscribe any time within 60 days to restore it. Requires a $0 balance."}
+                      <div style={{ fontFamily: "monospace", fontSize: 13, color: "#333", whiteSpace: "nowrap" }}>
+                        $0/mo
                       </div>
-                    </div>
-                    <div style={{ fontFamily: "monospace", fontSize: 13, color: "#333", whiteSpace: "nowrap" }}>
-                      $0/mo
-                    </div>
-                  </button>
+                    </button>
+                    {isSelected && (
+                      <div style={{ borderLeft: "3px solid #1976d2", marginLeft: 0, padding: "14px 16px", background: "#f8f9fb", borderRadius: "0 0 6px 6px", marginBottom: 8 }}>
+                        <p style={{ fontSize: 13, color: "#444", lineHeight: 1.6, margin: "0 0 12px" }}>
+                          Cancels your subscription and closes your account. Billing stops immediately. You keep log-in access for 60 days (view only — no printing), then the account is archived. Re-subscribe any time within 60 days to restore it. Requires a $0 balance.
+                        </p>
+                        <button
+                          onClick={() => {
+                            if (balanceDue) {
+                              setToast(`Settle your balance (${money(data.outstandingAmount)}) before closing — see Outstanding Invoices below.`);
+                              return;
+                            }
+                            setCloseReason("");
+                            setCloseDetail("");
+                            setCloseStep("reason");
+                          }}
+                          style={{
+                            padding: "8px 18px", background: "#c62828", color: "#fff",
+                            border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600,
+                            cursor: "pointer", fontFamily: "inherit",
+                          }}
+                        >
+                          Confirm Downgrade to Free
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 );
               })()}
             </div>

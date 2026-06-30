@@ -64,15 +64,32 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Billing API not configured" }, { status: 500 });
   }
 
-  let body: { tier?: string };
+  let body: { tier?: string; feedProvider?: string; feedAuthorizedName?: string; feedAuthorizedEmail?: string };
   try { body = await req.json() as typeof body; }
   catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }
   const tier = body.tier?.trim();
   if (!tier) return NextResponse.json({ error: "tier required" }, { status: 400 });
 
+  const feedProvider        = body.feedProvider?.trim() || null;
+  const feedAuthorizedName  = body.feedAuthorizedName?.trim() || null;
+  const feedAuthorizedEmail = body.feedAuthorizedEmail?.trim().toLowerCase() || null;
+
   const descriptor = subscriptionDescriptorFor(tier);
   if (!descriptor) {
     return NextResponse.json({ error: `Unknown subscription tier "${tier}"` }, { status: 400 });
+  }
+
+  // Auto (feed/DMS) tiers require the feed provider + an authorized dealership
+  // contact who can approve the integration. Collected up front so the feed
+  // setup isn't stalled chasing approvals.
+  if (
+    (descriptor.key === "sub-auto-web" || descriptor.key === "sub-auto-dms")
+    && (!feedProvider || !feedAuthorizedName || !feedAuthorizedEmail)
+  ) {
+    return NextResponse.json(
+      { error: "Feed provider, authorized name, and authorized email are required for Automatic subscriptions." },
+      { status: 400 },
+    );
   }
 
   // Resolve the acting dealer.
@@ -264,6 +281,17 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       await (admin as any).from("dealers")
         .update({ account_type: newAccountType, converted_at: new Date().toISOString(), downgraded_at: null })
         .eq("id", dealer.id);
+    }
+    // Persist feed/DMS setup details — auto tiers only. Runs BEFORE
+    // fireDealerReliable so the HubSpot re-fetch picks up the new values.
+    if ((descriptor.key === "sub-auto-web" || descriptor.key === "sub-auto-dms") && feedProvider) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any).from("dealers").update({
+        inventory_provider: feedProvider,
+        inventory_provider_is_dms: descriptor.key === "sub-auto-dms",
+        feed_authorized_name:  feedAuthorizedName,
+        feed_authorized_email: feedAuthorizedEmail,
+      }).eq("id", dealer.id);
     }
     fireDealerReliable(dealer.id, "trial→paid conversion (lifecycle)");
     // Notify Marketing OS so its funnel's Converted stage lights up in real

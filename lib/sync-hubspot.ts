@@ -47,6 +47,8 @@ interface DealerForHubspot {
   sub_billing_to: string | null;
   inventory_provider: string | null;
   inventory_provider_is_dms: boolean | null;
+  feed_authorized_name: string | null;
+  feed_authorized_email: string | null;
   last30: number | null;
   billing_street: string | null;
   billing_city: string | null;
@@ -154,6 +156,12 @@ function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, 
     // portal.
     feed_company:      d.inventory_provider,
     feed_company_type: d.inventory_provider ? (d.inventory_provider_is_dms ? "Auto-DMS" : "Auto-Web") : null,
+    // Dealership contact authorized to approve feed/DMS setup (collected at
+    // subscription). Map to HubSpot custom company props feed_contact_name /
+    // feed_contact_email — if not yet created in the portal, the sync logs to
+    // hubspot_sync_errors but the subscription change still completes.
+    feed_contact_name:  d.feed_authorized_name,
+    feed_contact_email: d.feed_authorized_email,
 
     // Activity — dealers.last30 is refreshed nightly by the computed cron
     // (distinct vehicles from print_history, rolling 30 days); 12mo +
@@ -295,7 +303,7 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: dealer } = await (admin as any)
       .from("dealers")
-      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at, downgraded_at")
+      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, feed_authorized_name, feed_authorized_email, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at, downgraded_at")
       .eq("id", dealerId)
       .maybeSingle() as { data: DealerForHubspot | null };
     if (!dealer) return;
