@@ -75,7 +75,7 @@ export const WIDGET_LABELS: Record<string, string> = {
   headerbar: 'Header bar', customtext: 'Custom text', sigline: 'Signature',
   infobox: 'Infobox', description: 'Description', features: 'Features',
   barcode: 'VIN Barcode', qrcode: 'QR Code', custom: 'Custom',
-  bgimage: 'Background Image', vehiclephoto: 'Vehicle Photo',
+  bgimage: 'Custom Image', vehiclephoto: 'Vehicle Photo',
   suggested_options: 'Suggested Products', suggested_price: 'Suggested Price',
   disclaimer: 'Disclaimer',
   mpg: 'MPG',
@@ -181,7 +181,7 @@ export const DEFS: Record<string, Record<string, unknown>> = {
   // sane defaults. New widgets should never use type='infobox'.
   infobox: { ibType: 'epa', imgUrl: IB_DEFAULT },
   // ── Dynamic content widgets (independent, multi-instance) ──────────────
-  bgimage: { imgUrl: IB_DEFAULT, label: 'Background Image' },
+  bgimage: { imgUrl: IB_DEFAULT, label: 'Custom Image' },
   vehiclephoto: { angle: '03', label: 'Vehicle Photo' },
   description: {
     text: 'Vehicle description will appear here. AI or database content will be loaded at print time.',

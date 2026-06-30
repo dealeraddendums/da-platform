@@ -311,7 +311,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const imgSt = 'width:100%;height:100%;object-fit:fill;display:block;mix-blend-mode:multiply';
     const phSt = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#f0f0f0;border:1px dashed #bbb';
     const src = (d.imgUrl as string) || '';
-    const alt = ((d.label as string) || 'Background Image').replace(/"/g, '&quot;');
+    const alt = ((d.label as string) || 'Custom Image').replace(/"/g, '&quot;');
     if (src) return `<div style="width:100%;height:100%"><img src="${src}" style="${imgSt}" alt="${alt}"></div>`;
     return `<div style="${phSt}"><span style="font-size:11px;color:#999;font-weight:500">${alt}</span></div>`;
   }
@@ -337,7 +337,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
     if (ibType === 'qr') return renderW('qrcode', { url: d.url, qrUrlTemplate: d.qrUrlTemplate, label: d.label, imgUrl: d.imgUrl }, fontScale);
     if (ibType === 'barcode') return renderW('barcode', { vin: d.vin }, fontScale);
     if (ibType === 'photo') return renderW('vehiclephoto', { imgUrl: d.imgUrl, label: 'Vehicle Photo' }, fontScale);
-    return renderW('bgimage', { imgUrl: d.imgUrl || IB_DEFAULT, label: 'Background Image' }, fontScale);
+    return renderW('bgimage', { imgUrl: d.imgUrl || IB_DEFAULT, label: 'Custom Image' }, fontScale);
   }
 
   if (type === 'description') {

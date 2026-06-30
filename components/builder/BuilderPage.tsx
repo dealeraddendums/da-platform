@@ -36,7 +36,7 @@ const PALETTE_TILES = [
   { type: 'divider',           emoji: '─',  label: 'Divider line',      hint: 'Horizontal rule',       group: 'structural' },
   // Dynamic content — independent, multi-instance widgets that replaced the
   // monolithic Infobox. Drop as many as needed; mix and match freely.
-  { type: 'bgimage',           emoji: '🖼️', label: 'Background Image',   hint: 'Full-width image',      group: 'dynamic' },
+  { type: 'bgimage',           emoji: '🖼️', label: 'Custom Image',      hint: 'Full-width image',      group: 'dynamic' },
   { type: 'qrcode',            emoji: '⊞',  label: 'QR Code',           hint: 'Scan for more info',    group: 'dynamic' },
   { type: 'barcode',           emoji: '▐▌', label: 'VIN Barcode',       hint: 'Vehicle barcode',       group: 'dynamic' },
   { type: 'vehiclephoto',      emoji: '📷', label: 'Vehicle Photo',     hint: 'Color-matched photo',   group: 'dynamic' },
@@ -82,7 +82,7 @@ function convertLegacyInfoboxes(ws: Record<string, Widget>): Record<string, Widg
       case 'epa':
       default:
         newType = 'bgimage';
-        newD = { imgUrl: w.d.imgUrl ?? '', label: 'Background Image' };
+        newD = { imgUrl: w.d.imgUrl ?? '', label: 'Custom Image' };
         break;
     }
     result[id] = { ...w, type: newType, d: newD };
@@ -2186,7 +2186,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       {showInfoboxLibPicker && (
         <ImagePickerModal
           bucket="new-infobox-images"
-          title="Choose Background Image"
+          title="Choose Custom Image"
           onSelect={url => {
             if (selId) {
               const selected = widgetsRef.current[selId];
@@ -2811,7 +2811,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
 
       {w.type === 'bgimage' && (
         <EpSection>
-          <Eps>Background Image</Eps>
+          <Eps>Custom Image</Eps>
           {onPickInfolibImage && (
             <button
               onClick={onPickInfolibImage}
