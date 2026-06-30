@@ -3088,11 +3088,23 @@ function FontStepper({ label, fkey, base, d, fontScale, af }: {
 }
 
 function ColorPair({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  // 'clear' = transparent bar with all-black text (handled in widgetRenderer).
+  const opts: [string, string][] = [['#ffffff', 'White'], ['#000000', 'Black'], ['clear', 'Clear']];
   return (
     <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-      {[['#ffffff','White'],['#000000','Black']].map(([c,n]) => (
+      {opts.map(([c, n]) => (
         <div key={c} onClick={() => onChange(c)} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-          <div style={{ width: 24, height: 24, background: c, border: `2px solid ${value === c ? '#2563EB' : '#ccc'}`, borderRadius: 3, flexShrink: 0 }} />
+          <div style={{
+            width: 24, height: 24, borderRadius: 3, flexShrink: 0,
+            border: `2px solid ${value === c ? '#2563EB' : '#ccc'}`,
+            background: c === 'clear' ? '#fff' : c,
+            // Checkerboard so the "Clear" swatch reads as transparent.
+            backgroundImage: c === 'clear'
+              ? 'linear-gradient(45deg,#ccc 25%,transparent 25%,transparent 75%,#ccc 75%),linear-gradient(45deg,#ccc 25%,transparent 25%,transparent 75%,#ccc 75%)'
+              : undefined,
+            backgroundSize: c === 'clear' ? '8px 8px' : undefined,
+            backgroundPosition: c === 'clear' ? '0 0,4px 4px' : undefined,
+          }} />
           <span style={{ fontSize: 11, color: '#55595c' }}>{n}</span>
         </div>
       ))}
