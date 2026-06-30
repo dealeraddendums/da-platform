@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import EntityRowActions from "@/components/EntityRowActions";
@@ -381,12 +380,9 @@ export default function GroupList() {
                         Entering group context is the EXPLICIT button below, so a
                         super_admin never silently lands in a member's session. */}
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <Link
-                        href={`/groups/${g.id}`}
-                        style={{ fontWeight: 500, color: "var(--text-primary)", textDecoration: "underline" }}
-                      >
+                      <span style={{ fontWeight: 500, color: "var(--text-primary)" }}>
                         {g.name}
-                      </Link>
+                      </span>
                       {g.is_test && (
                         <span
                           className="text-xs font-semibold px-2 py-0.5"
