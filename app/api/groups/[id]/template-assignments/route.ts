@@ -148,8 +148,10 @@ export async function POST(
       .filter((textId): textId is string => !!textId)
       .map((textId) => ({
         dealer_id: textId,
-        ...(set_as_default === "new" || set_as_default === "both" ? { default_addendum_new: tpl.id } : {}),
-        ...(set_as_default === "used" || set_as_default === "both" ? { default_addendum_used: tpl.id } : {}),
+        // default_addendum_* drives the print path; default_template_* mirrors it
+        // for the Settings UI's "default template" display.
+        ...(set_as_default === "new" || set_as_default === "both" ? { default_addendum_new: tpl.id, default_template_new: tpl.id } : {}),
+        ...(set_as_default === "used" || set_as_default === "both" ? { default_addendum_used: tpl.id, default_template_used: tpl.id } : {}),
       }));
 
     if (settingsUpdates.length > 0) {

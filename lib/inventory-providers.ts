@@ -15,6 +15,7 @@ export const DMS_PROVIDERS: readonly string[] = [
   "CDK",
   "Dealervault",
   "PBS",
+  "Reynolds",
   "Tekion",
 ];
 
@@ -55,7 +56,6 @@ export const OTHER_PROVIDERS: readonly string[] = [
   "OmniAuto",
   "ProMax",
   "Redline",
-  "Reynolds",
   "Vauto",
   "Vincue",
   "Vinsolutions",

@@ -8,6 +8,7 @@ import type { LabelProduct } from "@/lib/label-products";
 import { LABEL_PRODUCTS } from "@/lib/label-products";
 import type { AddendumPaperSize } from "@/lib/recommended-labels";
 import { paperSizeWidthLabel, productMatchesPaperSize } from "@/lib/recommended-labels";
+import { DMS_PROVIDERS, OTHER_PROVIDERS } from "@/lib/inventory-providers";
 
 type Tab = "info" | "shipping" | "labels" | "orders" | "billing" | "hubspot" | "security";
 
@@ -1586,17 +1587,8 @@ const SUBSCRIPTION_TIERS: Array<{ key: string; productKey: string; name: string;
   { key: "auto-dms",  productKey: "sub-auto-dms", name: "Monthly Subscription Automatic DMS", description: "DA Platform connects directly to your Dealer Management System for the fastest, most reliable inventory sync. Addendums update automatically as your DMS changes. Requires your DMS provider info and approval from an authorized contact at your dealership." },
 ];
 
-// Provider option lists for the Auto-tier feed-setup forms.
-const FEED_WEB_PROVIDERS = [
-  "Reynolds & Reynolds", "CDK / Fortellis", "DealerSocket", "Tekion",
-  "Dealertrack (Cox Automotive)", "VinSolutions", "PBS Systems", "Quorum",
-  "Frazer", "Auto/Mate", "Dealer.com", "Other",
-];
-const FEED_DMS_PROVIDERS = [
-  "Reynolds & Reynolds", "CDK Global / Fortellis", "DealerSocket DMS", "Tekion",
-  "Dealertrack DMS (Cox Automotive)", "PBS Systems", "Quorum", "Frazer",
-  "Auto/Mate", "Titan DMS", "Procede Software", "Other",
-];
+// Provider option lists come from the canonical lib/inventory-providers.ts
+// (DMS_PROVIDERS / OTHER_PROVIDERS); "Other" is appended at the dropdown.
 const feedLabelStyle: React.CSSProperties = { display: "block", fontSize: 12, color: "#55595c", marginBottom: 4, marginTop: 10 };
 const feedInputStyle: React.CSSProperties = { width: "100%", padding: "7px 10px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
@@ -1830,7 +1822,7 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
                             <label style={feedLabelStyle}>{tier.key === "auto-dms" ? "DMS Provider" : "Inventory Provider"}</label>
                             <select value={feedProvider} onChange={e => setFeedProvider(e.target.value)} style={feedInputStyle}>
                               <option value="">{tier.key === "auto-dms" ? "— select your DMS —" : "— select your provider —"}</option>
-                              {(tier.key === "auto-dms" ? FEED_DMS_PROVIDERS : FEED_WEB_PROVIDERS).map(p => (
+                              {(tier.key === "auto-dms" ? [...DMS_PROVIDERS, "Other"] : [...OTHER_PROVIDERS, "Other"]).map(p => (
                                 <option key={p} value={p}>{p}</option>
                               ))}
                             </select>
