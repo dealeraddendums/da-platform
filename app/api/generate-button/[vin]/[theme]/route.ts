@@ -1,24 +1,50 @@
-import { NextRequest, NextResponse } from "next/server";
-import { checkPdfExists, buildButtonHtml } from "@/lib/addendum";
+export const dynamic = "force-dynamic";
 
-// Public endpoint — returns HTML embed. No JWT required.
-// Called via script/iframe on dealer inventory pages.
+import { NextRequest } from "next/server";
+import { checkPdfExists } from "@/lib/addendum";
+import {
+  PLATFORM_BUTTON_CSS,
+  publicSupabase,
+  resolveWidgetVehicle,
+  getIntegration,
+  escapeHtml,
+  empty200,
+  html200,
+  corsPreflight,
+} from "@/lib/website-integrations";
 
-type Params = { params: { vin: string; theme: string } };
+// Public widget endpoint — button only. text/html, CORS *, Supabase-only.
+// Empty 200 when no addendum PDF exists for the VIN.
 
-export async function GET(req: NextRequest, { params }: Params): Promise<NextResponse> {
-  const vin = params.vin.toUpperCase();
+export async function OPTIONS() {
+  return corsPreflight();
+}
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { vin: string; theme: string } },
+) {
+  const vin = params.vin;
   const theme = params.theme;
-  const text = req.nextUrl.searchParams.get("text") || "Download Addendum";
+  const textOverride = request.nextUrl.searchParams.get("text");
 
-  const pdfUrl = await checkPdfExists(vin);
+  const pdfUrl = await checkPdfExists(vin.toUpperCase());
+  if (!pdfUrl) return empty200();
 
-  if (!pdfUrl) {
-    return new NextResponse("", { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  // Per-dealer customization (label/css/enabled) — best-effort; the button
+  // still renders with defaults if the vehicle/integration lookups miss.
+  let buttonLabel = textOverride || "Download Addendum";
+  let buttonCss = PLATFORM_BUTTON_CSS;
+  const sb = publicSupabase();
+  const vehicle = await resolveWidgetVehicle(sb, vin, null);
+  if (vehicle) {
+    const integration = await getIntegration(sb, vehicle.dealer_id);
+    if (integration && !integration.enabled) return empty200();
+    if (!textOverride && integration?.button_label) buttonLabel = integration.button_label;
+    if (integration?.button_css) buttonCss = integration.button_css;
   }
 
-  return new NextResponse(buildButtonHtml(theme, pdfUrl, text), {
-    status: 200,
-    headers: { "Content-Type": "text/html; charset=utf-8" },
-  });
+  return html200(
+    `<div class="${escapeHtml(theme)}"><style>${buttonCss}</style><a href="${pdfUrl}" class="dealer-addendums__button__download-button" target="_blank">${escapeHtml(buttonLabel)}</a></div>`,
+  );
 }

@@ -1,72 +1,91 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createAdminSupabaseClient } from "@/lib/db";
-import { checkPdfExists, buildButtonHtml } from "@/lib/addendum";
+export const dynamic = "force-dynamic";
 
-// Public endpoint — returns HTML embed. No JWT required.
-// Called via script/iframe on dealer inventory pages.
+import { NextRequest } from "next/server";
+import { checkPdfExists } from "@/lib/addendum";
+import {
+  PLATFORM_BUTTON_CSS,
+  publicSupabase,
+  resolveWidgetVehicle,
+  getIntegration,
+  getVehicleOptions,
+  escapeHtml,
+  empty200,
+  html200,
+  corsPreflight,
+} from "@/lib/website-integrations";
 
-type Params = { params: { vin: string; theme: string } };
+// Public widget endpoint — replaces the legacy API Portal /generate-addendum.
+// text/html, CORS *, Supabase-only. 5.0-only by construction (a VIN not in
+// dealer_vehicles → empty body). Options come from vehicle_options (the live
+// 5.0 table the Builder/print engine use), NOT the legacy addendum_data.
 
-function formatCurrency(val: string | number | null): string {
-  const n = parseFloat(String(val || 0));
-  return isNaN(n) ? "$0.00" : `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function fmt(val: string | number | null): string {
+  if (val === null || val === undefined || val === "") return "";
+  const n = typeof val === "string" ? parseFloat(val.replace(/[^0-9.]/g, "")) : val;
+  return isNaN(n) ? String(val) : "$" + n.toLocaleString("en-US");
 }
 
-export async function GET(req: NextRequest, { params }: Params): Promise<NextResponse> {
-  const vin = params.vin.toUpperCase();
+export async function OPTIONS() {
+  return corsPreflight();
+}
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { vin: string; theme: string } },
+) {
+  const vin = params.vin;
   const theme = params.theme;
-  const feature = req.nextUrl.searchParams.get("feature") ?? "";
-  const stock = req.nextUrl.searchParams.get("stock") ?? "";
-  const text = req.nextUrl.searchParams.get("text") || "Download Addendum";
-  const safeTheme = theme.replace(/[^a-zA-Z0-9_-]/g, "");
+  const { searchParams } = request.nextUrl;
+  const stock = searchParams.get("stock");
+  const feature = searchParams.get("feature") || "both";
+  const textOverride = searchParams.get("text");
 
-  const pdfUrl = await checkPdfExists(vin);
+  const sb = publicSupabase();
 
-  // feature=pricing or feature=both — include pricing HTML with options table
-  if ((feature === "pricing" || feature === "both") && stock) {
-    const admin = createAdminSupabaseClient();
-    const { data: vehicle } = await admin
-      .from("dealer_vehicles")
-      .select("id, msrp, internet_price")
-      .eq("vin", vin)
-      .eq("stock_number", stock)
-      .maybeSingle();
+  // 1. Resolve the vehicle (→ id + dealer_id + pricing). No match → empty.
+  const vehicle = await resolveWidgetVehicle(sb, vin, stock);
+  if (!vehicle) return empty200();
 
-    if (vehicle) {
-      const { data: optRows } = await admin
-        .from("vehicle_options")
-        .select("option_name, description, option_price")
-        .eq("vehicle_id", vehicle.id)
-        .order("sort_order", { ascending: true });
+  // 2. Dealer's dealer_com integration config. Disabled → nothing renders.
+  const integration = await getIntegration(sb, vehicle.dealer_id);
+  if (integration && !integration.enabled) return empty200();
 
-      const msrp = vehicle.msrp ? formatCurrency(vehicle.msrp) : "$0.00";
-      const internetPrice = vehicle.internet_price ? formatCurrency(vehicle.internet_price) : msrp;
+  const buttonLabel = textOverride || integration?.button_label || "Download Addendum";
+  const buttonCss = integration?.button_css || PLATFORM_BUTTON_CSS;
 
-      const optionsHtml = (optRows ?? []).map((o) =>
-        `<li>${o.option_name}: ${o.description ?? ""} — ${formatCurrency(o.option_price)}</li>`
-      ).join("");
+  // 3. Pricing block (feature=pricing|both, when data exists).
+  let pricingHtml = "";
+  if (feature === "pricing" || feature === "both") {
+    const options = await getVehicleOptions(sb, vehicle.id);
+    const msrpRow = vehicle.msrp
+      ? `<li class="dealer-addendums__pricing__msrp"><span class="dealer-addendums__pricing__label">MSRP</span><span class="dealer-addendums__pricing__value">${fmt(vehicle.msrp)}</span></li>`
+      : "";
+    const ipRow = vehicle.internet_price
+      ? `<li class="dealer-addendums__pricing__internet-price"><span class="dealer-addendums__pricing__label">Internet Price</span><span class="dealer-addendums__pricing__value">${fmt(vehicle.internet_price)}</span></li>`
+      : "";
+    const optionRows = options
+      .map(
+        (o) =>
+          `<li class="dealer-addendums__pricing__option"><span class="dealer-addendums__pricing__label">${escapeHtml(o.option_name)}</span><span class="dealer-addendums__pricing__value">${escapeHtml(fmt(o.option_price))}</span></li>`,
+      )
+      .join("");
 
-      const pricingHtml = `<div class="dealer-addendums__pricing">
-  <div class="dealer-addendums__price-row"><span class="dealer-addendums__price-label">MSRP</span><span class="dealer-addendums__price-value">${msrp}</span></div>
-  <div class="dealer-addendums__price-row"><span class="dealer-addendums__price-label">Internet Price</span><span class="dealer-addendums__price-value">${internetPrice}</span></div>
-  <ul class="dealer-addendums__options">${optionsHtml}</ul>
-</div>`;
-
-      const buttonHtml = pdfUrl ? `\n<a href="${pdfUrl}" class="dealer-addendums__button__download-button" target="_blank">${text}</a>` : "";
-      const html = `<div class="${safeTheme}">${pricingHtml}${feature === "both" ? buttonHtml : ""}</div>`;
-
-      return new NextResponse(html, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+    if (msrpRow || ipRow || optionRows) {
+      pricingHtml = `<div class="dealer-addendums__pricing"><ul class="dealer-addendums__pricing__list">${msrpRow}${ipRow}${optionRows}</ul></div>`;
     }
-    // Vehicle not found — fall through to simple button
   }
 
-  // Default: simple download button (or empty if no PDF)
-  if (!pdfUrl) {
-    return new NextResponse("", { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  // 4. Button block (feature=button|both, when the PDF exists in S3).
+  let buttonHtml = "";
+  if (feature === "button" || feature === "both") {
+    const pdfUrl = await checkPdfExists(vin.toUpperCase());
+    if (pdfUrl) {
+      buttonHtml = `<a href="${pdfUrl}" class="dealer-addendums__button__download-button" target="_blank">${escapeHtml(buttonLabel)}</a>`;
+    }
   }
 
-  return new NextResponse(buildButtonHtml(safeTheme, pdfUrl, text), {
-    status: 200,
-    headers: { "Content-Type": "text/html; charset=utf-8" },
-  });
+  // 5. Nothing to show → empty.
+  if (!pricingHtml && !buttonHtml) return empty200();
+
+  return html200(`<div class="${escapeHtml(theme)}"><style>${buttonCss}</style>${pricingHtml}${buttonHtml}</div>`);
 }
