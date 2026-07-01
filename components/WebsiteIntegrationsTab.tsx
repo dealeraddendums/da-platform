@@ -28,17 +28,21 @@ function escapeHtml(s: string): string {
 }
 
 function snippetFor(): string {
-  return `<script src="https://widgets.dealerconnectionportal.com/js/widgets.js"></script>
+  // Fetch-and-inject (the legacy widget's method) — works cross-origin via the
+  // endpoint's Access-Control-Allow-Origin: *. (Do NOT iframe it — the app sends
+  // X-Frame-Options: DENY, which blocks frame embedding.)
+  return `<div id="da-addendum-widget"></div>
 <script>
 document.addEventListener("Vehicle Shown V1", function (e) {
   var vin = (e.detail && e.detail.vin) || '';
-  var iframe = document.createElement('iframe');
-  iframe.src = 'https://api.dealeraddendums.com/generate-addendum/' + vin + '/dealer-addendums-theme?feature=both';
-  iframe.style.border = 'none';
-  document.getElementById('da-addendum-widget').appendChild(iframe);
+  if (!vin) return;
+  fetch('https://api.dealeraddendums.com/generate-addendum/' + vin + '/dealer-addendums-theme?feature=both')
+    .then(function (r) { return r.text(); })
+    .then(function (html) {
+      document.getElementById('da-addendum-widget').innerHTML = html;
+    });
 });
-</script>
-<div id="da-addendum-widget"></div>`;
+</script>`;
 }
 
 export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: string; role: string }) {
