@@ -88,7 +88,8 @@ export async function resolveWidgetVehicle(
     .from("dealer_vehicles")
     .select("id, dealer_id, msrp, internet_price, stock_number")
     .ilike("vin", vin)
-    .eq("status", "1");
+    // 5.0 dealer_vehicles use status "active"/"inactive" (NOT legacy Aurora's "1").
+    .eq("status", "active");
   if (stock) q = q.eq("stock_number", stock);
   const { data } = await q.limit(1).maybeSingle();
   if (!data) return null;
