@@ -24,6 +24,7 @@ interface Body {
   email?: string;
   dealership?: string;
   phone?: string;
+  zip?: string;
   accountKind?: "single" | "group";
   groupName?: string;
   attribution?: Attribution;
@@ -57,6 +58,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const email = body.email?.trim().toLowerCase();
   const dealership = body.dealership?.trim();
   const phone = body.phone?.trim() || null;
+  const zip = body.zip?.trim() || null;
   const accountKind: "single" | "group" = body.accountKind === "group" ? "group" : "single";
   const attribution = body.attribution ?? null;
 
@@ -84,7 +86,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     if (accountKind === "group") {
       const { groupId } = await createTrialGroup({
-        groupName, contactName: name, email, phone, attribution,
+        groupName, contactName: name, email, phone, zip, attribution,
       });
       await createAdminUserWithInvite({
         email, fullName: name, phone, role: "group_admin",
@@ -95,7 +97,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const { dealerUuid, dealerId } = await createTrialDealer({
-      dealership, contactName: name, email, phone, attribution,
+      dealership, contactName: name, email, phone, zip, attribution,
     });
     await createAdminUserWithInvite({
       email, fullName: name, phone, role: "dealer_admin",

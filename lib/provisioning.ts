@@ -50,6 +50,7 @@ export async function createTrialDealer(input: {
   contactName: string;
   email: string;
   phone?: string | null;
+  zip?: string | null;
   attribution?: Attribution;
 }): Promise<{ dealerUuid: string; dealerId: string; internalId: string }> {
   const admin = createAdminSupabaseClient();
@@ -65,6 +66,7 @@ export async function createTrialDealer(input: {
     primary_contact: input.contactName.trim(),
     primary_contact_email: input.email.trim().toLowerCase(),
     phone: input.phone || null,
+    zip: input.zip || null,
     acquisition: input.attribution ?? null,
   };
 
@@ -98,6 +100,7 @@ export async function createTrialDealer(input: {
   <tr><td style="padding:4px 12px 4px 0;color:#666">Dealership</td><td><strong>${input.dealership}</strong></td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Contact</td><td>${input.contactName} &lt;${input.email}&gt;</td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Phone</td><td>${input.phone ?? "—"}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Zip</td><td>${input.zip ?? "—"}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Dealer ID</td><td>${data.dealer_id as string}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Signed up</td><td>${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT</td></tr>
 </table>`,
@@ -245,6 +248,7 @@ export async function createTrialGroup(input: {
   contactName: string;
   email: string;
   phone?: string | null;
+  zip?: string | null;
   attribution?: Attribution;
 }): Promise<{ groupId: string; internalId: string }> {
   const admin = createAdminSupabaseClient();
@@ -257,6 +261,7 @@ export async function createTrialGroup(input: {
     primary_contact: input.contactName.trim(),
     primary_contact_email: input.email.trim().toLowerCase(),
     phone: input.phone || null,
+    zip: input.zip || null,
     acquisition: input.attribution ?? null,
   };
 
