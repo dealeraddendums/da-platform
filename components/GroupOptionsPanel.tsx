@@ -983,6 +983,7 @@ function TemplatesTab({ groupId }: { groupId: string }) {
   const [dealerEditable, setDealerEditable] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [assignSuccess, setAssignSuccess] = useState(false);
+  const [setDefaultFor, setSetDefaultFor] = useState<"new" | "used" | "both" | "neither">("neither");
 
   const vehicleTypeOpts = ["New", "Used", "CPO"];
 
@@ -1066,12 +1067,26 @@ function TemplatesTab({ groupId }: { groupId: string }) {
     setSelectedDealers(new Set());
     setDealerEditable(false);
     setAssignSuccess(false);
-    if (dealers.length === 0) {
-      const res = await fetch(`/api/groups/${groupId}/dealers`);
-      if (res.ok) {
-        const json = await res.json() as { data: DealerBasic[] };
-        setDealers(json.data ?? []);
-      }
+    setSetDefaultFor("neither");
+
+    const [assignmentsRes, dealersRes] = await Promise.all([
+      fetch(`/api/groups/${groupId}/template-assignments`),
+      dealers.length === 0 ? fetch(`/api/groups/${groupId}/dealers`) : Promise.resolve(null),
+    ]);
+
+    if (assignmentsRes.ok) {
+      const aj = await assignmentsRes.json() as { data: Array<{ dealer_id: string | null; template_id: string | null }> };
+      const alreadyAssigned = new Set(
+        (aj.data ?? [])
+          .filter((a) => a.template_id === tpl.id && a.dealer_id)
+          .map((a) => a.dealer_id as string)
+      );
+      setSelectedDealers(alreadyAssigned);
+    }
+
+    if (dealersRes && dealersRes.ok) {
+      const json = await dealersRes.json() as { data: DealerBasic[] };
+      setDealers(json.data ?? []);
     }
   }
 
@@ -1093,6 +1108,7 @@ function TemplatesTab({ groupId }: { groupId: string }) {
         template_id: assigningTpl.id,
         dealer_ids: Array.from(selectedDealers),
         dealer_editable: dealerEditable,
+        set_as_default: setDefaultFor,
       }),
     });
     if (res.ok) {
@@ -1295,6 +1311,20 @@ function TemplatesTab({ groupId }: { groupId: string }) {
                     <input type="radio" checked={dealerEditable} onChange={() => setDealerEditable(true)} />
                     <span className="text-sm">Editable — copied to dealer&apos;s template library</span>
                   </label>
+                </div>
+                <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+                  <p className="text-xs font-semibold mb-2" style={{ color: "var(--text-muted)" }}>SET AS DEFAULT ADDENDUM TEMPLATE</p>
+                  {(["new", "used", "both", "neither"] as const).map((opt) => (
+                    <label key={opt} className="flex items-center gap-2 cursor-pointer mb-1">
+                      <input type="radio" checked={setDefaultFor === opt} onChange={() => setSetDefaultFor(opt)} />
+                      <span className="text-sm">
+                        {opt === "new" && "New vehicles only"}
+                        {opt === "used" && "Used vehicles only"}
+                        {opt === "both" && "Both new and used"}
+                        {opt === "neither" && "Don't change dealer defaults"}
+                      </span>
+                    </label>
+                  ))}
                 </div>
               </>
             )}

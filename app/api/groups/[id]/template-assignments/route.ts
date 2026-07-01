@@ -59,12 +59,12 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { template_id?: string; dealer_ids?: string[]; dealer_editable?: boolean };
+  let body: { template_id?: string; dealer_ids?: string[]; dealer_editable?: boolean; set_as_default?: "new" | "used" | "both" | "neither" };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { template_id, dealer_ids, dealer_editable = false } = body;
+  const { template_id, dealer_ids, dealer_editable = false, set_as_default = "neither" } = body;
   if (!template_id) return NextResponse.json({ error: "template_id required" }, { status: 400 });
   if (!dealer_ids?.length) return NextResponse.json({ error: "dealer_ids required" }, { status: 400 });
 
@@ -98,18 +98,24 @@ export async function POST(
     return NextResponse.json({ error: upsertErr.message }, { status: 500 });
   }
 
-  // If dealer_editable=true, copy template to each dealer's own template
-  // library. templates.dealer_id is the TEXT dealer code (FK to
-  // dealers.dealer_id), while the dealer_ids array carries UUIDs (FK to
-  // dealers.id) — resolve UUID → text first or the insert fails the FK.
-  if (dealer_editable) {
+  // Resolve UUID → text dealer_id once for either the dealer_editable copy or
+  // set_as_default. templates.dealer_id / dealer_settings.dealer_id are the TEXT
+  // dealer code (FK to dealers.dealer_id), while dealer_ids carries UUIDs (FK to
+  // dealers.id) — resolve first or the writes fail the FK.
+  const needTextIds = dealer_editable || set_as_default !== "neither";
+  let uuidToText = new Map<string, string>();
+  if (needTextIds) {
     const { data: dealerTextRows } = await admin
       .from("dealers")
       .select("id, dealer_id")
       .in("id", dealer_ids);
-    const uuidToText = new Map<string, string>(
-      (dealerTextRows ?? []).map((d: { id: string; dealer_id: string }) => [d.id, d.dealer_id]),
+    uuidToText = new Map<string, string>(
+      ((dealerTextRows ?? []) as { id: string; dealer_id: string }[]).map((d) => [d.id, d.dealer_id]),
     );
+  }
+
+  // If editable, copy template into each dealer's own library
+  if (dealer_editable) {
     const copies = dealer_ids
       .map((uuid) => {
         const textId = uuidToText.get(uuid);
@@ -128,6 +134,26 @@ export async function POST(
     if (copies.length > 0) {
       // Use insert (not upsert) — dealer gets their own copy to edit
       await admin.from("templates").insert(copies);
+    }
+  }
+
+  // If set_as_default requested, point each assigned dealer's default ADDENDUM
+  // template at this group template. NOTE: the print path (pdf/generate, bulk,
+  // templates route) resolves the default from default_addendum_new/used — NOT
+  // the legacy default_template_* columns — so we write default_addendum_* so
+  // the choice actually takes effect at print time.
+  if (set_as_default !== "neither") {
+    const settingsUpdates = dealer_ids
+      .map((uuid) => uuidToText.get(uuid))
+      .filter((textId): textId is string => !!textId)
+      .map((textId) => ({
+        dealer_id: textId,
+        ...(set_as_default === "new" || set_as_default === "both" ? { default_addendum_new: tpl.id } : {}),
+        ...(set_as_default === "used" || set_as_default === "both" ? { default_addendum_used: tpl.id } : {}),
+      }));
+
+    if (settingsUpdates.length > 0) {
+      await admin.from("dealer_settings").upsert(settingsUpdates, { onConflict: "dealer_id" });
     }
   }
 
