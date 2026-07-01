@@ -490,8 +490,11 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
                 Cancel
               </button>
               {(() => {
-                const expected = decodeHtmlEntities(group.name).trim();
-                const ready = !deleting && deleteConfirmName.trim() === expected;
+                // Normalize curly/smart quotes to straight (U+2018/2019/201C/201D)
+                // so a typed regular apostrophe matches a stored smart quote.
+                const normQ = (s: string) => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
+                const expected = normQ(decodeHtmlEntities(group.name).trim());
+                const ready = !deleting && normQ(deleteConfirmName.trim()) === expected;
                 return (
                   <button
                     onClick={() => void confirmDelete()}

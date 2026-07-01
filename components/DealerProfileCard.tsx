@@ -745,8 +745,12 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                 Cancel
               </button>
               {(() => {
-                const expectedName = decodeHtmlEntities(dealer.name).trim();
-                const ready = !deleting && deleteConfirmName.trim() === expectedName;
+                // Normalize curly/smart quotes to straight so the user can
+                // type a regular apostrophe even if the stored name has a
+                // smart quote (U+2018/2019/201C/201D).
+                const normQ = (s: string) => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
+                const expectedName = normQ(decodeHtmlEntities(dealer.name).trim());
+                const ready = !deleting && normQ(deleteConfirmName.trim()) === expectedName;
                 return (
                   <button
                     onClick={() => void confirmDelete()}
