@@ -37,8 +37,23 @@ const SECURITY_HEADERS: Record<string, string> = {
   ].join("; "),
 };
 
-function applySecurityHeaders(res: NextResponse): void {
+// Public HTML widget endpoints are embedded on dealer sites (including via
+// <iframe>), so they must NOT send X-Frame-Options: DENY / frame-ancestors
+// 'none' — else the DNS cutover would break any iframe-based install. Narrower
+// than EXTERNAL_API_PREFIXES: only the two HTML widget routes, not the JSON APIs.
+const EMBEDDABLE_WIDGET_PREFIXES = ["/api/generate-addendum", "/api/generate-button"];
+function isEmbeddableWidget(pathname: string): boolean {
+  return EMBEDDABLE_WIDGET_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+function applySecurityHeaders(res: NextResponse, pathname?: string): void {
+  const embeddable = !!pathname && isEmbeddableWidget(pathname);
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
+    if (embeddable && k === "X-Frame-Options") continue; // allow framing on dealer sites
+    if (embeddable && k === "Content-Security-Policy") {
+      res.headers.set(k, v.replace("frame-ancestors 'none'", "frame-ancestors *"));
+      continue;
+    }
     res.headers.set(k, v);
   }
 }
@@ -133,7 +148,7 @@ export async function middleware(request: NextRequest) {
       if (!checkRateLimit(ip, "auth", 10, 60_000)) {
         const res = new NextResponse("Too Many Requests", { status: 429 });
         res.headers.set("Retry-After", "60");
-        applySecurityHeaders(res);
+        applySecurityHeaders(res, pathname);
         return res;
       }
     }
@@ -141,7 +156,7 @@ export async function middleware(request: NextRequest) {
       if (!checkRateLimit(ip, "invite_accept", 5, 3_600_000)) {
         const res = new NextResponse("Too Many Requests", { status: 429 });
         res.headers.set("Retry-After", "3600");
-        applySecurityHeaders(res);
+        applySecurityHeaders(res, pathname);
         return res;
       }
     }
@@ -169,14 +184,14 @@ export async function middleware(request: NextRequest) {
         );
         res.headers.set("Access-Control-Max-Age", "86400");
       }
-      applySecurityHeaders(res);
+      applySecurityHeaders(res, pathname);
       return res;
     }
 
     // Block cross-origin requests from unknown origins
     if (origin && !isAllowedOrigin(origin, host)) {
       const res = new NextResponse("Forbidden", { status: 403 });
-      applySecurityHeaders(res);
+      applySecurityHeaders(res, pathname);
       return res;
     }
   }
@@ -184,7 +199,7 @@ export async function middleware(request: NextRequest) {
   // Skip Supabase auth if env isn't configured (local dev without .env.local)
   if (!supabaseUrl || !supabaseKey) {
     const res = NextResponse.next();
-    applySecurityHeaders(res);
+    applySecurityHeaders(res, pathname);
     return res;
   }
 
@@ -236,7 +251,7 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = new URL("/login", request.url);
     redirectUrl.searchParams.set("next", pathname);
     const redirectRes = NextResponse.redirect(redirectUrl);
-    applySecurityHeaders(redirectRes);
+    applySecurityHeaders(redirectRes, pathname);
     return redirectRes;
   }
 
@@ -251,10 +266,10 @@ export async function middleware(request: NextRequest) {
       const redirectRes = NextResponse.redirect(
         new URL("/reset-password", request.url)
       );
-      applySecurityHeaders(redirectRes);
+      applySecurityHeaders(redirectRes, pathname);
       return redirectRes;
     }
-    applySecurityHeaders(response);
+    applySecurityHeaders(response, pathname);
     return response;
   }
 
@@ -263,7 +278,7 @@ export async function middleware(request: NextRequest) {
     const redirectRes = NextResponse.redirect(
       new URL("/dashboard", request.url)
     );
-    applySecurityHeaders(redirectRes);
+    applySecurityHeaders(redirectRes, pathname);
     return redirectRes;
   }
 
@@ -271,11 +286,11 @@ export async function middleware(request: NextRequest) {
     const redirectRes = NextResponse.redirect(
       new URL("/dashboard", request.url)
     );
-    applySecurityHeaders(redirectRes);
+    applySecurityHeaders(redirectRes, pathname);
     return redirectRes;
   }
 
-  applySecurityHeaders(response);
+  applySecurityHeaders(response, pathname);
   return response;
 }
 
