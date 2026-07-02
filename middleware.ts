@@ -41,7 +41,15 @@ const SECURITY_HEADERS: Record<string, string> = {
 // <iframe>), so they must NOT send X-Frame-Options: DENY / frame-ancestors
 // 'none' — else the DNS cutover would break any iframe-based install. Narrower
 // than EXTERNAL_API_PREFIXES: only the two HTML widget routes, not the JSON APIs.
-const EMBEDDABLE_WIDGET_PREFIXES = ["/api/generate-addendum", "/api/generate-button"];
+// Both the /api routes AND the legacy root paths (rewritten to /api in
+// next.config) must skip X-Frame-Options: DENY so an iframe-based install on a
+// dealer site still works after the api.dealeraddendums.com cutover.
+const EMBEDDABLE_WIDGET_PREFIXES = [
+  "/api/generate-addendum",
+  "/api/generate-button",
+  "/generate-addendum",
+  "/generate-button",
+];
 function isEmbeddableWidget(pathname: string): boolean {
   return EMBEDDABLE_WIDGET_PREFIXES.some((p) => pathname.startsWith(p));
 }

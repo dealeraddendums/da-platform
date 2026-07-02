@@ -29,6 +29,19 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ["box-node-sdk"],
   },
+  // Legacy API Portal (api.dealeraddendums.com) served the widget endpoints at
+  // the ROOT — Laravel web.php `generate-addendum/{vin}/{theme}` and
+  // `generate-button/{vin}/{theme}` — and 1,600+ Dealer.com installs call those
+  // root paths. The DA Platform routes live under /api/, so without these
+  // rewrites the DNS cutover would 404 every existing install. Map the legacy
+  // root paths onto the /api routes so the cutover is transparent (host-agnostic:
+  // works for both app.dealeraddendums.com and the cut-over api.dealeraddendums.com).
+  async rewrites() {
+    return [
+      { source: "/generate-addendum/:path*", destination: "/api/generate-addendum/:path*" },
+      { source: "/generate-button/:path*", destination: "/api/generate-button/:path*" },
+    ];
+  },
 };
 
 export default nextConfig;
