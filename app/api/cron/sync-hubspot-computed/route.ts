@@ -94,13 +94,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // query silently refreshed only the first 1000 every night).
     // `as any` because Supabase types don't know about downgraded_at yet
     // (migration 083). Runtime is fine; only TS is stale.
-    type DealerRow = { id: string; dealer_id: string; account_type: string | null; created_at: string | null; last30: number | null; hubspot_company_id: string; group_id: string | null; downgraded_at: string | null };
+    type DealerRow = { id: string; dealer_id: string; account_type: string | null; created_at: string | null; last30: number | null; hubspot_company_id: string; group_id: string | null; downgraded_at: string | null; migration_status: string | null };
     const dealers: DealerRow[] = [];
     for (let from = 0; ; from += 1000) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: page } = await (admin as any)
         .from("dealers")
-        .select("id, dealer_id, account_type, created_at, last30, hubspot_company_id, group_id, downgraded_at")
+        .select("id, dealer_id, account_type, created_at, last30, hubspot_company_id, group_id, downgraded_at, migration_status")
         .not("hubspot_company_id", "is", null)
         .eq("active", true)
         .order("id", { ascending: true })
@@ -124,7 +124,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // Keep dealers.last30 in step with the same computation — it feeds
         // the dealers-list UI and the event-driven HubSpot pushes between
         // cron runs.
-        if ((d.last30 ?? 0) !== prints30) {
+        //
+        // ⚠️ ONLY for new-platform dealers (migrated / ss_ self-serve). last30 is
+        // computed from print_history, which records NEW-platform prints only.
+        // Legacy dealers still print on the legacy platform, so their real
+        // activity lives in Aurora dealer_dim.LAST30 (imported via import-dealers).
+        // Writing the new-platform count (0) for them would clobber that — which
+        // is exactly what zeroed ~1000 dealers when the cron was paginated
+        // (498740e, 2026-06-25) and started reaching all dealers. DA Pulse reads
+        // last30 for ALL dealers, so we must not overwrite legacy values here.
+        const isNewPlatform = d.migration_status === "migrated" || d.dealer_id.startsWith("ss_");
+        if (isNewPlatform && (d.last30 ?? 0) !== prints30) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await (admin as any).from("dealers").update({ last30: prints30 }).eq("id", d.id);
         }
