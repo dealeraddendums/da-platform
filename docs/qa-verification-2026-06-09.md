@@ -85,6 +85,31 @@
 - [ ] A new **standalone trial** lands with the **sample** product + 2 sample vehicles.
 - [ ] **Single** Addendum + Infosheet print works (the CSP fix).
 
+## 13. Multiprint QA — SHIPPED `0c1f24e` (run this pass on prod)
+> Prints now record on the actual **Send/Download** click (new `pending_prints` staging table), NOT on
+> PDF generation. Counts use the `printed_vehicle_count` RPC (distinct vehicles).
+- [ ] **Preview + Cancel records nothing:** open a preview → Cancel → the vehicle **History shows nothing**,
+  no green state, no trial-count change.
+- [ ] **Send to Printer records once:** Send → row **greens** + **"Printed This Month"** updates on modal
+  close, **no reload**. Repeat for **bulk** (2+), **single** Print Now, and **Buyer's Guide** (incl. the
+  **EN+ES ZIP**, which records on download).
+- [ ] **Trial cap = distinct vehicles:** reprinting the same vehicles does **not** advance the cap;
+  printing **30 different** vehicles caps correctly. (Thursday QA Test Dealer is at **31 distinct →
+  correctly blocked**; clear its print history or flip to paid to keep testing.)
+- [ ] **Builder → Download PDF** records **no** print anywhere.
+- [ ] (If applied) HubSpot `prints_last_30/12mo` + super_admin/group "addendums this month" count
+  **distinct vehicles**.
+- [ ] **Op check:** abandoned/cancelled previews leave **no orphan `pending_prints` rows** (GC/TTL works).
+
+## 14. ⏳ Builder QA (verify after `builder-qa-2026-06-11.md` ships)
+- [ ] **Dealer Address** box is **read-only**, shows the profile address + an "edit in My Profile" hint;
+  editing My Profile changes what the widget shows; a **group** template shows each dealer's own address;
+  alignment/font/position still editable.
+- [ ] **No stuck widget:** a click **selects** without the widget following the cursor; a drag moves it and
+  **releases on every mouseup**, incl. released **off the paper/window**; a plain click never moves it.
+- [ ] **Greyed-out palette tile** → clicking it **selects** the placed widget on the canvas; you still can't
+  add a duplicate; multi-instance tiles unchanged.
+
 ---
 
 ## Suggested sequence
@@ -92,5 +117,5 @@
 2. **§1 Billing + §2 Print lock** (you/Alex) — money + the dealer-facing gate; highest risk.
 3. **§3 BI** (you) — reconcile the numbers.
 4. **§4–§10** UI/feature checks (hand to Marlena on a **Test dealer** where mutating).
-5. **§11 ETL + §8 session-rework** once those ship.
+5. **§11 ETL + §8 session-rework + §14 Builder** once those ship. **§13 Multiprint** shipped (`0c1f24e`) — run its pass now.
 6. **§12** spot-checks as time allows.

@@ -5,6 +5,31 @@
 > deploy." Keep this updated as items ship.
 
 ## ▶️ Next session
+- **KARR HTML image product not rendering in PDF:** Anderson Ford of Lincoln — `img` tag in item name is blank in PDF. CC prompt sent 2026-06-27.
+- **ETL freeze (migration_status='pending') + Horizontal Rule widget (migration 112):** migration 112 makes ETL skip `pending` dealers; "Stage for Migration" console action; new HR widget in Builder. CC prompt sent 2026-06-27.
+- **Watermark widget:** new Builder widget type, S3 bucket `addendum-watermarks`, modes: none/auto/fixed, brand picker, opacity property. CC prompt sent 2026-06-27.
+- **inventory_dealer_id → dealer_id admin UI cascade fix:** when `inventory_dealer_id` changes in admin UI, must cascade `dealer_id` update to all 5 dependent tables atomically. CC prompt sent 2026-06-27. (Root cause of Acura of Tempe out-of-sync, fixed one-time via SQL.)
+- **Blank template editable from SuperAdmin:** `is_blank_default` flag on `starter_templates`; seed record; SuperAdmin Builder shows it at top (no delete); Builder falls back to hardcoded blank if missing. CC prompt sent 2026-06-27.
+- **Custom Text widget rich text editor:** mini toolbar (bold/italic/underline, font color, font size) reusing product description editor pattern. CC prompt sent 2026-06-27.
+- **Starter template dealer address widget position:** X:40, Y:680, W:336, H:80. CC prompt sent 2026-06-27.
+- **🔴 Stopgap — Mercedes Benz of Collierville (Dealer General):** set `migration_status='migrated'`
+  in Supabase to stop ETL Job 5 from re-upserting the duplicate "Elite Member" product. ETL already
+  skips migrated dealers — safe, reversible. Full ETL enforcement fix is task #115 below.
+- **Open bug:** Addendum page ignores `?type=infosheet` / `?type=buyer_guide` from the Bulk buttons
+  (root `CLAUDE.md` → Active Issues). Needed for daily use.
+- **Ops — billing template staging (July 1 blocker):** ~730 of 1,860 eligible dealers still need a
+  da-billing template staged (active=false, future nextInvoiceDate) before they show Ready in the
+  migration console. This is the actual throughput ceiling for the July 1 wave. Not code — operator
+  work in da-billing.
+- **White-label / Enterprise (Phase 12)** — **`<reseller>.addendums.ai` subdomains** + logo/name/colors
+  (Allan registered `addendums.ai` 2026-06-19; `white-label-phase12.md`). **12a — built** (migration
+  110: `groups.custom_domain`/`branding`/`status`, `lib/brand.ts` host→brand resolution, branded
+  login/shell, super_admin config UI) — **LIVE `c2afeb7`**, pending live-test. **12b** = one **wildcard cert `*.addendums.ai`** +
+  wildcard DNS → ALB (one-time, **Alex**) + **host-aware WebAuthn rpID/expectedOrigin** (parent
+  `addendums.ai` for white-label hosts → passkeys + cookies share across subdomains; `dealeraddendums.com`
+  canonical unaffected) — **confirm prod `RP_ID`**. After the one-time setup, adding a reseller = just
+  set `groups.custom_domain`. **12c** = true reseller-owned vanity domains (optional premium; the hard
+  cross-registrable path this model avoids).
 - **🔴 URGENT — ETL config-lock ENFORCEMENT (`da-legacy-etl` half) NOT built; the freeze toggle is
   inert** (task #115; see `da-legacy-etl/docs/etl-config-lock.md` STATUS banner). The da-platform
   freeze toggle + account_purpose classifier shipped, but `da-legacy-etl` never honored `etl_locked`,
@@ -63,15 +88,13 @@
   _(Other 2026-06-07/08 specs — past-due print lock, ETL config-lock + freeze toggle, billing
   price-integrity [shipped], addendum-data sync gap — are tracked in their own docs in `docs/`,
   pending the session-close fold-in.)_
-- **Platform ↔ da-billing link sync (revises old "Step 3").** `platform-billing-link-sync.md`.
-  The "128 groups with no `groups.billing_customer_id`" is **not** missing customers — da-billing
-  **already has** them (Dealer General = `18796f8c-c`, active), the platform link was just never
-  backfilled. So this is a **sync/backfill across all groups + dealers (~95% already have a
-  da-billing customer)**, NOT a mass-create — mass-creating would **duplicate**. Crux = the
-  match key (da-billing **DA Client ID** ↔ platform legacy/internal id; CC resolves against live
-  data). Also **guard "Create Billing Account" + the cascade lazy-create** to link an existing
-  customer instead of duplicating. ⚠️ Until the guard ships, don't click Create Billing Account on
-  an existing account. Read-only audit + dry-run first.
+- **✅ Platform ↔ da-billing link sync — DONE 2026-06-23.** `platform-billing-link-sync.md`.
+  Script `scripts/backfill-billing-links.mjs` matched + linked billing customers by email+name.
+  **Result:** groups fully linked (0 outstanding); dealers: 1,604 already synced + 85 newly
+  backfilled = 1,689 linked. 59 remaining ambiguous (56 company-name-differs, 3 genuine
+  da-billing duplicates) — left untouched, need manual review via `shared/billing-links-audit.csv`
+  on the EC2. No mismatches. ⚠️ "Create Billing Account" guard still not built — do NOT click it
+  on accounts that already exist; the duplicate risk remains until the guard ships.
 - **Confirm deploy — group_admin active-dealer scoping (Dashboard/Products)**
   (`group-admin-active-dealer-scoping.md`, #71). Specced; the template-save sibling shipped
   (`313d9fc`) — confirm the Dashboard/Products page scoping deployed too.
@@ -94,6 +117,79 @@
   "Operator-side follow-ups" at the bottom.
 
 ## ✅ Shipped (for context)
+
+### Shipped 2026-06-27
+- **White-label CORS fix** — `89d682a`. `middleware.ts`: added `isAllowedOrigin()` — same-origin + `*.addendums.ai` allowed. Fixes all API mutations (OTP, passkey, settings) from white-label subdomains that were hitting CORS errors.
+- **OTP login flow fix** — `6b3999b`. "Go to sign in" link in invite email now goes to `/login?email=<enc>&mode=otp` (jumps directly to code-entry step instead of the plain login). White-label login page: `AuthHeaderLinks` returns null on non-default brand → removes Help + Status links.
+- **da-billing billingState architecture** — commits `72d8b97` / `4a819f4` / `e68d9d0` / `0a4fec8` / `489eb4d`. `billingState: 'setup' | 'active'` on da-billing customer: `setup` generates invoices but holds email; `active` generates + emails. Customer detail shows **Setup Mode / Live** badge + "Go Live" / "Return to Setup" buttons. `createCustomer` defaults to `setup`; self-pay upgrade paths and migration activate-billing explicitly pass `active`. `lib/billing.ts`: added `setBillingState()` client function. New `POST /api/v1/customers/:id/set-billing-state` endpoint in da-billing.
+- **Builder group template save fix** — `ca301aa`. Tracks `loadedTemplateSource: 'dealer'|'group'`. Group template edits now PATCH the existing record instead of POST (no more duplicate group templates). "(Group)" label shown in the default-template dropdown.
+- **HubSpot pagination + dedup fix** — `498740e` / `482c2f9`. `backfill-hubspot.mjs` now paginates all ~2,050 dealers (was hard-capped at 1,000). Name-dedup adopt+heal: keyless legacy HubSpot companies get a PATCH with the platform key instead of a duplicate POST. `upsertObject` guard: skip if dealer name is NULL/empty.
+- **Product Fruits "Vin" widget** — `ProductFruitsInit.tsx` client component mounted in app layout; CSP updated for `*.productfruits.com`; env var `NEXT_PUBLIC_PRODUCT_FRUITS_WORKSPACE_CODE`. Widget named "Vin" (custom name for the AI help widget).
+- **FTP server improvements** — `d4742e8`. Timestamps now display in `America/Los_Angeles` timezone. Large file streaming: `ftp_fget()` → `php://output` (no temp file on disk), `Content-Length` set from `ftp_size()`, Nginx timeouts bumped to 600s for large files.
+- **Image picker improvements** — `817fd16`. `ImagePickerModal.tsx` (backgrounds): 8.5/11 aspect ratio container + `objectFit:contain` so the full template is visible. `ImageUploadPicker.tsx` (products): widened to 700px, 4:3 aspect ratio + contain, filename label below each image.
+- **Migration console: group-level claim** — `f239a37`. "Claim Next 25" now excludes group dealers (only standalone dealers auto-claimed). Group header rows in Readiness tab with "Claim group" button + "Assign to…" dropdown for super_admin. Confirmation when reassigning from another owner. `migration-readiness.ts`: `groupId` surfaced on `ReadinessRow`.
+- **dealer_id cascade fix (one-time SQL — Acura of Tempe)** — `dealers.dealer_id` and `inventory_dealer_id` were out of sync; repaired via SQL cascade. Root cause: changing `inventory_dealer_id` in admin UI doesn't sync `dealer_id`. CC fix in progress (see Next session). See Key Business Logic in root `CLAUDE.md` for the three-identifier architecture note.
+- **Asking Price / Suggested Price widget redesign** — two-tone inverse bar: label side = bar color (default black), price box = inverse color (white). New Bar Color property (black/white toggle, default black). 2px solid black border around entire widget. Subtitle renders below bar only when content is present (no extra whitespace when empty). Applies to both canvas and PDF rendering.
+
+### Shipped 2026-06-19 (cont.) — Tagging + Regional Manager (group_user)
+- **Dealer & Group Tagging (v1) — SHIPPED + verified** (`dealer-group-tagging.md`). `tags` +
+  `dealer_tags` + `group_tags` (case-insensitive unique name) + `/api/tags` (+counts) + dealer/group
+  `…/tags` assign + tag filter/search/count on the Dealers + Groups lists + tag pickers on the profiles.
+  Access: super_admin (full) + group_admin (own group, can create tags). Solves the "AutoNation dealers
+  scattered across groups/names → count + group them" case. v2 = tag-management view
+  (rename/merge/delete); v3 = bulk-edit-by-tag.
+- **Regional Manager = tag-scoped `group_user` role — LIVE `300529b` (pending live-test)**
+  (`group-user-regional-manager.md`; **migration 109** `user_tags`). The previously-inert `group_user`
+  role is now a regional manager: scope = **their group ∩ their assigned tags**; **full dealer_admin
+  parity** on those dealers (build/print/inventory/settings, the dealer's own staff users, that dealer's
+  billing, Builder images); **cannot** add dealers, edit/create tags, create GROUP-level users, or edit
+  group-level config. `getJwtClaims.scope_tag_ids` + a `group_user` branch in `authorizeDealerAction`
+  (in-group AND tagged) gate ~18 routes; the active-dealer switch + every newly-opened surface resolve
+  the target dealer via that helper or the tag-verified `active_dealer` — **never a trusted caller
+  param** (the audited invariant; the `/api/upload-image` raw-writer gap was closed the same way).
+  super_admin sets up managers + tags (Phases 1+2). **Phase 3** (group_admin self-service invite + tag
+  mgmt) queued. ⚠️ Close-out gate: the live test (positives + the negative 403s).
+
+### Shipped 2026-06-17/19 (session — verified by Claude Code; STOP-for-review per item)
+- **Clear Print History 500 on large lots — FIXED** — `5b61c37`. Root cause: the dealer-wide + bulk
+  clear routes stuffed every active vehicle id into one `IN (...)` query → over the request-size limit →
+  500 (only bit big lots; Dickson City Hyundai = 1,799 vehicles). Fix: paginated active-id fetch +
+  chunked `.in()` ops on both routes (`/api/dealers/[id]/clear-print-history`, `/api/print/clear-history`);
+  active-only scoping + the `vehicle_id='0'` sentinel rules preserved; the three clients now surface the
+  real server error. (Diagnosis pivot: the browser alert said "Bad Request" but the status was **500** —
+  not an authz/context bug; the slug `Dkcity24` was correct.)
+- **Impersonation profile-resolution resolver — FIXED** — `d50c1cf`. `getJwtClaims` already fell back to
+  email when a by-id profile lookup missed (ETL/migrated profiles whose legacy id ≠ the magic-link auth
+  uid), but ~26 `(dashboard)` pages + the layout resolved the profile by id ONLY → impersonating a
+  migrated uid-mismatch dealer mis-resolved to `dealer_user`/null (hidden dealer UI, mis-scoped, 403s).
+  New `lib/profile-session.ts` (`resolveSessionProfile`, id→email fallback mirroring getJwtClaims) swapped
+  in across all those pages. No authz loosened (fallback only on by-id miss; email from the session).
+  Latent until the migration waves; verified via fixture. `docs/impersonation-profile-resolution-fix.md`.
+- **Admin Dealer → Billing subscription parity** — `46fc316`. Dealers → [dealer] → Billing now mirrors the
+  dealer's own My Profile → Billing: Current Subscription + Change Plan (all tiers, da-billing prices, **no
+  price ever sent**), a **convert-to-paid confirm** (only when converting a Trial/Free dealer), and
+  **Downgrade to Free** (reuses `/api/billing/me/close`). Reuses the existing super_admin-aware PATCH
+  `/api/billing/me/subscription?dealer_id=` — no new billing write path. GET extended with subscription +
+  pricing; dup-safe create/link preserved.
+- **Builder widgets** — `1e1b93f`. MSRP gains a **"Divider line above"** toggle (`dividerAbove`, default
+  false); Header Bar gains **Font Size + Font Color** (default `fontSize:1.0` + unset color = current 11px
+  auto-contrast — existing templates byte-identical). Shared `widgetRenderer.ts` → canvas + PDF.
+- **SuperAdmin Starter Layouts** — Phase 1 `01b376b` + Phase 2 `66ce1e8`. New platform-scoped
+  `starter_templates` store (own table; RLS = read-any-auth, writes super_admin-only) + `/api/starter-templates`
+  API + the **SuperAdmin Builder** authoring UI (Documents → SuperAdmin Builder → `/starter-layouts`; Builder
+  platform-starter mode). The dealer/group Builder **"+ New"** now opens a *Start a new document* picker
+  (Blank + the platform starters); picking one clones the layout into a fresh unsaved doc the dealer saves as
+  their own (starter never mutated). `docs/superadmin-starter-layouts.md`.
+- **Group → dealer control from My Group** — `6a2538a`. The "Switch to Dealer" button already existed on the
+  My Group member table (gated `isGroupAdmin`) and every dealer-asset write route already authorizes
+  group_admin-in-group via `authorizeDealerAction` — so the "no switch button / logo upload denied" symptoms
+  were the impersonation-resolution bug above (now fixed). New: **entry-point return memory** —
+  `lib/dealer-return.ts` (`da_dealer_return_to` cookie, 30-min TTL, open-redirect guard) set at all three
+  switch-in sites; Topbar back-to-group returns to where you came from (fallback `/dealers`).
+- **Spaces product-rule default 2 → 0** — ETL `options.ts` (on-box, `aa4f8e1`) + da-platform
+  `addendum-library/route.ts` (`d4a79b5`) + one-time `UPDATE addendum_library SET spaces=0 WHERE spaces=2`
+  (12,448 rows) + **migration 106** (`addendum_library` + `group_options` column DEFAULT 2 → 0). The ETL no
+  longer re-writes 2. ⚠️ ETL box runs uncommitted production code (git drift) — see root CLAUDE.md.
 
 ### Shipped 2026-06-15/16 (session — verified by Claude Code; STOP-for-review per item)
 - **Phase 13b step 1 — migration readiness console (READ-ONLY)** — `cacbf19`. super_admin `/migration`

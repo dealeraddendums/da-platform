@@ -3,47 +3,23 @@
 import { useEffect, useState } from "react";
 
 // Dealer-facing config for the public Website Integrations widget (Dealer.com).
-// Self-contained: fetches/saves /api/settings/website-integrations. Mirrors the
-// server's PLATFORM_BUTTON_CSS as the prefill/placeholder default (kept in sync
-// with lib/website-integrations.ts — this copy is client-safe, no server imports).
-const DEFAULT_BUTTON_CSS = `.dealer-addendums__button__download-button {
-  display: inline-block;
-  background-color: #1976d2;
-  color: #ffffff;
-  padding: 10px 20px;
-  border-radius: 4px;
-  text-decoration: none;
-  font-family: sans-serif;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.dealer-addendums__button__download-button:hover { background-color: #1565c0; }`;
+// Dealer.com already has our API endpoint registered as an approved integration,
+// so there is no per-dealer snippet to generate. The only per-dealer config is:
+//   1. enabled toggle
+//   2. feature — Magic Button ('button') | Pricing Stack ('pricing') | Both ('both')
+//   3. button label (only relevant when the Magic Button is shown)
+// Self-contained: fetches/saves /api/settings/website-integrations.
 
-const labelStyle: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#55595c", marginBottom: 4, marginTop: 14 };
+type Feature = "button" | "pricing" | "both";
+
+const FEATURE_OPTIONS: { value: Feature; label: string; hint: string }[] = [
+  { value: "button", label: "Magic Button", hint: "A “Download Addendum” button on the vehicle page." },
+  { value: "pricing", label: "Pricing Stack", hint: "The itemized pricing/options widget on the vehicle page." },
+  { value: "both", label: "Both", hint: "Show the Magic Button and the Pricing Stack." },
+];
+
+const labelStyle: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#55595c", marginBottom: 4, marginTop: 18 };
 const inputStyle: React.CSSProperties = { width: "100%", padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" };
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-}
-
-function snippetFor(): string {
-  // Fetch-and-inject (the legacy widget's method) — works cross-origin via the
-  // endpoint's Access-Control-Allow-Origin: *. (Do NOT iframe it — the app sends
-  // X-Frame-Options: DENY, which blocks frame embedding.)
-  return `<div id="da-addendum-widget"></div>
-<script>
-document.addEventListener("Vehicle Shown V1", function (e) {
-  var vin = (e.detail && e.detail.vin) || '';
-  if (!vin) return;
-  fetch('https://api.dealeraddendums.com/generate-addendum/' + vin + '/dealer-addendums-theme?feature=both')
-    .then(function (r) { return r.text(); })
-    .then(function (html) {
-      document.getElementById('da-addendum-widget').innerHTML = html;
-    });
-});
-</script>`;
-}
 
 export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: string; role: string }) {
   // dealer_admin acts on its own dealer (no param); group_admin/super_admin pass dealer_id.
@@ -53,8 +29,8 @@ export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: s
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [enabled, setEnabled] = useState(true);
+  const [feature, setFeature] = useState<Feature>("both");
   const [buttonLabel, setButtonLabel] = useState("Download Addendum");
-  const [buttonCss, setButtonCss] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -64,8 +40,8 @@ export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: s
         const json = await res.json().catch(() => ({}));
         if (!cancelled && res.ok && json.data) {
           setEnabled(json.data.enabled ?? true);
+          setFeature((json.data.feature as Feature) || "both");
           setButtonLabel(json.data.button_label || "Download Addendum");
-          setButtonCss(json.data.button_css || "");
         }
       } catch {
         /* keep defaults */
@@ -83,7 +59,7 @@ export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: s
       const res = await fetch(`/api/settings/website-integrations${qs}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "dealer_com", enabled, button_label: buttonLabel, button_css: buttonCss || null }),
+        body: JSON.stringify({ provider: "dealer_com", enabled, feature, button_label: buttonLabel }),
       });
       setSaveStatus(res.ok ? "saved" : "error");
     } catch {
@@ -93,46 +69,60 @@ export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: s
     }
   }
 
-  const effectiveCss = buttonCss.trim() || DEFAULT_BUTTON_CSS;
-  const previewHtml = `<style>${effectiveCss}</style><a href="#" onclick="return false" class="dealer-addendums__button__download-button">${escapeHtml(buttonLabel || "Download Addendum")}</a>`;
+  const showButtonLabel = feature === "button" || feature === "both";
 
   if (loading) {
     return <div style={{ padding: 24, color: "#78828c", fontSize: 13 }}>Loading…</div>;
   }
 
   return (
-    <div style={{ maxWidth: 720 }}>
+    <div style={{ maxWidth: 640 }}>
       <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: "20px 24px", fontFamily: "Roboto, sans-serif" }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: "#2a2b3c", marginBottom: 4 }}>Dealer.com</div>
         <div style={{ fontSize: 13, color: "#55595c", lineHeight: 1.6, marginBottom: 16 }}>
-          Customize the &ldquo;Download Addendum&rdquo; button and pricing widget shown on your Dealer.com vehicle pages.
+          Control how DealerAddendums appears on your Dealer.com vehicle pages. The integration is already approved on
+          Dealer.com&apos;s side — just choose what to show here.
         </div>
 
         <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          <span style={{ fontSize: 14, color: "#333" }}>Enabled — show the widget on this dealer&apos;s vehicle pages</span>
+          <span style={{ fontSize: 14, color: "#333" }}>Enabled — show on this dealer&apos;s vehicle pages</span>
         </label>
 
-        <label style={labelStyle}>Button Label</label>
-        <input value={buttonLabel} onChange={(e) => setButtonLabel(e.target.value)} placeholder="Download Addendum" style={inputStyle} />
+        <label style={labelStyle}>What to show</label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 2 }}>
+          {FEATURE_OPTIONS.map((opt) => (
+            <label key={opt.value} style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="wi-feature"
+                value={opt.value}
+                checked={feature === opt.value}
+                onChange={() => setFeature(opt.value)}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <span style={{ fontSize: 14, color: "#333", fontWeight: 600 }}>{opt.label}</span>
+                <span style={{ display: "block", fontSize: 12, color: "#78828c" }}>{opt.hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
 
-        <label style={labelStyle}>Button CSS</label>
-        <textarea
-          value={buttonCss}
-          onChange={(e) => setButtonCss(e.target.value)}
-          rows={8}
-          placeholder={DEFAULT_BUTTON_CSS}
-          style={{ ...inputStyle, fontFamily: "monospace", fontSize: 12, resize: "vertical" }}
-        />
-        <div style={{ fontSize: 11, color: "#78828c", marginTop: 4 }}>Leave blank to use the platform default styling.</div>
+        {showButtonLabel && (
+          <>
+            <label style={labelStyle}>Button Label</label>
+            <input
+              value={buttonLabel}
+              onChange={(e) => setButtonLabel(e.target.value)}
+              placeholder="Download Addendum"
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 11, color: "#78828c", marginTop: 4 }}>Text shown on the Magic Button. Leave as-is for the default.</div>
+          </>
+        )}
 
-        <label style={labelStyle}>Live Preview</label>
-        <div
-          style={{ border: "1px dashed #e0e0e0", borderRadius: 4, padding: 20, background: "#fafafa" }}
-          dangerouslySetInnerHTML={{ __html: previewHtml }}
-        />
-
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 24 }}>
           <button
             onClick={save}
             disabled={saving}
@@ -143,15 +133,6 @@ export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: s
           {saveStatus === "saved" && <span style={{ fontSize: 13, color: "#15803D" }}>✓ Saved</span>}
           {saveStatus === "error" && <span style={{ fontSize: 13, color: "#c62828" }}>Save failed — please try again.</span>}
         </div>
-      </div>
-
-      <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: "20px 24px", marginTop: 16, fontFamily: "Roboto, sans-serif" }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#2a2b3c", marginBottom: 6 }}>Website Snippet (Dealer.com)</div>
-        <div style={{ fontSize: 13, color: "#55595c", lineHeight: 1.6, marginBottom: 10 }}>
-          Add this to your Dealer.com VDP. It injects the widget for the vehicle being viewed — the VIN is filled in at runtime.
-          The exact integration method varies by Dealer.com account; your web admin can adapt it (e.g. via <code>API.insertCallToAction()</code>).
-        </div>
-        <pre style={{ background: "#f5f6f7", border: "1px solid #e0e0e0", borderRadius: 4, padding: 12, fontSize: 12, fontFamily: "monospace", overflowX: "auto", whiteSpace: "pre", color: "#333", margin: 0 }}>{snippetFor()}</pre>
       </div>
     </div>
   );

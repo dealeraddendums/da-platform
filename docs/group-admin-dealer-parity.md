@@ -56,3 +56,18 @@ hide dealer actions from a switched-in group_admin). Produce a **parity matrix**
 - The same actions on an **out-of-group** dealer → 403.
 - A real dealer_admin and a super_admin are unaffected.
 - Stage the changes and **stop for review before deploy** (authorization touches many routes).
+
+## SHIPPED — parity confirmed + switch-in/return (2026-06-19)
+- **Audit result:** every dealer-asset WRITE route the dealer surfaces use already authorizes
+  group_admin-in-group via `authorizeDealerAction` / `resolveDealerForRequest` — settings save, logo
+  upload/remove, buyers-guide-pdf upload/delete, clear-print-history. Out-of-group stays 403. The
+  shared-helper goal is met; no per-route gaps remained.
+- **My Group switch-in:** the "Switch to Dealer" button is on the My Group member table (GroupDealers in
+  `GroupProfileCard.tsx`) as well as the Dealers list — both `PATCH /api/profiles/active-dealer` and land
+  in the dealer's dashboard with full dealer_admin control.
+- **Return memory (`6a2538a`):** `lib/dealer-return.ts` (`da_dealer_return_to` cookie, 30-min TTL,
+  open-redirect-guarded) records the entry path at every switch-in site; Topbar back-to-group returns
+  there (fallback `/dealers`) — exiting a dealer comes back to wherever you switched in from.
+- **Note:** a service-provider group's "no switch button / write denied" symptom traced to the
+  impersonation profile-resolution bug (fixed `d50c1cf`, `docs/impersonation-profile-resolution-fix.md`) —
+  the impersonated group login was resolving as `dealer_user` — **not** a parity gap.
