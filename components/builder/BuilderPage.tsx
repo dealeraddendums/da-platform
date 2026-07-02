@@ -759,10 +759,23 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     let cancelled = false;
     (async () => {
       try {
-        const listRes = await fetch(`/api/templates?dealer_id=${encodeURIComponent(effDealerId)}`);
+        // Fetch the template list AND dealer_settings together so we can prefer
+        // the dealer's CONFIGURED default (default_addendum_new) over merely the
+        // most-recently-updated template. Both endpoints resolve the same dealer
+        // via ?dealer_id=, so this matches what Print Settings shows.
+        const dqs = `?dealer_id=${encodeURIComponent(effDealerId)}`;
+        const [listRes, settingsRes] = await Promise.all([
+          fetch(`/api/templates${dqs}`),
+          fetch(`/api/settings${dqs}`),
+        ]);
         if (!listRes.ok) return;
         const listJson = await listRes.json() as { data?: SavedTemplate[] };
         const rows = listJson.data ?? [];
+        let defaultAddendumNew: string | null = null;
+        if (settingsRes.ok) {
+          const sJson = await settingsRes.json() as { data?: { default_addendum_new?: string | null } };
+          defaultAddendumNew = sJson.data?.default_addendum_new ?? null;
+        }
         if (cancelled) return;
         if (rows.length === 0) {
           // First-time open — no saved templates yet. Bootstrap from the
@@ -815,11 +828,19 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           if (!cancelled) applyBlankCanvas();
           return;
         }
-        // Sort by updated_at DESC; prefer the dealer's own templates over
-        // assigned (locked) group templates so the auto-open never surprises
-        // the user with a 🔒 Locked surface.
+        // Prefer the dealer's CONFIGURED default template (default_addendum_new
+        // from dealer_settings) when it resolves to a template in this list —
+        // this is the same template the Print Settings default dropdown points
+        // at, so the Builder opens on the dealer's intended default. This works
+        // for a group-ASSIGNED default too (rows carry the group_template id, and
+        // the detail loader below handles source === 'group'). Fall back to the
+        // most-recently-updated own template (then any row) when no default is
+        // configured, so returning visits still resume work-in-progress and the
+        // auto-open never surprises the user with a 🔒 Locked surface.
         const sorted = [...rows].sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''));
-        const pick = sorted.find(t => t.source !== 'group') ?? sorted[0];
+        const pick = (defaultAddendumNew ? rows.find(t => t.id === defaultAddendumNew) : undefined)
+          ?? sorted.find(t => t.source !== 'group')
+          ?? sorted[0];
         if (cancelled || !pick) return;
         const detailUrl = pick.source === 'group' && pick.group_id
           ? `/api/group-templates/${pick.group_id}/${pick.id}`

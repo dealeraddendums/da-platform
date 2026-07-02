@@ -59,18 +59,30 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
 
   // Resolve effective dealer_id
   let dealerId = ghostDealerId ?? profile?.dealer_id ?? null;
+  let switchedIntoDealer = false;
   if (!ghostDealerId && (isGroupAdmin || isGroupUser) && profile?.active_dealer_id) {
     const { data: activeDlr } = await admin
       .from("dealers")
       .select("dealer_id")
       .eq("id", profile.active_dealer_id)
       .maybeSingle<{ dealer_id: string }>();
-    if (activeDlr) dealerId = activeDlr.dealer_id;
+    if (activeDlr) { dealerId = activeDlr.dealer_id; switchedIntoDealer = true; }
   }
 
+  // groupId puts the Builder in GROUP mode: the "Open Template" modal reads the
+  // group's own template library (/api/group-templates) and the auto-load is
+  // skipped. That's correct for the group-template authoring entry points
+  // (?group=… or group-ghost mode). But when a group_admin has SWITCHED INTO a
+  // member dealer (active_dealer_id → switchedIntoDealer), they are operating
+  // that dealer's account with full dealer parity, so the Builder must run in
+  // DEALER mode — reading the dealer's own + group-ASSIGNED templates via
+  // /api/templates, exactly like the dealer's Print Settings dropdown. Falling
+  // back to profile.group_id here (the old behavior) forced group mode and made
+  // the Builder show only the group's own templates ("DocFee Combo") instead of
+  // the templates actually assigned to the dealer ("DocFee", "New DocFee").
   const groupId = explicitGroupId
     ?? ghostGroupId
-    ?? ((isGroupAdmin && profile?.group_id) ? profile.group_id : null);
+    ?? ((isGroupAdmin && profile?.group_id && !switchedIntoDealer) ? profile.group_id : null);
 
   type DealerData = { logo_url: string | null; name: string | null; address: string | null; city: string | null; state: string | null; zip: string | null; phone: string | null };
 
