@@ -9,8 +9,9 @@ import { LABEL_PRODUCTS } from "@/lib/label-products";
 import type { AddendumPaperSize } from "@/lib/recommended-labels";
 import { paperSizeWidthLabel, productMatchesPaperSize } from "@/lib/recommended-labels";
 import { DMS_PROVIDERS, OTHER_PROVIDERS } from "@/lib/inventory-providers";
+import WebsiteIntegrationsTab from "@/components/WebsiteIntegrationsTab";
 
-type Tab = "info" | "shipping" | "labels" | "orders" | "billing" | "hubspot" | "security";
+type Tab = "info" | "shipping" | "labels" | "orders" | "billing" | "hubspot" | "security" | "website";
 
 type Props = {
   dealer?: DealerRow | null;
@@ -2225,12 +2226,15 @@ const tdStyle: React.CSSProperties = {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean; staffOnly?: boolean }[] = [
+const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean; staffOnly?: boolean; editOnly?: boolean }[] = [
   { id: "info", label: "Dealership Info", dealerOnly: true },
   { id: "shipping", label: "Shipping", dealerOnly: true },
   { id: "labels", label: "Order Labels", dealerOnly: true },
   { id: "orders", label: "Orders", dealerOnly: true },
   { id: "billing", label: "Billing", dealerOnly: true },
+  // Account-level website widget config (moved here from Settings). Editors only
+  // (the API blocks dealer_user); the widget's own config/save gate matches.
+  { id: "website", label: "Website Integrations", dealerOnly: true, editOnly: true },
   // staffOnly: super_admin can see + use this when ghosting a dealer.
   // Dealer roles never see the tab; the route enforces the same gate
   // server-side (returns 403 for any non-super_admin caller).
@@ -2245,6 +2249,7 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, recomme
   const visibleTabs = ALL_TABS.filter(t => {
     if (t.dealerOnly && !hasDealer) return false;
     if (t.staffOnly && !isStaff) return false;
+    if (t.editOnly && !canEdit) return false;
     return true;
   });
 
@@ -2266,7 +2271,7 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, recomme
     if (searchParams.get("upgrade") === "1") setOpenChangePlan(true);
     if (t === "security") { setTab("security"); return; }
     if (!hasDealer) return;
-    if (t === "labels" || t === "info" || t === "shipping" || t === "billing" || t === "orders") {
+    if (t === "labels" || t === "info" || t === "shipping" || t === "billing" || t === "orders" || (t === "website" && canEdit)) {
       setTab(t as Tab);
     } else if (t === "hubspot" && isStaff) {
       setTab("hubspot");
@@ -2335,6 +2340,7 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, recomme
         )}
         {tab === "orders" && <OrdersTab />}
         {tab === "billing" && <BillingTab openChangePlan={openChangePlan} />}
+        {tab === "website" && dealer && <WebsiteIntegrationsTab dealerId={dealer.dealer_id} role={userRole} />}
         {tab === "hubspot" && dealer && isStaff && (
           <HubSpotSyncTab dealer={dealer} />
         )}

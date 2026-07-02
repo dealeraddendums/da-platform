@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { DealerSettingsRow, TemplateRow, UserRole, BuyersGuideDefaults } from "@/lib/db";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
-import WebsiteIntegrationsTab from "@/components/WebsiteIntegrationsTab";
 import { BG_KEYS, BG_LABELS, type BgKey } from "@/lib/buyers-guide-constants";
 
 type Props = {
@@ -116,8 +115,6 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
 
   // isReadOnly roles default to buyers_guide tab; they can't switch tabs
   const [docTab, setDocTab] = useState<DocTab>(isReadOnly ? "buyers_guide" : "addendum");
-  // Top-level tab: the settings form vs. the Website Integrations widget config.
-  const [topTab, setTopTab] = useState<"settings" | "website">("settings");
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
@@ -484,41 +481,9 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
     );
   }
 
-  // ── Top-level tabs (Settings | Website Integrations) — dealer_admin/admins ──
-  const topTabsBar = (canEdit && dealerId) ? (
-    <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid var(--border, #e0e0e0)" }}>
-      {([["settings", "Settings"], ["website", "Website Integrations"]] as [ "settings" | "website", string][]).map(([t, l]) => (
-        <button
-          key={t}
-          onClick={() => setTopTab(t)}
-          style={{
-            padding: "8px 14px", border: "none", background: "none", cursor: "pointer",
-            fontSize: 13, fontWeight: 600, fontFamily: "inherit",
-            color: topTab === t ? "#1976d2" : "#78828c",
-            borderBottom: topTab === t ? "2px solid #1976d2" : "2px solid transparent",
-            marginBottom: -1,
-          }}
-        >
-          {l}
-        </button>
-      ))}
-    </div>
-  ) : null;
-
-  // ── Website Integrations tab ────────────────────────────────────────────────
-  if (topTab === "website" && canEdit && dealerId) {
-    return (
-      <div style={{ maxWidth: 720 }}>
-        {topTabsBar}
-        <WebsiteIntegrationsTab dealerId={dealerId} role={role} />
-      </div>
-    );
-  }
-
   // ── Settings form ──────────────────────────────────────────────────────────
   return (
     <div style={{ maxWidth: 640 }}>
-      {topTabsBar}
       {isAdminPicker && dealerId && (
         <div className="mb-4 flex items-center gap-3">
           <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
