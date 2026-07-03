@@ -17,7 +17,16 @@ type DealerListRow = DealerRow & {
   hubspot_company_id: number | null;
   has_users: boolean;
   tags: Tag[];
+  migration_status: string | null;
 };
+
+// A dealer is on the V5.0 platform once migrated, or if it was created
+// natively on 5.0 (self-serve, dealer_id prefixed "ss_"). Same rule as the
+// dashboard migration gate. Everything else is still on legacy 4.0.
+function platformVersion(d: Pick<DealerListRow, "migration_status" | "dealer_id">): "5.0" | "4.0" {
+  const isV5 = d.migration_status === "migrated" || d.dealer_id?.startsWith("ss_");
+  return isV5 ? "5.0" : "4.0";
+}
 
 type DealersResponse = {
   data: DealerListRow[];
@@ -581,7 +590,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                       }
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge active={d.active} />
+                      <StatusBadge active={d.active} platform={platformVersion(d)} />
                     </td>
                     <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
                       {subscriptionLabel(d.account_type)}
@@ -680,7 +689,7 @@ function HubSpotPill({ href }: { href: string }) {
   );
 }
 
-function StatusBadge({ active }: { active: boolean }) {
+function StatusBadge({ active, platform }: { active: boolean; platform: "5.0" | "4.0" }) {
   return (
     <span
       className="text-xs font-semibold px-2 py-0.5 rounded-full"
@@ -690,7 +699,7 @@ function StatusBadge({ active }: { active: boolean }) {
         border: `1px solid ${active ? "#c8e6c9" : "#ffcdd2"}`,
       }}
     >
-      {active ? "Active" : "Inactive"}
+      {`${active ? "Active" : "Inactive"} ${platform}`}
     </span>
   );
 }
