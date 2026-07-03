@@ -697,6 +697,8 @@ function StatusBadge({ active, platform }: { active: boolean; platform: "5.0" | 
         background: active ? "#e8f5e9" : "#ffebee",
         color: active ? "#2e7d32" : "#c62828",
         border: `1px solid ${active ? "#c8e6c9" : "#ffcdd2"}`,
+        whiteSpace: "nowrap",
+        display: "inline-block",
       }}
     >
       {`${active ? "Active" : "Inactive"} ${platform}`}
