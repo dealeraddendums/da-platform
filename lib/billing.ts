@@ -686,12 +686,16 @@ export function subscriptionDescriptorFor(accountType: string | null | undefined
 }
 
 /**
- * First-of-next-month ISO date string (YYYY-MM-DD) — used as the
- * nextInvoiceDate for a fresh subscription template.
+ * Today's date as an ISO date string (YYYY-MM-DD) — the nextInvoiceDate for a
+ * fresh subscription template. A dealer upgrading from Free to a paid plan is
+ * billed on the upgrade date (today), and that day-of-month becomes the
+ * recurring billing date — da-billing's cron generates the first invoice on the
+ * next run and then rolls the date forward monthly, preserving the day-of-month.
+ * (Previously this was first-of-next-month, which skipped billing the upgrade
+ * month and moved every dealer's billing day to the 1st.)
  */
-export function firstOfNextMonthIso(now: Date = new Date()): string {
-  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-  return next.toISOString().slice(0, 10);
+export function todayIso(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10);
 }
 
 // Friendly subscription-tier label for an account_type — mirrors the Dealers

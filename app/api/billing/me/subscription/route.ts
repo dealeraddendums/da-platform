@@ -10,7 +10,7 @@ import {
   archiveCustomer,
   customerExists,
   setBillingState,
-  firstOfNextMonthIso,
+  todayIso,
   subscriptionDescriptorFor,
   billingConfigured,
   type BillingProduct,
@@ -250,7 +250,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       await createTemplate({
         customerId: effectiveCustomerKey,
         products: merged,
-        nextInvoiceDate: firstOfNextMonthIso(),
+        nextInvoiceDate: todayIso(),
         scheduleInterval: "monthly",
       });
     }

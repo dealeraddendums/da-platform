@@ -19,7 +19,7 @@ import {
   deleteTemplate,
   createCustomer,
   customerExists,
-  firstOfNextMonthIso,
+  todayIso,
   subscriptionDescriptorFor,
   billingConfigured,
   type BillingProduct,
@@ -193,7 +193,7 @@ async function setDealerTier(
   const merged = planDealerMerge(current?.products ?? null, newSubLine, descriptor.key, dealer.internal_id);
 
   if (current) await putTemplate(key, merged);
-  else await createTemplate({ customerId: key, products: merged, nextInvoiceDate: firstOfNextMonthIso(), scheduleInterval: "monthly" });
+  else await createTemplate({ customerId: key, products: merged, nextInvoiceDate: todayIso(), scheduleInterval: "monthly" });
 
   return { ok: true, action: "tier_set", billedTo: "dealer", message: `da-billing: subscription set to ${descriptor.name} (effective next invoice).` };
 }

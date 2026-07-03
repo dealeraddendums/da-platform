@@ -7,7 +7,7 @@ import {
   createCustomer,
   createTemplate,
   subscriptionDescriptorFor,
-  firstOfNextMonthIso,
+  todayIso,
   billingConfigured,
   type BillingProduct,
 } from "@/lib/billing";
@@ -113,7 +113,7 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
       await createTemplate({
         customerId: customerResult.data.id,
         products,
-        nextInvoiceDate: firstOfNextMonthIso(),
+        nextInvoiceDate: todayIso(),
         scheduleInterval: "monthly",
       });
       // Mirror customer_id into dealers.template_id by convention —
