@@ -10,6 +10,7 @@ import type { AddendumPaperSize } from "@/lib/recommended-labels";
 import { paperSizeWidthLabel, productMatchesPaperSize } from "@/lib/recommended-labels";
 import { DMS_PROVIDERS, OTHER_PROVIDERS } from "@/lib/inventory-providers";
 import WebsiteIntegrationsTab from "@/components/WebsiteIntegrationsTab";
+import { formatBillingDate } from "@/lib/billing-date";
 
 type Tab = "info" | "shipping" | "labels" | "orders" | "billing" | "hubspot" | "security" | "website";
 
@@ -1765,7 +1766,7 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
             </div>
             <div>
               <div style={{ fontSize: 11, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>Next Invoice</div>
-              <div style={{ color: "#333" }}>{sub.nextInvoiceDate ? new Date(sub.nextInvoiceDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}</div>
+              <div style={{ color: "#333" }}>{formatBillingDate(sub.nextInvoiceDate)}</div>
             </div>
           </div>
         ) : (

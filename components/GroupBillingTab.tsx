@@ -7,6 +7,7 @@
 // never reaches the client bundle.
 
 import { useCallback, useEffect, useState } from "react";
+import { formatBillingDate } from "@/lib/billing-date";
 
 interface BillingCustomerDetail {
   id: string;
@@ -56,12 +57,7 @@ function money(n: number | null | undefined): string {
   return `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function fmtDate(d: string | null | undefined): string {
-  if (!d) return "—";
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
+const fmtDate = formatBillingDate;
 
 export default function GroupBillingTab({ groupId }: { groupId: string }) {
   const [data, setData] = useState<GroupBillingData | null>(null);

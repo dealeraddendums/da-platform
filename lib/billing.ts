@@ -695,7 +695,16 @@ export function subscriptionDescriptorFor(accountType: string | null | undefined
  * month and moved every dealer's billing day to the 1st.)
  */
 export function todayIso(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 10);
+  // Today's calendar date in America/New_York (the billing business timezone),
+  // not UTC — a late-evening ET upgrade must bill "today" in ET, and a bare UTC
+  // date would both roll to tomorrow and mis-display by a day. en-CA gives ISO
+  // YYYY-MM-DD ordering.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
 }
 
 // Friendly subscription-tier label for an account_type — mirrors the Dealers

@@ -12,6 +12,7 @@
 // directly from the browser; BILLING_API_KEY stays server-side.
 
 import { useCallback, useEffect, useState } from "react";
+import { formatBillingDate } from "@/lib/billing-date";
 
 interface DealerBillingDealer {
   id: string;
@@ -82,12 +83,7 @@ function money(n: number | null | undefined): string {
   return `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function fmtDate(d: string | null | undefined): string {
-  if (!d) return "—";
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
+const fmtDate = formatBillingDate;
 
 interface Props {
   dealerId: string;
