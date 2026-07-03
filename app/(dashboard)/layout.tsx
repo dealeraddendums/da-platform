@@ -9,6 +9,7 @@ import { isPaidAccountType } from "@/lib/print-eligibility";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
+import PlatformBanner from "@/components/PlatformBanner";
 import MainContent from "@/components/MainContent";
 import ProductFruitsWidget from "@/components/ProductFruitsWidget";
 import { BuilderBreadcrumbProvider } from "@/contexts/BuilderBreadcrumb";
@@ -184,6 +185,7 @@ export default async function DashboardLayout({
       <Sidebar role={sidebarRole} hideBuilder={isDealerRole && templatesLocked} showUpgrade={showUpgrade} />
       <div className="flex flex-col flex-1 overflow-hidden">
         <ImpersonationBanner />
+        <PlatformBanner />
         <BuilderBreadcrumbProvider>
           <Topbar user={userDisplay} />
           <MainContent>{children}</MainContent>
