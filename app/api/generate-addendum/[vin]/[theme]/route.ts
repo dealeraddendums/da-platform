@@ -50,7 +50,9 @@ export async function GET(
   const integration = await getIntegration(sb, vehicle.dealer_id);
   if (integration && !integration.enabled) return empty200();
 
-  const buttonLabel = textOverride || integration?.button_label || "Download Addendum";
+  // Account value wins: the dealer's saved button_label takes precedence over a
+  // caller-supplied ?text= override, so DDC needs no per-dealer customization.
+  const buttonLabel = integration?.button_label || textOverride || "Download Addendum";
   const buttonCss = integration?.button_css || PLATFORM_BUTTON_CSS;
 
   // 3. Pricing block (feature=pricing|both, when data exists).

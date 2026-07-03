@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // Dealer-facing config for the public Website Integrations widget (Dealer.com).
 // Dealer.com already has our API endpoint registered as an approved integration,
@@ -8,6 +8,8 @@ import { useEffect, useState } from "react";
 //   1. enabled toggle
 //   2. feature — Magic Button ('button') | Pricing Stack ('pricing') | Both ('both')
 //   3. button label (only relevant when the Magic Button is shown)
+//   4. button CSS — custom styles for the Download Addendum button (optional;
+//      can be generated from a screenshot of the dealer's site via Claude vision)
 // Self-contained: fetches/saves /api/settings/website-integrations.
 
 type Feature = "button" | "pricing" | "both";
@@ -17,6 +19,18 @@ const FEATURE_OPTIONS: { value: Feature; label: string; hint: string }[] = [
   { value: "pricing", label: "Pricing Stack", hint: "The itemized pricing/options widget on the vehicle page." },
   { value: "both", label: "Both", hint: "Show the Magic Button and the Pricing Stack." },
 ];
+
+const CSS_PLACEHOLDER = `.dealer-addendums__button__download-button {
+  background-color: #1976d2;
+  color: #ffffff;
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 14px;
+  text-decoration: none;
+  display: inline-block;
+  cursor: pointer;
+}`;
 
 const labelStyle: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#55595c", marginBottom: 4, marginTop: 18 };
 const inputStyle: React.CSSProperties = { width: "100%", padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" };
@@ -31,6 +45,13 @@ export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: s
   const [enabled, setEnabled] = useState(true);
   const [feature, setFeature] = useState<Feature>("both");
   const [buttonLabel, setButtonLabel] = useState("Download Addendum");
+  const [buttonCss, setButtonCss] = useState("");
+
+  // AI CSS generation from a screenshot.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState("");
+  const [genNote, setGenNote] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +63,7 @@ export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: s
           setEnabled(json.data.enabled ?? true);
           setFeature((json.data.feature as Feature) || "both");
           setButtonLabel(json.data.button_label || "Download Addendum");
+          setButtonCss(json.data.button_css || "");
         }
       } catch {
         /* keep defaults */
@@ -59,13 +81,43 @@ export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: s
       const res = await fetch(`/api/settings/website-integrations${qs}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "dealer_com", enabled, feature, button_label: buttonLabel }),
+        body: JSON.stringify({ provider: "dealer_com", enabled, feature, button_label: buttonLabel, button_css: buttonCss }),
       });
       setSaveStatus(res.ok ? "saved" : "error");
     } catch {
       setSaveStatus("error");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function onScreenshotSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // Reset the input so selecting the same file again still fires onChange.
+    e.target.value = "";
+    if (!file) return;
+
+    setGenerating(true);
+    setGenError("");
+    setGenNote("");
+    try {
+      const form = new FormData();
+      form.append("screenshot", file);
+      const res = await fetch(`/api/settings/website-integrations/generate-css`, {
+        method: "POST",
+        body: form,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.css) {
+        setButtonCss(json.css);
+        setGenNote("CSS generated — review and save.");
+      } else {
+        setGenError(json.error || "Could not generate CSS from this image");
+      }
+    } catch {
+      setGenError("Could not generate CSS from this image");
+    } finally {
+      setGenerating(false);
     }
   }
 
@@ -119,6 +171,49 @@ export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: s
               style={inputStyle}
             />
             <div style={{ fontSize: 11, color: "#78828c", marginTop: 4 }}>Text shown on the Magic Button. Leave as-is for the default.</div>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 18, marginBottom: 4 }}>
+              <label style={{ ...labelStyle, marginTop: 0, marginBottom: 0 }}>Button Style (Custom CSS)</label>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={generating}
+                style={{
+                  background: "#fff",
+                  color: "#1976d2",
+                  border: "1px solid #1976d2",
+                  borderRadius: 4,
+                  padding: "5px 10px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: generating ? "wait" : "pointer",
+                  fontFamily: "inherit",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {generating ? "Analyzing your website…" : "✨ Generate from screenshot"}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={onScreenshotSelected}
+                style={{ display: "none" }}
+              />
+            </div>
+            <textarea
+              value={buttonCss}
+              onChange={(e) => setButtonCss(e.target.value)}
+              placeholder={CSS_PLACEHOLDER}
+              rows={6}
+              spellCheck={false}
+              style={{ ...inputStyle, fontFamily: "monospace", fontSize: 12, lineHeight: 1.5, resize: "vertical" }}
+            />
+            <div style={{ fontSize: 11, color: "#78828c", marginTop: 4 }}>
+              Paste CSS to style the Download Addendum button to match your website. Leave blank for the default style.
+            </div>
+            {genNote && <div style={{ fontSize: 12, color: "#15803D", marginTop: 6 }}>✓ {genNote}</div>}
+            {genError && <div style={{ fontSize: 12, color: "#c62828", marginTop: 6 }}>{genError}</div>}
           </>
         )}
 

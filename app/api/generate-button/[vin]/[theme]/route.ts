@@ -40,7 +40,8 @@ export async function GET(
   if (vehicle) {
     const integration = await getIntegration(sb, vehicle.dealer_id);
     if (integration && !integration.enabled) return empty200();
-    if (!textOverride && integration?.button_label) buttonLabel = integration.button_label;
+    // Account value wins over a caller-supplied ?text= override.
+    if (integration?.button_label) buttonLabel = integration.button_label;
     if (integration?.button_css) buttonCss = integration.button_css;
   }
 
