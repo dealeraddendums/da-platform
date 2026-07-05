@@ -292,14 +292,14 @@ export async function setBillingState(
  * per-dealer round trip. Returns an empty map (never throws) on a billing hiccup
  * so the console degrades gracefully.
  */
-export async function listBillingTemplatesByCustomer(): Promise<Map<string, { active?: boolean; nextInvoiceDate?: string | null }>> {
-  const map = new Map<string, { active?: boolean; nextInvoiceDate?: string | null }>();
+export async function listBillingTemplatesByCustomer(): Promise<Map<string, { active?: boolean; nextInvoiceDate?: string | null; billingState?: string }>> {
+  const map = new Map<string, { active?: boolean; nextInvoiceDate?: string | null; billingState?: string }>();
   try {
     const res = await fetch(`${BASE}/templates?pageSize=100000&status=all`, { headers: authHeaders() });
     if (!res.ok) return map;
-    const parsed = JSON.parse(await readBody(res)) as { templates?: Array<{ customerId?: string; active?: boolean; nextInvoiceDate?: string | null }> };
+    const parsed = JSON.parse(await readBody(res)) as { templates?: Array<{ customerId?: string; active?: boolean; nextInvoiceDate?: string | null; billingState?: string }> };
     for (const t of parsed.templates ?? []) {
-      if (t.customerId) map.set(t.customerId, { active: t.active, nextInvoiceDate: t.nextInvoiceDate ?? null });
+      if (t.customerId) map.set(t.customerId, { active: t.active, nextInvoiceDate: t.nextInvoiceDate ?? null, billingState: t.billingState });
     }
   } catch {
     // degrade gracefully — readiness shows billing as "unknown/not staged"

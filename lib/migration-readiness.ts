@@ -43,6 +43,7 @@ export interface ReadinessDealer {
 export interface BillingTemplateInfo {
   active?: boolean;
   nextInvoiceDate?: string | null;
+  billingState?: string;
 }
 
 export interface ReadinessRow {
@@ -148,10 +149,19 @@ export function computeReadiness(
     billingReason = billedToGroup ? 'no group billing customer' : 'no billing customer';
   } else {
     const tmpl = ctx.billingByCustomer.get(customerId);
-    if (!tmpl) billingReason = 'no template';
-    else if (tmpl.active !== false) billingReason = 'template active (should be paused)';
-    else if (!isFutureDate(tmpl.nextInvoiceDate, ctx.now)) billingReason = 'nextInvoiceDate not in future';
-    else { billingStaged = true; billingReason = 'staged'; }
+    if (!tmpl) {
+      billingReason = 'no template';
+    } else {
+      // Billing is "staged" for migration when the da-billing customer is in
+      // Setup Mode (billingState==='setup', introduced 2026-06-27) — or, for the
+      // legacy paused-template model, when the template is inactive. Live billing
+      // (billingState==='active', the default when the field is absent) is NOT
+      // staged and must not be invite-ready.
+      const isSetupMode = tmpl.active === false || tmpl.billingState === 'setup';
+      if (!isSetupMode) billingReason = 'billing not in setup mode (go live not set, or not in da-billing yet)';
+      else if (!isFutureDate(tmpl.nextInvoiceDate, ctx.now)) billingReason = 'nextInvoiceDate not in future';
+      else { billingStaged = true; billingReason = 'staged'; }
+    }
   }
 
   // ── Eligible ───────────────────────────────────────────────────────────────
