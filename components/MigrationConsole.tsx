@@ -83,7 +83,7 @@ export default function MigrationConsole() {
   const [state, setState] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [assignFilter, setAssignFilter] = useState(""); // "" all | "me" | "unassigned" | <operatorId>
+  const [assignFilter, setAssignFilter] = useState("me"); // "" all | "me" | "unassigned" | <operatorId>
 
   // wave summaries (13b step 3)
   const [waves, setWaves] = useState<Wave[]>([]);
