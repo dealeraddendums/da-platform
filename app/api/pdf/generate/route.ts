@@ -10,6 +10,21 @@ import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/record-print";
 
 type BgOption = { option_name: string; option_price?: string; description?: string | null; required?: boolean };
+
+// Print-time sentinel normalizer for the savedFiltered rule comparison. The
+// addendum_library list fields use "-NONE" (also "NONE" / empty) to mean "don't
+// auto-add to any vehicle" — an auto-add control, NOT a print filter. The rules
+// matcher (listMatchesWithNot) otherwise reads "-NONE" as a literal value that
+// matches no vehicle, wrongly dropping an option already saved on the vehicle.
+// Collapse those sentinels to null (= no restriction) so on-vehicle options
+// print, while genuine list filters (e.g. models="KARR") are preserved.
+function normSentinelList(v: string | null): string | null {
+  if (v == null) return null;
+  const t = v.trim().toUpperCase();
+  if (t === "" || t === "-NONE" || t === "NONE") return null;
+  if (v.split(",").map((s) => s.trim()).filter(Boolean).length === 0) return null;
+  return v;
+}
 import {
   BG_DEFAULT,
   IS_BG_DEFAULT,
@@ -152,16 +167,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           separator_below: lr.separator_below === true,
           spaces: typeof lr.spaces === "number" ? lr.spaces : 0,
         };
+        // Normalize the "-NONE"/"NONE"/empty auto-add sentinels to null (no
+        // restriction) for the print-time savedFiltered comparison ONLY. These
+        // sentinels mean "don't auto-add", not "filter at print" — but the
+        // matcher would otherwise read "-NONE" as a literal value that matches
+        // no vehicle and drop an option already saved on the vehicle. Genuine
+        // list filters (e.g. models="KARR") are preserved. libRulesByName is
+        // used only here, so auto-add (which reads the raw addendum_library
+        // value elsewhere) is unaffected.
         const ruleRow = {
           applies_to: lr.applies_to as string | null,
           ad_types: lr.ad_types as string[] | null,
-          makes: lr.makes as string | null,
+          makes: normSentinelList(lr.makes as string | null),
           makes_not: (lr.makes_not as boolean | null) ?? false,
-          models: lr.models as string | null,
+          models: normSentinelList(lr.models as string | null),
           models_not: (lr.models_not as boolean | null) ?? false,
-          trims: lr.trims as string | null,
+          trims: normSentinelList(lr.trims as string | null),
           trims_not: (lr.trims_not as boolean | null) ?? false,
-          body_styles: lr.body_styles as string | null,
+          body_styles: normSentinelList(lr.body_styles as string | null),
           year_condition: (lr.year_condition as number | null) ?? 0,
           year_value: lr.year_value as number | null,
           miles_condition: (lr.miles_condition as number | null) ?? 0,
