@@ -33,7 +33,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const q = sp.get("q") ?? "";
   const condition = sp.get("condition") ?? "all";
   const status = sp.get("status") ?? "active";
-  const printStatus = sp.get("print_status") ?? "all"; // "all" | "printed" | "unprinted"
+  const printStatus = sp.get("print_status") ?? "all"; // "all" | "printed" | "unprinted" | "queued"
+  // queued=1 → mobile print queue (print_queue = 1), oldest queued first.
+  // Shared by the iOS Bulk Print screen and the dashboard Queued filter.
+  const queued = sp.get("queued") === "1" || printStatus === "queued";
   const SORTABLE_COLS = ["date_added", "year", "vin", "condition", "msrp"];
   const rawSort = sp.get("sort_by") ?? "date_added";
   const sortCol = SORTABLE_COLS.includes(rawSort) ? rawSort : "date_added";
@@ -47,8 +50,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .from("dealer_vehicles")
     .select("*", { count: "exact" })
     .eq("dealer_id", dealerId)
-    .order(sortCol, { ascending: sortAsc })
     .range(from, to);
+
+  if (queued) {
+    // Queue order: oldest queued first (print_queue_at is migration 123 —
+    // nulls last covers rows queued before it was applied), then the
+    // caller's sort as tiebreaker.
+    query = query
+      .eq("print_queue", 1)
+      .order("print_queue_at", { ascending: true, nullsFirst: false })
+      .order(sortCol, { ascending: sortAsc });
+  } else {
+    query = query.order(sortCol, { ascending: sortAsc });
+  }
 
   if (status !== "all") query = query.eq("status", status);
   if (condition !== "all") query = query.ilike("condition", condition);
