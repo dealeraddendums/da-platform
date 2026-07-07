@@ -12,7 +12,7 @@
 import { createAdminSupabaseClient } from "@/lib/db";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 import { sendMandrillEmail } from "@/lib/mandrill";
-import { buildMigrationInviteEmail } from "@/lib/invite-email";
+import { buildMigrationInviteEmail, buildMigrationFollowUpEmail } from "@/lib/invite-email";
 
 export interface MigrationInviteResult {
   ok: boolean;
@@ -105,7 +105,7 @@ export async function sendMigrationInvite(
   const migrateUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/migrate?invite=${token}`;
   try {
     await sendMandrillEmail({
-      subject: `Action needed: migrate ${dealer.name} to the new DealerAddendums platform`,
+      subject: `You're invited to DealerAddendums Platform 5.0 — ${dealer.name}`,
       from_email: "noreply@dealeraddendums.com",
       from_name: "DealerAddendums",
       to: [{ email, name: contactName || undefined }],
@@ -116,4 +116,97 @@ export async function sendMigrationInvite(
   }
 
   return { ok: true, dealer_name: dealer.name, email, emailSent: true };
+}
+
+/**
+ * Send a follow-up migration invite for a dealer that hasn't migrated yet.
+ * Generates a fresh code (14-day TTL, same invitations upsert as
+ * sendMigrationInvite), sends the follow-up email with escalating urgency
+ * copy, and sets dealers.invite_follow_up_count. Does NOT touch invited_at —
+ * the drip clock stays anchored on the original invite.
+ * followUpNumber: 1–5 (1=Day 3, 2=Day 10, 3=Day 30, 4=Day 60, 5=Day 90)
+ */
+export async function sendMigrationFollowUp(
+  dealerUuid: string,
+  followUpNumber: 1 | 2 | 3 | 4 | 5,
+  adminUserId?: string,
+): Promise<{ ok: boolean; email: string | null; emailSent: boolean; warning?: string }> {
+  const admin = createAdminSupabaseClient();
+
+  const { data: dealer } = await admin
+    .from("dealers")
+    .select("id, dealer_id, name, inventory_dealer_id, primary_contact, primary_contact_email, invited_at")
+    .eq("id", dealerUuid)
+    .maybeSingle<{ id: string; dealer_id: string; name: string; inventory_dealer_id: string | null; primary_contact: string | null; primary_contact_email: string | null; invited_at: string | null }>();
+  if (!dealer) throw new Error(`Dealer not found: ${dealerUuid}`);
+  if (!dealer.inventory_dealer_id) throw new Error(`No inventory_dealer_id for dealer "${dealer.name}"`);
+
+  // Recipient resolution mirrors sendMigrationInvite: primary contact, else a
+  // dealer_admin profile (profiles.dealer_id is the TEXT dealer_id).
+  let email = (dealer.primary_contact_email ?? "").trim().toLowerCase();
+  let contactName = (dealer.primary_contact ?? "").trim();
+  if (!email) {
+    const { data: prof } = await admin
+      .from("profiles")
+      .select("email, full_name")
+      .eq("dealer_id", dealer.dealer_id)
+      .eq("role", "dealer_admin")
+      .limit(1)
+      .maybeSingle<{ email: string | null; full_name: string | null }>();
+    email = (prof?.email ?? "").trim().toLowerCase();
+    if (!contactName) contactName = (prof?.full_name ?? "").trim();
+  }
+  if (!email) return { ok: false, email: null, emailSent: false, warning: `No contact email for "${dealer.name}"` };
+
+  const [firstName, ...rest] = (contactName || "there").split(/\s+/);
+  const code = generateSetupCode();
+  const expiresAt = new Date(Date.now() + INVITE_TTL_MS).toISOString();
+
+  const baseRow = {
+    email,
+    first_name: firstName || "there",
+    last_name: rest.join(" "),
+    role: "dealer_admin" as const,
+    dealer_id: dealer.id,        // invitations.dealer_id is the dealers.id UUID
+    dealer_name: dealer.name,
+    invited_by: adminUserId ?? null,
+    accepted_at: null,
+    expires_at: expiresAt,
+    setup_code_hash: hashSetupCode(code),
+    setup_code_expires_at: expiresAt,
+    purpose: "migration",
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const inv = (admin as any).from("invitations");
+  const res = await inv.upsert(baseRow, { onConflict: "email,dealer_id", ignoreDuplicates: false }).select("token").single();
+  if (res.error || !res.data) return { ok: false, email, emailSent: false, warning: res.error?.message ?? "Failed to upsert invitation" };
+  const token: string = res.data.token;
+
+  const migrateUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com"}/migrate?invite=${token}`;
+  const invitedAt = dealer.invited_at ? new Date(dealer.invited_at) : new Date();
+
+  const subjects: Record<number, string> = {
+    1: `Your new platform account is waiting — ${dealer.name}`,
+    2: `Still here when you're ready — ${dealer.name}`,
+    3: `Platform 4.0 retiring soon — ${dealer.name}`,
+    4: `60 days left — time to make the switch — ${dealer.name}`,
+    5: `Last chance — Platform 4.0 retires in 30 days — ${dealer.name}`,
+  };
+
+  try {
+    await sendMandrillEmail({
+      subject: subjects[followUpNumber] ?? subjects[1],
+      from_email: "noreply@dealeraddendums.com",
+      from_name: "DealerAddendums",
+      to: [{ email, name: contactName || undefined }],
+      html: buildMigrationFollowUpEmail({ firstName: firstName || "there", orgName: dealer.name, migrateUrl, setupCode: code, followUpNumber, invitedAt }),
+    });
+  } catch (mailErr) {
+    return { ok: true, email, emailSent: false, warning: `Code refreshed but email failed: ${mailErr instanceof Error ? mailErr.message : String(mailErr)}` };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin.from("dealers") as any).update({ invite_follow_up_count: followUpNumber }).eq("id", dealer.id);
+
+  return { ok: true, email, emailSent: true };
 }

@@ -59,8 +59,9 @@ export function buildInviteEmail(opts: {
 }
 
 // Migration self-serve invite (Phase 13a). Same scanner-proof one-time CODE +
-// inert link pattern as buildInviteEmail, but the copy is about migrating an
-// existing dealership to the new platform (not joining as a new user).
+// inert link pattern as buildInviteEmail, but the copy is a soft "you're
+// invited to 5.0" pitch — both platforms run side by side until the 4.0
+// sunset (120 days from the invite).
 export function buildMigrationInviteEmail(opts: {
   firstName: string;
   /** The dealership being migrated. */
@@ -71,38 +72,108 @@ export function buildMigrationInviteEmail(opts: {
   setupCode: string;
 }): string {
   const spacedCode = opts.setupCode.split("").join(" ");
-  return `
-<div style="font-family: Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; color: #333;">
-  <div style="margin-bottom: 24px;">
-    <img src="${APP_URL}/images/da-logo.png" alt="DA Platform" width="40" height="40" style="border-radius: 50%;" />
+  const sunsetDate = new Date();
+  sunsetDate.setDate(sunsetDate.getDate() + 120);
+  const sunsetFormatted = sunsetDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  return `<div style="font-family:Roboto,Arial,sans-serif;max-width:560px;margin:0 auto;padding:0;color:#333;">
+  <div style="background:#2a2b3c;border-radius:6px 6px 0 0;padding:28px 32px;text-align:center;">
+    <img src="${APP_URL}/images/da-logo.png" alt="DA Platform" width="48" height="48" style="border-radius:50%;margin:0 auto 12px;display:block;" />
+    <div style="color:#fff;font-size:20px;font-weight:700;">DealerAddendums Platform 5.0</div>
+    <div style="color:rgba(255,255,255,0.65);font-size:13px;margin-top:4px;">You're invited to try the new platform</div>
   </div>
-  <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">Time to move ${escapeHtml(opts.orgName)} to the new DealerAddendums</h2>
-  <p style="margin: 0 0 16px; color: #55595c;">Hi ${escapeHtml(opts.firstName)},</p>
-  <p style="margin: 0 0 16px; color: #55595c;">
-    We've rebuilt DealerAddendums and your dealership <strong>${escapeHtml(opts.orgName)}</strong> is ready to
-    move over. It's a quick, guided setup — confirm your details, set up your new login, and review your plan.
-    There's no password to create — just use the one-time code below to start.
-  </p>
-
-  <div style="margin: 0 0 8px; color: #55595c; font-size: 14px;">Your migration code:</div>
-  <div style="font-family: 'Courier New', monospace; font-size: 28px; font-weight: 700; letter-spacing: 8px;
-              background: #f5f6f8; border: 1px solid #e0e0e0; border-radius: 6px; padding: 14px 18px;
-              text-align: center; margin: 0 0 20px; color: #2a2b3c;">
-    ${escapeHtml(spacedCode)}
+  <div style="background:#fff;padding:32px;border-left:1px solid #e0e0e0;border-right:1px solid #e0e0e0;">
+    <p style="font-size:16px;font-weight:500;color:#1a1a2e;margin:0 0 8px;">Hi ${escapeHtml(opts.firstName)},</p>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 16px;">
+      We've set up a <strong>${escapeHtml(opts.orgName)}</strong> account on the new DealerAddendums Platform 5.0, and you're one of the first dealers invited to try it.
+    </p>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 24px;">
+      There's no pressure to switch today. <strong>You can use both platforms side by side</strong> — your existing account stays active and nothing changes about how you work now. Whenever you're ready, your account is waiting.
+    </p>
+    <div style="background:#f5f6f7;border-radius:6px;padding:20px 24px;margin-bottom:24px;">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#78828c;margin-bottom:14px;">What's new in 5.0</div>
+      <div style="padding:6px 0;font-size:14px;color:#333;">⚡&nbsp; <strong>Lightning-fast</strong> vehicle inventory and addendum printing</div>
+      <div style="padding:6px 0;font-size:14px;color:#333;">🎨&nbsp; <strong>Brand new template builder</strong> with pixel-perfect control</div>
+      <div style="padding:6px 0;font-size:14px;color:#333;">🔐&nbsp; <strong>Passkey login</strong> — sign in with Face ID or Touch ID, no password needed</div>
+      <div style="padding:6px 0;font-size:14px;color:#333;">📊&nbsp; <strong>Real-time dashboard</strong> with live activity tracking</div>
+    </div>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 14px;text-align:center;">When you're ready, use this code to get started at <strong>app.dealeraddendums.com/migrate</strong>:</p>
+    <div style="text-align:center;margin:0 0 24px;">
+      <div style="display:inline-block;background:#f5f6f7;border:1px solid #e0e0e0;border-radius:8px;padding:18px 28px;font-family:'Courier New',monospace;font-size:34px;font-weight:700;letter-spacing:6px;color:#1a1a2e;">${escapeHtml(spacedCode)}</div>
+    </div>
+    <div style="text-align:center;margin-bottom:24px;">
+      <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">Get started &rarr;</a>
+    </div>
+    <div style="background:#fff8ed;border:1px solid #ffe4a0;border-radius:6px;padding:14px 18px;">
+      <p style="font-size:13px;color:#7a5a00;margin:0;line-height:1.6;"><strong>Heads up:</strong> Platform 4.0 will remain available until <strong>${sunsetFormatted}</strong>. After that, the new platform will be your home. No rush — but it's good to know.</p>
+    </div>
   </div>
+  <div style="background:#f5f6f7;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 6px 6px;padding:20px 32px;text-align:center;">
+    <p style="font-size:12px;color:#78828c;margin:0 0 4px;">This code is good for 14 days. Questions? <a href="mailto:support@dealeraddendums.com" style="color:#1976d2;">support@dealeraddendums.com</a></p>
+    <p style="font-size:12px;color:#78828c;margin:0;">DealerAddendums &middot; dealeraddendums.com</p>
+  </div>
+</div>`;
+}
 
-  <p style="margin: 0 0 16px; color: #55595c;">
-    Open the migration page, enter the email address this was sent to, and the code above:
-  </p>
-  <a href="${opts.migrateUrl}"
-     style="display: inline-block; background: #1976d2; color: #fff; text-decoration: none;
-            padding: 10px 24px; border-radius: 4px; font-weight: 600; font-size: 14px; margin: 0 0 24px;">
-    Start Migration
-  </a>
-  <p style="color: #78828c; font-size: 12px; margin: 0;">
-    This invitation and code expire in 14 days. Your current account keeps working until you finish — nothing
-    changes until you confirm. If you did not expect this email, you can safely ignore it.
-  </p>
-</div>
-`;
+// Automated follow-up for a still-unmigrated dealer (drip #1–#5 = Day
+// 3/10/30/60/90 after the original invite). Copy escalates from gentle
+// reminder to sunset-deadline urgency; each send carries a FRESH code
+// (the invitations upsert refreshes the 14-day TTL).
+export function buildMigrationFollowUpEmail(opts: {
+  firstName: string;
+  orgName: string;
+  migrateUrl: string;
+  setupCode: string;
+  followUpNumber: 1 | 2 | 3 | 4 | 5;
+  /** Original invite date — anchors the 120-day 4.0 sunset. */
+  invitedAt: Date;
+}): string {
+  const spacedCode = opts.setupCode.split("").join(" ");
+  const sunsetDate = new Date(opts.invitedAt);
+  sunsetDate.setDate(sunsetDate.getDate() + 120);
+  const sunsetFormatted = sunsetDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const daysLeft = Math.max(0, Math.round((sunsetDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+
+  const headlines: Record<number, string> = {
+    1: `Your new platform account is waiting`,
+    2: `Still here when you're ready`,
+    3: `${daysLeft} days left on Platform 4.0`,
+    4: `${daysLeft} days left — time to make the switch`,
+    5: `Last chance — Platform 4.0 retires in ${daysLeft} days`,
+  };
+  const bodies: Record<number, string> = {
+    1: `Just a quick reminder — your <strong>${escapeHtml(opts.orgName)}</strong> account on DA Platform 5.0 is all set up and waiting for you. No pressure to switch today; your existing account is still fully active.`,
+    2: `No rush, but your <strong>${escapeHtml(opts.orgName)}</strong> account is ready whenever you are. You can use both the new and existing platforms for as long as you need.`,
+    3: `Your <strong>${escapeHtml(opts.orgName)}</strong> account on DA Platform 5.0 is ready. Platform 4.0 will be available until <strong>${sunsetFormatted}</strong> — now is a great time to get familiar with the new platform before then.`,
+    4: `Platform 4.0 retires on <strong>${sunsetFormatted}</strong>. Your <strong>${escapeHtml(opts.orgName)}</strong> account on the new platform is all set — use the code below to get in, set up your login, and make sure everything looks right before the cutover.`,
+    5: `Platform 4.0 retires on <strong>${sunsetFormatted}</strong> — that's coming up fast. Here's a fresh migration code for <strong>${escapeHtml(opts.orgName)}</strong>. Once you migrate, your templates, inventory, and settings will all be there waiting.`,
+  };
+
+  const headline = headlines[opts.followUpNumber] ?? headlines[1];
+  const body = bodies[opts.followUpNumber] ?? bodies[1];
+
+  return `<div style="font-family:Roboto,Arial,sans-serif;max-width:560px;margin:0 auto;padding:0;color:#333;">
+  <div style="background:#2a2b3c;border-radius:6px 6px 0 0;padding:28px 32px;text-align:center;">
+    <img src="${APP_URL}/images/da-logo.png" alt="DA Platform" width="48" height="48" style="border-radius:50%;margin:0 auto 12px;display:block;" />
+    <div style="color:#fff;font-size:20px;font-weight:700;">DealerAddendums Platform 5.0</div>
+    <div style="color:rgba(255,255,255,0.65);font-size:13px;margin-top:4px;">${headline}</div>
+  </div>
+  <div style="background:#fff;padding:32px;border-left:1px solid #e0e0e0;border-right:1px solid #e0e0e0;">
+    <p style="font-size:16px;font-weight:500;color:#1a1a2e;margin:0 0 8px;">Hi ${escapeHtml(opts.firstName)},</p>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 24px;">${body}</p>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 14px;text-align:center;">Here's your migration code — good for 14 days:</p>
+    <div style="text-align:center;margin:0 0 24px;">
+      <div style="display:inline-block;background:#f5f6f7;border:1px solid #e0e0e0;border-radius:8px;padding:18px 28px;font-family:'Courier New',monospace;font-size:34px;font-weight:700;letter-spacing:6px;color:#1a1a2e;">${escapeHtml(spacedCode)}</div>
+    </div>
+    <div style="text-align:center;margin-bottom:24px;">
+      <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">Start migration &rarr;</a>
+    </div>
+    <div style="background:#fff8ed;border:1px solid #ffe4a0;border-radius:6px;padding:14px 18px;">
+      <p style="font-size:13px;color:#7a5a00;margin:0;line-height:1.6;">Platform 4.0 will be available until <strong>${sunsetFormatted}</strong>. Nothing changes until you confirm the migration.</p>
+    </div>
+  </div>
+  <div style="background:#f5f6f7;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 6px 6px;padding:20px 32px;text-align:center;">
+    <p style="font-size:12px;color:#78828c;margin:0 0 4px;">Questions? <a href="mailto:support@dealeraddendums.com" style="color:#1976d2;">support@dealeraddendums.com</a></p>
+    <p style="font-size:12px;color:#78828c;margin:0;">DealerAddendums &middot; dealeraddendums.com</p>
+  </div>
+</div>`;
 }

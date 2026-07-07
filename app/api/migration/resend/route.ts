@@ -31,6 +31,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     const res = await sendMigrationInvite(dealer.inventory_dealer_id, claims.sub);
+    // Manual resend restarts the drip: invited_at was just reset by
+    // sendMigrationInvite, so zero the follow-up count too.
+    await admin
+      .from("dealers")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({ invite_follow_up_count: 0 } as any)
+      .eq("id", body.dealerId);
     return NextResponse.json({ ok: true, dealer: dealer.name, email: res.email, emailSent: res.emailSent, warning: res.warning });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Resend failed" }, { status: 500 });
