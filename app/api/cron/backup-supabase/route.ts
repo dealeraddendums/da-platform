@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { gzip } from "node:zlib";
-import { promisify } from "node:util";
+import { S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
+import { createGzip } from "node:zlib";
+import { PassThrough } from "node:stream";
 
 export const dynamic = "force-dynamic";
-// Allow up to 5 minutes for the full backup on EC2/Node — well under nginx defaults
 export const maxDuration = 300;
-
-const gzipAsync = promisify(gzip);
 
 const s3 = new S3Client({
   region: process.env.BACKUP_BUCKET_REGION ?? "us-west-1",
@@ -67,63 +65,94 @@ type TableResult =
   | { table: string; ok: true; rows: number; bytes: number; s3_key: string }
   | { table: string; ok: false; error: string };
 
-async function fetchAllRows(url: string, key: string, table: string): Promise<unknown[]> {
-  const rows: unknown[] = [];
-  let offset = 0;
-
-  for (;;) {
-    const rangeEnd = offset + PAGE_SIZE - 1;
-    const res = await fetch(`${url}/rest/v1/${encodeURIComponent(table)}?select=*`, {
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Range-Unit": "items",
-        Range: `${offset}-${rangeEnd}`,
-        Prefer: "count=none",
-      },
-    });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
+async function fetchPage(url: string, key: string, table: string, offset: number): Promise<unknown[]> {
+  // Two retries per page — a 7,500-request run (addendum_data alone is 5.7M
+  // rows) shouldn't abort a table on one transient failure.
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${url}/rest/v1/${encodeURIComponent(table)}?select=*`, {
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`,
+          "Range-Unit": "items",
+          Range: `${offset}-${offset + PAGE_SIZE - 1}`,
+          Prefer: "count=none",
+        },
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
+      }
+      const page = (await res.json()) as unknown[];
+      if (!Array.isArray(page)) throw new Error("non-array page response");
+      return page;
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
     }
-
-    const page = (await res.json()) as unknown[];
-    if (!Array.isArray(page) || page.length === 0) break;
-
-    rows.push(...page);
-    if (page.length < PAGE_SIZE) break;
-    offset += PAGE_SIZE;
   }
-
-  return rows;
+  throw lastErr ?? new Error("fetchPage failed");
 }
 
+// Streams the table page-by-page through gzip into an S3 multipart upload —
+// constant memory regardless of table size. Buffering whole tables OOM-killed
+// the PM2 worker once pagination was fixed (dealer_vehicles is 1.79M rows,
+// addendum_data 5.7M). Output stays a valid JSON array (.json.gz).
 async function backupTable(
   projectKey: string,
   config: ProjectConfig,
   table: string,
   date: string
 ): Promise<TableResult> {
+  const s3Key = `${projectKey}/${date}/${table}.json.gz`;
   try {
-    const rows = await fetchAllRows(config.url, config.key, table);
-    const compressed = await gzipAsync(Buffer.from(JSON.stringify(rows), "utf-8"));
-    const s3Key = `${projectKey}/${date}/${table}.json.gz`;
+    const gz = createGzip();
+    const body = new PassThrough();
+    gz.pipe(body);
 
-    await s3.send(
-      new PutObjectCommand({
+    const upload = new Upload({
+      client: s3,
+      params: {
         Bucket: BUCKET,
         Key: s3Key,
-        Body: compressed,
+        Body: body,
         ContentType: "application/gzip",
         ContentEncoding: "gzip",
-      })
-    );
+      },
+    });
+    const uploadDone = upload.done();
+    // Surface upload failures immediately instead of deadlocking the writer
+    // (a rejected .done() stops draining `body`, so gz.write backpressure
+    // would otherwise hang the loop forever).
+    let uploadFailed: Error | null = null;
+    uploadDone.catch((e) => { uploadFailed = e instanceof Error ? e : new Error(String(e)); body.destroy(); });
 
-    console.log(
-      `[backup-supabase] ✓ ${projectKey}/${table}: ${rows.length} rows, ${compressed.length} bytes → s3://${BUCKET}/${s3Key}`
-    );
-    return { table, ok: true, rows: rows.length, bytes: compressed.length, s3_key: s3Key };
+    const writeChunk = (chunk: string) =>
+      new Promise<void>((resolve, reject) => {
+        if (uploadFailed) return reject(uploadFailed);
+        if (gz.write(chunk)) return resolve();
+        gz.once("drain", () => (uploadFailed ? reject(uploadFailed) : resolve()));
+      });
+
+    let rowCount = 0;
+    let offset = 0;
+    await writeChunk("[");
+    for (;;) {
+      const page = await fetchPage(config.url, config.key, table, offset);
+      if (page.length === 0) break;
+      const jsonRows = page.map(r => JSON.stringify(r)).join(",");
+      await writeChunk(rowCount === 0 ? jsonRows : "," + jsonRows);
+      rowCount += page.length;
+      if (page.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    }
+    await writeChunk("]");
+    gz.end();
+    await uploadDone;
+
+    console.log(`[backup-supabase] ✓ ${projectKey}/${table}: ${rowCount} rows (streamed) → s3://${BUCKET}/${s3Key}`);
+    return { table, ok: true, rows: rowCount, bytes: 0, s3_key: s3Key };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[backup-supabase] ✗ ${projectKey}/${table}: ${msg}`);
@@ -168,26 +197,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const date = new Date().toISOString().slice(0, 10);
   console.log(`[backup-supabase] Starting backup for ${date}`);
 
-  const [daPlatform, daBilling] = await Promise.allSettled([
-    backupProject("da-platform", PROJECTS["da-platform"], date),
-    backupProject("da-billing", PROJECTS["da-billing"], date),
-  ]);
+  // Fire-and-forget (sync-hubspot-computed pattern): the streamed run takes
+  // ~an hour at 1,000 rows/page across ~7.5M rows, far past any LB/cron
+  // timeout. EasyCron gets a fast 200; results land in the PM2 log.
+  void (async () => {
+    const [daPlatform, daBilling] = await Promise.allSettled([
+      backupProject("da-platform", PROJECTS["da-platform"], date),
+      backupProject("da-billing", PROJECTS["da-billing"], date),
+    ]);
 
-  const result = {
-    date,
-    "da-platform":
-      daPlatform.status === "fulfilled"
-        ? daPlatform.value
-        : { success: 0, failed: PROJECTS["da-platform"].tables.length, tables: [], error: (daPlatform.reason as Error).message },
-    "da-billing":
-      daBilling.status === "fulfilled"
-        ? daBilling.value
-        : { success: 0, failed: PROJECTS["da-billing"].tables.length, tables: [], error: (daBilling.reason as Error).message },
-  };
+    const result = {
+      date,
+      "da-platform":
+        daPlatform.status === "fulfilled"
+          ? daPlatform.value
+          : { success: 0, failed: PROJECTS["da-platform"].tables.length, tables: [], error: (daPlatform.reason as Error).message },
+      "da-billing":
+        daBilling.status === "fulfilled"
+          ? daBilling.value
+          : { success: 0, failed: PROJECTS["da-billing"].tables.length, tables: [], error: (daBilling.reason as Error).message },
+    };
 
-  console.log(
-    `[backup-supabase] Complete — da-platform: ${result["da-platform"].success} ok / ${result["da-platform"].failed} failed | da-billing: ${result["da-billing"].success} ok / ${result["da-billing"].failed} failed`
-  );
+    console.log(
+      `[backup-supabase] Complete — da-platform: ${result["da-platform"].success} ok / ${result["da-platform"].failed} failed | da-billing: ${result["da-billing"].success} ok / ${result["da-billing"].failed} failed`
+    );
+  })();
 
-  return NextResponse.json(result);
+  return NextResponse.json({ ok: true, started: true, date });
 }
