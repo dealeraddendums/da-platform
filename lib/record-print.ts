@@ -95,17 +95,33 @@ export async function recordPrint(admin: Admin, printedBy: string, p: PrintRecor
   // (Single buyer-guide prints never flipped flags — parity preserved.)
   if (p.source !== "buyer_guide") {
     const todayDate = new Date().toISOString().split("T")[0];
-    const dvUpdate: Partial<{ print_status: number; print_info: number; print_guide: number; print_date: string; print_user: string }> = {
+    const dvUpdate: Partial<{ print_status: number; print_info: number; print_guide: number; print_date: string; print_user: string; print_queue: number; print_queue_at: string | null; print_queue_by: string | null }> = {
       print_date: todayDate,
       print_user: printedBy,
     };
-    if (p.docType === "addendum") dvUpdate.print_status = 1;
+    if (p.docType === "addendum") {
+      dvUpdate.print_status = 1;
+      // Any successful addendum print (web single, web bulk, mobile) dequeues
+      // the vehicle from the mobile print queue (IOS-APP-SPEC §8.3).
+      dvUpdate.print_queue = 0;
+      dvUpdate.print_queue_at = null;
+      dvUpdate.print_queue_by = null;
+    }
     else if (p.docType === "infosheet") dvUpdate.print_info = 1;
     else if (p.docType === "buyer_guide") dvUpdate.print_guide = 1;
     let { error: dvUpdateErr } = await admin
       .from("dealer_vehicles")
       .update(dvUpdate)
       .eq("id", p.vehicleId);
+    // Pre-migration-123 safety net: print_queue_at/print_queue_by don't exist
+    // until migration 123 is applied. Retry without the queue fields so the
+    // canonical flags still flip.
+    if (dvUpdateErr && /print_queue|schema cache|does not exist/i.test(dvUpdateErr.message)) {
+      const { print_queue: _q, print_queue_at: _qa, print_queue_by: _qb, ...withoutQueue } = dvUpdate;
+      void _q; void _qa; void _qb;
+      const retry = await admin.from("dealer_vehicles").update(withoutQueue).eq("id", p.vehicleId);
+      dvUpdateErr = retry.error;
+    }
     // Pre-migration-055 safety net: print_user was varchar(20) and rejected
     // 36-char UUIDs, rolling back the whole UPDATE. Retry without print_user
     // so the canonical flags still flip.
