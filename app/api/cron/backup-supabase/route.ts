@@ -18,7 +18,10 @@ const s3 = new S3Client({
 });
 
 const BUCKET = process.env.BACKUP_BUCKET ?? "da-platform-backups";
-const PAGE_SIZE = 10_000;
+// Must not exceed PostgREST's max-rows (1000 on Supabase): a larger page size
+// gets silently clamped to 1000 rows, which the loop reads as "last page" and
+// truncates every table's backup at 1000 rows (bug found 2026-07-07).
+const PAGE_SIZE = 1_000;
 
 interface ProjectConfig {
   url: string;
