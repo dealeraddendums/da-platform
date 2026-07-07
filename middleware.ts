@@ -188,7 +188,7 @@ export async function middleware(request: NextRequest) {
         );
         res.headers.set(
           "Access-Control-Allow-Headers",
-          "Content-Type, Authorization, x-cron-secret"
+          "Content-Type, Authorization, x-cron-secret, X-DA-Ghost-Token"
         );
         res.headers.set("Access-Control-Max-Age", "86400");
       }

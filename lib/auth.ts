@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { createServerSupabaseClient, createAdminSupabaseClient } from "./db";
 import type { UserRole } from "./db";
 import { verifyGhostToken } from "./ghost";
@@ -79,18 +79,39 @@ export async function getServerProfile(): Promise<{
   return { session, profile: null };
 }
 
-/** Extract session and custom claims from the Supabase cookie session. */
+/**
+ * Headless-client fallback (mobile app, IOS-APP-SPEC §8.4): resolve the user
+ * from an `Authorization: Bearer <supabase JWT>` header when there is no
+ * cookie session. The token is verified server-side by GoTrue
+ * (auth.getUser(jwt) checks signature + expiry) — no weakening vs cookies.
+ */
+async function getBearerUser(): Promise<{ id: string; email?: string; app_metadata?: Record<string, unknown> } | null> {
+  try {
+    const authz = headers().get("authorization") ?? "";
+    const m = authz.match(/^Bearer\s+(.+)$/i);
+    if (!m) return null;
+    const { data, error } = await createAdminSupabaseClient().auth.getUser(m[1]);
+    if (error || !data.user) return null;
+    return data.user as { id: string; email?: string; app_metadata?: Record<string, unknown> };
+  } catch {
+    return null; // headers() may throw outside a request context
+  }
+}
+
+/** Extract session and custom claims from the Supabase cookie session,
+ *  or from an Authorization: Bearer JWT (headless/mobile clients). */
 export async function getJwtClaims(): Promise<JwtClaims | null> {
   const supabase = createServerSupabaseClient();
   const {
     data: { session },
-    error,
   } = await supabase.auth.getSession();
 
-  if (error || !session) return null;
+  // Cookie session wins; Bearer is the headless path (mobile app).
+  const user = session?.user ?? (await getBearerUser());
+  if (!user) return null;
 
   // Impersonation: super_admin can impersonate a dealer via app_metadata
-  const appMeta = session.user.app_metadata as Record<string, unknown> | undefined;
+  const appMeta = user.app_metadata as Record<string, unknown> | undefined;
   const impersonatingDealerId = (appMeta?.impersonating_dealer_id as string | null) ?? null;
 
   // Use profiles table as source of truth for role/dealer_id/group_id
@@ -99,24 +120,24 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
   const { data: profileById } = await admin
     .from("profiles")
     .select("id, role, dealer_id, group_id, active_dealer_id")
-    .eq("id", session.user.id)
+    .eq("id", user.id)
     .maybeSingle();
 
   // Fallback: ETL-synced profiles may have a legacy UUID as their id that doesn't
   // match the Supabase auth UUID returned after magic-link impersonation. Look up
   // by email so impersonated sessions get the correct role and dealer_id.
   let profile = profileById;
-  if (!profile && session.user.email) {
+  if (!profile && user.email) {
     const { data: profileByEmail } = await admin
       .from("profiles")
       .select("id, role, dealer_id, group_id, active_dealer_id")
-      .eq("email", session.user.email)
+      .eq("email", user.email)
       .maybeSingle();
     profile = profileByEmail;
     if (profile) {
       console.log("[auth] profile resolved by email fallback — UUID mismatch", {
-        authId: session.user.id,
-        email: session.user.email,
+        authId: user.id,
+        email: user.email,
         role: profile.role,
         dealer_id: profile.dealer_id,
       });
@@ -153,7 +174,7 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
   // the resolved profile id (email-fallback aware). Empty ⇒ no dealers.
   let scopeTagIds: string[] = [];
   if (role === "group_user") {
-    const uid = profile?.id ?? session.user.id;
+    const uid = profile?.id ?? user.id;
     // user_tags isn't in the generated Supabase types yet (migration 109).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: tagRows } = await (admin as any).from("user_tags").select("tag_id").eq("user_id", uid);
@@ -167,7 +188,13 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
   if (role === "super_admin") {
     try {
       const cookieStore = cookies();
-      const ghostToken = cookieStore.get("da_ghost_token")?.value;
+      // Cookie (web admin panel) wins; the X-DA-Ghost-Token header is the
+      // mobile operate-as path (IOS-APP-SPEC §8.4) — same token format, same
+      // verifyGhostToken() verification, minted by POST /api/auth/ghost.
+      let ghostToken = cookieStore.get("da_ghost_token")?.value;
+      if (!ghostToken) {
+        try { ghostToken = headers().get("x-da-ghost-token") ?? undefined; } catch { /* no req ctx */ }
+      }
       if (ghostToken) {
         const ghostCtx = verifyGhostToken(ghostToken);
         if (ghostCtx?.dealer_text_id) {
@@ -182,8 +209,8 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
   }
 
   return {
-    sub: session.user.id,
-    email: session.user.email ?? "",
+    sub: user.id,
+    email: user.email ?? "",
     role,
     dealer_id: dealerId,
     group_id: profile?.group_id ?? null,
