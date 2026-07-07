@@ -51,9 +51,11 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
 }
 
-function PrintNowBtn({ vehicleId, printed, printDate, canPrint, blockedMsg, onNavigate }: {
+function PrintNowBtn({ vehicleId, printed, queued, printDate, canPrint, blockedMsg, onNavigate }: {
   vehicleId: string;
   printed: boolean;
+  /** Vehicle is in the mobile print queue (print_queue = 1) — orange cue. */
+  queued?: boolean;
   printDate: string | null;
   canPrint: boolean;
   blockedMsg?: string;
@@ -62,17 +64,21 @@ function PrintNowBtn({ vehicleId, printed, printDate, canPrint, blockedMsg, onNa
 }) {
   const tooltip = !canPrint && blockedMsg
     ? blockedMsg
-    : printed && printDate
-      ? `Last printed ${new Date(`${printDate}T12:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`
-      : undefined;
+    : queued
+      ? "Queued from mobile — waiting to be printed"
+      : printed && printDate
+        ? `Last printed ${new Date(`${printDate}T12:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`
+        : undefined;
+  // Queued wins over printed: the mobile user is waiting on this print
+  // (#ffa500 = the active-nav orange token).
   const baseStyle = {
     display: "inline-block" as const,
     height: 28, padding: "0 11px", fontSize: 11, fontWeight: 600 as const,
     borderRadius: 4, whiteSpace: "nowrap" as const, textDecoration: "none" as const,
     lineHeight: "28px",
-    background: printed ? "#4caf50" : "#fff",
-    color: printed ? "#fff" : "#333",
-    border: printed ? "1px solid #43a047" : "1px solid #c0c0c0",
+    background: queued ? "#ffa500" : printed ? "#4caf50" : "#fff",
+    color: queued || printed ? "#fff" : "#333",
+    border: queued ? "1px solid #e69500" : printed ? "1px solid #43a047" : "1px solid #c0c0c0",
   };
   if (!canPrint) {
     return (
@@ -432,6 +438,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
           <option value="all">All Print Status</option>
           <option value="printed">Printed</option>
           <option value="unprinted">Unprinted</option>
+          <option value="queued">Queued</option>
         </select>
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
@@ -605,7 +612,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
                         </button>
                       </td>
                       <td className="px-3 py-2">
-                        <PrintNowBtn vehicleId={v.id} printed={v.print_status === 1} printDate={v.print_date ?? null} canPrint={canPrint} blockedMsg={printBlockedMsg} onNavigate={() => { printNavRef.current = true; }} />
+                        <PrintNowBtn vehicleId={v.id} printed={v.print_status === 1} queued={v.print_queue === 1} printDate={v.print_date ?? null} canPrint={canPrint} blockedMsg={printBlockedMsg} onNavigate={() => { printNavRef.current = true; }} />
                       </td>
                     </tr>
                   );

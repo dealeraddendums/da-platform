@@ -138,7 +138,7 @@ async function DealerDashboardView({ dealerId }: { dealerId: string }) {
   startOfMonth.setHours(0, 0, 0, 0);
   const startOfMonthDate = startOfMonth.toISOString().split("T")[0];
 
-  const [{ count: totalVehiclesCount }, { count: printedMonthCount }, { count: printedLifetimeCount }] = await Promise.all([
+  const [{ count: totalVehiclesCount }, { count: printedMonthCount }, { count: printedLifetimeCount }, { count: queuedCount }] = await Promise.all([
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active"),
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
@@ -147,6 +147,10 @@ async function DealerDashboardView({ dealerId }: { dealerId: string }) {
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active")
       .eq("print_status", 1),
+    // Mobile print queue (dealer_vehicles.print_queue, IOS-APP-SPEC §8.1)
+    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId).eq("status", "active")
+      .eq("print_queue", 1),
   ]);
 
   const totalVehicles = totalVehiclesCount ?? 0;
@@ -158,6 +162,7 @@ async function DealerDashboardView({ dealerId }: { dealerId: string }) {
     { label: "Total Vehicles",     value: totalVehicles },
     { label: "Printed This Month", value: printedThisMonth },
     { label: "Unprinted",          value: unprintedNever },
+    { label: "Queued",             value: queuedCount ?? 0 },
   ];
 
   const printGate = await canPrintForDealer(dealerId);
@@ -165,7 +170,7 @@ async function DealerDashboardView({ dealerId }: { dealerId: string }) {
   return (
     <div>
       <PageHeader title="Dashboard" />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
         {dealerStats.map((s) => (
           <div key={s.label} className="card p-4">
             <p style={STAT_LABEL}>{s.label}</p>
@@ -258,7 +263,7 @@ export default async function DashboardPage() {
       startOfMonthGhost.setHours(0, 0, 0, 0);
 
       const startOfMonthGhostDate = startOfMonthGhost.toISOString().split("T")[0];
-      const [{ count: ghostTotal }, { count: ghostMonthCount }, { count: ghostLifetimeCount }] = await Promise.all([
+      const [{ count: ghostTotal }, { count: ghostMonthCount }, { count: ghostLifetimeCount }, { count: ghostQueuedCount }] = await Promise.all([
         admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
           .eq("dealer_id", ghostDealerId).eq("status", "active"),
         admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
@@ -267,6 +272,9 @@ export default async function DashboardPage() {
         admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
           .eq("dealer_id", ghostDealerId).eq("status", "active")
           .eq("print_status", 1),
+        admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+          .eq("dealer_id", ghostDealerId).eq("status", "active")
+          .eq("print_queue", 1),
       ]);
 
       const ghostTotalVehicles = ghostTotal ?? 0;
@@ -278,6 +286,7 @@ export default async function DashboardPage() {
         { label: "Total Vehicles",     value: ghostTotalVehicles },
         { label: "Printed This Month", value: ghostPrintedMonth },
         { label: "Unprinted",          value: ghostUnprinted },
+        { label: "Queued",             value: ghostQueuedCount ?? 0 },
       ];
 
       const ghostStatCard = (s: { label: string; value: number }) => (
@@ -290,7 +299,7 @@ export default async function DashboardPage() {
       return (
         <div>
           <PageHeader title="Dashboard" />
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
             {ghostStats.map(ghostStatCard)}
           </div>
           {/* super_admin in ghost mode bypasses the gate — leave printGate undefined */}

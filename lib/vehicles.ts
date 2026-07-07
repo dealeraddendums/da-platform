@@ -28,6 +28,8 @@ export type VehicleRow = {
   DESCRIPTION: string | null;
   PRINT_STATUS?: "0" | "1";
   supabase_printed?: boolean;
+  /** Mobile print queue flag (dealer_vehicles.print_queue, migration 020). */
+  print_queue?: number | null;
   HMPG: string | null;
   CMPG: string | null;
   MPG: string | null;

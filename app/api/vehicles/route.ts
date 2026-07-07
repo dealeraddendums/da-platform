@@ -74,7 +74,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     let query = admin
       .from("dealer_vehicles")
       .select(
-        "id, dealer_id, vin, stock_number, year, make, model, trim, body_style, exterior_color, mileage, msrp, condition, status, date_added",
+        "id, dealer_id, vin, stock_number, year, make, model, trim, body_style, exterior_color, mileage, msrp, condition, status, date_added, print_queue",
         { count: "exact" }
       )
       .eq("dealer_id", dealerId);

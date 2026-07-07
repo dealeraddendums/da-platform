@@ -34,7 +34,7 @@ const PER_PAGE_OPTIONS = [15, 25, 50, 0] as const; // 0 = All
 
 type Condition = "all" | "new" | "used" | "cpo";
 type Status = "active" | "all";
-type PrintFilter = "all" | "printed" | "unprinted";
+type PrintFilter = "all" | "printed" | "unprinted" | "queued";
 
 export default function VehicleInventory({ fixedDealerId, role, groupId, printGate }: Props) {
   const canPrint = printGate?.ok !== false;
@@ -97,6 +97,8 @@ export default function VehicleInventory({ fixedDealerId, role, groupId, printGa
     ? vehicles
     : printFilter === "printed"
     ? vehicles.filter((v) => !!v.supabase_printed)
+    : printFilter === "queued"
+    ? vehicles.filter((v) => v.print_queue === 1)
     : vehicles.filter((v) => !v.supabase_printed);
 
   function toggleCheck(id: number) {
@@ -312,35 +314,25 @@ export default function VehicleInventory({ fixedDealerId, role, groupId, printGa
               Print Status
             </span>
             <div style={{ display: "flex", gap: 4 }}>
-              {(["all", "printed", "unprinted"] as PrintFilter[]).map((p) => (
+              {(["all", "printed", "unprinted", "queued"] as PrintFilter[]).map((p) => (
                 <button
                   key={p}
                   type="button"
                   onClick={() => setPrintFilter(p)}
+                  title={p === "queued" ? "Vehicles queued from the mobile app" : undefined}
                   style={{
                     height: 30, padding: "0 14px", fontSize: 12, fontWeight: 500,
                     borderRadius: 4, cursor: "pointer",
-                    background: printFilter === p ? "var(--success)" : "var(--bg-subtle)",
+                    // Queued uses the orange token — matches the queued Print
+                    // Now cue (mobile print queue).
+                    background: printFilter === p ? (p === "queued" ? "#ffa500" : "var(--success)") : "var(--bg-subtle)",
                     color: printFilter === p ? "#fff" : "var(--text-secondary)",
-                    border: printFilter === p ? "1px solid #43a047" : "1px solid var(--border)",
+                    border: printFilter === p ? (p === "queued" ? "1px solid #e69500" : "1px solid #43a047") : "1px solid var(--border)",
                   }}
                 >
-                  {p === "all" ? "All" : p === "printed" ? "Printed" : "Unprinted"}
+                  {p === "all" ? "All" : p === "printed" ? "Printed" : p === "unprinted" ? "Unprinted" : "Queued"}
                 </button>
               ))}
-              <button
-                type="button"
-                disabled
-                title="Coming soon — mobile app"
-                style={{
-                  height: 30, padding: "0 14px", fontSize: 12, fontWeight: 500,
-                  borderRadius: 4, cursor: "not-allowed",
-                  background: "var(--bg-subtle)", color: "var(--text-muted)",
-                  border: "1px solid var(--border)", opacity: 0.55,
-                }}
-              >
-                Queued
-              </button>
             </div>
           </div>
         </div>
@@ -565,11 +557,14 @@ export default function VehicleInventory({ fixedDealerId, role, groupId, printGa
                               href={`/vehicles/${v.id}/addendum`}
                               className="text-xs font-medium"
                               style={{
-                                color: printed ? "var(--success)" : "var(--blue)",
+                                // Orange = queued from mobile (this table has no
+                                // per-row Print Now button; the Addendum link is
+                                // the print entry point).
+                                color: v.print_queue === 1 ? "#ffa500" : printed ? "var(--success)" : "var(--blue)",
                                 textDecoration: "none",
                                 whiteSpace: "nowrap",
                               }}
-                              title="Addendum options"
+                              title={v.print_queue === 1 ? "Queued from mobile — waiting to be printed" : "Addendum options"}
                             >
                               Addendum
                             </a>
