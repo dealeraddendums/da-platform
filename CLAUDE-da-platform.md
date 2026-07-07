@@ -799,6 +799,8 @@ Native mobile apps for dealers on the lot — scan a VIN, assign products, print
 ### Reference App
 Existing app (screenshots captured) — use as UX reference, not codebase. The new app connects to the DA Platform (Supabase) not the legacy backend.
 
+> **⚠️ 2026-07-07 — this Phase 15 section is superseded by `da-mobile/IOS-APP-SPEC.md` (v1.2).** Key changes vs the notes below: stack is **Swift/SwiftUI native iOS** (not React Native; Android deferred); **admin logins ARE included** (group_admin/group_user via `active_dealer_id`, super_admin via ghost token in `X-DA-Ghost-Token` header); queue = existing **`dealer_vehicles.print_queue` column** (NOT a separate `print_queue` table); the app bulk-prints its own queue; icon colors: gray=unprinted, green=printed, orange=queued. **Web-side prep shipped 2026-07-07** (commits `68ea239`–`4e3d7a4`, migration 123): `recordPrint()` dequeue on addendum prints, `POST`/`DELETE /api/print-queue/[vehicleId]`, `queued=1` list filter, Dashboard Queued filter/orange Print Now/stat card, **platform-wide Bearer-JWT auth in `getJwtClaims()`** (previously cookie-only), and `POST /api/auth/ghost` JSON mint (super_admin, 2 h TTL, audited). Verified mobile API shapes are in the spec §6 + §9 — note `/api/pdf/generate?async=1` for JSON mode, and `/api/pdf/bulk` returns one merged PDF + `X-Print-Token` header (blocking, max 50). **M1 (scaffold + auth + role routing) shipped 2026-07-07** — da-mobile PR #1 (`901a7ef`), plus new da-platform endpoint **`GET /api/auth/me`** (`334719a`, live) as the app's single identity/context source. ⚠️ The Supabase JWT carries **no custom role claims** (no `custom_access_token_hook` installed) — role/dealer/group/ghost context must come from `/api/auth/me`, not the token. `PATCH /api/profiles/active-dealer` body key is `dealerId` (camelCase).
+
 ---
 
 ### Screens & Flows
@@ -901,7 +903,7 @@ Existing app (screenshots captured) — use as UX reference, not codebase. The n
 - ⬜ Phase 12 — Enterprise White Label (custom subdomains + branding for large groups)
 - ⬜ Phase 13 — Dealer Self-Serve Onboarding (magic link → password → FreshBooks unwind)
 - ✅ Phase 14 — HubSpot Sync (DA → HubSpot, one-way): 14a write path + 14b cron shipped; backfill complete (2,025 dealers / 214 groups / 3,646 profiles). EasyCron registration for `/api/cron/sync-hubspot-computed` (schedule `0 8 * * *` UTC) still pending Allan.
-- ⬜ Phase 15 — iOS & Android Native Apps (VIN scan, Print Queue — review existing iOS app first)
+- 🔵 Phase 15 — iOS & Android Native Apps: spec complete (`da-mobile/IOS-APP-SPEC.md` v1.2, Swift/SwiftUI); web-side prep shipped 2026-07-07 (queue API + Queued filter + Bearer auth + ghost mint); iOS client build is next
 - ⬜ `billing_sync_errors` alerting — panel flagging non-zero error counts so Box/billing failures don't sit silent (Box SDK failed silently 2 days before discovery)
 - ⬜ Box folder backfill for ~1,600 legacy dealers — all have `box_folder_id = null`; needs audited bulk backfill script when ready
 
@@ -928,6 +930,7 @@ Existing app (screenshots captured) — use as UX reference, not codebase. The n
 | `0 3 * * *` | `/api/cron/harvest-vin-trims` | ✅ |
 | `0 9 5 * *` | `/api/cron/chromedata-usage-report` | ✅ |
 | `0 10 * * *` | `/api/cron/sync-xps-tracking` | ✅ |
+| `0 10 * * *` | `/api/migration/send-follow-ups` | ✅ — migration invite drip (Days 3/10/30/60/90 after invited_at) |
 
 ## Environment Variables
 

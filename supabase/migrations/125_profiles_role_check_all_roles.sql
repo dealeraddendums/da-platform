@@ -1,4 +1,4 @@
--- Migration 124: widen profiles_role_check to all six platform roles.
+-- Migration 125: widen profiles_role_check to all six platform roles.
 --
 -- Migration 001 created profiles.role with CHECK (role IN ('super_admin',
 -- 'group_admin', 'dealer_admin', 'dealer_user')) and no later migration
