@@ -285,9 +285,14 @@ export default function MigrationConsole() {
     if (readyOnly) rows = rows.filter((r) => r.ready);
     if (fbPending) rows = rows.filter((r) => r.freshbooksStopPending);
     if (stagedOnly) rows = rows.filter((r) => r.migrationStatus === "pending");
-    if (assignFilter === "me") rows = rows.filter((r) => r.assignedTo === me);
-    else if (assignFilter === "unassigned") rows = rows.filter((r) => !r.assignedTo);
-    else if (assignFilter) rows = rows.filter((r) => r.assignedTo === assignFilter);
+    // FB stop pending is a global cleanup queue, not per-operator work — when
+    // it's checked, ignore the assignment filter (which defaults to "Me" and
+    // would hide unassigned migrated dealers).
+    if (!fbPending) {
+      if (assignFilter === "me") rows = rows.filter((r) => r.assignedTo === me);
+      else if (assignFilter === "unassigned") rows = rows.filter((r) => !r.assignedTo);
+      else if (assignFilter) rows = rows.filter((r) => r.assignedTo === assignFilter);
+    }
     if (statusFilter) rows = rows.filter((r) => r.inviteStatus === statusFilter);
     if (group) rows = rows.filter((r) => r.groupName === group);
     if (state) rows = rows.filter((r) => r.state === state);
@@ -601,7 +606,7 @@ export default function MigrationConsole() {
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }}>
           <input type="checkbox" checked={readyOnly} onChange={(e) => setReadyOnly(e.target.checked)} /> Ready only
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }} title="Migrated dealers whose FreshBooks recurring still needs stopping">
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }} title="Migrated dealers whose FreshBooks recurring still needs stopping — shows ALL of them (ignores the Assigned-to filter)">
           <input type="checkbox" checked={fbPending} onChange={(e) => setFbPending(e.target.checked)} /> FB stop pending
         </label>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }} title="Dealers staged for a wave (migration_status=pending) — ETL is frozen for them">
