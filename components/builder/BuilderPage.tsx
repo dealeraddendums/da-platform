@@ -658,8 +658,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // ── Keyboard shortcuts ─────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const el = e.target as HTMLElement;
+      // Also bail on contenteditable — the Custom Text panel's RichTextEditor
+      // (tiptap) is a contenteditable DIV, so a tag check alone lets Backspace
+      // fall through and delete the selected widget mid-typing.
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable) return;
       if ((e.key === 'Delete' || e.key === 'Backspace') && selId) deleteWidget(selId);
       if (e.key === 'Escape') setSelId(null);
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
