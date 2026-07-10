@@ -4,7 +4,12 @@ import { computeReadiness, type ReadinessDealer, type ReadinessRow } from "@/lib
 
 // Shared readiness loader — one source of truth for the /migration console
 // (GET readiness) AND the wave-send validation. Computes per-dealer readiness
-// for real, un-migrated dealers (optionally filtered to specific dealer UUIDs).
+// for ALL real dealers INCLUDING migrated ones (optionally filtered to specific
+// dealer UUIDs): migrated rows drive the console's "Migrated" stat card and the
+// FreshBooks-stop-pending workflow — excluding them made both permanently
+// empty (bug fixed 2026-07-10). Migrated dealers are never actionable: they
+// compute eligible=false ('already migrated'), wave-send blocks non-eligible,
+// and claim-next filters them explicitly.
 // READ-ONLY. See phase-13-self-serve-migration.md → "13b detailed".
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,10 +48,10 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
   const admin = createAdminSupabaseClient();
   const ids = opts?.dealerIds;
 
-  // Real, not-yet-migrated dealers (optionally a specific set). Resilient to the
-  // migration_readiness flag columns (migration 100) not existing yet.
+  // Real dealers, migrated included (optionally a specific set). Resilient to
+  // the migration_readiness flag columns (migration 100) not existing yet.
   const baseFilter = (q: Admin) => {
-    let qq = q.or("migration_status.is.null,migration_status.neq.migrated").neq("is_test", true);
+    let qq = q.neq("is_test", true);
     if (ids && ids.length) qq = qq.in("id", ids);
     return qq;
   };
