@@ -389,6 +389,7 @@ export async function buildPeriodSummary(): Promise<PeriodSummary> {
     return t >= fromMs && t < toMs;
   };
 
+  const nowMs = Date.now();
   const periods = getPeriodWindows(new Date()).map(({ label, from, to }) => {
     const fromMs = from.getTime();
     const toMs = to.getTime();
@@ -407,10 +408,13 @@ export async function buildPeriodSummary(): Promise<PeriodSummary> {
       if (inWin(d.converted_at, fromMs, toMs)) trialsWon++;
 
       // Lost-trial EVENTS: still a trial, never converted/cancelled, and the
-      // 30-day cap expired inside the window.
+      // 30-day cap expired inside the window. Clamped at now — windows that
+      // extend into the future (current quarter) must not count expiries that
+      // haven't happened yet (the trial could still convert), and without the
+      // clamp the quarters wouldn't reconcile with YTD.
       if (isTrialAccountType(d.account_type) && !d.converted_at && !d.downgraded_at && d.created_at) {
         const expiryMs = new Date(d.created_at).getTime() + capMs;
-        if (expiryMs >= fromMs && expiryMs < toMs) trialsLost++;
+        if (expiryMs >= fromMs && expiryMs < toMs && expiryMs <= nowMs) trialsLost++;
       }
 
       if (createdIn && !independent) groupAdded++;
