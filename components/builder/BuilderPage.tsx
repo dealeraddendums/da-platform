@@ -1543,6 +1543,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       {/* Canvas-side CSS for HTML product descriptions — keep in sync with lib/pdf-html.ts */}
       <style jsx global>{`
         .description-html p { margin: 0; }
+        .description-html p:empty { min-height: 1em; }
         .description-html ul { margin: 0; padding-left: 1.2em; list-style-type: disc; }
         .description-html ul ul { list-style-type: circle; padding-left: 1.2em; }
         .description-html ol { margin: 0; padding-left: 1.2em; }

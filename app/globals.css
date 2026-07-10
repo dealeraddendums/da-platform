@@ -160,6 +160,7 @@
    the Builder canvas, and the printed addendum/infosheet all match. Inline
    font-size / line-height / color from the editor are respected as-is. */
 .description-html p  { margin: 0; }
+.description-html p:empty { min-height: 1em; }
 .description-html ul    { margin: 0; padding-left: 1.2em; list-style: disc outside; }
 .description-html ul ul { list-style: circle outside; }
 .description-html ol    { margin: 0; padding-left: 1.2em; list-style: decimal outside; }
