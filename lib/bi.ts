@@ -309,6 +309,132 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
   };
 }
 
+// ── Period Summary (fixed windows grid) ──────────────────────────────────────
+// One fetch of all non-test dealers, all windows computed in memory — the grid
+// is 10 windows × 6 event metrics and per-window SQL would be 60+ queries.
+// Metric semantics MATCH buildBiReport's classification rule (dedicated
+// timestamps; never updated_at, which the daily ETL touches for every dealer).
+
+export interface PeriodSummaryRow {
+  label: string;
+  newTrials: number;
+  trialsWon: number;
+  trialsLost: number;
+  groupAdded: number;
+  manualAdded: number;
+  downgradedFree: number;
+  newPaying: number;
+  growthPct: number | null;
+}
+
+export interface PeriodSummary {
+  periods: PeriodSummaryRow[];
+  totalPaying: number;
+  generatedAt: string;
+}
+
+/** Fixed reporting windows, half-open [from, to). Server clock (UTC on prod). */
+function getPeriodWindows(now: Date): { label: string; from: Date; to: Date }[] {
+  const year = now.getFullYear();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const day = now.getDay(); // 0=Sun
+  const mondayDiff = now.getDate() - day + (day === 0 ? -6 : 1);
+  const thisWeekStart = new Date(now.getFullYear(), now.getMonth(), mondayDiff);
+  const lastWeekStart = new Date(thisWeekStart); lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+  const thisMonthStart = new Date(year, now.getMonth(), 1);
+  const lastMonthStart = new Date(year, now.getMonth() - 1, 1);
+
+  return [
+    { label: "Today",      from: todayStart,               to: now },
+    { label: "This Week",  from: thisWeekStart,            to: now },
+    { label: "Last Week",  from: lastWeekStart,            to: thisWeekStart },
+    { label: "This Month", from: thisMonthStart,           to: now },
+    { label: "Last Month", from: lastMonthStart,           to: thisMonthStart },
+    { label: "Q1",         from: new Date(year, 0, 1),     to: new Date(year, 3, 1) },
+    { label: "Q2",         from: new Date(year, 3, 1),     to: new Date(year, 6, 1) },
+    { label: "Q3",         from: new Date(year, 6, 1),     to: new Date(year, 9, 1) },
+    { label: "Q4",         from: new Date(year, 9, 1),     to: new Date(year + 1, 0, 1) },
+    { label: "YTD",        from: new Date(year, 0, 1),     to: now },
+  ];
+}
+
+type PeriodDealer = DealerLite & { dealer_id: string | null; active: boolean | null };
+
+export async function buildPeriodSummary(): Promise<PeriodSummary> {
+  const admin = createAdminSupabaseClient();
+
+  // Single paginated fetch, test-excluded (same convention as fetchDealers).
+  const rows: PeriodDealer[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (admin
+      .from("dealers")
+      .select("id, dealer_id, group_id, account_type, created_at, converted_at, downgraded_at, active") as any)
+      .not("is_test", "is", true)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as PeriodDealer[];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+
+  // Denominator: current active paying book (same rule as totals.payingAccounts).
+  const totalPaying = rows.filter((d) => d.active === true && isPaidAccountType(d.account_type)).length;
+
+  const capMs = TRIAL_DAYS_CAP * DAY_MS;
+  const inWin = (iso: string | null, fromMs: number, toMs: number) => {
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
+    return t >= fromMs && t < toMs;
+  };
+
+  const periods = getPeriodWindows(new Date()).map(({ label, from, to }) => {
+    const fromMs = from.getTime();
+    const toMs = to.getTime();
+
+    let newTrials = 0, trialsWon = 0, trialsLost = 0, groupAdded = 0, manualAdded = 0, downgradedFree = 0;
+    for (const d of rows) {
+      const createdIn = inWin(d.created_at, fromMs, toMs);
+      const independent = d.group_id == null;
+
+      // Started as a trial (doc predicate: trial now, or later converted/downgraded)
+      if (createdIn && independent
+        && (isTrialAccountType(d.account_type) || d.converted_at != null || d.downgraded_at != null)) newTrials++;
+
+      // Conversion EVENTS (converted_at is the transition timestamp — the
+      // prompt's billing_cutover_at is the migration-billing marker, not this).
+      if (inWin(d.converted_at, fromMs, toMs)) trialsWon++;
+
+      // Lost-trial EVENTS: still a trial, never converted/cancelled, and the
+      // 30-day cap expired inside the window.
+      if (isTrialAccountType(d.account_type) && !d.converted_at && !d.downgraded_at && d.created_at) {
+        const expiryMs = new Date(d.created_at).getTime() + capMs;
+        if (expiryMs >= fromMs && expiryMs < toMs) trialsLost++;
+      }
+
+      if (createdIn && !independent) groupAdded++;
+
+      // Manually-added paying: independent, created in window, paid now, not a
+      // conversion (converted_at set → already counted in trialsWon), not
+      // self-serve. Keeps newPaying's three parts non-overlapping.
+      if (createdIn && independent && isPaidAccountType(d.account_type)
+        && d.converted_at == null && !(d.dealer_id ?? "").startsWith("ss_")) manualAdded++;
+
+      if (inWin(d.downgraded_at, fromMs, toMs)) downgradedFree++;
+    }
+
+    const newPaying = trialsWon + groupAdded + manualAdded;
+    const growthPct = totalPaying > 0
+      ? Math.round(((newPaying - downgradedFree) / totalPaying) * 1000) / 10
+      : null;
+
+    return { label, newTrials, trialsWon, trialsLost, groupAdded, manualAdded, downgradedFree, newPaying, growthPct };
+  });
+
+  return { periods, totalPaying, generatedAt: new Date().toISOString() };
+}
+
 /** head:true exact count for a filtered dealers query. Excludes test accounts. */
 async function countDealers(
   admin: ReturnType<typeof createAdminSupabaseClient>,

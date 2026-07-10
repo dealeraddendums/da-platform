@@ -23,6 +23,14 @@ type BiReport = {
   revenue: { available: boolean; series: { month: string; grossBilled: number }[]; currentMrr: number; error?: string };
 };
 
+// Mirror of lib/bi.ts PeriodSummary.
+type PeriodSummaryRow = {
+  label: string; newTrials: number; trialsWon: number; trialsLost: number;
+  groupAdded: number; manualAdded: number; downgradedFree: number;
+  newPaying: number; growthPct: number | null;
+};
+type PeriodSummary = { periods: PeriodSummaryRow[]; totalPaying: number; generatedAt: string };
+
 const NAVY = "#2a2b3c";
 const BLUE = "#1976d2";
 const BORDER = "#e0e0e0";
@@ -108,6 +116,8 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
   const [emailOpen, setEmailOpen] = useState(false);
   const [recipients, setRecipients] = useState(defaultRecipient);
   const [toast, setToast] = useState<string | null>(null);
+  const [periodSummary, setPeriodSummary] = useState<PeriodSummary | null>(null);
+  const [periodErr, setPeriodErr] = useState<string | null>(null);
 
   const load = useCallback(async (f: string, t: string) => {
     setLoading(true); setErr(null);
@@ -124,6 +134,16 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
   }, []);
 
   useEffect(() => { void load(initial.from, initial.to); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  // Period summary: fixed windows, independent of the date picker — fetch once.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/bi/period-summary")
+      .then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.error ?? "Failed to load"); return j as PeriodSummary; })
+      .then((j) => { if (!cancelled) setPeriodSummary(j); })
+      .catch((e) => { if (!cancelled) setPeriodErr(e instanceof Error ? e.message : "Failed to load"); });
+    return () => { cancelled = true; };
+  }, []);
 
   // Download the export for the CURRENT from/to so the file matches what's
   // on screen (same period → same buildBiReport → same numbers).
@@ -321,6 +341,10 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
             <Card label="Current MRR run-rate" value={report.revenue.available ? money(report.revenue.currentMrr) : "—"} />
           </div>
 
+          {/* Period Summary — fixed windows, independent of the date picker */}
+          <SectionTitle>Period Summary</SectionTitle>
+          <PeriodSummaryGrid summary={periodSummary} error={periodErr} />
+
           {/* Definitions */}
           <SectionTitle>Definitions</SectionTitle>
           <div style={{ fontSize: 11, color: MUTED, lineHeight: 1.7, maxWidth: 900 }}>
@@ -335,6 +359,86 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function PeriodSummaryGrid({ summary, error }: { summary: PeriodSummary | null; error: string | null }) {
+  if (error) return <div style={{ ...cardStyle, color: "#c62828", fontSize: 13 }}>{error}</div>;
+  if (!summary) return <div style={{ ...cardStyle, color: MUTED, fontSize: 13 }}>Loading…</div>;
+
+  const rows: { label: string; key: keyof PeriodSummaryRow; strong?: boolean }[] = [
+    { label: "New Trials",          key: "newTrials" },
+    { label: "Trials Won",          key: "trialsWon" },
+    { label: "Trials Lost",         key: "trialsLost" },
+    { label: "Group Dealers Added", key: "groupAdded" },
+    { label: "Manually Added",      key: "manualAdded" },
+    { label: "Downgraded to Free",  key: "downgradedFree" },
+    { label: "New Paying",          key: "newPaying", strong: true },
+    { label: "Growth %",            key: "growthPct", strong: true },
+  ];
+
+  const stickyBase: React.CSSProperties = {
+    position: "sticky", left: 0, textAlign: "right", whiteSpace: "nowrap",
+    minWidth: 150, borderRight: `1px solid ${BORDER}`,
+  };
+  const num: React.CSSProperties = {
+    ...td, textAlign: "center", fontVariantNumeric: "tabular-nums", minWidth: 62,
+  };
+
+  return (
+    <div style={{ ...cardStyle, padding: 0, overflowX: "auto" }}>
+      <table style={{ borderCollapse: "separate", borderSpacing: 0, width: "100%" }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, ...stickyBase, background: "#f7f8fa", zIndex: 2 }} />
+            {summary.periods.map((p) => (
+              <th key={p.label} style={{ ...th, textAlign: "center" }}>{p.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.key}>
+              <td style={{
+                ...td, ...stickyBase, fontWeight: r.strong ? 700 : 600, color: NAVY,
+                background: r.strong ? "#f0f2f5" : "#fff", zIndex: 1,
+                borderTop: r.key === "newPaying" ? `2px solid ${BORDER}` : undefined,
+              }}>
+                {r.label}
+              </td>
+              {summary.periods.map((p) => {
+                if (r.key === "growthPct") {
+                  const v = p.growthPct;
+                  const noBase = v == null;
+                  const color = noBase || v === 0 ? MUTED : v > 0 ? "#2e7d32" : "#c62828";
+                  return (
+                    <td key={p.label} style={{ ...num, fontWeight: 700, color, background: "#f9fafb" }}>
+                      {noBase || v === 0 ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`}
+                    </td>
+                  );
+                }
+                const v = p[r.key] as number;
+                return (
+                  <td key={p.label} style={{
+                    ...num,
+                    fontWeight: r.strong ? 700 : 400,
+                    background: r.strong ? "#f9fafb" : "#fff",
+                    borderTop: r.key === "newPaying" ? `2px solid ${BORDER}` : undefined,
+                    color: v === 0 ? "#b7bec6" : NAVY,
+                  }}>
+                    {v}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ padding: "8px 12px", fontSize: 11, color: MUTED, borderTop: `1px solid ${BORDER}` }}>
+        Growth % = (New Paying − Downgraded) ÷ current paying base ({summary.totalPaying.toLocaleString("en-US")}).
+        Weeks start Monday; quarters are calendar {new Date(summary.generatedAt).getFullYear()}. Fixed windows — the date picker above does not affect this grid.
+      </div>
     </div>
   );
 }
