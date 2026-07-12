@@ -12,7 +12,7 @@ import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { useService as usePdfService, renderBulkViaService, type BulkItem, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { enforceCanPrint } from "@/lib/print-eligibility";
 import { generateVehicleContent } from "@/lib/ai-content";
@@ -530,7 +530,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // Also pull separator_above/below + spaces — vehicle_options doesn't store these — and the
         // per-vehicle rules columns so the saved options can be re-gated by current library rules
         // (a product whose Make/Model rule was tightened after saving must drop off the addendum).
-        const libRuleByName = new Map<string, Parameters<typeof matchesRulesRow>[0]>();
+        // ALL same-name rows per name — a duplicate library entry must not
+        // collapse the map and drop the real product (KARR-on-Maverick parity).
+        const libRuleByName = new Map<string, Parameters<typeof matchesRulesRow>[0][]>();
         if (optionsSource === "uuid" || optionsSource === "legacy_sentinel") {
           let dealerLib = libCache.get(dv.dealer_id);
           if (!dealerLib) {
@@ -558,8 +560,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               spaces: typeof r.spaces === "number" ? (r.spaces as number) : 0,
             };
             // libRuleByName is only used to gate saved options at print time —
-            // null/undefined values fall back to "match anything" defaults inside matchesRulesRow.
-            libRuleByName.set(name, {
+            // savedRowSurvivesLibraryRules normalizes sentinels and keeps
+            // applies_to='none' manual-only products.
+            const bulkRuleRow = {
               applies_to: r.applies_to as string | null,
               ad_types: r.ad_types as string[] | null,
               makes: r.makes as string | null,
@@ -576,7 +579,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               msrp_condition: (r.msrp_condition as number | undefined) ?? 0,
               msrp1: r.msrp1 as number | null,
               msrp2: r.msrp2 as number | null,
-            });
+            };
+            const existingRules = libRuleByName.get(name);
+            if (existingRules) existingRules.push(bulkRuleRow);
+            else libRuleByName.set(name, [bulkRuleRow]);
           }
           effectiveOptions = effectiveOptions.map(o => ({
             ...o,
@@ -613,11 +619,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // Re-gate saved options by current library rules. A saved product
         // whose library row's Make/Model/etc rules no longer match this
         // vehicle gets dropped — even though the user once saved it.
-        const effectiveFiltered = effectiveOptions.filter(o => {
-          const rule = libRuleByName.get(o.option_name);
-          if (!rule) return true;
-          return matchesRulesRow(rule, vehicleData);
-        });
+        // applies_to='none' manual-only products and "-NONE" auto-add
+        // sentinels never drop (shared gate with options GET + pdf/generate).
+        const effectiveFiltered = effectiveOptions.filter(o =>
+          savedRowSurvivesLibraryRules(libRuleByName.get(o.option_name) ?? [], vehicleData)
+        );
 
         const options = [
           ...groupOpts.map(g => ({

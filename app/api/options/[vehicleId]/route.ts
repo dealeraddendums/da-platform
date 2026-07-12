@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { getGroupOptionsForDealer, matchesRulesRow } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, matchesRulesRow, savedRowSurvivesLibraryRules } from "@/lib/options-engine";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import type { VehicleOptionRow } from "@/lib/db";
 
@@ -153,6 +153,9 @@ function applyLibRequired<T extends { option_name: string; required?: boolean | 
  * Library rules trump saved state by design: if a dealer narrows a
  * product to CHEVROLET/Silverado after it was already saved on a Nissan,
  * the Nissan's addendum should drop it. See bug report 2026-05-13.
+ * The keep/drop decision lives in savedRowSurvivesLibraryRules (shared
+ * with pdf/generate + pdf/bulk): applies_to='none' manual-only products
+ * and "-NONE" auto-add sentinels never drop a saved row.
  */
 async function filterRowsByLibraryRules<T extends { option_name: string }>(
   admin: ReturnType<typeof createAdminSupabaseClient>,
@@ -189,32 +192,37 @@ async function filterRowsByLibraryRules<T extends { option_name: string }>(
     msrp1: number | null;
     msrp2: number | null;
   };
-  const ruleByName = new Map<string, LibRule>();
-  for (const r of lib as unknown as LibRule[]) ruleByName.set(r.option_name, r);
-  return rows.filter(r => {
-    const rule = ruleByName.get(r.option_name);
-    if (!rule) return true;        // no library row → custom add, keep
-    return matchesRulesRow({
-      applies_to: rule.applies_to,
-      ad_types: rule.ad_types,
-      makes: rule.makes,
-      makes_not: rule.makes_not ?? false,
-      models: rule.models,
-      models_not: rule.models_not ?? false,
-      trims: rule.trims,
-      trims_not: rule.trims_not ?? false,
-      body_styles: rule.body_styles,
-      fuel: rule.fuel,
-      fuel_not: rule.fuel_not ?? false,
-      year_condition: rule.year_condition ?? 0,
-      year_value: rule.year_value,
-      miles_condition: rule.miles_condition ?? 0,
-      miles_value: rule.miles_value,
-      msrp_condition: rule.msrp_condition ?? 0,
-      msrp1: rule.msrp1,
-      msrp2: rule.msrp2,
-    }, vehicle);
+  // ALL same-name rows per name — a duplicate library entry must not collapse
+  // the map and drop the real product (KARR-on-Maverick parity with pdf/generate).
+  const rulesByName = new Map<string, LibRule[]>();
+  for (const r of lib as unknown as LibRule[]) {
+    const arr = rulesByName.get(r.option_name);
+    if (arr) arr.push(r);
+    else rulesByName.set(r.option_name, [r]);
+  }
+  const toRulesRow = (rule: LibRule) => ({
+    applies_to: rule.applies_to,
+    ad_types: rule.ad_types,
+    makes: rule.makes,
+    makes_not: rule.makes_not ?? false,
+    models: rule.models,
+    models_not: rule.models_not ?? false,
+    trims: rule.trims,
+    trims_not: rule.trims_not ?? false,
+    body_styles: rule.body_styles,
+    fuel: rule.fuel,
+    fuel_not: rule.fuel_not ?? false,
+    year_condition: rule.year_condition ?? 0,
+    year_value: rule.year_value,
+    miles_condition: rule.miles_condition ?? 0,
+    miles_value: rule.miles_value,
+    msrp_condition: rule.msrp_condition ?? 0,
+    msrp1: rule.msrp1,
+    msrp2: rule.msrp2,
   });
+  return rows.filter(r =>
+    savedRowSurvivesLibraryRules((rulesByName.get(r.option_name) ?? []).map(toRulesRow), vehicle)
+  );
 }
 
 /**

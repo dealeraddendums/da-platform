@@ -11,20 +11,6 @@ import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/
 
 type BgOption = { option_name: string; option_price?: string; description?: string | null; required?: boolean };
 
-// Print-time sentinel normalizer for the savedFiltered rule comparison. The
-// addendum_library list fields use "-NONE" (also "NONE" / empty) to mean "don't
-// auto-add to any vehicle" — an auto-add control, NOT a print filter. The rules
-// matcher (listMatchesWithNot) otherwise reads "-NONE" as a literal value that
-// matches no vehicle, wrongly dropping an option already saved on the vehicle.
-// Collapse those sentinels to null (= no restriction) so on-vehicle options
-// print, while genuine list filters (e.g. models="KARR") are preserved.
-function normSentinelList(v: string | null): string | null {
-  if (v == null) return null;
-  const t = v.trim().toUpperCase();
-  if (t === "" || t === "-NONE" || t === "NONE") return null;
-  if (v.split(",").map((s) => s.trim()).filter(Boolean).length === 0) return null;
-  return v;
-}
 import {
   BG_DEFAULT,
   IS_BG_DEFAULT,
@@ -32,7 +18,7 @@ import {
   LAYOUT_INFOSHEET,
   makeWidget,
 } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent } from "@/lib/ai-content";
 import QRCode from "qrcode";
@@ -167,24 +153,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           separator_below: lr.separator_below === true,
           spaces: typeof lr.spaces === "number" ? lr.spaces : 0,
         };
-        // Normalize the "-NONE"/"NONE"/empty auto-add sentinels to null (no
-        // restriction) for the print-time savedFiltered comparison ONLY. These
-        // sentinels mean "don't auto-add", not "filter at print" — but the
-        // matcher would otherwise read "-NONE" as a literal value that matches
-        // no vehicle and drop an option already saved on the vehicle. Genuine
-        // list filters (e.g. models="KARR") are preserved. libRulesByName is
-        // used only here, so auto-add (which reads the raw addendum_library
-        // value elsewhere) is unaffected.
+        // Raw rule rows — savedRowSurvivesLibraryRules normalizes the
+        // "-NONE"/"NONE"/empty auto-add sentinels and keeps applies_to='none'
+        // manual-only products at compare time. libRulesByName is used only
+        // for the savedFiltered gate below, so auto-add (which reads the raw
+        // addendum_library value elsewhere) is unaffected.
         const ruleRow = {
           applies_to: lr.applies_to as string | null,
           ad_types: lr.ad_types as string[] | null,
-          makes: normSentinelList(lr.makes as string | null),
+          makes: lr.makes as string | null,
           makes_not: (lr.makes_not as boolean | null) ?? false,
-          models: normSentinelList(lr.models as string | null),
+          models: lr.models as string | null,
           models_not: (lr.models_not as boolean | null) ?? false,
-          trims: normSentinelList(lr.trims as string | null),
+          trims: lr.trims as string | null,
           trims_not: (lr.trims_not as boolean | null) ?? false,
-          body_styles: normSentinelList(lr.body_styles as string | null),
+          body_styles: lr.body_styles as string | null,
           year_condition: (lr.year_condition as number | null) ?? 0,
           year_value: lr.year_value as number | null,
           miles_condition: (lr.miles_condition as number | null) ?? 0,
@@ -237,15 +220,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const groupOpts = await getGroupOptionsForDealer(textDealerId, vehicleData, dealerVehicleId);
 
     // Drop saved options whose library row exists but doesn't match this
-    // vehicle. Custom saves (no library row) are kept.
-    const savedFiltered = (optionRows ?? []).filter(r => {
-      const rules = libRulesByName.get(r.option_name as string);
-      if (!rules || rules.length === 0) return true;
-      // Keep the saved option if ANY library definition for this name matches
-      // the vehicle. A single misconfigured "applies to none" duplicate sharing
-      // the same name must not drop the real (e.g. ALL-vehicles) product.
-      return rules.some(rule => matchesRulesRow(rule, vehicleData));
-    });
+    // vehicle. Custom saves (no library row), applies_to='none' manual-only
+    // products, and "-NONE" auto-add sentinels are kept — shared gate with
+    // the options GET and pdf/bulk (savedRowSurvivesLibraryRules).
+    const savedFiltered = (optionRows ?? []).filter(r =>
+      savedRowSurvivesLibraryRules(libRulesByName.get(r.option_name as string) ?? [], vehicleData)
+    );
 
     const options = [
       ...groupOpts.map(g => ({

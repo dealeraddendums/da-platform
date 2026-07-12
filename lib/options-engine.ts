@@ -153,6 +153,61 @@ function matchesLibraryRow(row: LibraryRow, vehicle: VehicleRow): boolean {
   return matchesRulesRow(row, vehicle);
 }
 
+/**
+ * "-NONE" / "NONE" / empty in the addendum_library list fields means "don't
+ * auto-add to any vehicle" — an auto-add control, NOT a saved-option filter.
+ * The rules matcher (listMatchesWithNot) would read "-NONE" as a literal value
+ * matching no vehicle and wrongly drop an option already saved on the vehicle.
+ * Collapse the sentinels to null (= no restriction); genuine list filters
+ * (e.g. models="KARR") pass through untouched.
+ */
+export function normalizeSentinelList(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const t = v.trim().toUpperCase();
+  if (t === "" || t === "-NONE" || t === "NONE") return null;
+  if (v.split(",").map((s) => s.trim()).filter(Boolean).length === 0) return null;
+  return v;
+}
+
+/**
+ * Read/print-time gate for options ALREADY SAVED on a vehicle (vehicle_options)
+ * against their current addendum_library definition(s). Shared by the options
+ * GET, pdf/generate, and pdf/bulk so a saved option is displayed and printed by
+ * the same rules everywhere. Differs from matchesRulesRow (the auto-add
+ * matcher) in three ways:
+ *
+ * - applies_to='none' KEEPS the row. 'none' means "never auto-add — manual
+ *   adds only", so a saved row for such a product can only exist because a
+ *   user explicitly added it to this vehicle. matchesRulesRow rejects 'none'
+ *   outright, which silently dropped manually-added products from reads and
+ *   prints — and the next bulk save, built from the filtered read, deleted
+ *   them from vehicle_options permanently (TestFlight bug 2026-07-08).
+ * - The list-field sentinels are normalized via normalizeSentinelList
+ *   (ABT print fix 2026-07-07, now applied at every read site).
+ * - `rules` carries ALL same-name library rows for the dealer: any one match
+ *   keeps the row, so a misconfigured duplicate can't drop the real product
+ *   (KARR-on-Maverick fix).
+ *
+ * Rows with no library definition (rules = []) are custom one-offs — kept.
+ * A genuine rule mismatch (applies_to='rules'/'all' that no longer matches
+ * the vehicle) still drops: library rules trump saved state by design
+ * (2026-05-13).
+ */
+export function savedRowSurvivesLibraryRules(rules: RulesRow[], vehicle: VehicleRow): boolean {
+  if (rules.length === 0) return true;
+  return rules.some(rule =>
+    rule.applies_to === "none" ||
+    matchesRulesRow({
+      ...rule,
+      makes: normalizeSentinelList(rule.makes),
+      models: normalizeSentinelList(rule.models),
+      trims: normalizeSentinelList(rule.trims),
+      body_styles: normalizeSentinelList(rule.body_styles),
+      fuel: normalizeSentinelList(rule.fuel),
+    }, vehicle)
+  );
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
