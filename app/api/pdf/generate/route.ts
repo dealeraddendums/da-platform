@@ -18,7 +18,7 @@ import {
   LAYOUT_INFOSHEET,
   makeWidget,
 } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent } from "@/lib/ai-content";
 import QRCode from "qrcode";
@@ -126,61 +126,100 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // The library rules (Make/Model/Year/...) also gate the saved options at
     // print time — if a saved option's library row exists but doesn't match
     // the vehicle, it's dropped here. Library rules trump saved state by design.
-    const allOptNames = (optionRows ?? []).map(r => r.option_name as string);
-    const nullDescNames = (optionRows ?? [])
-      .filter(r => !r.description)
-      .map(r => r.option_name as string);
+    //
+    // The library is fetched WHOLE (not name-scoped) and joined by
+    // normalizeOptionName: saved names can differ from library names by the
+    // legacy trailing-"^" marker, and the newly-added-product merge below
+    // needs rows whose names aren't saved yet.
+    type GenLibRow = {
+      id: string;
+      option_name: string;
+      item_price: string | null;
+      description: string | null;
+      required: boolean | null;
+      active: boolean | null;
+      created_at: string | null;
+      separator_above: boolean | null;
+      separator_below: boolean | null;
+      spaces: number | null;
+      applies_to: string | null;
+      ad_types: string[] | null;
+      makes: string | null;
+      makes_not: boolean | null;
+      models: string | null;
+      models_not: boolean | null;
+      trims: string | null;
+      trims_not: boolean | null;
+      body_styles: string | null;
+      fuel: string | null;
+      fuel_not: boolean | null;
+      year_condition: number | null;
+      year_value: number | null;
+      miles_condition: number | null;
+      miles_value: number | null;
+      msrp_condition: number | null;
+      msrp1: number | null;
+      msrp2: number | null;
+    };
+    let dealerLib: GenLibRow[] = [];
     const libDescMap: Record<string, string | null> = {};
-    const libRequiredMap: Record<string, boolean> = {};
     const libLayoutMap: Record<string, { separator_above: boolean; separator_below: boolean; spaces: number }> = {};
-    // Keyed by option_name → ARRAY of rules: a dealer can have multiple library
-    // rows with the same name (e.g. an accidental duplicate). Collapsing them to
-    // one (Map<name, rule>) let a misconfigured "applies to none" duplicate win
-    // the slot and drop the real product at print time (KARR-on-Maverick bug).
+    // Keyed by normalized option_name → ARRAY of rules: a dealer can have
+    // multiple library rows with the same name (e.g. an accidental duplicate).
+    // Collapsing them to one (Map<name, rule>) let a misconfigured "applies to
+    // none" duplicate win the slot and drop the real product at print time
+    // (KARR-on-Maverick bug).
     const libRulesByName = new Map<string, Parameters<typeof matchesRulesRow>[0][]>();
-    if (allOptNames.length > 0) {
+    if ((optionRows ?? []).length > 0) {
       const { data: libRows } = await admin
         .from("addendum_library")
-        .select("option_name, description, required, separator_above, separator_below, spaces, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
+        .select("id, option_name, item_price, description, required, active, created_at, separator_above, separator_below, spaces, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
         .eq("dealer_id", dv.dealer_id)
-        .in("option_name", allOptNames);
-      for (const lr of libRows ?? []) {
-        const name = lr.option_name as string;
-        if (nullDescNames.includes(name) && lr.description) libDescMap[name] = lr.description as string;
-        if (lr.required === false) libRequiredMap[name] = false;
-        libLayoutMap[name] = {
-          separator_above: lr.separator_above === true,
-          separator_below: lr.separator_below === true,
-          spaces: typeof lr.spaces === "number" ? lr.spaces : 0,
-        };
+        .order("sort_order", { ascending: true });
+      dealerLib = (libRows ?? []) as unknown as GenLibRow[];
+      for (const lr of dealerLib) {
+        const name = normalizeOptionName(lr.option_name);
+        if (lr.description && libDescMap[name] === undefined) libDescMap[name] = lr.description;
+        if (libLayoutMap[name] === undefined) {
+          libLayoutMap[name] = {
+            separator_above: lr.separator_above === true,
+            separator_below: lr.separator_below === true,
+            spaces: typeof lr.spaces === "number" ? lr.spaces : 0,
+          };
+        }
         // Raw rule rows — savedRowSurvivesLibraryRules normalizes the
         // "-NONE"/"NONE"/empty auto-add sentinels and keeps applies_to='none'
         // manual-only products at compare time. libRulesByName is used only
         // for the savedFiltered gate below, so auto-add (which reads the raw
         // addendum_library value elsewhere) is unaffected.
         const ruleRow = {
-          applies_to: lr.applies_to as string | null,
-          ad_types: lr.ad_types as string[] | null,
-          makes: lr.makes as string | null,
-          makes_not: (lr.makes_not as boolean | null) ?? false,
-          models: lr.models as string | null,
-          models_not: (lr.models_not as boolean | null) ?? false,
-          trims: lr.trims as string | null,
-          trims_not: (lr.trims_not as boolean | null) ?? false,
-          body_styles: lr.body_styles as string | null,
-          year_condition: (lr.year_condition as number | null) ?? 0,
-          year_value: lr.year_value as number | null,
-          miles_condition: (lr.miles_condition as number | null) ?? 0,
-          miles_value: lr.miles_value as number | null,
-          msrp_condition: (lr.msrp_condition as number | null) ?? 0,
-          msrp1: lr.msrp1 as number | null,
-          msrp2: lr.msrp2 as number | null,
+          applies_to: lr.applies_to,
+          ad_types: lr.ad_types,
+          makes: lr.makes,
+          makes_not: lr.makes_not ?? false,
+          models: lr.models,
+          models_not: lr.models_not ?? false,
+          trims: lr.trims,
+          trims_not: lr.trims_not ?? false,
+          body_styles: lr.body_styles,
+          fuel: lr.fuel,
+          fuel_not: lr.fuel_not ?? false,
+          year_condition: lr.year_condition ?? 0,
+          year_value: lr.year_value,
+          miles_condition: lr.miles_condition ?? 0,
+          miles_value: lr.miles_value,
+          msrp_condition: lr.msrp_condition ?? 0,
+          msrp1: lr.msrp1,
+          msrp2: lr.msrp2,
         };
         const existingRules = libRulesByName.get(name);
         if (existingRules) existingRules.push(ruleRow);
         else libRulesByName.set(name, [ruleRow]);
       }
     }
+    // Live Required/Suggested flag — the library's current value always wins
+    // over the value cached on vehicle_options at save time.
+    const liveRequired = buildLiveRequiredByName(dealerLib);
 
     const disclaimers = await getGroupDisclaimers(textDealerId, dealer?.state ?? null, docType);
 
@@ -224,7 +263,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // products, and "-NONE" auto-add sentinels are kept — shared gate with
     // the options GET and pdf/bulk (savedRowSurvivesLibraryRules).
     const savedFiltered = (optionRows ?? []).filter(r =>
-      savedRowSurvivesLibraryRules(libRulesByName.get(r.option_name as string) ?? [], vehicleData)
+      savedRowSurvivesLibraryRules(libRulesByName.get(normalizeOptionName(r.option_name as string)) ?? [], vehicleData)
+    );
+
+    // Library products added AFTER this vehicle's last save that rules-match
+    // it print too — same merge as the options GET, so Print Now includes a
+    // newly-added product without requiring an editor visit. Removed products
+    // predate the save and are not resurrected.
+    const freshLibOptions = newlyAddedLibraryMatches(
+      dealerLib,
+      (optionRows ?? []) as Array<{ option_name: string; created_at?: string | null; updated_at?: string | null }>,
+      vehicleData,
     );
 
     const options = [
@@ -241,19 +290,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         spaces: g.spaces ?? 0,
       })),
       ...savedFiltered.map(r => {
-        const layout = libLayoutMap[r.option_name as string];
+        const key = normalizeOptionName(r.option_name as string);
+        const layout = libLayoutMap[key];
+        const live = liveRequired.get(key);
         return {
           ...r,
-          description: r.description ?? libDescMap[r.option_name as string] ?? null,
-          // Library required=false takes precedence over stale vehicle_options value
-          required: libRequiredMap[r.option_name as string] === false
-            ? false
-            : (r.required as boolean | undefined) !== false,
+          description: r.description ?? libDescMap[key] ?? null,
+          // Live library type wins over the value cached at save time; the
+          // saved flag only applies to custom one-offs with no library row.
+          required: live !== undefined ? live : (r.required as boolean | undefined) !== false,
           separator_above: layout?.separator_above === true,
           separator_below: layout?.separator_below === true,
           spaces: layout?.spaces ?? 0,
         };
       }),
+      ...freshLibOptions.map(r => ({
+        option_name: r.option_name,
+        option_price: r.item_price ?? "NC",
+        description: r.description ?? null,
+        active: true as const,
+        required: r.required !== false,
+        separator_above: r.separator_above === true,
+        separator_below: r.separator_below === true,
+        spaces: typeof r.spaces === "number" ? r.spaces : 0,
+      })),
     ];
 
     // ── Load dealer's saved default template from dealer_settings ────────────

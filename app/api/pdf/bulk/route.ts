@@ -12,7 +12,7 @@ import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { useService as usePdfService, renderBulkViaService, type BulkItem, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { enforceCanPrint } from "@/lib/print-eligibility";
 import { generateVehicleContent } from "@/lib/ai-content";
@@ -441,11 +441,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         };
         let effectiveOptions: EffectiveOption[] = [];
         let optionsSource = "library";
+        // Raw saved rows kept for the newly-added-library-product merge —
+        // it compares library created_at against the newest saved timestamp.
+        let savedForMerge: Array<{ option_name: string; created_at?: string | null; updated_at?: string | null }> = [];
 
         // 1. Saved options keyed to this vehicle's UUID
         const { data: savedOpts, error: savedOptsErr } = await admin
           .from("vehicle_options")
-          .select("option_name, option_price, description, required")
+          .select("option_name, option_price, description, required, created_at, updated_at")
           .eq("vehicle_id", vehicleId)
           .eq("dealer_id", dv.dealer_id)
           .eq("active", true)
@@ -455,6 +458,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         if (savedOpts && savedOpts.length > 0) {
           optionsSource = "uuid";
+          savedForMerge = savedOpts;
           effectiveOptions = savedOpts.map(o => ({
             option_name: o.option_name,
             option_price: o.option_price ?? "NC",
@@ -465,7 +469,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           // 2. Legacy '0' sentinel (options saved before per-vehicle UUID migration)
           const { data: legacyOpts, error: legacyOptsErr } = await admin
             .from("vehicle_options")
-            .select("option_name, option_price, description, required")
+            .select("option_name, option_price, description, required, created_at, updated_at")
             .eq("vehicle_id", "0")
             .eq("dealer_id", dv.dealer_id)
             .eq("active", true)
@@ -475,6 +479,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
           if (legacyOpts && legacyOpts.length > 0) {
             optionsSource = "legacy_sentinel";
+            savedForMerge = legacyOpts;
             effectiveOptions = legacyOpts.map(o => ({
               option_name: o.option_name,
               option_price: o.option_price ?? "NC",
@@ -490,10 +495,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                   "option_name", "item_price", "description", "applies_to",
                   "ad_types", "ad_type",
                   "makes", "makes_not", "models", "models_not", "trims", "trims_not",
+                  "body_styles", "fuel", "fuel_not",
                   "year_condition", "year_value",
                   "miles_condition", "miles_value",
                   "msrp_condition", "msrp1", "msrp2",
-                  "required",
+                  "required", "created_at",
                   "separator_above", "separator_below", "spaces",
                 ].join(", "))
                 .eq("dealer_id", dv.dealer_id)
@@ -526,6 +532,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           }
         }
 
+        // The dealer's library rows in scope for this vehicle's saved-option
+        // hydration + the newly-added-product merge below.
+        let bulkDealerLib: LibRow[] = [];
         // For saved options that may have stale required=true, cross-reference library by option name.
         // Also pull separator_above/below + spaces — vehicle_options doesn't store these — and the
         // per-vehicle rules columns so the saved options can be re-gated by current library rules
@@ -539,26 +548,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             const { data: lib } = await admin
               .from("addendum_library")
               .select([
-                "option_name", "required", "separator_above", "separator_below", "spaces",
+                "option_name", "item_price", "description",
+                "required", "created_at", "separator_above", "separator_below", "spaces",
                 "applies_to", "ad_types",
                 "makes", "makes_not", "models", "models_not", "trims", "trims_not", "body_styles",
+                "fuel", "fuel_not",
                 "year_condition", "year_value", "miles_condition", "miles_value",
                 "msrp_condition", "msrp1", "msrp2",
               ].join(", "))
               .eq("dealer_id", dv.dealer_id)
-              .eq("active", true);
+              .eq("active", true)
+              .order("sort_order");
             dealerLib = (lib ?? []) as unknown as LibRow[];
+            libCache.set(dv.dealer_id, dealerLib);
           }
-          const libRequiredMap: Record<string, boolean> = {};
+          bulkDealerLib = dealerLib;
+          // Live Required/Suggested flag per normalized name — the library's
+          // current value always wins over the value cached at save time.
+          const liveRequired = buildLiveRequiredByName(
+            dealerLib as unknown as Array<{ option_name: string; required?: boolean | null; active?: boolean | null }>
+          );
           const libLayoutMap: Record<string, { separator_above: boolean; separator_below: boolean; spaces: number }> = {};
           for (const r of dealerLib) {
-            const name = r.option_name as string;
-            if ((r.required as boolean | undefined) === false) libRequiredMap[name] = false;
-            libLayoutMap[name] = {
-              separator_above: r.separator_above === true,
-              separator_below: r.separator_below === true,
-              spaces: typeof r.spaces === "number" ? (r.spaces as number) : 0,
-            };
+            const name = normalizeOptionName(r.option_name as string);
+            if (libLayoutMap[name] === undefined) {
+              libLayoutMap[name] = {
+                separator_above: r.separator_above === true,
+                separator_below: r.separator_below === true,
+                spaces: typeof r.spaces === "number" ? (r.spaces as number) : 0,
+              };
+            }
             // libRuleByName is only used to gate saved options at print time —
             // savedRowSurvivesLibraryRules normalizes sentinels and keeps
             // applies_to='none' manual-only products.
@@ -572,6 +591,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               trims: r.trims as string | null,
               trims_not: (r.trims_not as boolean | undefined) ?? false,
               body_styles: r.body_styles as string | null,
+              fuel: r.fuel as string | null,
+              fuel_not: (r.fuel_not as boolean | undefined) ?? false,
               year_condition: (r.year_condition as number | undefined) ?? 0,
               year_value: r.year_value as number | null,
               miles_condition: (r.miles_condition as number | undefined) ?? 0,
@@ -584,13 +605,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             if (existingRules) existingRules.push(bulkRuleRow);
             else libRuleByName.set(name, [bulkRuleRow]);
           }
-          effectiveOptions = effectiveOptions.map(o => ({
-            ...o,
-            required: libRequiredMap[o.option_name] === false ? false : o.required,
-            separator_above: libLayoutMap[o.option_name]?.separator_above ?? o.separator_above ?? false,
-            separator_below: libLayoutMap[o.option_name]?.separator_below ?? o.separator_below ?? false,
-            spaces: libLayoutMap[o.option_name]?.spaces ?? o.spaces ?? 0,
-          }));
+          effectiveOptions = effectiveOptions.map(o => {
+            const key = normalizeOptionName(o.option_name);
+            const live = liveRequired.get(key);
+            return {
+              ...o,
+              // Live library type wins over the value cached at save time;
+              // the saved flag only applies to custom one-offs with no
+              // library row.
+              required: live !== undefined ? live : o.required,
+              separator_above: libLayoutMap[key]?.separator_above ?? o.separator_above ?? false,
+              separator_below: libLayoutMap[key]?.separator_below ?? o.separator_below ?? false,
+              spaces: libLayoutMap[key]?.spaces ?? o.spaces ?? 0,
+            };
+          });
         }
 
         // ── Vehicle data shape ───────────────────────────────────────────────
@@ -622,8 +650,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // applies_to='none' manual-only products and "-NONE" auto-add
         // sentinels never drop (shared gate with options GET + pdf/generate).
         const effectiveFiltered = effectiveOptions.filter(o =>
-          savedRowSurvivesLibraryRules(libRuleByName.get(o.option_name) ?? [], vehicleData)
+          savedRowSurvivesLibraryRules(libRuleByName.get(normalizeOptionName(o.option_name)) ?? [], vehicleData)
         );
+
+        // Library products added AFTER this vehicle's last save that
+        // rules-match it print too — same merge as the options GET and
+        // pdf/generate. Removed products predate the save and are not
+        // resurrected. No-op on the library-seed path (savedForMerge empty).
+        const freshLibOptions = newlyAddedLibraryMatches(
+          bulkDealerLib as unknown as Array<Parameters<typeof matchesRulesRow>[0] & { option_name: string; active?: boolean | null; created_at?: string | null }>,
+          savedForMerge,
+          vehicleData,
+        ).map(r => {
+          const row = r as unknown as LibRow;
+          return {
+            option_name: row.option_name as string,
+            option_price: (row.item_price as string) ?? "NC",
+            description: (row.description as string) || null,
+            required: (row.required as boolean | undefined) !== false,
+            separator_above: row.separator_above === true,
+            separator_below: row.separator_below === true,
+            spaces: typeof row.spaces === "number" ? (row.spaces as number) : 0,
+          };
+        });
 
         const options = [
           ...groupOpts.map(g => ({
@@ -635,6 +684,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             spaces: g.spaces ?? 0,
           })),
           ...effectiveFiltered,
+          ...freshLibOptions,
         ];
 
         console.log(`[BULK]   options_result source=${optionsSource} count=${options.length} names=[${options.map(o => o.option_name).join(", ")}]`);

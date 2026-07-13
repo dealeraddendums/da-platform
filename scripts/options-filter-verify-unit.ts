@@ -18,7 +18,7 @@
  *   - no library definition (custom one-off) survives
  */
 import assert from "node:assert/strict";
-import { savedRowSurvivesLibraryRules, normalizeSentinelList, matchesRulesRow } from "@/lib/options-engine";
+import { savedRowSurvivesLibraryRules, normalizeSentinelList, matchesRulesRow, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches } from "@/lib/options-engine";
 import type { VehicleRow } from "@/lib/vehicles";
 
 // ── tiny test runner ─────────────────────────────────────────────────────────
@@ -152,6 +152,73 @@ void test("2 manual adds: 'all' product + 'none' product BOTH survive", () => {
   ];
   const kept = saved.filter(r => savedRowSurvivesLibraryRules(rulesByName.get(r.option_name) ?? [], vehicle()));
   assert.deepEqual(kept.map(r => r.option_name), ["Ceramic Tint", "Wheel Locks", "One-Off Custom Thing"]);
+});
+
+// ── 2026-07-13 Napleton type-sync fixes ──────────────────────────────────────
+
+void test("normalizeOptionName strips trailing legacy '^' + trims + lowercases", () => {
+  assert.equal(normalizeOptionName("AVC Appearance^"), "avc appearance");
+  assert.equal(normalizeOptionName("  LuxCare^^ "), "luxcare");
+  assert.equal(normalizeOptionName("AVC Appearance"), "avc appearance");
+  assert.equal(normalizeOptionName("KARR"), "karr");
+  assert.equal(normalizeOptionName(null), "");
+  // caret only strips at the END — an interior caret is part of the name
+  assert.equal(normalizeOptionName("A^B"), "a^b");
+});
+
+void test("buildLiveRequiredByName: library value wins, caret-insensitive key", () => {
+  const map = buildLiveRequiredByName([
+    { option_name: "AVC Appearance^", required: false, active: true },
+    { option_name: "Nitro Fill", required: true, active: true },
+  ]);
+  assert.equal(map.get(normalizeOptionName("AVC Appearance")), false); // saved name has no caret
+  assert.equal(map.get(normalizeOptionName("Nitro Fill")), true);
+  assert.equal(map.get(normalizeOptionName("Unknown Custom")), undefined);
+});
+
+void test("buildLiveRequiredByName: active duplicate beats inactive", () => {
+  const map = buildLiveRequiredByName([
+    { option_name: "Tint", required: true, active: false },
+    { option_name: "Tint", required: false, active: true },
+  ]);
+  assert.equal(map.get("tint"), false);
+});
+
+const libNew = {
+  ...baseRule,
+  applies_to: "all" as string | null,
+  option_name: "LuxCare^",
+  active: true as boolean | null,
+  created_at: "2026-07-13T16:02:02Z" as string | null,
+};
+const savedOld = [
+  { option_name: "AVC Appearance", created_at: "2026-05-03T11:02:37Z", updated_at: "2026-05-03T11:02:37Z" },
+];
+
+void test("newlyAddedLibraryMatches: product created after last save merges in", () => {
+  const fresh = newlyAddedLibraryMatches([libNew], savedOld, vehicle());
+  assert.deepEqual(fresh.map(r => r.option_name), ["LuxCare^"]);
+});
+
+void test("newlyAddedLibraryMatches: product predating the save (user-removed) stays out", () => {
+  const removed = { ...libNew, option_name: "Bumperdillo^", created_at: "2026-05-01T00:00:00Z" };
+  assert.deepEqual(newlyAddedLibraryMatches([removed], savedOld, vehicle()), []);
+});
+
+void test("newlyAddedLibraryMatches: same name as a saved row never duplicates (caret-insensitive)", () => {
+  const sameName = { ...libNew, option_name: "AVC Appearance^" };
+  assert.deepEqual(newlyAddedLibraryMatches([sameName], savedOld, vehicle()), []);
+});
+
+void test("newlyAddedLibraryMatches: inactive, applies_to='none', and rule-mismatched rows stay out", () => {
+  const inactive = { ...libNew, active: false };
+  const manualOnly = { ...libNew, option_name: "Manual Only", applies_to: "none" as string | null };
+  const wrongMake = { ...libNew, option_name: "Ford Thing", applies_to: "rules" as string | null, makes: "FORD" as string | null };
+  assert.deepEqual(newlyAddedLibraryMatches([inactive, manualOnly, wrongMake], savedOld, vehicle()), []);
+});
+
+void test("newlyAddedLibraryMatches: no saved rows → no merge (seed path owns that case)", () => {
+  assert.deepEqual(newlyAddedLibraryMatches([libNew], [], vehicle()), []);
 });
 
 // ── report ───────────────────────────────────────────────────────────────────

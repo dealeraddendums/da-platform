@@ -170,6 +170,84 @@ export function normalizeSentinelList(v: string | null | undefined): string | nu
 }
 
 /**
+ * Join key for matching vehicle_options rows to their addendum_library
+ * definition by name. Legacy Aurora item names can carry a trailing "^"
+ * marker that the old vehicle_options sync stripped ("AVC Appearance" saved
+ * vs "AVC Appearance^" in the library), so exact-name joins silently miss —
+ * which left stale required flags uncorrected (Napleton type-sync bug
+ * 2026-07-13). Trim, drop trailing carets, and lowercase.
+ */
+export function normalizeOptionName(name: string | null | undefined): string {
+  return (name ?? "").trim().replace(/\^+$/, "").trim().toLowerCase();
+}
+
+/**
+ * Live Required/Suggested flag per library product, keyed by normalized
+ * name. The library's CURRENT value always wins over the value cached on
+ * vehicle_options at save time — `required` controls which widget (Required
+ * vs Suggested) the product renders in, and that's a library-level setting,
+ * not per-vehicle state. When a dealer has duplicate same-name rows, an
+ * active row's flag beats an inactive one; ties keep the first seen
+ * (sort_order query order).
+ */
+export function buildLiveRequiredByName(
+  libRows: Array<{ option_name: string; required?: boolean | null; active?: boolean | null }>
+): Map<string, boolean> {
+  const picked = new Map<string, { required: boolean; active: boolean }>();
+  for (const r of libRows) {
+    const key = normalizeOptionName(r.option_name);
+    if (!key) continue;
+    const isActive = r.active !== false;
+    const cur = picked.get(key);
+    if (!cur || (isActive && !cur.active)) picked.set(key, { required: r.required !== false, active: isActive });
+  }
+  const map = new Map<string, boolean>();
+  picked.forEach((v, k) => map.set(k, v.required));
+  return map;
+}
+
+/**
+ * Library products added AFTER a vehicle's options were last saved that
+ * rules-match the vehicle. The saved set is a full-replace snapshot, so a
+ * product added to the library later never appears on already-saved vehicles
+ * (Napleton LuxCare bug 2026-07-13). Compare addendum_library.created_at
+ * against the newest saved-row timestamp: newly created products merge in;
+ * products the user deliberately REMOVED from this vehicle (which predate
+ * the save) stay removed. Auto-add semantics match the no-saved-options seed
+ * path: active rows only, applies_to='none' never auto-adds, raw rule values
+ * (a "-NONE" sentinel means "don't auto-add" and is honored here).
+ */
+export function newlyAddedLibraryMatches<
+  T extends { option_name: string; active?: boolean | null; created_at?: string | null; applies_to?: string | null }
+>(
+  libRows: T[],
+  savedRows: Array<{ option_name: string; created_at?: string | null; updated_at?: string | null }>,
+  vehicle: VehicleRow,
+): T[] {
+  if (savedRows.length === 0) return [];
+  let lastSave = 0;
+  for (const r of savedRows) {
+    for (const t of [r.created_at, r.updated_at]) {
+      const ms = t ? Date.parse(t) : NaN;
+      if (!Number.isNaN(ms) && ms > lastSave) lastSave = ms;
+    }
+  }
+  if (lastSave === 0) return []; // no usable save timestamp — can't tell new from removed
+  const savedNames = new Set(savedRows.map(r => normalizeOptionName(r.option_name)));
+  return libRows.filter(r => {
+    if (r.active === false) return false;
+    if (r.applies_to === "none") return false;
+    if (savedNames.has(normalizeOptionName(r.option_name))) return false;
+    const created = r.created_at ? Date.parse(r.created_at) : NaN;
+    if (Number.isNaN(created) || created <= lastSave) return false;
+    // Null-able rule columns are handled by matchesRulesRow at runtime
+    // (`?? null` / `!!` coercion) — the cast bridges the row types coming
+    // from the three call sites' differing selects.
+    return matchesRulesRow(r as unknown as RulesRow, vehicle);
+  });
+}
+
+/**
  * Read/print-time gate for options ALREADY SAVED on a vehicle (vehicle_options)
  * against their current addendum_library definition(s). Shared by the options
  * GET, pdf/generate, and pdf/bulk so a saved option is displayed and printed by

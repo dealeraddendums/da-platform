@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { getGroupOptionsForDealer, matchesRulesRow, savedRowSurvivesLibraryRules } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches } from "@/lib/options-engine";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import type { VehicleOptionRow } from "@/lib/db";
 
@@ -115,114 +115,138 @@ async function mirrorToAddendumItems(
   }
 }
 
-// Build a map of option_name → false for any addendum_library entries marked required=false.
-// Used to override stale vehicle_options.required=true values when the library flag changed.
-async function buildLibRequiredMap(
+// One full-library row shape shared by the type override, the rules gate,
+// and the newly-added preview merge.
+type DealerLibRow = {
+  id: string;
+  option_name: string;
+  item_price: string | null;
+  description: string | null;
+  required: boolean | null;
+  active: boolean | null;
+  created_at: string | null;
+  sort_order: number | null;
+  applies_to: string | null;
+  ad_types: string[] | null;
+  makes: string | null;
+  makes_not: boolean | null;
+  models: string | null;
+  models_not: boolean | null;
+  trims: string | null;
+  trims_not: boolean | null;
+  body_styles: string | null;
+  fuel: string | null;
+  fuel_not: boolean | null;
+  year_condition: number | null;
+  year_value: number | null;
+  miles_condition: number | null;
+  miles_value: number | null;
+  msrp_condition: number | null;
+  msrp1: number | null;
+  msrp2: number | null;
+};
+
+// Fetch the dealer's whole library once. Name-scoped queries
+// (.in("option_name", savedNames)) silently missed library rows whose names
+// differ from the saved rows by the legacy trailing-"^" marker, which broke
+// the required-flag override and the rules gate for those products.
+async function loadDealerLibrary(
   admin: ReturnType<typeof createAdminSupabaseClient>,
   dealerId: string,
-  optionNames: string[]
-): Promise<Record<string, boolean>> {
-  if (optionNames.length === 0) return {};
+): Promise<DealerLibRow[]> {
   const { data } = await admin
     .from("addendum_library")
-    .select("option_name, required")
+    .select("id, option_name, item_price, description, required, active, created_at, sort_order, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
     .eq("dealer_id", dealerId)
-    .in("option_name", optionNames);
-  const map: Record<string, boolean> = {};
-  for (const r of data ?? []) {
-    if (r.required === false) map[r.option_name as string] = false;
-  }
-  return map;
+    .order("sort_order", { ascending: true });
+  return (data ?? []) as unknown as DealerLibRow[];
 }
 
-function applyLibRequired<T extends { option_name: string; required?: boolean | null }>(
-  rows: T[],
-  libMap: Record<string, boolean>
-): T[] {
-  return rows.map(r => {
-    if (libMap[r.option_name] === false) return { ...r, required: false };
-    return r;
-  });
-}
+const libRowToRulesRow = (rule: DealerLibRow) => ({
+  applies_to: rule.applies_to,
+  ad_types: rule.ad_types,
+  makes: rule.makes,
+  makes_not: rule.makes_not ?? false,
+  models: rule.models,
+  models_not: rule.models_not ?? false,
+  trims: rule.trims,
+  trims_not: rule.trims_not ?? false,
+  body_styles: rule.body_styles,
+  fuel: rule.fuel,
+  fuel_not: rule.fuel_not ?? false,
+  year_condition: rule.year_condition ?? 0,
+  year_value: rule.year_value,
+  miles_condition: rule.miles_condition ?? 0,
+  miles_value: rule.miles_value,
+  msrp_condition: rule.msrp_condition ?? 0,
+  msrp1: rule.msrp1,
+  msrp2: rule.msrp2,
+});
+
+type SavedRow = {
+  option_name: string;
+  required?: boolean | null;
+  sort_order?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
 
 /**
- * Drop rows whose addendum_library entry exists but doesn't match the
- * current vehicle's rules. Rows with no library match are kept — they're
- * one-off custom additions the user explicitly attached to this vehicle.
+ * Hydrate saved vehicle_options rows against the CURRENT library:
  *
- * Library rules trump saved state by design: if a dealer narrows a
- * product to CHEVROLET/Silverado after it was already saved on a Nissan,
- * the Nissan's addendum should drop it. See bug report 2026-05-13.
- * The keep/drop decision lives in savedRowSurvivesLibraryRules (shared
- * with pdf/generate + pdf/bulk): applies_to='none' manual-only products
- * and "-NONE" auto-add sentinels never drop a saved row.
+ * 1. Live type — `required` (Required vs Suggested widget placement) always
+ *    comes from the library when a same-name row exists; the value cached on
+ *    vehicle_options at save time is only kept for custom one-offs with no
+ *    library definition. Joined by normalizeOptionName (trailing-"^" safe).
+ * 2. Rules gate — rows whose library rules no longer match the vehicle drop
+ *    (library rules trump saved state, 2026-05-13); applies_to='none'
+ *    manual-only products and "-NONE" sentinels never drop
+ *    (savedRowSurvivesLibraryRules, shared with pdf/generate + pdf/bulk).
+ * 3. New-product previews — library products created AFTER this vehicle's
+ *    last save that rules-match the vehicle are appended as unpersisted
+ *    source:"default" previews, so a product added to the library shows up
+ *    on vehicles that already have saved options. Products the user removed
+ *    from this vehicle predate the save and are NOT resurrected.
  */
-async function filterRowsByLibraryRules<T extends { option_name: string }>(
-  admin: ReturnType<typeof createAdminSupabaseClient>,
-  dealerId: string,
+function hydrateSavedAgainstLibrary<T extends SavedRow>(
+  lib: DealerLibRow[],
   rows: T[],
   vehicle: import("@/lib/vehicles").VehicleRow | undefined,
-): Promise<T[]> {
-  if (!vehicle || rows.length === 0) return rows;
-  const names = Array.from(new Set(rows.map(r => r.option_name)));
-  const { data: lib } = await admin
-    .from("addendum_library")
-    .select("option_name, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
-    .eq("dealer_id", dealerId)
-    .in("option_name", names);
-  if (!lib || lib.length === 0) return rows;
-  type LibRule = {
-    option_name: string;
-    applies_to: string | null;
-    ad_types: string[] | null;
-    makes: string | null;
-    makes_not: boolean | null;
-    models: string | null;
-    models_not: boolean | null;
-    trims: string | null;
-    trims_not: boolean | null;
-    body_styles: string | null;
-    fuel: string | null;
-    fuel_not: boolean | null;
-    year_condition: number | null;
-    year_value: number | null;
-    miles_condition: number | null;
-    miles_value: number | null;
-    msrp_condition: number | null;
-    msrp1: number | null;
-    msrp2: number | null;
-  };
+) {
+  const liveRequired = buildLiveRequiredByName(lib);
+  const withLiveType = rows.map(r => {
+    const live = liveRequired.get(normalizeOptionName(r.option_name));
+    return live === undefined ? r : { ...r, required: live };
+  });
+
+  if (!vehicle) return withLiveType;
+
   // ALL same-name rows per name — a duplicate library entry must not collapse
   // the map and drop the real product (KARR-on-Maverick parity with pdf/generate).
-  const rulesByName = new Map<string, LibRule[]>();
-  for (const r of lib as unknown as LibRule[]) {
-    const arr = rulesByName.get(r.option_name);
-    if (arr) arr.push(r);
-    else rulesByName.set(r.option_name, [r]);
+  const rulesByName = new Map<string, ReturnType<typeof libRowToRulesRow>[]>();
+  for (const r of lib) {
+    const key = normalizeOptionName(r.option_name);
+    const arr = rulesByName.get(key);
+    if (arr) arr.push(libRowToRulesRow(r));
+    else rulesByName.set(key, [libRowToRulesRow(r)]);
   }
-  const toRulesRow = (rule: LibRule) => ({
-    applies_to: rule.applies_to,
-    ad_types: rule.ad_types,
-    makes: rule.makes,
-    makes_not: rule.makes_not ?? false,
-    models: rule.models,
-    models_not: rule.models_not ?? false,
-    trims: rule.trims,
-    trims_not: rule.trims_not ?? false,
-    body_styles: rule.body_styles,
-    fuel: rule.fuel,
-    fuel_not: rule.fuel_not ?? false,
-    year_condition: rule.year_condition ?? 0,
-    year_value: rule.year_value,
-    miles_condition: rule.miles_condition ?? 0,
-    miles_value: rule.miles_value,
-    msrp_condition: rule.msrp_condition ?? 0,
-    msrp1: rule.msrp1,
-    msrp2: rule.msrp2,
-  });
-  return rows.filter(r =>
-    savedRowSurvivesLibraryRules((rulesByName.get(r.option_name) ?? []).map(toRulesRow), vehicle)
+  const filtered = withLiveType.filter(r =>
+    savedRowSurvivesLibraryRules(rulesByName.get(normalizeOptionName(r.option_name)) ?? [], vehicle)
   );
+
+  const fresh = newlyAddedLibraryMatches(lib, rows, vehicle);
+  const maxSort = filtered.reduce((m, r) => Math.max(m, r.sort_order ?? 0), 0);
+  const previews = fresh.map((r, i) => ({
+    default_id: r.id,
+    option_name: r.option_name,
+    option_price: r.item_price ?? "NC",
+    description: r.description ?? null,
+    sort_order: maxSort + 1 + i,
+    source: "default" as const,
+    required: r.required !== false,
+  }));
+
+  return [...filtered, ...previews];
 }
 
 /**
@@ -262,10 +286,9 @@ export async function GET(
         .order("sort_order", { ascending: true });
 
       if (saved && saved.length > 0) {
-        const libMap = await buildLibRequiredMap(admin, effectiveDealerId, saved.map(r => r.option_name as string));
-        const withRequired = applyLibRequired(saved, libMap);
-        const filtered = await filterRowsByLibraryRules(admin, effectiveDealerId, withRequired, vehicleForRules);
-        return NextResponse.json({ data: filtered, groupOptions, source: "saved" });
+        const lib = await loadDealerLibrary(admin, effectiveDealerId);
+        const hydrated = hydrateSavedAgainstLibrary(lib, saved, vehicleForRules);
+        return NextResponse.json({ data: hydrated, groupOptions, source: "saved" });
       }
 
       // If UUID and nothing found, also check legacy '0' sentinel as fallback
@@ -278,10 +301,9 @@ export async function GET(
           .order("sort_order", { ascending: true });
 
         if (legacySaved && legacySaved.length > 0) {
-          const libMap = await buildLibRequiredMap(admin, effectiveDealerId, legacySaved.map(r => r.option_name as string));
-          const withRequired = applyLibRequired(legacySaved, libMap);
-          const filtered = await filterRowsByLibraryRules(admin, effectiveDealerId, withRequired, vehicleForRules);
-          return NextResponse.json({ data: filtered, groupOptions, source: "saved" });
+          const lib = await loadDealerLibrary(admin, effectiveDealerId);
+          const hydrated = hydrateSavedAgainstLibrary(lib, legacySaved, vehicleForRules);
+          return NextResponse.json({ data: hydrated, groupOptions, source: "saved" });
         }
       }
 
@@ -349,10 +371,9 @@ export async function GET(
       .order("sort_order", { ascending: true });
 
     if (saved && saved.length > 0) {
-      const libMap = await buildLibRequiredMap(admin, effectiveDealerId, saved.map(r => r.option_name as string));
-      const withRequired = applyLibRequired(saved, libMap);
-      const filtered = await filterRowsByLibraryRules(admin, effectiveDealerId, withRequired, vehicleForRulesFallback);
-      return NextResponse.json({ data: filtered, groupOptions, source: "saved" });
+      const lib = await loadDealerLibrary(admin, effectiveDealerId);
+      const hydrated = hydrateSavedAgainstLibrary(lib, saved, vehicleForRulesFallback);
+      return NextResponse.json({ data: hydrated, groupOptions, source: "saved" });
     }
 
     // No saved options — seed from dealer's addendum_library
