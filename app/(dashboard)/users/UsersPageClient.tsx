@@ -334,6 +334,7 @@ function AddUserModal({ onClose, onSuccess, dealerMode, ownDealerId }: {
     if (!form.full_name.trim()) { setErr("Full name is required."); return; }
     if (!form.email.trim())     { setErr("Email is required."); return; }
     if (!form.password)         { setErr("Password is required."); return; }
+    if (form.password.length < 8) { setErr("Password must be at least 8 characters."); return; }
     if (form.password !== form.confirm) { setErr("Passwords do not match."); return; }
     if (needsDealer && !form.dealer) { setErr("Please select a dealer."); return; }
     if (needsGroup  && !form.group)  { setErr("Please select a group.");  return; }
@@ -464,6 +465,10 @@ function EditUserModal({ user, onClose, onSuccess, dealerMode, canImpersonate, o
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
+    if (form.newPassword && form.newPassword.length < 8) {
+      setErr("Password must be at least 8 characters.");
+      return;
+    }
     if (form.newPassword && form.newPassword !== form.confirmPassword) {
       setErr("Passwords do not match.");
       return;

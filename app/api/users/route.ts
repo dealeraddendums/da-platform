@@ -253,6 +253,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!email?.trim())     return NextResponse.json({ error: "Email is required"     }, { status: 400 });
   if (!full_name?.trim()) return NextResponse.json({ error: "Full name is required" }, { status: 400 });
   if (!password)          return NextResponse.json({ error: "Password is required"  }, { status: 400 });
+  if (password.length < 8) return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
 
   let targetRole: UserRole;
   let targetDealerId: string | null;

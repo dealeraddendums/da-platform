@@ -52,6 +52,9 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
   const canEdit   = viewerRole === "super_admin" || viewerRole === "dealer_admin" || viewerRole === "group_admin";
   const canDelete = viewerRole === "super_admin";
   const canImpersonate = viewerRole === "super_admin";
+  // Set Password goes through PATCH /api/users/[id], which allows super_admin
+  // (any user) and dealer_admin (own-dealer users only) — mirror that here.
+  const canSetPassword = viewerRole === "super_admin" || viewerRole === "dealer_admin";
 
   // Allow dealer_admin / group_admin to invite the two non-admin roles only.
   const inviteRoles: { value: string; label: string }[] = viewerRole === "super_admin"
@@ -80,6 +83,11 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
   const [editName, setEditName] = useState("");
   const [saving, setSaving] = useState(false);
   const [impersonating, setImpersonating] = useState<string | null>(null);
+  const [pwUser, setPwUser] = useState<DealerUserProfile | null>(null);
+  const [pwValue, setPwValue] = useState("");
+  const [pwShow, setPwShow] = useState(false);
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -181,6 +189,37 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
       const json = await res.json().catch(() => ({})) as { error?: string };
       alert(json.error ?? "Failed to delete");
     }
+  }
+
+  function openSetPassword(u: DealerUserProfile) {
+    setPwUser(u);
+    setPwValue("");
+    setPwShow(false);
+    setPwError(null);
+  }
+
+  async function submitSetPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pwUser) return;
+    if (pwValue.length < 8) {
+      setPwError("Password must be at least 8 characters.");
+      return;
+    }
+    setPwSaving(true);
+    setPwError(null);
+    const res = await fetch(`/api/users/${pwUser.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pwValue }),
+    });
+    if (res.ok) {
+      setInvToast({ kind: "success", msg: `Password updated for ${pwUser.email}.` });
+      setPwUser(null);
+    } else {
+      const json = await res.json().catch(() => ({})) as { error?: string };
+      setPwError(json.error ?? "Failed to set password");
+    }
+    setPwSaving(false);
   }
 
   async function handleImpersonate(u: DealerUserProfile) {
@@ -403,6 +442,9 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
                         {canEdit && (
                           <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => startEdit(u)} title="Edit">Edit</button>
                         )}
+                        {canSetPassword && (
+                          <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => openSetPassword(u)} title="Set or reset this user's password">Set Password</button>
+                        )}
                         {canImpersonate && (
                           <button
                             className="text-xs"
@@ -425,6 +467,58 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
             })}
           </tbody>
         </table>
+      )}
+
+      {pwUser && canSetPassword && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+          onClick={(e) => { if (e.target === e.currentTarget && !pwSaving) setPwUser(null); }}
+        >
+          <form
+            onSubmit={(e) => void submitSetPassword(e)}
+            style={{ background: "#fff", borderRadius: 6, width: 420, maxWidth: "100%", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}
+          >
+            <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #e0e0e0" }}>
+              <h2 style={{ fontSize: 16, fontWeight: 600, color: "#333", margin: 0 }}>
+                Set Password for {pwUser.full_name || pwUser.email}
+              </h2>
+              <p style={{ fontSize: 12, color: "#78828c", margin: "4px 0 0" }}>
+                The user can sign in with this password immediately — no email is sent.
+              </p>
+            </div>
+            <div style={{ padding: "20px 24px" }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#55595c", marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                New Password
+              </label>
+              <div style={{ position: "relative" }}>
+                <input
+                  autoFocus
+                  type={pwShow ? "text" : "password"}
+                  value={pwValue}
+                  onChange={(e) => setPwValue(e.target.value)}
+                  placeholder="Min. 8 characters"
+                  style={{ width: "100%", height: 36, border: "1px solid #e0e0e0", borderRadius: 4, padding: "0 40px 0 10px", fontSize: 13, color: "#333", outline: "none", boxSizing: "border-box" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setPwShow(s => !s)}
+                  aria-label={pwShow ? "Hide password" : "Show password"}
+                  title={pwShow ? "Hide password" : "Show password"}
+                  style={{ position: "absolute", right: 6, top: 0, height: 36, width: 30, border: "none", background: "none", cursor: "pointer", color: "#78828c", fontSize: 15, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                >
+                  {pwShow ? "🙈" : "👁️"}
+                </button>
+              </div>
+              {pwError && <p style={{ fontSize: 13, color: "#ff5252", margin: "10px 0 0" }}>{pwError}</p>}
+            </div>
+            <div style={{ padding: "12px 24px 20px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setPwUser(null)} disabled={pwSaving}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={pwSaving || pwValue.length < 8}>
+                {pwSaving ? "Setting…" : "Set Password"}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
     </div>
   );
