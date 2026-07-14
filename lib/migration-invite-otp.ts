@@ -39,10 +39,16 @@ export async function sendMigrationInvite(
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, inventory_dealer_id, primary_contact, primary_contact_email")
+    .select("id, dealer_id, name, inventory_dealer_id, primary_contact, primary_contact_email, active")
     .eq("inventory_dealer_id", inventoryDealerId)
-    .maybeSingle<{ id: string; dealer_id: string; name: string; inventory_dealer_id: string; primary_contact: string | null; primary_contact_email: string | null }>();
+    .maybeSingle<{ id: string; dealer_id: string; name: string; inventory_dealer_id: string; primary_contact: string | null; primary_contact_email: string | null; active: boolean | null }>();
   if (!dealer) throw new Error(`Dealer not found: ${inventoryDealerId}`);
+  // Deactivated dealers (e.g. Dealer General rooftops out of the paid+active
+  // scope) must never receive migration invites — this guards every send path
+  // (direct invite, wave-send, resend, follow-up drip).
+  if (dealer.active === false) {
+    throw new Error(`Dealer "${dealer.name}" (${inventoryDealerId}) is deactivated — migration invites are blocked`);
+  }
 
   // Recipient: the dealer's primary contact; fall back to a dealer_admin profile.
   let email = (dealer.primary_contact_email ?? "").trim().toLowerCase();

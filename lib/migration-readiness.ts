@@ -26,6 +26,7 @@ export interface ReadinessDealer {
   account_purpose: string | null;
   is_test: boolean | null;
   migration_status: string | null;
+  active?: boolean | null;
   migration_complex: boolean | null;
   template_confirmed: boolean | null;
   subscription_billed_to: string | null;
@@ -173,6 +174,9 @@ export function computeReadiness(
   let eligible = true;
   let eligibleReason = 'eligible';
   if (d.migration_status === 'migrated') { eligible = false; eligibleReason = 'already migrated'; }
+  // Deactivated dealers (e.g. Dealer General rooftops out of the paid+active
+  // scope, 2026-07-14) never migrate — blocks wave-send and claim-next too.
+  else if (d.active === false) { eligible = false; eligibleReason = 'deactivated dealer'; }
   else if (d.is_test || (d.account_purpose && d.account_purpose !== 'real')) { eligible = false; eligibleReason = 'test/demo account'; }
   else if (isWhiteGloveGroup(ctx.groupName)) { eligible = false; eligibleReason = `white-glove group (${ctx.groupName})`; }
   else if (d.migration_complex) { eligible = false; eligibleReason = 'flagged complex'; }
