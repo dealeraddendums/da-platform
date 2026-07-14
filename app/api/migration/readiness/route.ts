@@ -17,10 +17,12 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
 
   const { rows, flagsColumnPresent, billingTemplatesLoaded } = await loadReadinessRows();
 
-  // Operators (the team that divides the tail) = super_admin profiles, for the
-  // "Assigned to" column/filter + the assign dropdown.
+  // Operators (the team that divides the tail) = ACTIVE super_admin profiles,
+  // for the "Assigned to" column/filter + the assign dropdown. active=false
+  // keeps retired/duplicate operator accounts out of the dropdown (the
+  // admin@/allan@ duplicate-Allan split, consolidated 2026-07-13).
   const admin = createAdminSupabaseClient();
-  const { data: ops } = await admin.from("profiles").select("id, full_name, email").eq("role", "super_admin");
+  const { data: ops } = await admin.from("profiles").select("id, full_name, email").eq("role", "super_admin").eq("active", true);
   const operators = (ops ?? []).map((o: { id: string; full_name: string | null; email: string | null }) => ({ id: o.id, name: o.full_name || o.email || o.id }));
 
   const summary = {
