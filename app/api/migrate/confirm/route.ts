@@ -8,6 +8,7 @@ import { fireProfileSync, fireDealerReliable } from "@/lib/sync-hubspot";
 import { fireConversionWebhook } from "@/lib/marketing-webhook";
 import { billingConfigured, getTemplate, activateTemplate } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
+import { boxConfigured, createDealerFolder } from "@/lib/box";
 import { sendMandrillEmail } from "@/lib/mandrill";
 
 export const dynamic = "force-dynamic";
@@ -84,9 +85,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, group_id, subscription_billed_to, billing_customer_id, account_type, inventory_provider, inventory_provider_is_dms")
+    .select("id, dealer_id, name, group_id, subscription_billed_to, billing_customer_id, account_type, inventory_provider, inventory_provider_is_dms, box_folder_id")
     .eq("id", inv.dealer_id!)
-    .maybeSingle<{ id: string; dealer_id: string; name: string; group_id: string | null; subscription_billed_to: string | null; billing_customer_id: string | null; account_type: string | null; inventory_provider: string | null; inventory_provider_is_dms: boolean | null }>();
+    .maybeSingle<{ id: string; dealer_id: string; name: string; group_id: string | null; subscription_billed_to: string | null; billing_customer_id: string | null; account_type: string | null; inventory_provider: string | null; inventory_provider_is_dms: boolean | null; box_folder_id: string | null }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
 
   const nowIso = new Date().toISOString();
@@ -130,6 +131,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { error: dealerErr } = await (admin as any).from("dealers").update(dealerPatch).eq("id", dealer.id);
   if (dealerErr) {
     return NextResponse.json({ error: `Migration save failed: ${dealerErr.message}` }, { status: 500 });
+  }
+
+  // Provision a Box.com folder for the newly-migrated dealer (fire-and-forget,
+  // same pattern as POST /api/dealers). ETL-created legacy dealers never got a
+  // folder at row-creation time, so this is their first chance. Non-fatal — a
+  // Box hiccup must never block a migration; failures land in
+  // billing_sync_errors for retry.
+  if (boxConfigured() && !dealer.box_folder_id) {
+    fireAndForget(async () => {
+      const folderId = await createDealerFolder(dealer.name);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: boxErr } = await (admin as any)
+        .from("dealers")
+        .update({ box_folder_id: folderId })
+        .eq("id", dealer.id)
+        .is("box_folder_id", null);
+      if (boxErr) throw new Error(`dealers update failed: ${boxErr.message} (folder ${folderId})`);
+    }, {
+      event: "box.folder.create",
+      dealerId: dealer.id,
+      payload: { dealerName: dealer.name, entity: "dealer", source: "migrate-confirm" },
+    });
   }
 
   // ── 5. Billing: activate the template (future nextInvoiceDate) — GATED ──────

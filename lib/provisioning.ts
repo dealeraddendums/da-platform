@@ -14,6 +14,8 @@ import { syncDealerCreateReliable, syncGroupToHubspot, fireProfileSync } from "@
 import { SOURCE_FORM } from "@/lib/hubspot";
 import { sendPasskeyInvite } from "@/lib/migration-invite";
 import { sendMandrillEmail } from "@/lib/mandrill";
+import { boxConfigured, createDealerFolder, createGroupFolder } from "@/lib/box";
+import { fireAndForget } from "@/lib/billing-sync";
 
 const SUPPORT_EMAIL = process.env.SUPPORT_NOTIFICATION_EMAIL ?? "support@dealeraddendums.com";
 
@@ -79,6 +81,28 @@ export async function createTrialDealer(input: {
   }
   if (error || !data) {
     throw new Error(`dealer insert failed: ${error?.message ?? "unknown"}`);
+  }
+
+  // Provision a Box.com folder for the dealer (fire-and-forget, same pattern
+  // as the admin POST /api/dealers path). Non-fatal — a Box hiccup must never
+  // block a self-serve signup; failures land in billing_sync_errors for retry.
+  if (boxConfigured()) {
+    const dealerUuid = data.id as string;
+    const folderName = sanitizeName(input.dealership);
+    fireAndForget(async () => {
+      const folderId = await createDealerFolder(folderName);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: updateErr } = await (admin as any)
+        .from("dealers")
+        .update({ box_folder_id: folderId })
+        .eq("id", dealerUuid)
+        .is("box_folder_id", null);
+      if (updateErr) throw new Error(`dealers update failed: ${updateErr.message} (folder ${folderId})`);
+    }, {
+      event: "box.folder.create",
+      dealerId: dealerUuid,
+      payload: { dealerName: folderName, entity: "dealer", source: "self-serve" },
+    });
   }
 
   // Reliable HubSpot Company create — the onboarding-workflow trigger. Stamps
@@ -276,6 +300,27 @@ export async function createTrialGroup(input: {
   }
   if (error || !data) {
     throw new Error(`group insert failed: ${error?.message ?? "unknown"}`);
+  }
+
+  // Provision a Box.com folder for the group (fire-and-forget, same pattern
+  // as the admin POST /api/groups path). Non-fatal.
+  if (boxConfigured()) {
+    const groupUuid = data.id as string;
+    const folderName = sanitizeName(input.groupName);
+    fireAndForget(async () => {
+      const folderId = await createGroupFolder(folderName);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: updateErr } = await (admin as any)
+        .from("groups")
+        .update({ box_folder_id: folderId })
+        .eq("id", groupUuid)
+        .is("box_folder_id", null);
+      if (updateErr) throw new Error(`groups update failed: ${updateErr.message} (folder ${folderId})`);
+    }, {
+      event: "box.folder.create",
+      groupId: groupUuid,
+      payload: { groupName: folderName, entity: "group", source: "self-serve" },
+    });
   }
 
   // Awaited (not fire-and-forget) for the same reason as the dealer path: the
