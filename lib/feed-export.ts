@@ -1,0 +1,422 @@
+// FTP Feed Export — CSV generation for feed companies (V5.0 port of the
+// DA 4.0 HUB Feeds section). Server-only.
+//
+// A feed company (Homenet, DealersLink, Vincue, …) has attached dealers
+// (feed_company_dealers, keyed by dealers.id UUID plus the provider's own
+// feed_dealer_id) and a column_mappings array [{recipientColumn, daField}].
+// generateFeedCsv() walks every attached dealer's vehicles and emits one CSV
+// row per vehicle with the recipient's column names.
+//
+// The effective option set per vehicle mirrors the print pipeline
+// (pdf/generate): saved active vehicle_options gated by
+// savedRowSurvivesLibraryRules, plus group options (assignment + rules +
+// dismissal filtered), plus newlyAddedLibraryMatches — so the feed reports
+// the same products an addendum would print. Group/assignment/dismissal
+// reads are batched per dealer, not per vehicle.
+
+import { createAdminSupabaseClient } from "@/lib/db";
+import type { GroupOptionRow } from "@/lib/db";
+import {
+  matchesRulesRow,
+  normalizeOptionName,
+  newlyAddedLibraryMatches,
+  savedRowSurvivesLibraryRules,
+  parseOptionPriceValue,
+} from "@/lib/options-engine";
+
+export interface ColumnMapping {
+  recipientColumn: string;
+  daField: string;
+}
+
+export interface FeedCompanyRow {
+  id: string;
+  name: string;
+  ftp_url: string;
+  ftp_username: string;
+  ftp_password: string;
+  ftp_port: number;
+  filename: string;
+  protocol: "ftp" | "sftp";
+  include_vehicles: "printed" | "all";
+  column_mappings: ColumnMapping[];
+  last_push_at: string | null;
+  last_push_status: string | null;
+}
+
+// ── DA field catalog ─────────────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Dv = Record<string, any>;
+
+const str = (v: unknown): string => (v == null ? "" : String(v));
+
+/** Raw vehicle fields — 4.0 HUB names → V5.0 dealer_vehicles columns.
+ *  DEALER_ID intentionally resolves to the PROVIDER's id for the dealer
+ *  (feed_company_dealers.feed_dealer_id) — that's what the recipient keys on. */
+const RAW_FIELD_EXTRACTORS: Record<string, (dv: Dv, ctx: { feedDealerId: string; dealerTextId: string }) => string> = {
+  _ID:              (dv) => str(dv.id),
+  BODYSTYLE:        (dv) => str(dv.body_style),
+  CERTIFIED:        (dv) => (dv.condition === "CPO" ? "Yes" : "No"),
+  CMPG:             (dv) => str(dv.cmpg),
+  created_at:       (dv) => str(dv.date_added),
+  CREATED_BY:       (dv) => str(dv.created_by),
+  DATE_IN_STOCK:    (dv) => str(dv.date_in_stock ?? dv.date_added),
+  DEALER_ID:        (_dv, ctx) => ctx.feedDealerId,
+  DESCRIPTION:      (dv) => str(dv.description),
+  DOORS:            (dv) => str(dv.doors),
+  DRIVETRAIN:       (dv) => str(dv.drivetrain),
+  EDIT_DATE:        (dv) => str(dv.edit_date),
+  EDIT_STATUS:      (dv) => str(dv.edit_status),
+  ENGINE:           (dv) => str(dv.engine),
+  EXT_COLOR:        (dv) => str(dv.exterior_color),
+  FUEL:             (dv) => str(dv.fuel),
+  HMPG:             (dv) => str(dv.hmpg),
+  INPUT_DATE:       (dv) => str(dv.input_date),
+  INSP_NUMB:        (dv) => str(dv.insp_numb),
+  INT_COLOR:        (dv) => str(dv.interior_color),
+  INTERNET_PRICE:   (dv) => str(dv.internet_price),
+  MAKE:             (dv) => str(dv.make),
+  MILEAGE:          (dv) => str(dv.mileage),
+  MODEL:            (dv) => str(dv.model),
+  MPG:              (dv) => str(dv.mpg),
+  MSRP:             (dv) => str(dv.msrp),
+  MSRP_ADJUSTMENT:  (dv) => str(dv.msrp_adjustment),
+  NEW_USED:         (dv) => str(dv.condition),
+  OPTIONS:          (dv) => str(dv.options),
+  OPTIONS_ADDED:    (dv) => str(dv.options_added),
+  PHOTOS:           (dv) => str(dv.photos),
+  PRINT_DATE:       (dv) => str(dv.print_date),
+  PRINT_FLAG:       (dv) => str(dv.print_flag),
+  PRINT_GUIDE:      (dv) => str(dv.print_guide),
+  PRINT_INFO:       (dv) => str(dv.print_info),
+  PRINT_QUEUE:      (dv) => str(dv.print_queue),
+  PRINT_SMS:        (dv) => str(dv.print_sms),
+  PRINT_STATUS:     (dv) => str(dv.print_status),
+  PRINT_USER:       (dv) => str(dv.print_user),
+  PT:               () => "",                       // 4.0-only column; no V5.0 equivalent
+  RE_ORDER:         (dv) => str(dv.re_order),
+  STATUS:           (dv) => str(dv.status),
+  STATUS_CODE:      (dv) => str(dv.status_code),
+  STOCK_NUMBER:     (dv) => str(dv.stock_number),
+  TRANSMISSION:     (dv) => str(dv.transmission),
+  TRIM:             (dv) => str(dv.trim),
+  UPDATE_DATE:      (dv) => str(dv.updated_at),
+  updated_at:       (dv) => str(dv.updated_at),
+  VDP_LINK:         (dv) => str(dv.vdp_link),
+  VIN_NUMBER:       (dv) => str(dv.vin),
+  WARRANTY_EXPIRES: (dv) => str(dv.warranty_expires),
+  YEAR:             (dv) => str(dv.year),
+};
+
+export const RAW_FIELDS = Object.keys(RAW_FIELD_EXTRACTORS);
+
+export const COMPUTED_FIELDS = [
+  "TOTAL_ADDS",
+  "SELLING_PRICE",
+  "OPTION_LIST",
+  "OPTION_LIST_COMMA",
+  "OPTION_PRICE",
+  "OPTIONS_WITH_PRICE",
+  "ADDED_MARKUP",
+  "OPTIONS_WO_ADDED_MARKUP",
+  "DEALER_DISCOUNTS",
+  "DEALER_DISCOUNTS_NUM",
+  "DEALER_DISCOUNTS_TEXT",
+  "OP_PRICE_WO_DISCOUNT_MARKUP",
+  "OPTIONS_WO_DISCOUNT_MARKUP",
+  "ADDED_MARKUP_TEXT",
+  "GRAND_TOTAL",
+] as const;
+
+export const ALL_DA_FIELDS = [...RAW_FIELDS, ...COMPUTED_FIELDS];
+
+// ── Computed fields ──────────────────────────────────────────────────────────
+//
+// V5.0 pricing model (mirrors lib/pdf-html.ts): an option's price is parsed
+// with parseOptionPriceValue; there is no separate markup concept on the new
+// platform (ADDED_MARKUP* therefore report 0/empty), and dealer discounts are
+// negative-priced option lines. So:
+//   TOTAL_ADDS / OPTION_PRICE  = Σ positive option prices
+//   DEALER_DISCOUNTS           = |Σ negative option prices|
+//   SELLING_PRICE              = MSRP − DEALER_DISCOUNTS
+//   GRAND_TOTAL                = MSRP + TOTAL_ADDS − DEALER_DISCOUNTS
+
+interface EffectiveOption { name: string; price: number }
+
+function money(n: number): string {
+  return (Math.round(n * 100) / 100).toFixed(2).replace(/\.00$/, "");
+}
+
+function computeFields(dv: Dv, options: EffectiveOption[]): Record<string, string> {
+  const positives = options.filter((o) => o.price >= 0);
+  const negatives = options.filter((o) => o.price < 0);
+  const totalAdds = positives.reduce((s, o) => s + o.price, 0);
+  const discounts = Math.abs(negatives.reduce((s, o) => s + o.price, 0));
+  const msrp = typeof dv.msrp === "number" ? dv.msrp : parseFloat(String(dv.msrp ?? "")) || 0;
+
+  return {
+    TOTAL_ADDS: money(totalAdds),
+    SELLING_PRICE: money(msrp - discounts),
+    OPTION_LIST: options.map((o) => o.name).join("\n"),
+    OPTION_LIST_COMMA: options.map((o) => o.name).join(", "),
+    OPTION_PRICE: money(totalAdds),
+    OPTIONS_WITH_PRICE: options.map((o) => `${o.name}: $${money(o.price)}`).join("\n"),
+    ADDED_MARKUP: "0",
+    OPTIONS_WO_ADDED_MARKUP: money(totalAdds),
+    DEALER_DISCOUNTS: money(discounts),
+    DEALER_DISCOUNTS_NUM: money(discounts),
+    DEALER_DISCOUNTS_TEXT: negatives.map((o) => o.name).join(", "),
+    OP_PRICE_WO_DISCOUNT_MARKUP: money(totalAdds),
+    OPTIONS_WO_DISCOUNT_MARKUP: positives.map((o) => o.name).join(", "),
+    ADDED_MARKUP_TEXT: "",
+    GRAND_TOTAL: money(msrp + totalAdds - discounts),
+  };
+}
+
+// ── CSV helpers ──────────────────────────────────────────────────────────────
+
+function csvCell(v: string): string {
+  if (/[",\n\r]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
+  return v;
+}
+
+export function toCsv(rows: string[][]): string {
+  return rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+// ── Vehicle shape for the rules engine (matches pdf/generate's vehicleData) ──
+
+function toRulesVehicle(dv: Dv, dealerTextId: string) {
+  return {
+    id: 0 as const,
+    DEALER_ID: dealerTextId,
+    VIN_NUMBER: dv.vin ?? "",
+    STOCK_NUMBER: dv.stock_number,
+    YEAR: dv.year != null ? String(dv.year) : null,
+    MAKE: dv.make,
+    MODEL: dv.model,
+    TRIM: dv.trim,
+    BODYSTYLE: dv.body_style,
+    EXT_COLOR: dv.exterior_color,
+    INT_COLOR: dv.interior_color,
+    ENGINE: dv.engine,
+    FUEL: dv.fuel ?? null,
+    DRIVETRAIN: dv.drivetrain,
+    TRANSMISSION: dv.transmission,
+    MILEAGE: dv.mileage != null ? String(dv.mileage) : null,
+    DATE_IN_STOCK: dv.date_added,
+    STATUS: "1" as const,
+    MSRP: dv.msrp != null ? String(dv.msrp) : null,
+    NEW_USED: dv.condition === "Used" ? "Used" : "New",
+    CERTIFIED: dv.condition === "CPO" ? "Yes" : "No",
+    OPTIONS: null,
+    PHOTOS: null,
+    DESCRIPTION: dv.description,
+    PRINT_STATUS: "0" as const,
+    HMPG: dv.hmpg ?? null,
+    CMPG: dv.cmpg ?? null,
+    MPG: dv.mpg ?? null,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Admin = any;
+
+async function fetchAllRows<T>(q: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+  const out: T[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await q(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// ── Main generator ───────────────────────────────────────────────────────────
+
+export interface FeedCsvResult {
+  csv: string;
+  vehicleCount: number;
+  dealerCount: number;
+}
+
+export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
+  const admin: Admin = createAdminSupabaseClient();
+
+  const { data: feed } = await admin
+    .from("feed_companies")
+    .select("*")
+    .eq("id", feedId)
+    .maybeSingle() as { data: FeedCompanyRow | null };
+  if (!feed) throw new Error("Feed company not found");
+
+  const mappings: ColumnMapping[] = Array.isArray(feed.column_mappings)
+    ? feed.column_mappings.filter((m) => m && m.recipientColumn && m.daField)
+    : [];
+  if (mappings.length === 0) throw new Error("No column mappings configured for this feed");
+
+  const { data: feedDealers } = await admin
+    .from("feed_company_dealers")
+    .select("dealer_uuid, feed_dealer_id, dealers(id, dealer_id, name, group_id)")
+    .eq("feed_company_id", feedId) as {
+      data: Array<{
+        dealer_uuid: string;
+        feed_dealer_id: string;
+        dealers: { id: string; dealer_id: string; name: string; group_id: string | null } | null;
+      }> | null;
+    };
+
+  const rows: string[][] = [mappings.map((m) => m.recipientColumn)];
+  let vehicleCount = 0;
+
+  for (const fd of feedDealers ?? []) {
+    const dealer = fd.dealers;
+    if (!dealer) continue;
+    const dealerTextId = dealer.dealer_id;
+    const ctx = { feedDealerId: fd.feed_dealer_id, dealerTextId };
+
+    // 1. Vehicles for this dealer (paginated; feed scope per include_vehicles).
+    const vehicles = await fetchAllRows<Dv>((from, to) => {
+      let q = admin
+        .from("dealer_vehicles")
+        .select("*")
+        .eq("dealer_id", dealerTextId)
+        .eq("status", "active")
+        .order("id", { ascending: true })
+        .range(from, to);
+      if (feed.include_vehicles === "printed") q = q.eq("print_status", 1);
+      return q;
+    });
+    if (vehicles.length === 0) continue;
+
+    // 2. Dealer library (once) → rules-by-name map for the saved-row gate +
+    //    the newly-added-matches merge, same as pdf/generate.
+    const libRows = await fetchAllRows<Dv>((from, to) => admin
+      .from("addendum_library")
+      .select("id, option_name, item_price, required, active, created_at, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
+      .eq("dealer_id", dealerTextId)
+      .range(from, to));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const libRulesByName = new Map<string, any[]>();
+    for (const lr of libRows) {
+      const name = normalizeOptionName(lr.option_name);
+      const arr = libRulesByName.get(name) ?? [];
+      arr.push(lr);
+      libRulesByName.set(name, arr);
+    }
+
+    // 3. Saved options for all the dealer's vehicles (chunked IN on vehicle id).
+    const vehicleIds = vehicles.map((v) => String(v.id));
+    const savedByVehicle = new Map<string, Dv[]>();
+    for (const ids of chunk(vehicleIds, 200)) {
+      const opts = await fetchAllRows<Dv>((from, to) => admin
+        .from("vehicle_options")
+        .select("vehicle_id, option_name, option_price, active, created_at, updated_at")
+        .in("vehicle_id", ids)
+        .eq("active", true)
+        .range(from, to));
+      for (const o of opts) {
+        const key = String(o.vehicle_id);
+        const arr = savedByVehicle.get(key) ?? [];
+        arr.push(o);
+        savedByVehicle.set(key, arr);
+      }
+    }
+
+    // 4. Group options — rows + assignments once per dealer, dismissals
+    //    batched over all vehicle ids (in-memory per-vehicle filtering below).
+    let groupRows: GroupOptionRow[] = [];
+    let assignedIds = new Set<string>();
+    const dismissedByVehicle = new Map<string, Set<string>>();
+    if (dealer.group_id) {
+      const { data: gRows } = await admin
+        .from("group_options")
+        .select("*")
+        .eq("group_id", dealer.group_id)
+        .eq("active", true)
+        .order("sort_order") as { data: GroupOptionRow[] | null };
+      groupRows = gRows ?? [];
+      const selectScopeIds = groupRows.filter((r) => r.assign_all_dealers === false).map((r) => r.id);
+      if (selectScopeIds.length > 0) {
+        const { data: assigns } = await admin
+          .from("dealer_option_assignments")
+          .select("option_id")
+          .eq("dealer_id", dealer.id)
+          .eq("group_id", dealer.group_id)
+          .eq("dealer_editable", false)
+          .in("option_id", selectScopeIds) as { data: Array<{ option_id: string }> | null };
+        assignedIds = new Set((assigns ?? []).map((a) => a.option_id));
+      }
+      if (groupRows.length > 0) {
+        for (const ids of chunk(vehicleIds, 200)) {
+          const { data: dismissals } = await admin
+            .from("dealer_dismissed_group_options")
+            .select("vehicle_id, group_option_id")
+            .in("vehicle_id", ids) as { data: Array<{ vehicle_id: string; group_option_id: string }> | null };
+          for (const d of dismissals ?? []) {
+            const key = String(d.vehicle_id);
+            const set = dismissedByVehicle.get(key) ?? new Set<string>();
+            set.add(d.group_option_id);
+            dismissedByVehicle.set(key, set);
+          }
+        }
+      }
+    }
+
+    // 5. Per-vehicle: effective options → computed fields → mapped CSV row.
+    for (const dv of vehicles) {
+      const rulesVehicle = toRulesVehicle(dv, dealerTextId);
+      const saved = savedByVehicle.get(String(dv.id)) ?? [];
+
+      const savedFiltered = saved.filter((r) =>
+        savedRowSurvivesLibraryRules(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (libRulesByName.get(normalizeOptionName(r.option_name)) ?? []) as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          rulesVehicle as any,
+        ),
+      );
+      const freshLib = newlyAddedLibraryMatches(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        libRows as any[],
+        saved as Array<{ option_name: string; created_at?: string | null; updated_at?: string | null }>,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        rulesVehicle as any,
+      );
+      const dismissed = dismissedByVehicle.get(String(dv.id)) ?? new Set<string>();
+      const groupEffective = groupRows
+        .filter((r) => (r.assign_all_dealers !== false ? true : assignedIds.has(r.id)))
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .filter((r) => matchesRulesRow(r as any, rulesVehicle as any))
+        .filter((r) => !dismissed.has(r.id));
+
+      const effective: EffectiveOption[] = [
+        ...groupEffective.map((g) => ({ name: g.option_name, price: parseOptionPriceValue(g.option_price) })),
+        ...savedFiltered.map((s) => ({ name: String(s.option_name), price: parseOptionPriceValue(s.option_price) })),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ...freshLib.map((l: any) => ({ name: String(l.option_name), price: parseOptionPriceValue(l.item_price) })),
+      ];
+
+      const computed = computeFields(dv, effective);
+      rows.push(mappings.map((m) => {
+        const raw = RAW_FIELD_EXTRACTORS[m.daField];
+        if (raw) return raw(dv, ctx);
+        if (m.daField in computed) return computed[m.daField];
+        return "";
+      }));
+      vehicleCount++;
+    }
+  }
+
+  return { csv: toCsv(rows), vehicleCount, dealerCount: (feedDealers ?? []).length };
+}
