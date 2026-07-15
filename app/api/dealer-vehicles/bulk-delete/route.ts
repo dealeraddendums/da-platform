@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import type { VehicleAuditLogInsert } from "@/lib/db";
 
 /** POST /api/dealer-vehicles/bulk-delete — delete multiple vehicles by ID */
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         changed_by: claims.sub,
         changed_by_email: claims.email,
       }));
-      void admin.from("vehicle_audit_log").insert(logEntries);
+      fireWrite(admin.from("vehicle_audit_log").insert(logEntries), "vehicle_audit_log");
     }
 
     const { error: delErr } = await admin

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { signGhostToken } from "@/lib/ghost";
 
 /**
@@ -48,11 +48,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       expires_at: now + 7_200_000,
     });
 
-    void admin.from("admin_audit").insert({
+    fireWrite(admin.from("admin_audit").insert({
       admin_user_id: claims.sub,
       action: "ghost_mode_enter",
       metadata: { group_name: group.name, group_id: group.id },
-    });
+    }), "admin_audit");
 
     const res = NextResponse.json({ ok: true, group_id: group.id, group_name: group.name });
     res.cookies.set("da_ghost_token", token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 7200 });
@@ -79,12 +79,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     expires_at: now + 7_200_000,
   });
 
-  void admin.from("admin_audit").insert({
+  fireWrite(admin.from("admin_audit").insert({
     admin_user_id: claims.sub,
     action: "ghost_mode_enter",
     target_dealer_id: dealer.dealer_id,
     metadata: { dealer_name: dealer.name, dealer_uuid: dealer.id },
-  });
+  }), "admin_audit");
 
   const res = NextResponse.json({
     ok: true,

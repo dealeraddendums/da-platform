@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
 import { applyInventoryDealerIdChange, DealerIdSyncError } from "@/lib/dealer-id-sync";
 
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       .eq("status", "active");
   }
 
-  void admin.from("admin_audit").insert({
+  fireWrite(admin.from("admin_audit").insert({
     admin_user_id: claims.sub,
     action: "inventory_dealer_id_changed",
     target_dealer_id: dealer.dealer_id,
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       dealer_id_old: dealer.dealer_id,
       dealer_id_new: (syncResult.changed && syncResult.cascaded) ? newId : dealer.dealer_id,
     },
-  });
+  }), "admin_audit");
 
   return NextResponse.json({
     data: updatedDealer as DealerRow,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import {
   isPaidAccountType,
   TRIAL_DAYS_CAP,
@@ -94,7 +94,7 @@ export async function POST(
     return NextResponse.json({ error: `Update failed: ${updateErr.message}` }, { status: 500 });
   }
 
-  void admin.from("admin_audit").insert({
+  fireWrite(admin.from("admin_audit").insert({
     admin_user_id: claims.sub,
     action: "trial_extended",
     target_dealer_id: dealer.dealer_id,
@@ -107,7 +107,7 @@ export async function POST(
       previous_account_type: dealer.account_type,
       previous_trial_ends_at: dealer.trial_ends_at,
     },
-  });
+  }), "admin_audit");
 
   // Lifecycle may flip (Trial Expired / Downgraded → Dealer Trial).
   fireDealerSync(dealer.id);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 
 /**
  * POST /api/admin/impersonate-group
@@ -93,11 +93,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // honors it) — we deliberately DO NOT mutate the target's
   // profiles.active_dealer_id, so their own saved nav state is untouched.
 
-  void admin.from("admin_audit").insert({
+  fireWrite(admin.from("admin_audit").insert({
     admin_user_id: claims.sub,
     action: "impersonate_group",
     metadata: { group_name: group.name, group_id, target_email: targetProfile.email },
-  });
+  }), "admin_audit");
 
   return NextResponse.json({
     access_token: sessionData.access_token,

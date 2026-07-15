@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 
 /**
  * POST /api/admin/impersonate
@@ -99,12 +99,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // Log impersonation event — fire and forget, don't block on failure
-  void admin.from("admin_audit").insert({
+  fireWrite(admin.from("admin_audit").insert({
     admin_user_id: claims.sub,
     action: "impersonate",
     target_dealer_id: dealer_id,
     metadata: { dealer_name: dealer.name, target_email: targetProfile.email },
-  });
+  }), "admin_audit");
 
   return NextResponse.json({
     access_token: sessionData.access_token,

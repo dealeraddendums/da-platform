@@ -1806,6 +1806,23 @@ export function createServerSupabaseClient() {
 }
 
 /** Service-role client — bypasses RLS, for admin operations only. */
+
+/**
+ * Execute a fire-and-forget Supabase write. `void builder` alone is a NO-OP —
+ * PostgrestBuilder is a lazy thenable that only sends its request when awaited
+ * or .then()ed (every pre-2026-07-15 `void admin.from(...).insert(...)` audit
+ * write silently never ran). This forces execution and logs failures.
+ */
+export function fireWrite(
+  builder: PromiseLike<{ error: { message: string } | null }>,
+  label: string,
+): void {
+  void Promise.resolve(builder).then(
+    ({ error }) => { if (error) console.error(`[fire-write] ${label}:`, error.message); },
+    (e) => console.error(`[fire-write] ${label}:`, e instanceof Error ? e.message : e),
+  );
+}
+
 export function createAdminSupabaseClient() {
   return createClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",

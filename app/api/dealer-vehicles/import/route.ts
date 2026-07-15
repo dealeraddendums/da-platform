@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import type { DealerVehicleInsert, VehicleAuditLogInsert } from "@/lib/db";
 
 type MappedVehicle = {
@@ -154,7 +154,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }))
         .filter((e) => e.vehicle_id);
       if (logEntries.length) {
-        void admin.from("vehicle_audit_log").insert(logEntries);
+        fireWrite(admin.from("vehicle_audit_log").insert(logEntries), "vehicle_audit_log");
       }
       void idMap; // suppress unused warning
     }

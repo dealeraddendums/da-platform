@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 
 /**
@@ -99,12 +99,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // Log the action
-  void admin.from("admin_audit").insert({
+  fireWrite(admin.from("admin_audit").insert({
     admin_user_id: claims.sub,
     action: "create_dealer_user",
     target_dealer_id: dealer_id,
     metadata: { email: email.trim(), full_name: full_name.trim(), role, dealer_name: dealer.name },
-  });
+  }), "admin_audit");
 
   // Generate impersonation tokens so the admin lands in the dealer context immediately
   const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({

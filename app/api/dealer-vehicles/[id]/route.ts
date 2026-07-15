@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import type { DealerVehicleInsert, DealerVehicleRow, VehicleAuditLogInsert } from "@/lib/db";
 
 type Params = { params: { id: string } };
@@ -135,7 +135,7 @@ export async function DELETE(_req: NextRequest, { params }: Params): Promise<Nex
     changed_by: claims.sub,
     changed_by_email: claims.email,
   };
-  void admin.from("vehicle_audit_log").insert(logEntry);
+  fireWrite(admin.from("vehicle_audit_log").insert(logEntry), "vehicle_audit_log");
 
   const { error: delErr } = await admin
     .from("dealer_vehicles")

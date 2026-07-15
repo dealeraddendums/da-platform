@@ -1,5 +1,6 @@
 import { createAdminSupabaseClient } from "./db";
 import { sendMandrillEmail } from "./mandrill";
+import { fireWrite } from "@/lib/db";
 
 export type InviteResult = {
   dealer_name: string;
@@ -131,7 +132,7 @@ export async function inviteUsersForDealer(
 
   // 5. Log to admin_audit (only when triggered by a known admin user)
   if (adminUserId) {
-    void admin.from("admin_audit").insert({
+    fireWrite(admin.from("admin_audit").insert({
       admin_user_id: adminUserId,
       action: "users_invited",
       target_dealer_id: inventoryDealerId,
@@ -142,7 +143,7 @@ export async function inviteUsersForDealer(
         already_existed: result.already_existed,
         failed: result.failed,
       },
-    });
+    }), "admin_audit");
   }
 
   return result;

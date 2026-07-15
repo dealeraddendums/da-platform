@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 
 /**
  * POST /api/admin/ghost/exit
@@ -13,11 +13,11 @@ export async function POST(): Promise<NextResponse> {
 
   // Log — fire and forget
   const admin = createAdminSupabaseClient();
-  void admin.from("admin_audit").insert({
+  fireWrite(admin.from("admin_audit").insert({
     admin_user_id: claims.sub,
     action: "ghost_mode_exit",
     metadata: {},
-  });
+  }), "admin_audit");
 
   const res = NextResponse.json({ ok: true });
   res.cookies.set("da_ghost_token", "", {
