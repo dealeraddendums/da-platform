@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useEmailCheck, emailCheckBlocksSubmit } from "@/lib/use-email-check";
+import EmailAvailability from "@/components/EmailAvailability";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { rememberDealerReturnPath } from "@/lib/dealer-return";
@@ -65,6 +67,9 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Real-time availability on the contact email; submit holds while checking/taken.
+  const contactEmailStatus = useEmailCheck(fields.primary_contact_email);
+  const emailBlocked = emailCheckBlocksSubmit(contactEmailStatus);
 
   function set(k: keyof NewDealerFields) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -139,6 +144,7 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
           <div>
             <label style={labelStyle}>Contact Email</label>
             <input style={inputStyle} type="email" value={fields.primary_contact_email} onChange={set("primary_contact_email")} placeholder="jane@dealer.com" />
+            <EmailAvailability status={contactEmailStatus} />
           </div>
 
           {/* Subscription + billing routing — all three required for group-added dealers. */}
@@ -168,7 +174,7 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
         {err && <p style={{ color: "#ff5252", fontSize: 13, marginBottom: 12 }}>{err}</p>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Creating…" : "Create Dealer"}</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || emailBlocked}>{saving ? "Creating…" : "Create Dealer"}</button>
         </div>
       </form>
     </div>

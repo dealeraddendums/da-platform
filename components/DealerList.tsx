@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useEmailCheck, emailCheckBlocksSubmit } from "@/lib/use-email-check";
+import EmailAvailability from "@/components/EmailAvailability";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
@@ -760,6 +762,12 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
       setFields((f) => ({ ...f, [key]: e.target.value }));
   }
 
+  // Real-time availability on both email fields; submit holds while a check
+  // is in flight or an email is taken.
+  const contactEmailStatus = useEmailCheck(fields.primary_contact_email);
+  const usernameStatus = useEmailCheck(fields.username);
+  const emailBlocked = emailCheckBlocksSubmit(contactEmailStatus, usernameStatus);
+
   async function submit(sendNotify: boolean) {
     if (!fields.name.trim() || !fields.dealer_id.trim()) {
       setError("Dealer Name and Dealer ID are required.");
@@ -890,6 +898,7 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
           <div>
             <label className="label">Contact Email</label>
             <input className="input" type="email" value={fields.primary_contact_email} onChange={set("primary_contact_email")} placeholder="jane@dealer.com" />
+            <EmailAvailability status={contactEmailStatus} />
           </div>
         </div>
 
@@ -898,6 +907,7 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
           <div>
             <label className="label">Username (login email)</label>
             <input className="input" type="text" value={fields.username} onChange={set("username")} placeholder="Username" />
+            <EmailAvailability status={usernameStatus} />
             <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Leave blank to skip account creation</p>
           </div>
           <div>
@@ -947,17 +957,17 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
       <div className="flex items-center gap-3 mt-5 flex-wrap">
         <button
           type="button"
-          disabled={saving}
+          disabled={saving || emailBlocked}
           onClick={() => void submit(true)}
-          style={{ background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, height: 36, padding: "0 16px", fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1 }}
+          style={{ background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, height: 36, padding: "0 16px", fontSize: 13, fontWeight: 600, cursor: saving || emailBlocked ? "not-allowed" : "pointer", opacity: saving || emailBlocked ? 0.7 : 1 }}
         >
           {saving ? "Saving…" : "SAVE AND NOTIFY NEW DEALER"}
         </button>
         <button
           type="button"
-          disabled={saving}
+          disabled={saving || emailBlocked}
           onClick={() => void submit(false)}
-          style={{ background: "#4caf50", color: "#fff", border: "none", borderRadius: 4, height: 36, padding: "0 16px", fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1 }}
+          style={{ background: "#4caf50", color: "#fff", border: "none", borderRadius: 4, height: 36, padding: "0 16px", fontSize: 13, fontWeight: 600, cursor: saving || emailBlocked ? "not-allowed" : "pointer", opacity: saving || emailBlocked ? 0.7 : 1 }}
         >
           {saving ? "Saving…" : "SAVE NEW DEALER"}
         </button>
