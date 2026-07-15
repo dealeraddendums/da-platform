@@ -12,7 +12,7 @@ import {
   LIFECYCLE,
   isPayingAccount,
 } from "@/lib/hubspot";
-import { isOverAllowance, isFreeAccountType } from "@/lib/print-eligibility";
+import { isOverAllowance, isFreeAccountType, hasActiveTrialOverride } from "@/lib/print-eligibility";
 import { printedVehicleCount } from "@/lib/print-counts";
 
 /**
@@ -94,13 +94,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // query silently refreshed only the first 1000 every night).
     // `as any` because Supabase types don't know about downgraded_at yet
     // (migration 083). Runtime is fine; only TS is stale.
-    type DealerRow = { id: string; dealer_id: string; account_type: string | null; created_at: string | null; last30: number | null; hubspot_company_id: string; group_id: string | null; downgraded_at: string | null; migration_status: string | null };
+    type DealerRow = { id: string; dealer_id: string; account_type: string | null; created_at: string | null; last30: number | null; hubspot_company_id: string; group_id: string | null; downgraded_at: string | null; migration_status: string | null; trial_ends_at: string | null; trial_prints_cap: number | null };
     const dealers: DealerRow[] = [];
     for (let from = 0; ; from += 1000) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: page } = await (admin as any)
         .from("dealers")
-        .select("id, dealer_id, account_type, created_at, last30, hubspot_company_id, group_id, downgraded_at, migration_status")
+        .select("id, dealer_id, account_type, created_at, last30, hubspot_company_id, group_id, downgraded_at, migration_status, trial_ends_at, trial_prints_cap")
         .not("hubspot_company_id", "is", null)
         .eq("active", true)
         .order("id", { ascending: true })
@@ -146,11 +146,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         let stage: string | null = null;
         if (isPayingAccount(d.account_type)) {
           stage = LIFECYCLE.CUSTOMER;
-        } else if (d.downgraded_at || isFreeAccountType(d.account_type)) {
+        } else if (!hasActiveTrialOverride(d) && (d.downgraded_at || isFreeAccountType(d.account_type))) {
+          // An active extend-trial override (migration 126) outranks the
+          // Free/Downgraded bucket — same precedence as canPrint and the
+          // event-driven sync.
           stage = LIFECYCLE.ACCOUNT_DOWNGRADED;
         } else {
           const lifetimePrints = await printedVehicleCount(admin, { dealerId: d.dealer_id });
-          const expired = isOverAllowance({ created_at: d.created_at, lifetime_prints: lifetimePrints });
+          const expired = isOverAllowance({ created_at: d.created_at, lifetime_prints: lifetimePrints, trial_ends_at: d.trial_ends_at, trial_prints_cap: d.trial_prints_cap });
           stage = expired ? LIFECYCLE.TRIAL_EXPIRED : LIFECYCLE.DEALER_TRIAL;
           if (expired) stats.dealers_expired++;
         }

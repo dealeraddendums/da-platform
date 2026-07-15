@@ -223,6 +223,10 @@ export type DealerRow = {
   etl_locked_reason: string | null;
   etl_locked_by: string | null;
   account_type: string;
+  /** Migration 126 — extend-trial expiry override. NULL = created_at + 30 days. */
+  trial_ends_at: string | null;
+  /** Migration 126 — extend-trial print-cap override. NULL = 30. */
+  trial_prints_cap: number | null;
   group_id: string | null;
   dealer_group_legacy: string | null;
   billing_id: string | null;

@@ -59,18 +59,28 @@ interface BillingMeResponse {
   notes?: string;
 }
 
-function computeTrial(createdAt: string | null, lifetimePrints: number): TrialInfo {
+function computeTrial(
+  createdAt: string | null,
+  lifetimePrints: number,
+  overrides?: { trial_ends_at?: string | null; trial_prints_cap?: number | null },
+): TrialInfo {
   const createdMs = createdAt ? new Date(createdAt).getTime() : Date.now();
+  // With an extend-trial override (migration 126) the window runs to
+  // trial_ends_at, so express "day N of cap" against that longer window.
+  const endsMs = overrides?.trial_ends_at
+    ? new Date(overrides.trial_ends_at).getTime()
+    : createdMs + TRIAL_DAYS_CAP * 86_400_000;
+  const daysCap = Math.max(Math.round((endsMs - createdMs) / 86_400_000), 1);
   const dayN = Math.min(
     Math.max(Math.floor((Date.now() - createdMs) / 86_400_000) + 1, 1),
-    TRIAL_DAYS_CAP,
+    daysCap,
   );
   return {
     dayN,
     printN: lifetimePrints,
-    overAllowance: isOverAllowance({ created_at: createdAt, lifetime_prints: lifetimePrints }),
-    daysCap: TRIAL_DAYS_CAP,
-    printsCap: TRIAL_PRINTS_CAP,
+    overAllowance: isOverAllowance({ created_at: createdAt, lifetime_prints: lifetimePrints, ...overrides }),
+    daysCap,
+    printsCap: overrides?.trial_prints_cap ?? TRIAL_PRINTS_CAP,
   };
 }
 
@@ -145,12 +155,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient();
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, name, billing_customer_id, internal_id, created_at, subscription_billed_to, group_id, account_type")
+    .select("id, name, billing_customer_id, internal_id, created_at, subscription_billed_to, group_id, account_type, trial_ends_at, trial_prints_cap")
     .eq("dealer_id", resolved.dealerTextId)
     .maybeSingle<{
       id: string; name: string; billing_customer_id: string | null; internal_id: string | null;
       created_at: string | null; subscription_billed_to: "dealer" | "group" | null;
       group_id: string | null; account_type: string | null;
+      trial_ends_at: string | null; trial_prints_cap: number | null;
     }>();
 
   if (!dealer) {
@@ -161,7 +172,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // canPrintForDealer — reprints don't inflate it) — drives the "Free"/"Trial"
   // card copy.
   const lifetimePrints = await printedVehicleCount(admin, { dealerId: resolved.dealerTextId });
-  const trial = computeTrial(dealer.created_at, lifetimePrints);
+  const trial = computeTrial(dealer.created_at, lifetimePrints, { trial_ends_at: dealer.trial_ends_at, trial_prints_cap: dealer.trial_prints_cap });
 
   // ── Group-billed dealer ───────────────────────────────────────────────────
   // The subscription + invoices live on the GROUP's da-billing customer, not

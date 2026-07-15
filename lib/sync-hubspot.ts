@@ -22,7 +22,7 @@ import {
   DedupSkipError,
   HubspotError,
 } from "@/lib/hubspot";
-import { isOverAllowance, isFreeAccountType } from "@/lib/print-eligibility";
+import { isOverAllowance, isFreeAccountType, hasActiveTrialOverride } from "@/lib/print-eligibility";
 import { printedVehicleCount } from "@/lib/print-counts";
 
 // ── Property builders ───────────────────────────────────────────────────────
@@ -58,6 +58,8 @@ interface DealerForHubspot {
   hubspot_company_id: string | null;
   created_at: string | null;
   downgraded_at: string | null;          // set on paying→Free, cleared on re-upgrade
+  trial_ends_at: string | null;          // migration 126 — extend-trial override
+  trial_prints_cap: number | null;       // migration 126 — extend-trial override
 }
 
 interface GroupForHubspot {
@@ -114,9 +116,16 @@ function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, 
   let stage: string;
   if (isPayingAccount(d.account_type)) {
     stage = LIFECYCLE.CUSTOMER;
+  } else if (hasActiveTrialOverride(d)) {
+    // Operator-extended trial (migration 126) outranks the Free/Downgraded
+    // bucket — mirrors canPrint, where an active override grants trial-track
+    // printing even to a Free/legacy dealer. Prints axis can still expire it.
+    stage = isOverAllowance({ created_at: d.created_at, lifetime_prints: lifetimePrints, trial_ends_at: d.trial_ends_at, trial_prints_cap: d.trial_prints_cap })
+      ? LIFECYCLE.TRIAL_EXPIRED
+      : LIFECYCLE.DEALER_TRIAL;
   } else if (d.downgraded_at || isFreeAccountType(d.account_type)) {
     stage = LIFECYCLE.ACCOUNT_DOWNGRADED;
-  } else if (isOverAllowance({ created_at: d.created_at, lifetime_prints: lifetimePrints })) {
+  } else if (isOverAllowance({ created_at: d.created_at, lifetime_prints: lifetimePrints, trial_ends_at: d.trial_ends_at, trial_prints_cap: d.trial_prints_cap })) {
     stage = LIFECYCLE.TRIAL_EXPIRED;
   } else {
     stage = LIFECYCLE.DEALER_TRIAL;
@@ -331,7 +340,7 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: dealer } = await (admin as any)
       .from("dealers")
-      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, feed_authorized_name, feed_authorized_email, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at, downgraded_at")
+      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, feed_authorized_name, feed_authorized_email, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at, downgraded_at, trial_ends_at, trial_prints_cap")
       .eq("id", dealerId)
       .maybeSingle() as { data: DealerForHubspot | null };
     if (!dealer) return;

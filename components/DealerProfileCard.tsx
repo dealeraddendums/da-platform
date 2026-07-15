@@ -168,6 +168,38 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
   const [subSuccess, setSubSuccess] = useState<string | null>(null);
   const [subWarn, setSubWarn] = useState<string | null>(null);
 
+  // Extend Trial state (super_admin only, non-paid tiers)
+  const [trialExtending, setTrialExtending] = useState<number | null>(null);
+  const [trialError, setTrialError] = useState<string | null>(null);
+  const [trialSuccess, setTrialSuccess] = useState<string | null>(null);
+
+  async function handleExtendTrial(days: 7 | 14 | 30) {
+    setTrialExtending(days);
+    setTrialError(null);
+    setTrialSuccess(null);
+    try {
+      const res = await fetch(`/api/admin/dealers/${dealer.id}/extend-trial`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days }),
+      });
+      const j = (await res.json()) as { ok?: boolean; trial_ends_at?: string; trial_prints_cap?: number; account_type?: string; error?: string };
+      if (!res.ok || !j.ok) {
+        setTrialError(j.error ?? "Failed to extend trial");
+        return;
+      }
+      setDealer({ ...dealer, trial_ends_at: j.trial_ends_at ?? null, trial_prints_cap: j.trial_prints_cap ?? null, account_type: j.account_type ?? dealer.account_type });
+      setSubValue(canonicalSubTier(j.account_type ?? dealer.account_type));
+      setTrialSuccess(`✓ Trial extended to ${new Date(j.trial_ends_at!).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`);
+      setTimeout(() => setTrialSuccess(null), 8000);
+      router.refresh();
+    } catch (e) {
+      setTrialError(e instanceof Error ? e.message : "Network error — try again");
+    } finally {
+      setTrialExtending(null);
+    }
+  }
+
   async function handleSubSave() {
     const newType = subValue;
     if (newType === canonicalSubTier(dealer.account_type)) { setSubEditing(false); return; }
@@ -1126,6 +1158,47 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                 {subWarn && <p className="text-xs mt-1" style={{ color: "#e65100" }}>{subWarn}</p>}
               </div>
             ))}
+
+            {/* Extend Trial — super_admin only, non-paid tiers. Sets the
+                migration-126 overrides (trial_ends_at + trial_prints_cap) and
+                normalizes account_type to Trial, so an expired/Free dealer can
+                try 5.0. Paid tiers hide the section (nothing to extend). */}
+            {isSuperAdmin && ["Trial", "Free"].includes(canonicalSubTier(dealer.account_type)) && (() => {
+              const createdMs = dealer.created_at ? new Date(dealer.created_at).getTime() : Date.now();
+              const endsMs = dealer.trial_ends_at ? new Date(dealer.trial_ends_at).getTime() : createdMs + 30 * 86_400_000;
+              const endsLabel = new Date(endsMs).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+              const expired = endsMs < Date.now();
+              const isTrialTier = canonicalSubTier(dealer.account_type) === "Trial";
+              return (
+                <div>
+                  <div className="flex items-start justify-between gap-4">
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Trial</span>
+                      <p className="text-xs mt-0.5" style={{ color: expired ? "var(--error, #c62828)" : "var(--text-muted)" }}>
+                        {isTrialTier
+                          ? (expired ? `Expired ${endsLabel}` : `Ends ${endsLabel}`)
+                          : "Not on a trial — extending grants one and sets the tier to Trial."}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
+                      {([7, 14, 30] as const).map((d) => (
+                        <button
+                          key={d}
+                          className="btn btn-secondary"
+                          style={{ fontSize: 12, padding: "4px 10px" }}
+                          onClick={() => void handleExtendTrial(d)}
+                          disabled={trialExtending !== null}
+                        >
+                          {trialExtending === d ? "…" : `+${d} days`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {trialSuccess && <p className="text-xs mt-1" style={{ color: "var(--success, #2e7d32)" }}>{trialSuccess}</p>}
+                  {trialError && <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{trialError}</p>}
+                </div>
+              );
+            })()}
 
             {/* Account Purpose (migration 096) — super_admin only. Test & Sales
                 Demo set the Test flag (is_test), excluding the account from BI /

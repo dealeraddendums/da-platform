@@ -26,6 +26,10 @@ export interface DealerEligibility {
   account_type: string | null;
   created_at: string | null;        // ISO timestamp; null treated as "now" (just-created)
   lifetime_prints: number | null;
+  /** Operator-set expiry override (migration 126). NULL = created_at + 30 days. */
+  trial_ends_at?: string | null;
+  /** Operator-set print-cap override (migration 126). NULL = 30. */
+  trial_prints_cap?: number | null;
 }
 
 /**
@@ -61,12 +65,34 @@ export function isFreeAccountType(at: string | null | undefined): boolean {
  * Over-allowance: trial cap exceeded on EITHER axis (30 days OR 30 prints).
  * Shared by canPrint and the HubSpot Trial → Trial Expired derivation so
  * the two surfaces never disagree about who's expired.
+ *
+ * Operator overrides (migration 126, set by the SuperAdmin extend-trial
+ * action): trial_ends_at replaces the created_at + 30d time axis, and
+ * trial_prints_cap replaces the 30-print cap. NULL = default behavior.
  */
-export function isOverAllowance(d: { created_at?: string | null; lifetime_prints?: number | null }): boolean {
+export function isOverAllowance(d: {
+  created_at?: string | null;
+  lifetime_prints?: number | null;
+  trial_ends_at?: string | null;
+  trial_prints_cap?: number | null;
+}): boolean {
   const createdAt = d.created_at ? new Date(d.created_at).getTime() : Date.now();
-  const ageDays = (Date.now() - createdAt) / (1000 * 60 * 60 * 24);
+  const endsAt = d.trial_ends_at
+    ? new Date(d.trial_ends_at).getTime()
+    : createdAt + TRIAL_DAYS_CAP * 24 * 60 * 60 * 1000;
   const prints = d.lifetime_prints ?? 0;
-  return ageDays > TRIAL_DAYS_CAP || prints > TRIAL_PRINTS_CAP;
+  const printsCap = d.trial_prints_cap ?? TRIAL_PRINTS_CAP;
+  return Date.now() > endsAt || prints > printsCap;
+}
+
+/**
+ * Operator-granted trial window that is still running. Grants trial-track
+ * treatment even when account_type says Free/legacy — the daily ETL can
+ * revert account_type from Aurora for unmigrated dealers, so the extension
+ * must not depend on it.
+ */
+export function hasActiveTrialOverride(d: { trial_ends_at?: string | null }): boolean {
+  return !!d.trial_ends_at && new Date(d.trial_ends_at).getTime() > Date.now();
 }
 
 export type CanPrintReason = "trial_expired" | "free_downgraded" | "past_due";
@@ -92,7 +118,7 @@ export interface CanPrintResult {
 
 export function canPrint(d: DealerEligibility): CanPrintResult {
   if (isPaidAccountType(d.account_type)) return { ok: true };
-  if (isTrialAccountType(d.account_type)) {
+  if (isTrialAccountType(d.account_type) || hasActiveTrialOverride(d)) {
     if (!isOverAllowance(d)) return { ok: true };
     return {
       ok: false,
@@ -170,7 +196,7 @@ export async function canPrintForDealer(dealerTextId: string): Promise<CanPrintR
   const admin = createAdminSupabaseClient();
   const { data: dealer } = await admin
     .from("dealers")
-    .select("account_type, created_at, subscription_billed_to, billing_customer_id, group_id")
+    .select("account_type, created_at, subscription_billed_to, billing_customer_id, group_id, trial_ends_at, trial_prints_cap")
     .eq("dealer_id", dealerTextId)
     .maybeSingle<{
       account_type: string | null;
@@ -178,6 +204,8 @@ export async function canPrintForDealer(dealerTextId: string): Promise<CanPrintR
       subscription_billed_to: string | null;
       billing_customer_id: string | null;
       group_id: string | null;
+      trial_ends_at: string | null;
+      trial_prints_cap: number | null;
     }>();
 
   // Unknown dealer — be permissive; route-level 404s handle the actual error
@@ -191,7 +219,7 @@ export async function canPrintForDealer(dealerTextId: string): Promise<CanPrintR
   // Only trial accounts need the number: paid passes outright and Free/
   // Downgraded blocks outright, so skip the query for both.
   let lifetimePrints = 0;
-  if (isTrialAccountType(dealer.account_type)) {
+  if (isTrialAccountType(dealer.account_type) || hasActiveTrialOverride(dealer)) {
     lifetimePrints = await printedVehicleCount(admin, { dealerId: dealerTextId });
   }
 
@@ -200,6 +228,8 @@ export async function canPrintForDealer(dealerTextId: string): Promise<CanPrintR
     account_type: dealer.account_type,
     created_at: dealer.created_at,
     lifetime_prints: lifetimePrints,
+    trial_ends_at: dealer.trial_ends_at,
+    trial_prints_cap: dealer.trial_prints_cap,
   });
   if (!base.ok) return base;
 
