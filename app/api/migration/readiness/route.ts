@@ -29,7 +29,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     total: rows.length,
     ready: rows.filter((r) => r.ready).length,
     eligible: rows.filter((r) => r.eligible).length,
-    billingStaged: rows.filter((r) => r.billingStaged).length,
+    billingStaged: rows.filter((r) => r.billingStaged && r.billingApplicable !== false).length,
     templateConfirmed: rows.filter((r) => r.templateConfirmed).length,
     readyPool: rows.filter((r) => r.billingStaged && r.eligible).length,
     settingsMissing: rows.filter((r) => r.settingsMissing).length,

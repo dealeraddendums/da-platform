@@ -17,6 +17,16 @@ export function isWhiteGloveGroup(groupName: string | null | undefined): boolean
   return WHITE_GLOVE_GROUP_PATTERNS.some((p) => n.includes(p));
 }
 
+/**
+ * Trial-track account for readiness purposes: explicit "Trial", the legacy
+ * "Trial Expired" label, or null (the unset default = fresh trial). Mirrors
+ * lib/print-eligibility.ts isTrialAccountType plus the "Trial Expired" form.
+ */
+export function isTrialTrackAccount(accountType: string | null | undefined): boolean {
+  if (accountType == null) return true;
+  return accountType.split(' $')[0].trim().toLowerCase().startsWith('trial');
+}
+
 export interface ReadinessDealer {
   id: string;
   dealer_id: string;
@@ -29,6 +39,7 @@ export interface ReadinessDealer {
   active?: boolean | null;
   migration_complex: boolean | null;
   template_confirmed: boolean | null;
+  account_type: string | null;
   subscription_billed_to: string | null;
   billing_customer_id: string | null;
   logo_url: string | null;
@@ -56,7 +67,10 @@ export interface ReadinessRow {
   state: string | null;
   // ── HARD gates (these three determine `ready`) ──────────────────────────
   billingStaged: boolean;
-  billingReason: string;       // human note: staged / missing / active / past-date / no-customer
+  billingReason: string;       // human note: staged / missing / active / past-date / no-customer / n-a trial
+  /** False for Trial-track dealers — nothing to bill until they upgrade, so
+   *  billing staging can't gate them. UI shows "—" instead of a check. */
+  billingApplicable: boolean;
   templateConfirmed: boolean;
   eligible: boolean;
   eligibleReason: string;      // why not eligible (white-glove group / complex / migrated / test)
@@ -141,12 +155,19 @@ export function computeReadiness(
   if (zeroInventory) warnings.push('no synced products');
 
   // ── Billing template staged ───────────────────────────────────────────────
+  // Trial-track dealers (account_type 'Trial' / 'Trial Expired' / null) have
+  // nothing to bill until they upgrade to Paid — da-billing staging is N/A and
+  // must never gate their migration. canPrint handles Trial vs Paid on its own.
+  const billingApplicable = !isTrialTrackAccount(d.account_type);
   // Group-billed dealers stage on the GROUP's customer; else their own.
   const billedToGroup = d.subscription_billed_to === 'group';
   const customerId = billedToGroup ? ctx.groupBillingCustomerId : d.billing_customer_id;
   let billingStaged = false;
   let billingReason: string;
-  if (!customerId) {
+  if (!billingApplicable) {
+    billingStaged = true;
+    billingReason = 'n/a — trial account (no billing until upgrade)';
+  } else if (!customerId) {
     billingReason = billedToGroup ? 'no group billing customer' : 'no billing customer';
   } else {
     const tmpl = ctx.billingByCustomer.get(customerId);
@@ -190,7 +211,7 @@ export function computeReadiness(
 
   return {
     id: d.id, dealer_id: d.dealer_id, name: d.name, groupId: d.group_id ?? null, groupName: ctx.groupName, state: d.state,
-    billingStaged, billingReason, templateConfirmed, eligible, eligibleReason, ready,
+    billingStaged, billingReason, billingApplicable, templateConfirmed, eligible, eligibleReason, ready,
     settingsMissing, logoMissing, zeroInventory, warnings,
     inviteStatus, invitedAt: d.invited_at ?? null, waveId: ctx.invitation?.wave_id ?? null,
     freshbooksStoppedAt: ctx.freshbooksStoppedAt ?? null,

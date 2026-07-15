@@ -11,6 +11,7 @@ interface Row {
   state: string | null;
   billingStaged: boolean;
   billingReason: string;
+  billingApplicable?: boolean;
   templateConfirmed: boolean;
   eligible: boolean;
   eligibleReason: string;
@@ -343,7 +344,7 @@ export default function MigrationConsole() {
       total: rows.length,
       ready: rows.filter((r) => r.ready).length,
       eligible: rows.filter((r) => r.eligible).length,
-      billingStaged: rows.filter((r) => r.billingStaged).length,
+      billingStaged: rows.filter((r) => r.billingStaged && r.billingApplicable !== false).length,
       templateConfirmed: rows.filter((r) => r.templateConfirmed).length,
       readyPool: rows.filter((r) => r.billingStaged && r.eligible).length,
       invited: rows.filter((r) => r.inviteStatus === "invited").length,
@@ -406,7 +407,11 @@ export default function MigrationConsole() {
       </td>
       <td style={td}>{r.groupName ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
       <td style={td}>{r.state ?? <span style={{ color: "#9aa0a6" }}>—</span>}</td>
-      <td style={{ ...td, textAlign: "center" }}><Check ok={r.billingStaged} title={r.billingReason} /></td>
+      <td style={{ ...td, textAlign: "center" }}>
+        {r.billingApplicable === false
+          ? <span title={r.billingReason} style={{ color: "#78828c", fontWeight: 700 }}>—</span>
+          : <Check ok={r.billingStaged} title={r.billingReason} />}
+      </td>
       <td style={{ ...td, textAlign: "center" }}>
         <input
           type="checkbox"
