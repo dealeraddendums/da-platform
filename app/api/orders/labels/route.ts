@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
+import { fetchLabelPricingEntries } from "@/lib/label-products";
 
 // DA Platform SKU -> da-billing labelType slug. da-billing's price
 // resolver keys off these slugs (size + finish), not our SKUs or the
@@ -156,6 +157,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const admin = createAdminSupabaseClient();
   const today = new Date();
+
+  // Server-side price resolution: re-price every item from da-billing's live
+  // catalog (never trust the browser's numbers). Falls back to the client
+  // price only when da-billing is unreachable — the client renders from the
+  // same catalog, so a mismatch there is a availability edge, not tampering.
+  const pricingEntries = await fetchLabelPricingEntries({ fresh: true });
+  if (pricingEntries) {
+    for (const item of items) {
+      const lt = SKU_TO_LABEL_TYPE[item.sku];
+      const wantFedex = item.shipping === 'fedex';
+      const hit = lt ? pricingEntries.find(e => e.labelType === lt && e.quantity === item.qty && e.fedex === wantFedex) : undefined;
+      if (hit) {
+        item.price = hit.price;
+      } else {
+        console.warn(`[orders/labels] no catalog entry for sku=${item.sku} qty=${item.qty} fedex=${wantFedex} — keeping client price ${item.price}`);
+      }
+    }
+  } else {
+    console.warn('[orders/labels] label pricing fetch failed — using client prices');
+  }
   const totalAmount = items.reduce((s, i) => s + i.price, 0);
 
   // Look up the dealer's labels-billing config so we can route to the
@@ -316,6 +337,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           lineItemDescription: `${internalDealerId}::${dealerName}::${item.sku}`,
           labelType: SKU_TO_LABEL_TYPE[item.sku] ?? item.sku,
           labelQuantity: String(item.qty),
+          // FedEx variants price differently — da-billing's resolver needs
+          // the flag (it was never sent before, so FedEx orders billed at
+          // the standard rate).
+          fedex: item.shipping === 'fedex',
         }));
         const updatedProducts = [...filteredExisting, ...newProducts];
         const putRes = await fetch(`${BILLING_BASE}/templates/${billingCustomerKey}`, {

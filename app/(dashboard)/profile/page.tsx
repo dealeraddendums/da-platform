@@ -6,6 +6,7 @@ import { resolveSessionProfile } from "@/lib/profile-session";
 import type { DealerRow } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import { getRecommendedAddendumPaperSizes } from "@/lib/recommended-labels";
+import { fetchLabelProducts } from "@/lib/label-products";
 import ProfileClient from "./ProfileClient";
 
 export const metadata = { title: "My Profile — DA Platform" };
@@ -16,6 +17,8 @@ export default async function ProfilePage() {
   if (!session) redirect("/login");
 
   const admin = createAdminSupabaseClient();
+  // Live label catalog from da-billing (1h cache; hardcoded fallback inside).
+  const labelProducts = await fetchLabelProducts();
   const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; full_name: string | null; active_dealer_id: string | null; created_at: string }>(admin, session, "role, dealer_id, full_name, active_dealer_id, created_at");
 
   const role = profile?.role ?? "dealer_user";
@@ -39,6 +42,7 @@ export default async function ProfilePage() {
       const dealer = rawDealer as DealerRow | null;
       return (
         <ProfileClient
+        labelProducts={labelProducts}
           dealer={dealer}
           canEdit={false}
           canOrderLabels={false}
@@ -54,6 +58,7 @@ export default async function ProfilePage() {
     // super_admin not in ghost mode — Security tab only (no dealer context)
     return (
       <ProfileClient
+        labelProducts={labelProducts}
         dealer={null}
         canEdit={false}
         canOrderLabels={false}
@@ -86,6 +91,7 @@ export default async function ProfilePage() {
     if (!resolvedActive) {
       return (
         <ProfileClient
+        labelProducts={labelProducts}
           dealer={null}
           canEdit={false}
           canOrderLabels={false}
@@ -163,6 +169,7 @@ export default async function ProfilePage() {
 
   return (
     <ProfileClient
+      labelProducts={labelProducts}
       dealer={dealer}
       canEdit={canEdit}
       canOrderLabels={canOrderLabels}

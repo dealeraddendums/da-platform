@@ -4,8 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { DealerRow } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
-import type { LabelProduct } from "@/lib/label-products";
-import { LABEL_PRODUCTS } from "@/lib/label-products";
+import { LABEL_PRODUCTS, type LabelProduct } from "@/lib/label-products";
 import type { AddendumPaperSize } from "@/lib/recommended-labels";
 import { paperSizeWidthLabel, productMatchesPaperSize } from "@/lib/recommended-labels";
 import { DMS_PROVIDERS, OTHER_PROVIDERS } from "@/lib/inventory-providers";
@@ -30,6 +29,9 @@ type Props = {
   userName: string;
   userRole: string;
   memberSince: string;
+  /** Live label catalog from da-billing (server-fetched, 1h cache).
+   *  Falls back to the hardcoded LABEL_PRODUCTS when absent. */
+  labelProducts?: LabelProduct[];
 };
 
 // ── Dealership Info Tab ──────────────────────────────────────────────────────
@@ -732,6 +734,7 @@ function OrderLabelsTab({
   recommendedPaperSizes,
   userEmail,
   userName,
+  labelProducts,
 }: {
   dealer: DealerRow;
   /** Allowed to place a label order. dealer_admin OR dealer_user. */
@@ -739,7 +742,9 @@ function OrderLabelsTab({
   recommendedPaperSizes: AddendumPaperSize[];
   userEmail: string;
   userName: string;
+  labelProducts?: LabelProduct[];
 }) {
+  const catalog = labelProducts && labelProducts.length ? labelProducts : LABEL_PRODUCTS;
   const [cart, setCart] = useState<CartItem[]>([]);
   const [shipOverride, setShipOverride] = useState(false);
   const [shipForm, setShipForm] = useState({
@@ -1076,7 +1081,7 @@ function OrderLabelsTab({
           marginBottom: 28,
         }}
       >
-        {LABEL_PRODUCTS.map(product => {
+        {catalog.map(product => {
           const selectedItem = cart.find(c => c.product.sku === product.sku);
           const isRecommended = recommendedPaperSizes.some(ps =>
             productMatchesPaperSize(product.size, ps),
@@ -1185,7 +1190,7 @@ function OrderLabelsTab({
       </div>
 
       {recommendedPaperSizes.length > 0 && (() => {
-        const recommendedProducts = LABEL_PRODUCTS.filter(p =>
+        const recommendedProducts = catalog.filter(p =>
           recommendedPaperSizes.some(ps => productMatchesPaperSize(p.size, ps)),
         );
         const widths = recommendedPaperSizes.map(paperSizeWidthLabel);
@@ -2243,7 +2248,7 @@ const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean; staffOnly?: bool
   { id: "security", label: "Security" },
 ];
 
-export default function ProfileClient({ dealer, canEdit, canOrderLabels, recommendedPaperSizes, userEmail, userName, userRole, memberSince }: Props) {
+export default function ProfileClient({ dealer, canEdit, canOrderLabels, recommendedPaperSizes, userEmail, userName, userRole, memberSince, labelProducts }: Props) {
   const searchParams = useSearchParams();
   const hasDealer = !!dealer;
   const isStaff = userRole === "super_admin";
@@ -2332,6 +2337,7 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, recomme
         {tab === "shipping" && dealer && <ShippingTab dealer={dealer} canEdit={canEdit} />}
         {tab === "labels" && dealer && (
           <OrderLabelsTab
+            labelProducts={labelProducts}
             dealer={dealer}
             canOrder={canOrderLabels}
             recommendedPaperSizes={recommendedPaperSizes}
