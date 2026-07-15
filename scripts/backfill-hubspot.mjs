@@ -219,8 +219,19 @@ function groupProps(g, memberCount) {
   return {
     name: g.name,
     groupid: g.internal_id,
-    billingid: g.billing_customer_id ?? null,
+    platformid: g.id,
+    billingid: g.billing_customer_id ?? g.internal_id ?? null,
     dealers_in_group: memberCount,
+    phone: g.phone,
+    zip: g.zip,
+    company_email: g.primary_contact_email,
+    billing_contact_name:            g.billing_contact ?? g.primary_contact,
+    billing_contact_email:           g.billing_email ?? g.primary_contact_email,
+    billing_contact_phone_number:    g.billing_phone ?? g.phone,
+    billing_contact_zip:             g.billing_zip ?? g.zip,
+    billing_contact_mailing_address: g.billing_address,
+    billing_contact_city:            g.billing_city,
+    billing_contact_state:           g.billing_state,
     lifecyclestage: g.hubspot_company_id ? null : LIFECYCLE.GROUP_TRIAL,
   };
 }
@@ -288,7 +299,7 @@ async function run() {
   }
 
   if (RUN_GROUPS) {
-    const groups = await fetchAll("groups", "id, name, internal_id, hubspot_company_id, billing_customer_id");
+    const groups = await fetchAll("groups", "id, name, internal_id, hubspot_company_id, billing_customer_id, phone, zip, primary_contact, primary_contact_email, billing_contact, billing_email, billing_phone, billing_address, billing_city, billing_state, billing_zip");
     console.log(`\nGroups to process: ${groups.length}`);
     for (const g of groups) {
       try {
