@@ -256,6 +256,25 @@ function profileProps(p, companyName) {
   };
 }
 
+// Two Supabase rows sharing one stored HubSpot id silently overwrite each
+// other on every sync (last writer wins) — seen 2026-07-15 with two group
+// pairs whose companies had been merged in HubSpot (a merged-away id
+// redirects to the survivor, so both rows "resolve"). Warn loudly so the
+// operator can split them before the run clobbers data.
+function warnSharedHubspotIds(rows, label) {
+  const byId = new Map();
+  for (const r of rows) {
+    if (!r.hubspot_company_id) continue;
+    if (!byId.has(r.hubspot_company_id)) byId.set(r.hubspot_company_id, []);
+    byId.get(r.hubspot_company_id).push(r);
+  }
+  for (const [id, shared] of byId) {
+    if (shared.length > 1) {
+      console.warn(`  ⚠️  ${label}: ${shared.length} rows share HubSpot id ${id} — they will overwrite each other: ${shared.map(r => `${r.name} (${r.id})`).join(" | ")}`);
+    }
+  }
+}
+
 async function run() {
   console.log(`HubSpot backfill — ${DRY_RUN ? "DRY RUN (no writes)" : "LIVE"}`);
   console.log(`  scopes: ${[RUN_DEALERS&&"dealers", RUN_GROUPS&&"groups", RUN_PROFILES&&"profiles"].filter(Boolean).join(", ")}`);
@@ -267,6 +286,7 @@ async function run() {
       [["active", true]],
     );
     console.log(`\nDealers to process: ${dealers.length}`);
+    warnSharedHubspotIds(dealers, "dealers");
     // Preload groups once
     const allGroups = await fetchAll("groups", "id, name, internal_id");
     const groupById = new Map(allGroups.map(g => [g.id, g]));
@@ -301,6 +321,7 @@ async function run() {
   if (RUN_GROUPS) {
     const groups = await fetchAll("groups", "id, name, internal_id, hubspot_company_id, billing_customer_id, phone, zip, primary_contact, primary_contact_email, billing_contact, billing_email, billing_phone, billing_address, billing_city, billing_state, billing_zip");
     console.log(`\nGroups to process: ${groups.length}`);
+    warnSharedHubspotIds(groups, "groups");
     for (const g of groups) {
       try {
         const { count: memberCount } = await admin.from("dealers").select("id", { count: "exact", head: true }).eq("group_id", g.id).eq("active", true);
