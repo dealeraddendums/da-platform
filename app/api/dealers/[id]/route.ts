@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { archiveCustomer, unarchiveCustomer, billingConfigured, updateCustomer, getTemplate, putTemplate } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
@@ -93,21 +94,28 @@ export async function PATCH(
   if (!resolved) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
   const dealerUuid = resolved.id;
 
-  // group_admin gets a narrow whitelist — inventory_provider /
-  // inventory_provider_is_dms / inventory_dealer_id only, and only on
-  // dealers in their group. Reject anything outside that whitelist up
-  // front so the 403 reason is explicit (the whitelist below would
-  // silently drop unknown fields otherwise).
-  if (claims.role === "group_admin") {
-    const allowed = new Set(["inventory_provider", "inventory_provider_is_dms", "inventory_dealer_id"]);
+  // group_admin / group_user get a narrow whitelist — the inventory trio
+  // plus logo_url (group admins operate member dealers with dealer_admin
+  // parity, and the Dealer Logo card saves via this PATCH). Reject anything
+  // outside the whitelist up front so the 403 reason is explicit (the
+  // whitelist below would silently drop unknown fields otherwise). Scope via
+  // authorizeDealerAction: group_admin → in-group; group_user (regional
+  // manager) → in-group AND tag-scoped. (group_user previously fell through
+  // this gate entirely — no branch — and could PATCH any dealer.)
+  if (claims.role === "group_admin" || claims.role === "group_user") {
+    const allowed = new Set(["inventory_provider", "inventory_provider_is_dms", "inventory_dealer_id", "logo_url"]);
     const submitted = Object.keys(body).filter(k => (body as Record<string, unknown>)[k] !== undefined);
     const extras = submitted.filter(k => !allowed.has(k));
     if (extras.length > 0) {
-      return NextResponse.json({ error: `group_admin cannot edit: ${extras.join(", ")}` }, { status: 403 });
+      return NextResponse.json({ error: `${claims.role} cannot edit: ${extras.join(", ")}` }, { status: 403 });
     }
-    if (resolved.group_id !== claims.group_id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const authz = await authorizeDealerAction(claims, resolved.dealer_id);
+    if (!authz.ok) return authz.response;
+  }
+
+  // dealer_restricted also had no branch — lock it out like dealer_user.
+  if (claims.role === "dealer_restricted") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // For dealer_admin, verify they own this dealer before patching
