@@ -114,48 +114,79 @@ export async function POST(
     );
   }
 
-  // If editable, copy template into each dealer's own library
+  // If editable, copy template into each dealer's own library. A dealer that
+  // already has a copy (same name + document_type) gets that copy refreshed in
+  // place — re-running the assign must not mint another duplicate (it used to:
+  // every assign click inserted a new copy, which is how the Bill Jacobs
+  // dealers ended up with 3 identically-named rows each in their dropdown).
   if (dealer_editable) {
-    const copies = dealer_ids
-      .map((uuid) => {
-        const textId = uuidToText.get(uuid);
-        if (!textId) return null;
-        return {
-          dealer_id: textId,
-          name: tpl.name,
-          document_type: tpl.document_type,
-          vehicle_types: tpl.vehicle_types,
-          template_json: tpl.template_json,
-          is_active: true,
-        };
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null);
+    const textIds = dealer_ids
+      .map((uuid) => uuidToText.get(uuid))
+      .filter((t): t is string => !!t);
 
-    if (copies.length > 0) {
-      // Use insert (not upsert) — dealer gets their own copy to edit
-      await admin.from("templates").insert(copies);
+    const { data: existingCopies, error: existingErr } = await admin
+      .from("templates")
+      .select("id, dealer_id")
+      .in("dealer_id", textIds)
+      .eq("name", tpl.name)
+      .eq("document_type", tpl.document_type);
+    if (existingErr) {
+      return NextResponse.json({ error: `Failed to check existing dealer copies: ${existingErr.message}` }, { status: 500 });
+    }
+    const hasCopy = new Set((existingCopies ?? []).map((r) => r.dealer_id as string));
+
+    const freshFields = {
+      vehicle_types: tpl.vehicle_types,
+      template_json: tpl.template_json,
+      is_active: true,
+    };
+
+    const inserts = textIds
+      .filter((textId) => !hasCopy.has(textId))
+      .map((textId) => ({
+        dealer_id: textId,
+        name: tpl.name,
+        document_type: tpl.document_type,
+        ...freshFields,
+      }));
+    if (inserts.length > 0) {
+      const { error: insErr } = await admin.from("templates").insert(inserts);
+      if (insErr) {
+        return NextResponse.json({ error: `Failed to copy template to dealers: ${insErr.message}` }, { status: 500 });
+      }
+    }
+    for (const row of existingCopies ?? []) {
+      const { error: updErr } = await admin.from("templates").update(freshFields).eq("id", row.id);
+      if (updErr) {
+        return NextResponse.json({ error: `Failed to refresh dealer copy: ${updErr.message}` }, { status: 500 });
+      }
     }
   }
 
   // If set_as_default requested, point each assigned dealer's default ADDENDUM
   // template at this group template. NOTE: the print path (pdf/generate, bulk,
-  // templates route) resolves the default from default_addendum_new/used — NOT
-  // the legacy default_template_* columns — so we write default_addendum_* so
-  // the choice actually takes effect at print time.
+  // templates route) AND the Settings UI dropdown resolve the default from
+  // default_addendum_new/used. Do NOT write the legacy default_template_*
+  // columns here: they still carry an FK to templates(id), so a group-template
+  // id is rejected — that FK violation used to kill this entire upsert
+  // silently, which is why "Set as default" never took effect.
   if (set_as_default !== "neither") {
     const settingsUpdates = dealer_ids
       .map((uuid) => uuidToText.get(uuid))
       .filter((textId): textId is string => !!textId)
       .map((textId) => ({
         dealer_id: textId,
-        // default_addendum_* drives the print path; default_template_* mirrors it
-        // for the Settings UI's "default template" display.
-        ...(set_as_default === "new" || set_as_default === "both" ? { default_addendum_new: tpl.id, default_template_new: tpl.id } : {}),
-        ...(set_as_default === "used" || set_as_default === "both" ? { default_addendum_used: tpl.id, default_template_used: tpl.id } : {}),
+        ...(set_as_default === "new" || set_as_default === "both" ? { default_addendum_new: tpl.id } : {}),
+        ...(set_as_default === "used" || set_as_default === "both" ? { default_addendum_used: tpl.id } : {}),
       }));
 
     if (settingsUpdates.length > 0) {
-      await admin.from("dealer_settings").upsert(settingsUpdates, { onConflict: "dealer_id" });
+      const { error: settingsErr } = await admin
+        .from("dealer_settings")
+        .upsert(settingsUpdates, { onConflict: "dealer_id" });
+      if (settingsErr) {
+        return NextResponse.json({ error: `Assigned, but setting dealer defaults failed: ${settingsErr.message}` }, { status: 500 });
+      }
     }
   }
 
