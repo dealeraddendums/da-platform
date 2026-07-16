@@ -614,6 +614,11 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
 
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
+  // Bulk selection (dealer-owned rows only — corporate products are locked)
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   // Corporate products inherited from the dealer's parent group. Read-only on
   // the dealer side — the group admin manages them from the Group page. Empty
   // array when the dealer isn't in a group or no products apply to them.
@@ -646,6 +651,13 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
       if (!res.ok) { setError(json.error ?? "Failed to load options"); return; }
       setItems(json.data ?? []);
       setTotal(json.total ?? 0);
+      // Selection only ever holds rows visible on the current page — prune
+      // anything that no longer exists after a refetch / page change.
+      setSelected(prev => {
+        const visible = new Set((json.data ?? []).map(d => d.id));
+        const next = new Set(Array.from(prev).filter(id => visible.has(id)));
+        return next.size === prev.size ? prev : next;
+      });
     } catch {
       setError("Network error");
     } finally {
@@ -712,8 +724,49 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
     if (res.ok) { setDeleteConfirm(null); void fetchItems(); }
   }
 
+  function toggleSelected(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected(prev =>
+      prev.size === items.length ? new Set<string>() : new Set(items.map(i => i.id))
+    );
+  }
+
+  async function handleBulkDelete() {
+    if (selected.size === 0) return;
+    setBulkDeleting(true);
+    try {
+      const res = await fetch("/api/addendum-library/bulk", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selected) }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({})) as { error?: string };
+        setError(json.error ?? "Bulk delete failed");
+        return;
+      }
+      const deletedAll = selected.size === items.length;
+      setSelected(new Set());
+      setBulkConfirm(false);
+      // If the whole page was deleted, step back a page (triggers refetch);
+      // otherwise refetch in place.
+      if (deletedAll && page > 1) setPage(p => p - 1);
+      else void fetchItems();
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
   function enterReorder() {
     setReorderItems([...items]);
+    setSelected(new Set());
     setReorderMode(true);
   }
 
@@ -887,6 +940,17 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
               <thead>
                 <tr style={{ background: "#f5f6f7", borderBottom: "1px solid #e0e0e0" }}>
                   {reorderMode && <th style={{ width: 40, padding: "10px 8px" }} />}
+                  {!reorderMode && (
+                    <th style={{ width: 36, padding: "10px 8px", textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Select all products"
+                        checked={items.length > 0 && selected.size === items.length}
+                        onChange={toggleSelectAll}
+                        style={{ cursor: "pointer" }}
+                      />
+                    </th>
+                  )}
                   <th style={th}>Product Name</th>
                   <th style={th}>Description</th>
                   <th style={th}>Type</th>
@@ -927,6 +991,17 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                     >
                       {reorderMode && (
                         <td style={{ padding: "8px 8px", textAlign: "center", color: "#bbb", fontSize: 18 }}>⠿</td>
+                      )}
+                      {!reorderMode && (
+                        <td style={{ padding: "8px 8px", textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${stripHtml(item.option_name)}`}
+                            checked={selected.has(item.id)}
+                            onChange={() => toggleSelected(item.id)}
+                            style={{ cursor: "pointer" }}
+                          />
+                        </td>
                       )}
                       <td style={td}>
                         <RichName name={item.option_name} imgMaxH={24} showLabel style={{ fontWeight: 600, color: "#333", fontSize: 13 }} />
@@ -978,6 +1053,20 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
             </table>
 
             </div>
+            {/* Bulk action bar */}
+            {!reorderMode && selected.size > 0 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", borderTop: "1px solid #e0e0e0", background: "#fff8f8" }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#333" }}>
+                  ✓ {selected.size} selected
+                </span>
+                <button
+                  onClick={() => setBulkConfirm(true)}
+                  style={{ padding: "6px 16px", background: "#ff5252", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+                >
+                  Delete Selected ({selected.size})
+                </button>
+              </div>
+            )}
             {/* Pagination */}
             {!reorderMode && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderTop: "1px solid #e0e0e0", background: "#fafafa" }}>
@@ -1039,6 +1128,26 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button onClick={() => setDeleteConfirm(null)} style={btnGhost}>Cancel</button>
               <button onClick={() => void handleDelete(deleteConfirm)} style={btnDanger}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk delete confirm modal */}
+      {bulkConfirm && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 8, padding: 28, width: 380, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "#333", marginBottom: 10 }}>
+              Delete {selected.size} product{selected.size !== 1 ? "s" : ""}?
+            </div>
+            <p style={{ fontSize: 13, color: "#55595c", marginBottom: 20 }}>
+              {selected.size !== 1 ? "These products" : "This product"} will be permanently removed from your library. This cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button onClick={() => setBulkConfirm(false)} style={btnGhost} disabled={bulkDeleting}>Cancel</button>
+              <button onClick={() => void handleBulkDelete()} style={btnDanger} disabled={bulkDeleting}>
+                {bulkDeleting ? "Deleting…" : "Delete"}
+              </button>
             </div>
           </div>
         </div>
