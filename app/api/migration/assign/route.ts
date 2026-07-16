@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -40,5 +40,37 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, assigned: (data ?? []).length, assignTo });
+
+  // Claiming implies staging: freeze the ETL (migration_status='pending') for
+  // the claimed dealers so operator hand-config isn't overwritten by the
+  // nightly sync. Only dealers untouched by the migration pipeline (NULL or
+  // 'legacy') are staged — pending/invited/migrating/migrated/opted_out keep
+  // their status. Unassigning (assignTo: null) never stages.
+  let staged = 0;
+  const assignedIds = ((data ?? []) as { id: string }[]).map((d) => d.id);
+  if (assignTo !== null && assignedIds.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: stagedRows, error: stageErr } = await (admin as any)
+      .from("dealers")
+      .update({ migration_status: "pending" })
+      .in("id", assignedIds)
+      .or("migration_status.is.null,migration_status.eq.legacy")
+      .select("id");
+    if (stageErr) {
+      console.error("[migration/assign] stage-on-assign failed:", stageErr.message);
+    } else {
+      staged = (stagedRows ?? []).length;
+      for (const r of (stagedRows ?? []) as { id: string }[]) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        fireWrite((admin as any).from("migration_log").insert({
+          dealer_id: r.id,
+          event: "staged_for_migration",
+          performed_by: claims.sub,
+          notes: "auto-staged on claim/assign (ETL frozen)",
+        }), "migration_log staged_for_migration");
+      }
+    }
+  }
+
+  return NextResponse.json({ ok: true, assigned: assignedIds.length, staged, assignTo });
 }
