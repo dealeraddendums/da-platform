@@ -60,7 +60,15 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
   // Resolve effective dealer_id
   let dealerId = ghostDealerId ?? profile?.dealer_id ?? null;
   let switchedIntoDealer = false;
-  if (!ghostDealerId && (isGroupAdmin || isGroupUser) && profile?.active_dealer_id) {
+  if (explicitGroupId) {
+    // Explicit group-authoring entry (?group=…): pure GROUP mode. A prior
+    // "switch into dealer" (active_dealer_id) or dealer-ghost session must
+    // not bleed in — it injected that dealer's logo/address into the group
+    // canvas and, worse, a non-null dealerId flips saveAsGroupTemplate off
+    // in BuilderPage, so Save would have written a DEALER template while
+    // visibly editing a group one.
+    dealerId = null;
+  } else if (!ghostDealerId && (isGroupAdmin || isGroupUser) && profile?.active_dealer_id) {
     const { data: activeDlr } = await admin
       .from("dealers")
       .select("dealer_id")

@@ -1631,11 +1631,32 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           )}
           {loadedTemplateId && (
             <span
-              style={{ fontSize: 11, color: 'rgba(255,255,255,0.78)', whiteSpace: 'nowrap', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', padding: '0 4px' }}
-              title={`Editing ${templateName}`}
+              style={{ fontSize: 11, color: 'rgba(255,255,255,0.78)', whiteSpace: 'nowrap', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', padding: '0 4px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              title={`Editing ${templateName}${loadedTemplateSource === 'group' ? ' (group template)' : ''}`}
             >
               Editing: <strong style={{ color: '#fff', fontWeight: 600 }}>{templateName}</strong>
+              {loadedTemplateSource === 'group' && (
+                <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.03em', color: '#ffa500', border: '1px solid rgba(255,165,0,0.55)', borderRadius: 3, padding: '1px 6px', whiteSpace: 'nowrap' }}>
+                  Group Template
+                </span>
+              )}
             </span>
+          )}
+          {/* Group-authoring mode with nothing loaded yet — still flag the
+              context so a new document reads as a group template. */}
+          {!loadedTemplateId && groupId && saveAsGroupTemplate && (
+            <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.03em', color: '#ffa500', border: '1px solid rgba(255,165,0,0.55)', borderRadius: 3, padding: '1px 6px', whiteSpace: 'nowrap' }}>
+              Group Template
+            </span>
+          )}
+          {groupId && !dealerId && (
+            <a
+              href={`/groups/${groupId}`}
+              style={{ ...tbBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+              title="Return to the group profile"
+            >
+              ← Back to Group
+            </a>
           )}
           <button onClick={() => void newTemplate()} style={tbBtn} title={starterMode ? 'Start a new blank starter' : 'Start a new document — blank or from a starter layout'}>+ New</button>
           <button onClick={openTemplates} style={tbBtn}>All templates</button>

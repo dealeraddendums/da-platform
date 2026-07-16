@@ -15,7 +15,24 @@ type Props = {
 
 type Tab = "users" | "billing" | "options" | "disclaimers" | "templates";
 
+// Open the Builder in GROUP mode. If the viewer is a group_admin currently
+// switched into a member dealer (active_dealer_id set), clear that first —
+// otherwise the dashboard layout keeps rendering the dealer's nav/header
+// around the group-template edit session (dealer-context bleed). Idempotent
+// and harmless when no active dealer is set.
+async function openGroupBuilder(url: string): Promise<void> {
+  try {
+    await fetch("/api/profiles/active-dealer", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dealerId: null }),
+    });
+  } catch { /* non-fatal — worst case the old header shows until next nav */ }
+  window.location.href = url;
+}
+
 export default function GroupOptionsPanel({ groupId, isSuperAdmin = false }: Props) {
+
   const [tab, setTab] = useState<Tab>("users");
 
   const tabs: { id: Tab; label: string }[] = [
@@ -1227,6 +1244,7 @@ function TemplatesTab({ groupId }: { groupId: string }) {
           className="btn btn-primary"
           style={{ fontSize: 12, height: 30, padding: "0 12px", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
           href={`/builder?group=${groupId}`}
+          onClick={(e) => { e.preventDefault(); void openGroupBuilder(`/builder?group=${groupId}`); }}
         >
           + New Template
         </a>
@@ -1349,7 +1367,8 @@ function TemplatesTab({ groupId }: { groupId: string }) {
                 <td className="px-4 py-2.5 text-right" style={{ whiteSpace: "nowrap" }}>
                   <div className="flex items-center justify-end gap-3">
                     <a className="text-xs" style={{ color: "var(--blue)", textDecoration: "none" }}
-                      href={`/builder?group=${groupId}&template=${t.id}`}>
+                      href={`/builder?group=${groupId}&template=${t.id}`}
+                      onClick={(e) => { e.preventDefault(); void openGroupBuilder(`/builder?group=${groupId}&template=${t.id}`); }}>
                       Edit
                     </a>
                     <button className="text-xs" style={{ color: "#7b1fa2" }} onClick={() => void openAssignModal(t)}>Assign to Dealers</button>
