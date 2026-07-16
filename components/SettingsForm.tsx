@@ -895,8 +895,32 @@ function PrinterNudgeCard({
 function PrintHistorySection({ dealerId, collapsed, onToggle }: { dealerId: string; collapsed: boolean; onToggle: () => void }) {
   const [open, setOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [clearingManual, setClearingManual] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  async function confirmClearManual() {
+    setClearingManual(true);
+    try {
+      const res = await fetch(`/api/dealers/${encodeURIComponent(dealerId)}/clear-manual-vehicles`, {
+        method: "POST",
+      });
+      const json = await res.json() as { cleared?: number; error?: string };
+      if (!res.ok) throw new Error(json.error || `Failed to clear manual vehicles (HTTP ${res.status})`);
+      setManualOpen(false);
+      setToast(`Removed ${json.cleared ?? 0} manually-added vehicle${(json.cleared ?? 0) === 1 ? "" : "s"}`);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => {
+        setToast(null);
+        window.location.reload();
+      }, 2500);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to clear manual vehicles");
+    } finally {
+      setClearingManual(false);
+    }
+  }
 
   async function confirm() {
     setClearing(true);
@@ -943,9 +967,63 @@ function PrintHistorySection({ dealerId, collapsed, onToggle }: { dealerId: stri
         >
           Clear Print History
         </button>
+
+        <div style={{ borderTop: "1px solid var(--border)", marginTop: 18, paddingTop: 16 }}>
+          <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-secondary)", margin: "0 0 6px" }}>
+            Clear Manual Vehicles
+          </p>
+          <p className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
+            Remove all vehicles added via VIN decoder or spreadsheet upload. Use this when switching to a live inventory feed to eliminate duplicates. Vehicles added by your inventory feed are not affected.
+          </p>
+          <button
+            onClick={() => setManualOpen(true)}
+            style={{
+              height: 32, padding: "0 12px", fontSize: 12, fontWeight: 500,
+              background: "#fff", border: "1px solid #c0c0c0", borderRadius: 4,
+              color: "#55595c", cursor: "pointer",
+            }}
+            onMouseEnter={e => { const b = e.currentTarget; b.style.borderColor = "#ff5252"; b.style.color = "#ff5252"; }}
+            onMouseLeave={e => { const b = e.currentTarget; b.style.borderColor = "#c0c0c0"; b.style.color = "#55595c"; }}
+          >
+            Clear Manual Vehicles
+          </button>
+        </div>
         </>
         )}
       </div>
+
+      {manualOpen && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setManualOpen(false); }}
+        >
+          <div style={{ background: "#fff", borderRadius: 6, width: "min(480px, 92vw)", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
+              <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)" }}>⚠️ Clear Manual Vehicles</span>
+              <button onClick={() => setManualOpen(false)} style={{ fontSize: 20, color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ padding: "16px 16px 20px" }}>
+              <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+                This will permanently remove all vehicles added via VIN decoder or spreadsheet upload from your inventory.
+              </p>
+              <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.6, margin: "10px 0 0" }}>
+                This action cannot be undone.
+              </p>
+              <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, margin: "10px 0 0" }}>
+                Vehicles added by your inventory feed will not be affected.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
+              <button onClick={() => setManualOpen(false)} disabled={clearingManual} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
+                Cancel
+              </button>
+              <button onClick={() => void confirmClearManual()} disabled={clearingManual} style={{ height: 36, padding: "0 16px", background: "#ff5252", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: clearingManual ? "not-allowed" : "pointer", opacity: clearingManual ? 0.7 : 1 }}>
+                {clearingManual ? "Clearing…" : "Yes, Clear Manual Vehicles"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {open && (
         <div
