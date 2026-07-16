@@ -176,7 +176,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const dealerSettingsCache = new Map<string, DealerSettingsRow | null>();
   const templateCache = new Map<string, Widget[] | null>();
-  const templateMetaCache = new Map<string, { bgUrl?: string; fontScale?: number; paperSizeStr?: string }>();
+  const templateMetaCache = new Map<string, { bgUrl?: string; fontScale?: number; paperSizeStr?: string; isGroup?: boolean }>();
   const libCache = new Map<string, LibRow[]>();
 
   // No local Chrome on da-platform after Phase E.2. Service-mode loop
@@ -283,6 +283,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         // ── Default template ─────────────────────────────────────────────────
         let templateWidgets: Widget[] | null = null;
+        let templateIsGroup = false;
         let templateBgUrl: string | undefined;
         let templateFontScale: number | undefined;
         let templatePaperSizeStr: string | undefined;
@@ -303,6 +304,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               // (migration 065 drops the FK). Try templates first, fall back
               // to group_templates so a group-template default still prints.
               let tmpl: { template_json: Record<string, unknown> } | null = null;
+              let tmplIsGroup = false;
               const ownRes = await admin
                 .from("templates")
                 .select("template_json")
@@ -316,6 +318,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                   .eq("id", templateId)
                   .maybeSingle<{ template_json: Record<string, unknown> }>();
                 tmpl = grpRes.data;
+                if (tmpl) tmplIsGroup = true;
               }
               if (tmpl?.template_json) {
                 const tj = tmpl.template_json as {
@@ -324,7 +327,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 };
                 templateCache.set(templateId, tj.widgets ? Object.values(tj.widgets) : null);
                 templateMetaCache.set(templateId, {
-                  bgUrl: tj.bgUrl, fontScale: tj.fontScale, paperSizeStr: tj.paperSize,
+                  bgUrl: tj.bgUrl, fontScale: tj.fontScale, paperSizeStr: tj.paperSize, isGroup: tmplIsGroup,
                 });
               } else {
                 templateCache.set(templateId, null);
@@ -332,6 +335,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             }
             templateWidgets = templateCache.get(templateId) ?? null;
             const meta = templateMetaCache.get(templateId);
+            templateIsGroup = meta?.isGroup === true;
             templateBgUrl = meta?.bgUrl;
             templateFontScale = meta?.fontScale;
             templatePaperSizeStr = meta?.paperSizeStr;
@@ -875,6 +879,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           vehicle: vehicleData, options,
           disclaimers,
           dealerLogoUrl,
+          forceDealerLogo: templateIsGroup,
           dealer: dealer ? { name: dealer.name, address: dealer.address, city: dealer.city, state: dealer.state, zip: dealer.zip, phone: dealer.phone } : undefined,
           customDims: customPaperDims,
           aiEnabled,

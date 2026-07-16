@@ -55,6 +55,11 @@ export interface BuildPdfHtmlInput {
    */
   disclaimers?: Array<{ text: string; locked?: boolean }>;
   dealerLogoUrl?: string | null;
+  /** True when the widgets came from a GROUP template. The Logo widget then
+   *  always renders the PRINTING dealer's logo — any imgUrl stored on the
+   *  widget is an authoring-time artifact (whatever dealer context the group
+   *  author happened to have), never the printing dealer's choice. */
+  forceDealerLogo?: boolean;
   dealer?: { name?: string | null; address?: string | null; city?: string | null; state?: string | null; zip?: string | null; phone?: string | null };
   customDims?: { widthIn: number; heightIn: number };
   aiEnabled?: boolean;
@@ -73,6 +78,7 @@ export async function buildPdfHtml({
   options,
   disclaimers,
   dealerLogoUrl,
+  forceDealerLogo,
   dealer,
   customDims,
   aiEnabled,
@@ -126,7 +132,10 @@ export async function buildPdfHtml({
     // the PDF need to render the user's selection. Only when the widget has
     // no chosen image do we fall back to the dealer's canonical logo_url
     // (undefined = caller did not pass dealerLogoUrl → keep whatever's there).
-    if (w.type === 'logo' && dealerLogoUrl !== undefined) {
+    if (w.type === 'logo' && forceDealerLogo) {
+      // Group template: the printing dealer's identity wins unconditionally.
+      d.imgUrl = dealerLogoUrl ?? '';
+    } else if (w.type === 'logo' && dealerLogoUrl !== undefined) {
       const existing = typeof d.imgUrl === 'string' ? d.imgUrl : '';
       if (!existing) d.imgUrl = dealerLogoUrl;
     }

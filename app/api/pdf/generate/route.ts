@@ -320,6 +320,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Only runs when no widgets were supplied by the caller (i.e. Print Now,
     // not a Builder print which passes its own widget layout).
     let savedTemplateWidgets: Widget[] | null = null;
+    let savedTemplateIsGroup = false;
     let savedTemplateBgUrl: string | undefined;
     let savedTemplateFontScale: number | undefined;
     let savedTemplatePaperSize: PaperSize | undefined;
@@ -369,6 +370,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               .eq("id", templateId)
               .maybeSingle<{ template_json: Record<string, unknown> }>();
             tmpl = grpRes.data;
+            if (tmpl) savedTemplateIsGroup = true;
           }
 
           if (tmpl?.template_json) {
@@ -700,6 +702,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       options,
       disclaimers,
       dealerLogoUrl,
+      forceDealerLogo: savedTemplateIsGroup,
       dealer: dealer ? { name: dealer.name, address: dealer.address, city: dealer.city, state: dealer.state, zip: dealer.zip, phone: dealer.phone } : undefined,
       customDims: customPaperDims,
       aiEnabled,
