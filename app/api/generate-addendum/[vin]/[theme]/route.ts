@@ -4,7 +4,10 @@ import { NextRequest } from "next/server";
 import { checkPdfExists } from "@/lib/addendum";
 import {
   PLATFORM_BUTTON_CSS,
+  PLATFORM_ICON_CSS,
   sanitizeButtonCss,
+  sanitizeIconChar,
+  getIconIntegration,
   publicSupabase,
   resolveWidgetVehicle,
   resolveDealerParam,
@@ -56,6 +59,21 @@ export async function GET(
   // 1. Resolve the vehicle (→ id + dealer_id + pricing). No match → empty.
   const vehicle = await resolveWidgetVehicle(sb, vin, stock, dealerScope);
   if (!vehicle) return empty200();
+
+  // ?feature=icon — the compact icon-style button (independent of the Magic
+  // Button; both can coexist on one page with different styling). Config from
+  // the 'api_icon' provider row; same PDF click target as the Magic Button.
+  if (feature === "icon") {
+    const pdfUrl = await checkPdfExists(vin.toUpperCase());
+    if (!pdfUrl) return empty200();
+    const icon = await getIconIntegration(sb, vehicle.dealer_id);
+    if (icon && icon.enabled === false) return empty200();
+    const iconChar = sanitizeIconChar(icon?.button_label);
+    const iconCss = icon?.button_css ? sanitizeButtonCss(icon.button_css) : PLATFORM_ICON_CSS;
+    return html200(
+      `<div class="${escapeHtml(theme)}"><style>${iconCss}</style><a href="${pdfUrl}" class="dealer-addendums__button__icon-button" target="_blank" aria-label="Download Addendum" title="Download Addendum">${escapeHtml(iconChar)}</a></div>`,
+    );
+  }
 
   // 2. Dealer's dealer_com integration config. Disabled → nothing renders.
   const integration = await getIntegration(sb, vehicle.dealer_id);

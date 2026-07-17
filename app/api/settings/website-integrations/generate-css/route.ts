@@ -15,7 +15,10 @@ const SUPPORTED_MEDIA = ["image/jpeg", "image/png", "image/gif", "image/webp"] a
 type SupportedMedia = (typeof SUPPORTED_MEDIA)[number];
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB — comfortably under the base64 image limit
 
-const PROMPT = `You are a CSS expert analyzing an automotive dealer website screenshot.
+// Two targets share the endpoint: the full-size Download Addendum button
+// (default) and the compact icon button (?feature=icon widget). The card
+// passes `target=icon` in the form data to switch prompts.
+const PROMPT_BUTTON = `You are a CSS expert analyzing an automotive dealer website screenshot.
 
 Look at any buttons or call-to-action elements visible on this page. Extract the visual style — colors, font, border-radius, padding, shadow, hover effects.
 
@@ -24,6 +27,20 @@ Generate CSS for a button that visually matches the dealer's website style. The 
 
 The element is an <a> tag rendered as a button. Include at minimum:
   background-color, color, font-family, font-size, font-weight, padding, border-radius, border, text-decoration, display, cursor
+
+If you can infer a hover state from the design, include a :hover rule too.
+
+Return ONLY valid CSS with no explanation, no markdown fences, no comments. Just the raw CSS rules.`;
+
+const PROMPT_ICON = `You are a CSS expert analyzing an automotive dealer website screenshot.
+
+Look at the site's colors, accents, and any small badge/icon-style elements. Extract the visual style — colors, border-radius, shadow, hover effects.
+
+Generate CSS for a SMALL ICON-STYLE BUTTON (a compact circular or square badge, roughly 28–40px, containing a single character like "?") that visually matches the dealer's website style. The selector is:
+  .dealer-addendums__button__icon-button
+
+The element is an <a> tag rendered as a compact badge. Include at minimum:
+  display (inline-flex with centering), width, height, border-radius, background-color, color, font-family, font-size, font-weight, text-decoration, cursor
 
 If you can infer a hover state from the design, include a :hover rule too.
 
@@ -39,12 +56,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // 1. Read the uploaded screenshot from multipart/form-data.
+  // 1. Read the uploaded screenshot (+ optional target) from multipart/form-data.
   let file: File | null = null;
+  let target = "button";
   try {
     const form = await req.formData();
     const field = form.get("screenshot");
     if (field instanceof File) file = field;
+    if (form.get("target") === "icon") target = "icon";
   } catch {
     return genError();
   }
@@ -72,7 +91,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           role: "user",
           content: [
             { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-            { type: "text", text: PROMPT },
+            { type: "text", text: target === "icon" ? PROMPT_ICON : PROMPT_BUTTON },
           ],
         },
       ],

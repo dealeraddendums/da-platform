@@ -11,8 +11,10 @@ import { resolveDealerForRequest } from "@/lib/dealer-authz";
 
 // 'dealer_com' = the Dealer.com card; 'api' = the Generate Button API card
 // (dealers embedding api.dealeraddendums.com/generate-addendum|button links
-// directly). The public widget routes prefer the 'api' row when present.
-const PROVIDERS = ["dealer_com", "api"] as const;
+// directly — the public widget routes prefer the 'api' row when present);
+// 'api_icon' = the Icon Button API card (?feature=icon — button_label holds
+// the icon character, default "?").
+const PROVIDERS = ["dealer_com", "api", "api_icon"] as const;
 const PROVIDER = "dealer_com"; // default (back-compat)
 const FEATURES = ["button", "pricing", "both"] as const;
 type Feature = (typeof FEATURES)[number];
@@ -55,7 +57,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Defaults when the dealer hasn't configured it yet.
   return NextResponse.json({
     embed_dealer_id: embedDealerId,
-    data: data ?? { provider, button_label: "Download Addendum", button_css: null, enabled: true, feature: provider === "api" ? "button" : "both", updated_at: null },
+    data: data ?? {
+      provider,
+      button_label: provider === "api_icon" ? "?" : "Download Addendum",
+      button_css: null,
+      enabled: true,
+      feature: provider === "dealer_com" ? "both" : provider === "api_icon" ? "icon" : "button",
+      updated_at: null,
+    },
   });
 }
 
@@ -89,14 +98,15 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     dealer_id: dealerId,
     provider,
     updated_at: new Date().toISOString(),
-    ...(body.button_label !== undefined && { button_label: (body.button_label || "").trim() || "Download Addendum" }),
+    ...(body.button_label !== undefined && { button_label: (body.button_label || "").trim() || (provider === "api_icon" ? "?" : "Download Addendum") }),
     // Empty string → null so the widget falls back to platform default CSS.
     ...("button_css" in body && { button_css: body.button_css && body.button_css.trim() ? body.button_css : null }),
     ...(body.enabled !== undefined && { enabled: !!body.enabled }),
     ...(body.feature !== undefined && { feature: body.feature }),
-    // The API card has no Enabled toggle or feature picker — usage is opt-in
-    // by embedding the link. Pin sane values on its row.
+    // The API cards have no Enabled toggle or feature picker — usage is opt-in
+    // by embedding the link. Pin sane values on their rows.
     ...(provider === "api" && { enabled: true, feature: "button" }),
+    ...(provider === "api_icon" && { enabled: true, feature: "icon" }),
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

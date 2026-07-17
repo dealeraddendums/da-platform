@@ -4,7 +4,10 @@ import { NextRequest } from "next/server";
 import { checkPdfExists } from "@/lib/addendum";
 import {
   PLATFORM_BUTTON_CSS,
+  PLATFORM_ICON_CSS,
   sanitizeButtonCss,
+  sanitizeIconChar,
+  getIconIntegration,
   publicSupabase,
   resolveWidgetVehicle,
   resolveDealerParam,
@@ -32,6 +35,32 @@ export async function GET(
 
   const pdfUrl = await checkPdfExists(vin.toUpperCase());
   if (!pdfUrl) return empty200();
+
+  // ?feature=icon — compact icon-style button ('api_icon' provider row),
+  // independent of the Magic Button. Same PDF click target.
+  if (request.nextUrl.searchParams.get("feature") === "icon") {
+    const sbIcon = publicSupabase();
+    const dealerParamIcon = request.nextUrl.searchParams.get("dealer");
+    let iconDealerId: string | null = null;
+    if (dealerParamIcon) {
+      iconDealerId = await resolveDealerParam(sbIcon, dealerParamIcon);
+      if (!iconDealerId) return empty200();
+    } else {
+      const v = await resolveWidgetVehicle(sbIcon, vin, null);
+      if (v) iconDealerId = v.dealer_id;
+    }
+    let iconChar = "?";
+    let iconCss = PLATFORM_ICON_CSS;
+    if (iconDealerId) {
+      const icon = await getIconIntegration(sbIcon, iconDealerId);
+      if (icon && icon.enabled === false) return empty200();
+      iconChar = sanitizeIconChar(icon?.button_label);
+      if (icon?.button_css) iconCss = sanitizeButtonCss(icon.button_css);
+    }
+    return html200(
+      `<div class="${escapeHtml(theme)}"><style>${iconCss}</style><a href="${pdfUrl}" class="dealer-addendums__button__icon-button" target="_blank" aria-label="Download Addendum" title="Download Addendum">${escapeHtml(iconChar)}</a></div>`,
+    );
+  }
 
   // Per-dealer customization (label/css/enabled) — best-effort; the button
   // still renders with defaults if the vehicle/integration lookups miss.

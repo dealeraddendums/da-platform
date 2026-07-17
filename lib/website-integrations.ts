@@ -29,6 +29,36 @@ export const PLATFORM_BUTTON_CSS = `
 }
 `;
 
+// Default style for the compact icon-style button (?feature=icon) — small
+// platform-blue circle. Overridden per dealer by an 'api_icon' integration row.
+export const PLATFORM_ICON_CSS = `
+.dealer-addendums__button__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: #1976d2;
+  color: #ffffff;
+  font-family: sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+.dealer-addendums__button__icon-button:hover { background-color: #1565c0; }
+`;
+
+/** The icon character/text shown inside the icon button (stored in the
+ *  api_icon row's button_label). Kept short — 4 visible units max (emoji are
+ *  single units via the code-point iterator) — and HTML-escaped at render. */
+export function sanitizeIconChar(raw: string | null | undefined): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "?";
+  return Array.from(s).slice(0, 4).join("");
+}
+
 export const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -138,6 +168,19 @@ export async function getIntegration(sb: SupabaseClient, dealerId: string): Prom
     .in("provider", ["api", "dealer_com"]);
   const rows = (data ?? []) as (WidgetIntegration & { provider: string })[];
   return rows.find((r) => r.provider === "api") ?? rows.find((r) => r.provider === "dealer_com") ?? null;
+}
+
+/** Icon-button (?feature=icon) config — the 'api_icon' provider row only.
+ *  Separate from getIntegration: the icon is an independent widget that can
+ *  coexist on the same page as the Magic Button with different styling. */
+export async function getIconIntegration(sb: SupabaseClient, dealerId: string): Promise<WidgetIntegration | null> {
+  const { data } = await sb
+    .from("dealer_website_integrations")
+    .select("provider, button_label, button_css, enabled")
+    .eq("dealer_id", dealerId)
+    .eq("provider", "api_icon")
+    .maybeSingle();
+  return (data as WidgetIntegration) ?? null;
 }
 
 /** Sanitize dealer-supplied button CSS before injecting it into a <style>
