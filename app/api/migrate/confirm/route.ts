@@ -4,11 +4,9 @@ import type { UserRole } from "@/lib/db";
 import { verifySetupCode } from "@/lib/invite-code";
 import { rateLimit } from "@/lib/rate-limit";
 import { getAuthUserIdByEmail } from "@/lib/last-sign-in";
-import { fireProfileSync, fireDealerReliable } from "@/lib/sync-hubspot";
-import { fireConversionWebhook } from "@/lib/marketing-webhook";
+import { fireProfileSync } from "@/lib/sync-hubspot";
 import { billingConfigured, getTemplate, activateTemplate } from "@/lib/billing";
-import { fireAndForget } from "@/lib/billing-sync";
-import { boxConfigured, createDealerFolder } from "@/lib/box";
+import { migrateDealerRecord, futureNextInvoice } from "@/lib/migrate-dealer";
 import { sendMandrillEmail } from "@/lib/mandrill";
 
 export const dynamic = "force-dynamic";
@@ -32,20 +30,6 @@ export const dynamic = "force-dynamic";
 const AUTO_ACTIVATE = process.env.MIGRATION_AUTO_ACTIVATE === "1" || process.env.MIGRATION_AUTO_ACTIVATE === "true";
 
 type Inv = { id: string; email: string; first_name: string | null; last_name: string | null; dealer_id: string | null; expires_at: string; accepted_at: string | null; setup_code_hash: string | null; setup_code_expires_at: string | null; purpose?: string | null };
-
-function paidTierFor(dms: boolean | null, provider: string | null): string {
-  if (dms) return "Automatic DMS";
-  if (provider && provider.trim()) return "Automatic Web";
-  return "Manual";
-}
-
-// A safe FUTURE next-invoice date: keep the existing one if it's already in the
-// future, else push ~one cycle out (30 days) so the cron doesn't fire an
-// immediate catch-up invoice on the migration day.
-function futureNextInvoice(existing: string | undefined, now: number): string {
-  if (existing) { const t = Date.parse(existing); if (Number.isFinite(t) && t > now) return existing; }
-  return new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString();
-}
 
 const alert = (subject: string, html: string) =>
   sendMandrillEmail({ subject, from_email: "noreply@dealeraddendums.com", from_name: "DealerAddendums", to: [{ email: "support@dealeraddendums.com", name: "DA Support" }], html })
@@ -115,45 +99,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   fireProfileSync(userId);
 
-  // ── 2-4. Corrections + migrated + Paid tier (single dealers update) ─────────
-  const paidType = paidTierFor(dealer.inventory_provider_is_dms, dealer.inventory_provider);
+  // ── 2-4. Corrections + migrated + Paid tier (shared canonical writes) ───────
+  // migrateDealerRecord = the CANONICAL migration write set (also used by the
+  // group-level migrate flow): migration_status/account_type/converted_at/
+  // downgraded_at/billing_cutover_at + Box folder + HubSpot lifecycle +
+  // conversion webhook. Contact corrections ride along as extraPatch.
   const corr = body.corrections ?? {};
-  const dealerPatch: Record<string, unknown> = {
-    migration_status: "migrated",
-    account_type: paidType,
-    converted_at: nowIso,
-    downgraded_at: null,
-  };
-  if (typeof corr.phone === "string" && corr.phone.trim()) dealerPatch.phone = corr.phone.trim();
-  if (typeof corr.primary_contact === "string" && corr.primary_contact.trim()) dealerPatch.primary_contact = corr.primary_contact.trim();
-  if (typeof corr.primary_contact_email === "string" && corr.primary_contact_email.trim()) dealerPatch.primary_contact_email = corr.primary_contact_email.trim().toLowerCase();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: dealerErr } = await (admin as any).from("dealers").update(dealerPatch).eq("id", dealer.id);
-  if (dealerErr) {
-    return NextResponse.json({ error: `Migration save failed: ${dealerErr.message}` }, { status: 500 });
+  const extraPatch: Record<string, unknown> = {};
+  if (typeof corr.phone === "string" && corr.phone.trim()) extraPatch.phone = corr.phone.trim();
+  if (typeof corr.primary_contact === "string" && corr.primary_contact.trim()) extraPatch.primary_contact = corr.primary_contact.trim();
+  if (typeof corr.primary_contact_email === "string" && corr.primary_contact_email.trim()) extraPatch.primary_contact_email = corr.primary_contact_email.trim().toLowerCase();
+  const migrated = await migrateDealerRecord(admin, dealer, {
+    nowIso, hubspotContext: "migration confirm — upgrade to Paid (Customer)", extraPatch,
+  });
+  if (!migrated.ok) {
+    return NextResponse.json({ error: `Migration save failed: ${migrated.error}` }, { status: 500 });
   }
-
-  // Provision a Box.com folder for the newly-migrated dealer (fire-and-forget,
-  // same pattern as POST /api/dealers). ETL-created legacy dealers never got a
-  // folder at row-creation time, so this is their first chance. Non-fatal — a
-  // Box hiccup must never block a migration; failures land in
-  // billing_sync_errors for retry.
-  if (boxConfigured() && !dealer.box_folder_id) {
-    fireAndForget(async () => {
-      const folderId = await createDealerFolder(dealer.name);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: boxErr } = await (admin as any)
-        .from("dealers")
-        .update({ box_folder_id: folderId })
-        .eq("id", dealer.id)
-        .is("box_folder_id", null);
-      if (boxErr) throw new Error(`dealers update failed: ${boxErr.message} (folder ${folderId})`);
-    }, {
-      event: "box.folder.create",
-      dealerId: dealer.id,
-      payload: { dealerName: dealer.name, entity: "dealer", source: "migrate-confirm" },
-    });
-  }
+  const paidType = migrated.plan;
 
   // ── 5. Billing: activate the template (future nextInvoiceDate) — GATED ──────
   let billingState: "activated" | "review-queued" | "no-customer" | "error" = "no-customer";
@@ -183,9 +145,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     billingDetail = groupBilled ? "group has no billing customer" : "dealer has no billing customer";
   }
 
-  // ── 6. HubSpot lifecycle (now Paid) + marketing conversion + contact sync ───
-  fireDealerReliable(dealer.id, "migration confirm — upgrade to Paid (Customer)");
-  fireConversionWebhook({ dealerId: dealer.dealer_id, convertedAt: nowIso, plan: paidType });
+  // ── 6. HubSpot lifecycle + conversion webhook fired inside migrateDealerRecord.
 
   // ── 7. FreshBooks recurring-stop — ALWAYS operator-queued, never auto-run ───
   // (OAuth refresh token rotates on every use; a careful manual stop avoids the

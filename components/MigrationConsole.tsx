@@ -98,6 +98,9 @@ export default function MigrationConsole() {
   const [claiming, setClaiming] = useState(false);
   const [claimingGroup, setClaimingGroup] = useState<string | null>(null);
   const [syncingGroup, setSyncingGroup] = useState<string | null>(null);
+  // Group-level migration modals (2026-07-17): invite group admins + migrate group.
+  const [inviteAdminsGroup, setInviteAdminsGroup] = useState<{ id: string; name: string } | null>(null);
+  const [migrateGroup, setMigrateGroup] = useState<{ id: string; name: string } | null>(null);
 
   const me = data?.currentUserId ?? "";
   const operators = data?.operators ?? [];
@@ -548,6 +551,16 @@ export default function MigrationConsole() {
                 style={{ height: 28, padding: "0 12px", border: "1px solid #2e7d32", borderRadius: 6, background: "#fff", color: "#2e7d32", fontSize: 12, fontWeight: 600, cursor: syncingGroup ? "default" : "pointer", opacity: syncingGroup && syncingGroup !== groupId ? 0.5 : 1 }}>
                 {syncingGroup === groupId ? "Syncing…" : "Sync group"}
               </button>
+              <button type="button" onClick={() => setInviteAdminsGroup({ id: groupId, name: groupName ?? "Group" })}
+                title="Invite this group's admin(s) to set up their Platform 5.0 login"
+                style={{ height: 28, padding: "0 12px", border: "1px solid #7b1fa2", borderRadius: 6, background: "#fff", color: "#7b1fa2", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                Invite admins…
+              </button>
+              <button type="button" onClick={() => setMigrateGroup({ id: groupId, name: groupName ?? "Group" })}
+                title="Migrate every member dealer + take the group's da-billing customer Live (guarded checklist)"
+                style={{ height: 28, padding: "0 12px", border: "none", borderRadius: 6, background: NAVY, color: "#ffa500", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                Migrate group…
+              </button>
               <button type="button" onClick={() => void claimGroup(groupId, groupName)} disabled={busy}
                 title="Assign every dealer in this group to you (one owner per group)"
                 style={{ height: 28, padding: "0 12px", border: "1px solid #1976d2", borderRadius: 6, background: allMine ? "#e3f2fd" : "#fff", color: "#1976d2", fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}>
@@ -833,6 +846,278 @@ export default function MigrationConsole() {
           </div>
         );
       })()}
+
+      {inviteAdminsGroup && (
+        <InviteAdminsModal group={inviteAdminsGroup} onClose={() => setInviteAdminsGroup(null)} />
+      )}
+      {migrateGroup && (
+        <MigrateGroupModal
+          group={migrateGroup}
+          memberRows={(data?.rows ?? []).filter((r) => r.groupId === migrateGroup.id)}
+          onClose={() => setMigrateGroup(null)}
+          onMigrated={() => { setMigrateGroup(null); void load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Group-admin invite modal ─────────────────────────────────────────────────
+type AdminCandidate = { id: string; email: string; full_name: string | null; active: boolean; has_auth: boolean; last_sign_in: string | null };
+type AdminsResp = {
+  group: { id: string; name: string };
+  admins: AdminCandidate[];
+  pending: Array<{ email: string; first_name: string | null; last_name: string | null; created_at: string; expires_at: string }>;
+  suggested: { email: string; name: string | null; source: string } | null;
+  admin_active: boolean;
+};
+
+const modalOverlay: React.CSSProperties = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 };
+const modalBox: React.CSSProperties = { background: "#fff", borderRadius: 8, padding: 24, width: 520, maxHeight: "84vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", fontFamily: "'Roboto', sans-serif" };
+
+function adminStatusChip(a: AdminCandidate): React.ReactNode {
+  if (a.last_sign_in) return <span style={{ fontSize: 11, fontWeight: 700, color: "#2e7d32" }}>Active ✓ · signed in {new Date(a.last_sign_in).toLocaleDateString()}</span>;
+  if (a.has_auth) return <span style={{ fontSize: 11, fontWeight: 700, color: "#b06a00" }}>Has login · never signed in</span>;
+  return <span style={{ fontSize: 11, fontWeight: 700, color: "#c62828" }}>No 5.0 login</span>;
+}
+
+function InviteAdminsModal({ group, onClose }: { group: { id: string; name: string }; onClose: () => void }) {
+  const [info, setInfo] = useState<AdminsResp | null>(null);
+  const [loadErr, setLoadErr] = useState("");
+  const [checked, setChecked] = useState<Set<string>>(new Set()); // emails
+  const [manual, setManual] = useState({ first: "", last: "", email: "" });
+  const [sending, setSending] = useState(false);
+  const [results, setResults] = useState<Array<{ email: string; status: string; detail?: string }> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/migration/group-admins?group_id=${encodeURIComponent(group.id)}`);
+        const j = await res.json();
+        if (!cancelled) { if (res.ok) setInfo(j as AdminsResp); else setLoadErr(j.error ?? "Failed to load"); }
+      } catch { if (!cancelled) setLoadErr("Failed to load"); }
+    })();
+    return () => { cancelled = true; };
+  }, [group.id]);
+
+  function toggle(email: string) {
+    setChecked((prev) => { const n = new Set(prev); if (n.has(email)) n.delete(email); else n.add(email); return n; });
+  }
+
+  async function send() {
+    if (!info) return;
+    const invites: Array<{ first_name: string; last_name: string; email: string }> = [];
+    for (const email of Array.from(checked)) {
+      const a = info.admins.find((x) => x.email === email);
+      const sug = info.suggested?.email === email ? info.suggested : null;
+      const name = (a?.full_name ?? sug?.name ?? "").trim();
+      const [first, ...rest] = name.split(/\s+/);
+      invites.push({ first_name: first ?? "", last_name: rest.join(" "), email });
+    }
+    if (manual.email.trim()) invites.push({ first_name: manual.first.trim(), last_name: manual.last.trim(), email: manual.email.trim().toLowerCase() });
+    if (invites.length === 0) return;
+    setSending(true);
+    try {
+      const res = await fetch("/api/migration/group-admins", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_id: group.id, invites }),
+      });
+      const j = await res.json();
+      if (!res.ok) { alert(j.error ?? "Invite failed"); return; }
+      setResults(j.results ?? []);
+    } catch { alert("Invite failed"); } finally { setSending(false); }
+  }
+
+  return (
+    <div style={modalOverlay} onClick={onClose}>
+      <div style={modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: NAVY, marginBottom: 4 }}>Invite admins — {group.name}</div>
+        <p style={{ fontSize: 12, color: "#78828c", margin: "0 0 14px" }}>
+          Sends the scanner-proof 5.0 setup invite (8-digit code). Migrating the group requires at least one admin to have signed in.
+        </p>
+        {loadErr && <div style={{ color: "#c62828", fontSize: 13 }}>{loadErr}</div>}
+        {!info && !loadErr && <div style={{ color: "#78828c", fontSize: 13 }}>Loading…</div>}
+        {info && !results && (
+          <>
+            {info.admins.length === 0 && !info.suggested && (
+              <div style={{ fontSize: 13, color: "#78828c", marginBottom: 10 }}>
+                No group_admin profiles on file for this group — add the admin below. (No live Aurora lookup here; the profiles ETL sync was retired, so legacy-only group users are added by email.)
+              </div>
+            )}
+            {info.admins.map((a) => (
+              <label key={a.email} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 4px", borderBottom: "1px solid #f0f0f0", cursor: a.has_auth ? "default" : "pointer" }}>
+                <input type="checkbox" disabled={a.has_auth} checked={checked.has(a.email)} onChange={() => toggle(a.email)} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#333" }}>{a.full_name || a.email}</span>
+                  <span style={{ display: "block", fontSize: 11, color: "#78828c" }}>{a.email}</span>
+                </span>
+                {adminStatusChip(a)}
+              </label>
+            ))}
+            {info.suggested && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 4px", borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}>
+                <input type="checkbox" checked={checked.has(info.suggested.email)} onChange={() => toggle(info.suggested!.email)} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#333" }}>{info.suggested.name || info.suggested.email}</span>
+                  <span style={{ display: "block", fontSize: 11, color: "#78828c" }}>{info.suggested.email} · {info.suggested.source}</span>
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#78828c" }}>Suggested</span>
+              </label>
+            )}
+            {info.pending.length > 0 && (
+              <div style={{ fontSize: 11, color: "#b06a00", margin: "8px 0 0" }}>
+                Pending: {info.pending.map((p) => `${p.email} (invited ${new Date(p.created_at).toLocaleDateString()})`).join(", ")}
+              </div>
+            )}
+            <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #e0e0e0" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#55595c", textTransform: "uppercase", marginBottom: 6 }}>Add someone else</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input placeholder="First" value={manual.first} onChange={(e) => setManual({ ...manual, first: e.target.value })} style={{ width: 90, padding: "6px 8px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13 }} />
+                <input placeholder="Last" value={manual.last} onChange={(e) => setManual({ ...manual, last: e.target.value })} style={{ width: 90, padding: "6px 8px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13 }} />
+                <input placeholder="email@dealer.com" value={manual.email} onChange={(e) => setManual({ ...manual, email: e.target.value })} style={{ flex: 1, padding: "6px 8px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13 }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
+              <button type="button" onClick={onClose} style={{ padding: "8px 16px", border: "1px solid #cccccc", borderRadius: 6, background: "#fff", fontSize: 13, cursor: "pointer" }}>Cancel</button>
+              <button type="button" onClick={() => void send()} disabled={sending || (checked.size === 0 && !manual.email.trim())}
+                style={{ padding: "8px 16px", border: "none", borderRadius: 6, background: "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: sending || (checked.size === 0 && !manual.email.trim()) ? 0.5 : 1 }}>
+                {sending ? "Sending…" : "Send invites"}
+              </button>
+            </div>
+          </>
+        )}
+        {results && (
+          <>
+            {results.map((r) => (
+              <div key={r.email} style={{ fontSize: 13, padding: "6px 0", borderBottom: "1px solid #f0f0f0" }}>
+                <span style={{ fontWeight: 600 }}>{r.email}</span>{" — "}
+                <span style={{ color: r.status === "sent" ? "#2e7d32" : r.status === "skipped" ? "#b06a00" : "#c62828" }}>
+                  {r.status}{r.detail ? ` (${r.detail})` : ""}
+                </span>
+              </div>
+            ))}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <button type="button" onClick={onClose} style={{ padding: "8px 16px", border: "none", borderRadius: 6, background: "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Done</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Migrate-group modal ──────────────────────────────────────────────────────
+function MigrateGroupModal({ group, memberRows, onClose, onMigrated }: {
+  group: { id: string; name: string };
+  memberRows: Row[];
+  onClose: () => void;
+  onMigrated: () => void;
+}) {
+  const [adminInfo, setAdminInfo] = useState<AdminsResp | null>(null);
+  const [activateBilling, setActivateBilling] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{ migrated: string[]; skipped: Array<{ name: string; reason: string }>; billing: string; failed: Array<{ name: string; error: string }> } | null>(null);
+  const [runErr, setRunErr] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/migration/group-admins?group_id=${encodeURIComponent(group.id)}`);
+        const j = await res.json();
+        if (!cancelled && res.ok) setAdminInfo(j as AdminsResp);
+      } catch { /* checklist shows unknown */ }
+    })();
+    return () => { cancelled = true; };
+  }, [group.id]);
+
+  // Client mirror of the server gate: migrated OR synced+billing+template.
+  // Self-serve ELIGIBILITY is deliberately NOT required — group-managed
+  // dealers migrate through this path. The server re-checks everything.
+  const memberChecks = memberRows.map((r) => {
+    const missing: string[] = [];
+    if (r.inviteStatus !== "migrated") {
+      if (!r.synced) missing.push("not synced");
+      if (!r.billingStaged) missing.push("billing");
+      if (!r.templateConfirmed) missing.push("template");
+    }
+    return { name: r.name, migrated: r.inviteStatus === "migrated", missing };
+  });
+  const membersOk = memberChecks.every((m) => m.missing.length === 0);
+  const adminOk = adminInfo?.admin_active === true;
+  const canRun = membersOk && adminOk && !running;
+
+  async function run() {
+    setRunning(true);
+    setRunErr("");
+    try {
+      const res = await fetch("/api/migration/migrate-group", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_id: group.id, activate_billing: activateBilling }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        setRunErr(j.blockers ? `${j.error} ${j.blockers.map((b: { name: string; missing: string[] }) => `${b.name}: ${b.missing.join(", ")}`).join("; ")}` : (j.error ?? "Migration failed"));
+        return;
+      }
+      setResult(j);
+    } catch { setRunErr("Migration failed"); } finally { setRunning(false); }
+  }
+
+  return (
+    <div style={modalOverlay} onClick={result ? onMigrated : onClose}>
+      <div style={modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: NAVY, marginBottom: 4 }}>Migrate group — {group.name}</div>
+        {!result && (
+          <>
+            <p style={{ fontSize: 12, color: "#78828c", margin: "0 0 14px" }}>
+              This migrates every ready member dealer to 5.0 (account → Paid, ETL stops for them), optionally takes the
+              group&apos;s da-billing customer <strong>Live</strong>, and queues the manual FreshBooks recurring-stop.
+              Rollback is per-dealer via the existing rollback flow.
+            </p>
+            <div style={{ fontSize: 13, marginBottom: 4, fontWeight: 700, color: "#55595c" }}>Checklist</div>
+            <div style={{ fontSize: 13, padding: "5px 0", borderBottom: "1px solid #f0f0f0" }}>
+              {adminInfo == null ? "… checking group admin logins" : adminOk
+                ? <span style={{ color: "#2e7d32" }}>✓ A group admin has an active 5.0 login</span>
+                : <span style={{ color: "#c62828" }}>✗ No group admin has signed in to 5.0 yet — use “Invite admins…” first, then wait for their first sign-in</span>}
+            </div>
+            {memberChecks.map((m) => (
+              <div key={m.name} style={{ fontSize: 13, padding: "5px 0", borderBottom: "1px solid #f0f0f0" }}>
+                {m.migrated
+                  ? <span style={{ color: "#78828c" }}>— {m.name} (already migrated)</span>
+                  : m.missing.length === 0
+                    ? <span style={{ color: "#2e7d32" }}>✓ {m.name} — ready</span>
+                    : <span style={{ color: "#c62828" }}>✗ {m.name} — {m.missing.join(", ")}</span>}
+              </div>
+            ))}
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, fontSize: 13, cursor: "pointer" }}>
+              <input type="checkbox" checked={activateBilling} onChange={(e) => setActivateBilling(e.target.checked)} />
+              <span>Activate group billing now (da-billing customer goes <strong>Live</strong>; next invoice date stays in the future — nothing is charged today)</span>
+            </label>
+            {runErr && <div style={{ color: "#c62828", fontSize: 12, marginTop: 10 }}>{runErr}</div>}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
+              <button type="button" onClick={onClose} style={{ padding: "8px 16px", border: "1px solid #cccccc", borderRadius: 6, background: "#fff", fontSize: 13, cursor: "pointer" }}>Cancel</button>
+              <button type="button" onClick={() => void run()} disabled={!canRun}
+                style={{ padding: "8px 16px", border: "none", borderRadius: 6, background: NAVY, color: "#ffa500", fontSize: 13, fontWeight: 700, cursor: canRun ? "pointer" : "default", opacity: canRun ? 1 : 0.5 }}>
+                {running ? "Migrating…" : "Migrate group"}
+              </button>
+            </div>
+          </>
+        )}
+        {result && (
+          <>
+            <div style={{ fontSize: 13, color: "#2e7d32", fontWeight: 600, margin: "8px 0" }}>✓ Migrated {result.migrated.length} dealer{result.migrated.length === 1 ? "" : "s"}: {result.migrated.join(", ")}</div>
+            {result.skipped.length > 0 && <div style={{ fontSize: 12, color: "#78828c" }}>Skipped: {result.skipped.map((s) => `${s.name} (${s.reason})`).join(", ")}</div>}
+            {result.failed.length > 0 && <div style={{ fontSize: 12, color: "#c62828" }}>Failed: {result.failed.map((f) => `${f.name} (${f.error})`).join(", ")}</div>}
+            <div style={{ fontSize: 12, color: "#55595c", marginTop: 6 }}>Billing: {result.billing}</div>
+            <div style={{ fontSize: 12, color: "#b06a00", marginTop: 6 }}>⚠ FreshBooks recurring-stop is queued as a manual operator task (FB stop pending).</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <button type="button" onClick={onMigrated} style={{ padding: "8px 16px", border: "none", borderRadius: 6, background: "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Done</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -46,6 +46,6 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     currentUserId: claims.sub,
     flagsColumnPresent,
     billingTemplatesLoaded,
-    note: "Ready = synced + billing-template-staged + template-confirmed + eligible (HARD gates). Synced = the dealer's Platform 4.0 data (products, logo, settings) was pulled via the Sync action — the nightly ETL no longer refreshes config, so sync before inviting. Settings/logo/inventory are WARNINGS only. Eligible excludes white-glove groups, flagged-complex, and dealers with no self-serve contact (operator/group-managed).",
+    note: "Ready = synced + billing-template-staged + template-confirmed + eligible (HARD gates). Synced = the dealer's Platform 4.0 data (products, logo, settings) was pulled via the Sync action — the nightly ETL no longer refreshes config, so sync before inviting. Settings/logo/inventory are WARNINGS only. Eligible excludes white-glove groups, flagged-complex, and dealers with no self-serve contact (operator/group-managed). GROUP flow: Sync group → verify billing + templates → Invite admins… → (admin signs in) → Migrate group… → manual FreshBooks stop. Group migration does NOT require self-serve eligibility — group-managed dealers migrate via Migrate group.",
   });
 }
