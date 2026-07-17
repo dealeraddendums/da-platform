@@ -73,6 +73,42 @@ function CssEditor({
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState("");
   const [genNote, setGenNote] = useState("");
+  // "Match from URL": reads exact computed styles from the dealer's live page
+  // (da-pdf-service Puppeteer) — precise where the screenshot generator guesses.
+  const [matchOpen, setMatchOpen] = useState(false);
+  const [matchUrl, setMatchUrl] = useState("");
+  const [matchText, setMatchText] = useState("");
+  const [matching, setMatching] = useState(false);
+
+  async function onMatchFromUrl() {
+    if (!matchUrl.trim() || !matchText.trim() || matching) return;
+    setMatching(true);
+    setGenError("");
+    setGenNote("");
+    try {
+      const res = await fetch(`/api/settings/website-integrations/match-from-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: matchUrl.trim(),
+          buttonText: matchText.trim(),
+          targetClass: target === "icon" ? ".dealer-addendums__button__icon-button" : ".dealer-addendums__button__download-button",
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.css) {
+        setButtonCss(json.css);
+        setGenNote(`Matched the "${json.matched?.text ?? matchText.trim()}" button on your page — review and save.`);
+        setMatchOpen(false);
+      } else {
+        setGenError(json.error || "We couldn't read that page. Try the screenshot method instead.");
+      }
+    } catch {
+      setGenError("We couldn't read that page. Try the screenshot method instead.");
+    } finally {
+      setMatching(false);
+    }
+  }
 
   async function onScreenshotSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -103,18 +139,61 @@ function CssEditor({
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 18, marginBottom: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 18, marginBottom: 4, flexWrap: "wrap" }}>
         <label style={{ ...labelStyle, marginTop: 0, marginBottom: 0 }}>Button Style (Custom CSS)</label>
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={generating}
-          style={{ background: "#fff", color: "#1976d2", border: "1px solid #1976d2", borderRadius: 4, padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: generating ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
-        >
-          {generating ? "Analyzing your website…" : "✨ Generate from screenshot"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => { setMatchOpen((v) => !v); setGenError(""); setGenNote(""); }}
+            disabled={matching}
+            style={{ background: matchOpen ? "#eef4fb" : "#fff", color: "#1976d2", border: "1px solid #1976d2", borderRadius: 4, padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+          >
+            🔗 Match a button on your site
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={generating}
+            style={{ background: "#fff", color: "#1976d2", border: "1px solid #1976d2", borderRadius: 4, padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: generating ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+          >
+            {generating ? "Analyzing your website…" : "✨ Generate from screenshot"}
+          </button>
+        </div>
         <input ref={fileInputRef} type="file" accept="image/*" onChange={onScreenshotSelected} style={{ display: "none" }} />
       </div>
+      {matchOpen && (
+        <div style={{ border: "1px solid #e0e0e0", borderRadius: 4, padding: 12, marginBottom: 8, background: "#fafbfc" }}>
+          <input
+            type="url"
+            value={matchUrl}
+            onChange={(e) => setMatchUrl(e.target.value)}
+            placeholder="Page URL (a vehicle page on your website)"
+            style={{ ...inputStyle, fontSize: 13, marginBottom: 8 }}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text"
+              value={matchText}
+              onChange={(e) => setMatchText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") onMatchFromUrl(); }}
+              placeholder='Text of the button to match (e.g. "Window Sticker")'
+              maxLength={120}
+              style={{ ...inputStyle, fontSize: 13, flex: 1 }}
+            />
+            <button
+              type="button"
+              onClick={onMatchFromUrl}
+              disabled={matching || !matchUrl.trim() || !matchText.trim()}
+              style={{ background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: matching ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+            >
+              {matching ? "Reading your page…" : "Match"}
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: "#78828c", marginTop: 6 }}>
+            We&apos;ll read the exact styles from your live page.
+          </div>
+        </div>
+      )}
       <textarea
         value={buttonCss}
         onChange={(e) => setButtonCss(e.target.value)}
