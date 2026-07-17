@@ -27,6 +27,8 @@ interface Row {
   freshbooksStopPending: boolean;
   assignedTo: string | null;
   migrationStatus: string | null;
+  synced: boolean;
+  lastSyncedAt: string | null;
 }
 interface Wave { waveId: string; sentAt: string | null; sent: number; migrated: number; pending: number; }
 interface Operator { id: string; name: string; }
@@ -95,6 +97,7 @@ export default function MigrationConsole() {
   const [assigning, setAssigning] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [claimingGroup, setClaimingGroup] = useState<string | null>(null);
+  const [syncingGroup, setSyncingGroup] = useState<string | null>(null);
 
   const me = data?.currentUserId ?? "";
   const operators = data?.operators ?? [];
@@ -167,17 +170,59 @@ export default function MigrationConsole() {
   }
 
   // Stage a dealer for an upcoming wave → migration_status='pending', which
-  // FREEZES the DA Legacy ETL for that dealer (it stops overwriting their
-  // settings before migration). Reflected optimistically; full reload after.
-  async function stageDealer(row: Row) {
-    if (!confirm(`Stage ${row.name} for migration? This freezes the ETL for this dealer (it stops overwriting their settings) until they're migrated.`)) return;
+  // Manual Aurora → 5.0 sync (replaces "stage", 2026-07-17). First sync pulls
+  // the dealer's current 4.0 data (products, logo, settings, dealer record)
+  // into 5.0; a RE-sync overwrites any 5.0 hand-config with 4.0 again, so it
+  // gets a scarier confirm. Reflected optimistically; full reload catches up.
+  async function syncDealer(row: Row): Promise<boolean> {
+    if (row.lastSyncedAt) {
+      if (!confirm(`Re-sync ${row.name}? This overwrites their V5.0 logo, products, and settings with current Platform 4.0 data.`)) return false;
+    } else {
+      if (!confirm(`Sync ${row.name}? This pulls their current Platform 4.0 data (products, logo, settings) into 5.0. Nothing will overwrite them afterwards.`)) return false;
+    }
+    return syncDealerNoConfirm(row);
+  }
+
+  async function syncDealerNoConfirm(row: Row): Promise<boolean> {
     setStagingId(row.id);
     try {
-      const res = await fetch("/api/migration/stage-dealer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealer_id: row.id }) });
-      const j = await res.json();
-      if (!res.ok) { alert(j.error ?? "Stage failed"); return; }
-      setData((d) => d && { ...d, rows: d.rows.map((r) => r.id === row.id ? { ...r, migrationStatus: "pending" } : r) });
-    } catch { alert("Stage failed"); } finally { setStagingId(null); }
+      const res = await fetch("/api/migration/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealer_ids: [row.id] }) });
+      const j = await res.json() as { error?: string; synced_at?: string; dealers?: Array<{ status: string; reason?: string }> };
+      if (!res.ok) { alert(j.error ?? "Sync failed"); return false; }
+      const d0 = j.dealers?.[0];
+      if (d0 && d0.status !== "synced") { alert(`${row.name}: ${d0.reason ?? d0.status}`); return false; }
+      setData((d) => d && {
+        ...d,
+        rows: d.rows.map((r) => r.id === row.id
+          ? {
+              ...r,
+              migrationStatus: r.migrationStatus === null || r.migrationStatus === "legacy" ? "pending" : r.migrationStatus,
+              lastSyncedAt: j.synced_at ?? new Date().toISOString(),
+              synced: true,
+              ready: r.billingStaged && r.templateConfirmed && r.eligible,
+            }
+          : r),
+      });
+      return true;
+    } catch { alert("Sync failed"); return false; } finally { setStagingId(null); }
+  }
+
+  // Sync every non-migrated dealer in a group, sequentially (the ETL box
+  // mutexes concurrent syncs; one at a time also gives per-row progress).
+  async function syncGroup(groupId: string, groupName: string | null) {
+    const members = (data?.rows ?? []).filter((r) => r.groupId === groupId && r.inviteStatus !== "migrated");
+    if (members.length === 0) return;
+    const resynced = members.filter((m) => m.lastSyncedAt).length;
+    const warn = resynced > 0 ? ` ${resynced} of them were already synced — their V5.0 logo, products, and settings will be overwritten with current 4.0 data.` : "";
+    if (!confirm(`Sync all ${members.length} dealer${members.length === 1 ? "" : "s"} in ${groupName ?? "this group"} from Platform 4.0?${warn}`)) return;
+    setSyncingGroup(groupId);
+    try {
+      for (const m of members) {
+        const ok = await syncDealerNoConfirm(m);
+        if (!ok) break; // the failed dealer already alerted; stop the run
+      }
+      await load();
+    } finally { setSyncingGroup(null); }
   }
 
   async function markFbStopped(row: Row, stopped: boolean) {
@@ -260,7 +305,7 @@ export default function MigrationConsole() {
       setData((d) => d && {
         ...d,
         rows: d.rows.map((r) => r.id === row.id
-          ? { ...r, templateConfirmed: next, ready: r.billingStaged && next && r.eligible }
+          ? { ...r, templateConfirmed: next, ready: r.synced && r.billingStaged && next && r.eligible }
           : r),
       });
     } catch (e) {
@@ -285,7 +330,7 @@ export default function MigrationConsole() {
     let rows = data?.rows ?? [];
     if (readyOnly) rows = rows.filter((r) => r.ready);
     if (fbPending) rows = rows.filter((r) => r.freshbooksStopPending);
-    if (stagedOnly) rows = rows.filter((r) => r.migrationStatus === "pending");
+    if (stagedOnly) rows = rows.filter((r) => r.synced);
     // FB stop pending is a global cleanup queue, not per-operator work — when
     // it's checked, ignore the assignment filter (which defaults to "Me" and
     // would hide unassigned migrated dealers).
@@ -351,7 +396,7 @@ export default function MigrationConsole() {
       stalled: rows.filter((r) => r.inviteStatus === "stalled" || r.inviteStatus === "expired").length,
       migrated: rows.filter((r) => r.inviteStatus === "migrated").length,
       fbPending: rows.filter((r) => r.freshbooksStopPending).length,
-      staged: rows.filter((r) => r.migrationStatus === "pending").length,
+      staged: rows.filter((r) => r.synced).length,
       unassigned: rows.filter((r) => r.eligible && !r.assignedTo).length,
     };
   }, [data]);
@@ -438,17 +483,21 @@ export default function MigrationConsole() {
               {resendingId === r.id ? "…" : "resend"}
             </button>
           )}
-          {r.migrationStatus === "pending" && (
-            <span title="Staged for a wave — DA Legacy ETL is frozen for this dealer (settings no longer overwritten)"
-              style={{ background: "#fff3e0", color: "#e65100", border: "1px solid #ffe0b2", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" }}>
-              ⏸ Pending · ETL frozen
+          {r.synced && (
+            <span title={r.lastSyncedAt
+              ? `Synced from Platform 4.0 on ${new Date(r.lastSyncedAt).toLocaleDateString()} — products, logo, and settings pulled; nothing overwrites them now`
+              : "Prepared before the sync model (staged) — counts as synced"}
+              style={{ background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" }}>
+              ✓ Synced{r.lastSyncedAt ? ` ${new Date(r.lastSyncedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
             </span>
           )}
-          {r.migrationStatus !== "pending" && r.inviteStatus !== "migrated" && (
-            <button type="button" onClick={() => void stageDealer(r)} disabled={stagingId === r.id}
-              title="Stage for migration — freezes the ETL so it stops overwriting this dealer's settings"
-              style={{ fontSize: 11, color: "#e65100", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
-              {stagingId === r.id ? "…" : "stage"}
+          {r.inviteStatus !== "migrated" && (
+            <button type="button" onClick={() => void syncDealer(r)} disabled={stagingId === r.id || syncingGroup !== null}
+              title={r.lastSyncedAt
+                ? "Re-sync — overwrites this dealer's V5.0 logo, products, and settings with current Platform 4.0 data"
+                : "Sync — pulls this dealer's current Platform 4.0 data (products, logo, settings) into 5.0"}
+              style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+              {stagingId === r.id ? "syncing…" : r.lastSyncedAt ? "re-sync" : "sync"}
             </button>
           )}
         </div>
@@ -494,6 +543,11 @@ export default function MigrationConsole() {
               {allMine ? "owned by you" : `owner: ${ownerParts.join(", ")}`}
             </span>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+              <button type="button" onClick={() => void syncGroup(groupId, groupName)} disabled={busy || syncingGroup !== null}
+                title="Pull every member dealer's current Platform 4.0 data (products, logo, settings) into 5.0"
+                style={{ height: 28, padding: "0 12px", border: "1px solid #2e7d32", borderRadius: 6, background: "#fff", color: "#2e7d32", fontSize: 12, fontWeight: 600, cursor: syncingGroup ? "default" : "pointer", opacity: syncingGroup && syncingGroup !== groupId ? 0.5 : 1 }}>
+                {syncingGroup === groupId ? "Syncing…" : "Sync group"}
+              </button>
               <button type="button" onClick={() => void claimGroup(groupId, groupName)} disabled={busy}
                 title="Assign every dealer in this group to you (one owner per group)"
                 style={{ height: 28, padding: "0 12px", border: "1px solid #1976d2", borderRadius: 6, background: allMine ? "#e3f2fd" : "#fff", color: "#1976d2", fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}>
@@ -614,8 +668,8 @@ export default function MigrationConsole() {
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }} title="Migrated dealers whose FreshBooks recurring still needs stopping — shows ALL of them (ignores the Assigned-to filter)">
           <input type="checkbox" checked={fbPending} onChange={(e) => setFbPending(e.target.checked)} /> FB stop pending
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }} title="Dealers staged for a wave (migration_status=pending) — ETL is frozen for them">
-          <input type="checkbox" checked={stagedOnly} onChange={(e) => setStagedOnly(e.target.checked)} /> Staged{live.staged ? ` (${live.staged})` : ""}
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#333", cursor: "pointer" }} title="Dealers whose Platform 4.0 data has been pulled into 5.0 via Sync (or staged before the sync model)">
+          <input type="checkbox" checked={stagedOnly} onChange={(e) => setStagedOnly(e.target.checked)} /> Synced{live.staged ? ` (${live.staged})` : ""}
         </label>
         <button
           type="button"

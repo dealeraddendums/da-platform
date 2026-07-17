@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
-import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
+import { createAdminSupabaseClient } from "@/lib/db";
 import { loadReadinessRows } from "@/lib/migration-readiness-data";
 
 export const dynamic = "force-dynamic";
@@ -54,34 +54,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const ids = (data ?? []).map((d: { id: string }) => d.id);
 
-  // Claiming implies staging: freeze the ETL (migration_status='pending') for
-  // the claimed dealers so operator hand-config isn't overwritten by the
-  // nightly sync. Only NULL/'legacy' dealers are staged — dealers already in
-  // the pipeline (pending/invited/migrating/migrated/opted_out) are untouched.
-  let staged = 0;
-  if (ids.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: stagedRows, error: stageErr } = await (admin as any)
-      .from("dealers")
-      .update({ migration_status: "pending" })
-      .in("id", ids)
-      .or("migration_status.is.null,migration_status.eq.legacy")
-      .select("id");
-    if (stageErr) {
-      console.error("[migration/claim-next] stage-on-claim failed:", stageErr.message);
-    } else {
-      staged = (stagedRows ?? []).length;
-      for (const r of (stagedRows ?? []) as { id: string }[]) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        fireWrite((admin as any).from("migration_log").insert({
-          dealer_id: r.id,
-          event: "staged_for_migration",
-          performed_by: claims.sub,
-          notes: "auto-staged on claim/assign (ETL frozen)",
-        }), "migration_log staged_for_migration");
-      }
-    }
-  }
-
-  return NextResponse.json({ ok: true, claimed: ids.length, requested: count, ids, staged });
+  // NOTE (2026-07-17): claim no longer auto-stages. The nightly ETL is reduced
+  // to discover-and-count (nothing overwrites claimed dealers anymore), and
+  // 'pending' is set by the Sync action, which is what Ready now requires.
+  return NextResponse.json({ ok: true, claimed: ids.length, requested: count, ids });
 }

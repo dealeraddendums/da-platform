@@ -45,6 +45,8 @@ export interface ReadinessDealer {
   logo_url: string | null;
   primary_contact_email: string | null;
   invited_at: string | null;
+  /** Manual Aurora sync stamp (migration 130) — set by POST /api/migration/sync. */
+  last_synced_at?: string | null;
   // core ETL fields used by the etl-complete check
   address: string | null;
   city: string | null;
@@ -74,7 +76,13 @@ export interface ReadinessRow {
   templateConfirmed: boolean;
   eligible: boolean;
   eligibleReason: string;      // why not eligible (white-glove group / complex / migrated / test)
-  ready: boolean;              // billingStaged && templateConfirmed && eligible
+  /** Fourth hard gate (2026-07-17): the dealer's 4.0 data has been pulled via
+   *  the manual Sync action (last_synced_at set), or the dealer was staged
+   *  ('pending') before the sync model — both mean "prepared, nothing will
+   *  overwrite them". The nightly ETL no longer refreshes config, so an
+   *  unsynced dealer may carry stale settings/products — sync before invite. */
+  synced: boolean;
+  ready: boolean;              // synced && billingStaged && templateConfirmed && eligible
   // ── WARNINGS (informational only — never block `ready`) ──────────────────
   settingsMissing: boolean;    // no dealer_settings row (migration creates one — Step 5)
   logoMissing: boolean;        // no logo_url (optional / addable later)
@@ -89,8 +97,10 @@ export interface ReadinessRow {
   freshbooksStopPending: boolean; // migrated but FreshBooks recurring not yet stopped
   // ── operator assignment (who owns this dealer's migration) ──────────────────
   assignedTo: string | null;
-  // ── staging: raw dealers.migration_status ('pending' = ETL frozen, queued) ──
+  // ── staging: raw dealers.migration_status ('pending' = synced/prepared) ─────
   migrationStatus: string | null;
+  /** When the manual Sync last ran for this dealer (migration 130). */
+  lastSyncedAt: string | null;
 }
 
 export type InviteStatus = "not-invited" | "invited" | "stalled" | "expired" | "migrated";
@@ -203,20 +213,28 @@ export function computeReadiness(
   else if (d.migration_complex) { eligible = false; eligibleReason = 'flagged complex'; }
   else if (!hasSelfServeContact) { eligible = false; eligibleReason = 'no self-serve contact (operator/group-managed)'; }
 
-  // ── Ready = the THREE hard gates only (warnings excluded) ──────────────────
+  // ── Ready = the FOUR hard gates only (warnings excluded) ───────────────────
+  // synced: manual Sync ran (last_synced_at) OR the dealer reached 'pending'/
+  // beyond before the sync model (staged, invited, migrating) — those were
+  // prepared under the old flow and must not lose readiness retroactively.
   const templateConfirmed = !!d.template_confirmed;
-  const ready = billingStaged && templateConfirmed && eligible;
+  const synced = !!d.last_synced_at
+    || d.migration_status === 'pending'
+    || d.migration_status === 'invited'
+    || d.migration_status === 'migrating';
+  const ready = synced && billingStaged && templateConfirmed && eligible;
 
   const inviteStatus = computeInviteStatus(d.migration_status, d.invited_at, ctx.invitation ?? null, ctx.now);
 
   return {
     id: d.id, dealer_id: d.dealer_id, name: d.name, groupId: d.group_id ?? null, groupName: ctx.groupName, state: d.state,
-    billingStaged, billingReason, billingApplicable, templateConfirmed, eligible, eligibleReason, ready,
+    billingStaged, billingReason, billingApplicable, templateConfirmed, eligible, eligibleReason, synced, ready,
     settingsMissing, logoMissing, zeroInventory, warnings,
     inviteStatus, invitedAt: d.invited_at ?? null, waveId: ctx.invitation?.wave_id ?? null,
     freshbooksStoppedAt: ctx.freshbooksStoppedAt ?? null,
     freshbooksStopPending: inviteStatus === "migrated" && !ctx.freshbooksStoppedAt,
     assignedTo: ctx.assignedTo ?? null,
     migrationStatus: d.migration_status ?? null,
+    lastSyncedAt: d.last_synced_at ?? null,
   };
 }
