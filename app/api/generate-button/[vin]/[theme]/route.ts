@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 import { checkPdfExists } from "@/lib/addendum";
 import {
   PLATFORM_BUTTON_CSS,
+  sanitizeButtonCss,
   publicSupabase,
   resolveWidgetVehicle,
   getIntegration,
@@ -42,7 +43,8 @@ export async function GET(
     if (integration && !integration.enabled) return empty200();
     // Account value wins over a caller-supplied ?text= override.
     if (integration?.button_label) buttonLabel = integration.button_label;
-    if (integration?.button_css) buttonCss = integration.button_css;
+    // Sanitized — served cross-origin to dealer websites.
+    if (integration?.button_css) buttonCss = sanitizeButtonCss(integration.button_css);
   }
 
   return html200(

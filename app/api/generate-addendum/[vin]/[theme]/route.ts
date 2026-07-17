@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 import { checkPdfExists } from "@/lib/addendum";
 import {
   PLATFORM_BUTTON_CSS,
+  sanitizeButtonCss,
   publicSupabase,
   resolveWidgetVehicle,
   getIntegration,
@@ -53,7 +54,10 @@ export async function GET(
   // Account value wins: the dealer's saved button_label takes precedence over a
   // caller-supplied ?text= override, so DDC needs no per-dealer customization.
   const buttonLabel = integration?.button_label || textOverride || "Download Addendum";
-  const buttonCss = integration?.button_css || PLATFORM_BUTTON_CSS;
+  // Dealer CSS is sanitized: this <style> block is served cross-origin to
+  // dealer websites, so tag-breakouts/@import/expression()/non-https url()
+  // are stripped before injection.
+  const buttonCss = integration?.button_css ? sanitizeButtonCss(integration.button_css) : PLATFORM_BUTTON_CSS;
 
   // 3. Pricing block (feature=pricing|both, when data exists).
   let pricingHtml = "";

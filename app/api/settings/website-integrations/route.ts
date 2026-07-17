@@ -9,7 +9,11 @@ import { resolveDealerForRequest } from "@/lib/dealer-authz";
 // is blocked. The table isn't in the generated Database types, so the client is
 // cast to any for these queries (same pattern as starter_templates).
 
-const PROVIDER = "dealer_com";
+// 'dealer_com' = the Dealer.com card; 'api' = the Generate Button API card
+// (dealers embedding api.dealeraddendums.com/generate-addendum|button links
+// directly). The public widget routes prefer the 'api' row when present.
+const PROVIDERS = ["dealer_com", "api"] as const;
+const PROVIDER = "dealer_com"; // default (back-compat)
 const FEATURES = ["button", "pricing", "both"] as const;
 type Feature = (typeof FEATURES)[number];
 
@@ -23,18 +27,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!resolved.ok) return resolved.response;
   const { dealerId } = resolved;
 
+  const provider = (req.nextUrl.searchParams.get("provider") || PROVIDER).trim();
+  if (!(PROVIDERS as readonly string[]).includes(provider)) {
+    return NextResponse.json({ error: `Unsupported provider "${provider}"` }, { status: 400 });
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminSupabaseClient() as any;
   const { data } = await admin
     .from("dealer_website_integrations")
     .select("provider, button_label, button_css, enabled, feature, updated_at")
     .eq("dealer_id", dealerId)
-    .eq("provider", PROVIDER)
+    .eq("provider", provider)
     .maybeSingle();
 
   // Defaults when the dealer hasn't configured it yet.
   return NextResponse.json({
-    data: data ?? { provider: PROVIDER, button_label: "Download Addendum", button_css: null, enabled: true, feature: "both", updated_at: null },
+    data: data ?? { provider, button_label: "Download Addendum", button_css: null, enabled: true, feature: provider === "api" ? "button" : "both", updated_at: null },
   });
 }
 
@@ -56,7 +65,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   }
 
   const provider = (body.provider || PROVIDER).trim();
-  if (provider !== PROVIDER) {
+  if (!(PROVIDERS as readonly string[]).includes(provider)) {
     return NextResponse.json({ error: `Unsupported provider "${provider}"` }, { status: 400 });
   }
 
@@ -73,6 +82,9 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     ...("button_css" in body && { button_css: body.button_css && body.button_css.trim() ? body.button_css : null }),
     ...(body.enabled !== undefined && { enabled: !!body.enabled }),
     ...(body.feature !== undefined && { feature: body.feature }),
+    // The API card has no Enabled toggle or feature picker — usage is opt-in
+    // by embedding the link. Pin sane values on its row.
+    ...(provider === "api" && { enabled: true, feature: "button" }),
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

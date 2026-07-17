@@ -110,15 +110,37 @@ export async function getVehicleOptions(sb: SupabaseClient, vehicleId: string): 
   return (data as WidgetOption[]) ?? [];
 }
 
-/** Fetch a dealer's dealer_com integration config (label/css/enabled), or null. */
+/** Fetch a dealer's widget integration config (label/css/enabled), or null.
+ *  Two provider rows can exist: 'api' (Generate Button API card — direct
+ *  embedders) and 'dealer_com'. The 'api' row wins when present; 'dealer_com'
+ *  is the fallback so pre-existing Dealer.com customizations keep applying to
+ *  the same public routes (DDC's canonical call is /generate-addendum/…). */
 export async function getIntegration(sb: SupabaseClient, dealerId: string): Promise<WidgetIntegration | null> {
   const { data } = await sb
     .from("dealer_website_integrations")
-    .select("button_label, button_css, enabled")
+    .select("provider, button_label, button_css, enabled")
     .eq("dealer_id", dealerId)
-    .eq("provider", "dealer_com")
-    .maybeSingle();
-  return (data as WidgetIntegration) ?? null;
+    .in("provider", ["api", "dealer_com"]);
+  const rows = (data ?? []) as (WidgetIntegration & { provider: string })[];
+  return rows.find((r) => r.provider === "api") ?? rows.find((r) => r.provider === "dealer_com") ?? null;
+}
+
+/** Sanitize dealer-supplied button CSS before injecting it into a <style>
+ *  block served cross-origin to dealer websites. CSS has no legitimate use
+ *  for '<', so all tag-opens are stripped (kills </style> breakouts and
+ *  <script> injection), along with @import, IE expression(), javascript:
+ *  URLs, and any url() that isn't plain https. */
+export function sanitizeButtonCss(css: string | null | undefined): string {
+  if (!css) return "";
+  return String(css)
+    .replace(/</g, "")
+    .replace(/@import\b/gi, "")
+    .replace(/expression\s*\(/gi, "")
+    .replace(/javascript\s*:/gi, "")
+    .replace(/url\s*\(([^)]*)\)/gi, (match, inner: string) => {
+      const v = inner.trim().replace(/^['"]|['"]$/g, "");
+      return /^https:\/\//i.test(v) ? match : "";
+    });
 }
 
 export function escapeHtml(s: string): string {

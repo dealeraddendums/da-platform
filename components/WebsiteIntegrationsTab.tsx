@@ -229,6 +229,146 @@ export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: s
           {saveStatus === "error" && <span style={{ fontSize: 13, color: "#c62828" }}>Save failed — please try again.</span>}
         </div>
       </div>
+
+      <ApiButtonCard qs={qs} />
+    </div>
+  );
+}
+
+// ── Generate Button API card ─────────────────────────────────────────────────
+// For dealers embedding the direct API link on their own website, e.g.
+//   https://api.dealeraddendums.com/generate-addendum/{VIN}/default?feature=button
+// Stores a dealer_website_integrations row with provider='api' (no Enabled
+// toggle — usage is opt-in by embedding the link). The public widget routes
+// prefer this row over the Dealer.com one when both exist.
+function ApiButtonCard({ qs }: { qs: string }) {
+  const sep = qs ? "&" : "?";
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
+  const [buttonLabel, setButtonLabel] = useState("Download Addendum");
+  const [buttonCss, setButtonCss] = useState("");
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState("");
+  const [genNote, setGenNote] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/settings/website-integrations${qs}${sep}provider=api`);
+        const json = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok && json.data) {
+          setButtonLabel(json.data.button_label || "Download Addendum");
+          setButtonCss(json.data.button_css || "");
+        }
+      } catch {
+        /* keep defaults */
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [qs, sep]);
+
+  async function save() {
+    setSaving(true);
+    setSaveStatus("idle");
+    try {
+      const res = await fetch(`/api/settings/website-integrations${qs}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "api", button_label: buttonLabel, button_css: buttonCss }),
+      });
+      setSaveStatus(res.ok ? "saved" : "error");
+    } catch {
+      setSaveStatus("error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onScreenshotSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setGenerating(true);
+    setGenError("");
+    setGenNote("");
+    try {
+      const form = new FormData();
+      form.append("screenshot", file);
+      const res = await fetch(`/api/settings/website-integrations/generate-css`, { method: "POST", body: form });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.css) {
+        setButtonCss(json.css);
+        setGenNote("CSS generated — review and save.");
+      } else {
+        setGenError(json.error || "Could not generate CSS from this image");
+      }
+    } catch {
+      setGenError("Could not generate CSS from this image");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  if (loading) return null;
+
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: "20px 24px", fontFamily: "Roboto, sans-serif", marginTop: 16 }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: "#2a2b3c", marginBottom: 4 }}>Generate Button API</div>
+      <div style={{ fontSize: 13, color: "#55595c", lineHeight: 1.6, marginBottom: 4 }}>
+        Style the Download Addendum button served by the DealerAddendums API (api.dealeraddendums.com) when embedded
+        directly on your website.
+      </div>
+
+      <label style={labelStyle}>Button Label</label>
+      <input value={buttonLabel} onChange={(e) => setButtonLabel(e.target.value)} placeholder="Download Addendum" style={inputStyle} />
+      <div style={{ fontSize: 11, color: "#78828c", marginTop: 4 }}>
+        Text shown on the button. This wins over a <code>?text=</code> value in the embed link.
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 18, marginBottom: 4 }}>
+        <label style={{ ...labelStyle, marginTop: 0, marginBottom: 0 }}>Button Style (Custom CSS)</label>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={generating}
+          style={{ background: "#fff", color: "#1976d2", border: "1px solid #1976d2", borderRadius: 4, padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: generating ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+        >
+          {generating ? "Analyzing your website…" : "✨ Generate from screenshot"}
+        </button>
+        <input ref={fileInputRef} type="file" accept="image/*" onChange={onScreenshotSelected} style={{ display: "none" }} />
+      </div>
+      <textarea
+        value={buttonCss}
+        onChange={(e) => setButtonCss(e.target.value)}
+        placeholder={CSS_PLACEHOLDER}
+        rows={6}
+        spellCheck={false}
+        style={{ ...inputStyle, fontFamily: "monospace", fontSize: 12, lineHeight: 1.5, resize: "vertical" }}
+      />
+      <div style={{ fontSize: 11, color: "#78828c", marginTop: 4 }}>
+        Paste CSS to style the button to match your website. Leave blank for the default style. Changes may take up to
+        5 minutes to appear on your website.
+      </div>
+      {genNote && <div style={{ fontSize: 12, color: "#15803D", marginTop: 6 }}>✓ {genNote}</div>}
+      {genError && <div style={{ fontSize: 12, color: "#c62828", marginTop: 6 }}>{genError}</div>}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 24 }}>
+        <button
+          onClick={save}
+          disabled={saving}
+          style={{ background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, padding: "9px 20px", fontSize: 14, fontWeight: 600, cursor: saving ? "wait" : "pointer", fontFamily: "inherit" }}
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+        {saveStatus === "saved" && <span style={{ fontSize: 13, color: "#15803D" }}>✓ Saved</span>}
+        {saveStatus === "error" && <span style={{ fontSize: 13, color: "#c62828" }}>Save failed — please try again.</span>}
+      </div>
     </div>
   );
 }
