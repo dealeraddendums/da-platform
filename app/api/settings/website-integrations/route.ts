@@ -34,15 +34,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminSupabaseClient() as any;
-  const { data } = await admin
-    .from("dealer_website_integrations")
-    .select("provider, button_label, button_css, enabled, feature, updated_at")
-    .eq("dealer_id", dealerId)
-    .eq("provider", provider)
-    .maybeSingle();
+  const [{ data }, { data: dealerRow }] = await Promise.all([
+    admin
+      .from("dealer_website_integrations")
+      .select("provider, button_label, button_css, enabled, feature, updated_at")
+      .eq("dealer_id", dealerId)
+      .eq("provider", provider)
+      .maybeSingle(),
+    admin
+      .from("dealers")
+      .select("inventory_dealer_id, dealer_id")
+      .eq("dealer_id", dealerId)
+      .maybeSingle(),
+  ]);
+
+  // embed_dealer_id: the value dealers put in the API link's ?dealer= param
+  // (inventory_dealer_id preferred — it's what feeds/website providers know).
+  const embedDealerId = dealerRow?.inventory_dealer_id ?? dealerRow?.dealer_id ?? dealerId;
 
   // Defaults when the dealer hasn't configured it yet.
   return NextResponse.json({
+    embed_dealer_id: embedDealerId,
     data: data ?? { provider, button_label: "Download Addendum", button_css: null, enabled: true, feature: provider === "api" ? "button" : "both", updated_at: null },
   });
 }

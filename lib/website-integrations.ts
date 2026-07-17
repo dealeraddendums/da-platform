@@ -83,6 +83,7 @@ export async function resolveWidgetVehicle(
   sb: SupabaseClient,
   vin: string,
   stock: string | null,
+  dealerTextId?: string | null,
 ): Promise<WidgetVehicle | null> {
   let q = sb
     .from("dealer_vehicles")
@@ -91,9 +92,23 @@ export async function resolveWidgetVehicle(
     // 5.0 dealer_vehicles use status "active"/"inactive" (NOT legacy Aurora's "1").
     .eq("status", "active");
   if (stock) q = q.eq("stock_number", stock);
+  // Optional ?dealer= scope — disambiguates a VIN under two dealers (trades).
+  if (dealerTextId) q = q.eq("dealer_id", dealerTextId);
   const { data } = await q.limit(1).maybeSingle();
   if (!data) return null;
   return { id: data.id, dealer_id: data.dealer_id, msrp: data.msrp ?? null, internet_price: data.internet_price ?? null };
+}
+
+/** Resolve an optional ?dealer= value (inventory_dealer_id preferred, then
+ *  dealer_id) to the TEXT dealer_id that keys dealer_vehicles. Null when
+ *  unknown. Two eq lookups (not .or) so arbitrary param characters can't
+ *  disturb the PostgREST filter syntax. Mirrors da-api-service. */
+export async function resolveDealerParam(sb: SupabaseClient, dealerParam: string): Promise<string | null> {
+  const v = String(dealerParam ?? "").trim();
+  if (!v) return null;
+  let { data } = await sb.from("dealers").select("dealer_id").eq("inventory_dealer_id", v).limit(1).maybeSingle();
+  if (!data) ({ data } = await sb.from("dealers").select("dealer_id").eq("dealer_id", v).limit(1).maybeSingle());
+  return (data as { dealer_id: string } | null)?.dealer_id ?? null;
 }
 
 /**

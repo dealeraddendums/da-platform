@@ -7,6 +7,7 @@ import {
   sanitizeButtonCss,
   publicSupabase,
   resolveWidgetVehicle,
+  resolveDealerParam,
   getIntegration,
   escapeHtml,
   empty200,
@@ -34,12 +35,22 @@ export async function GET(
 
   // Per-dealer customization (label/css/enabled) — best-effort; the button
   // still renders with defaults if the vehicle/integration lookups miss.
+  // Optional ?dealer= resolves the integration directly (no vehicle lookup
+  // needed for a button); unknown dealer value → empty like missing data.
   let buttonLabel = textOverride || "Download Addendum";
   let buttonCss = PLATFORM_BUTTON_CSS;
   const sb = publicSupabase();
-  const vehicle = await resolveWidgetVehicle(sb, vin, null);
-  if (vehicle) {
-    const integration = await getIntegration(sb, vehicle.dealer_id);
+  const dealerParam = request.nextUrl.searchParams.get("dealer");
+  let integrationDealerId: string | null = null;
+  if (dealerParam) {
+    integrationDealerId = await resolveDealerParam(sb, dealerParam);
+    if (!integrationDealerId) return empty200();
+  } else {
+    const vehicle = await resolveWidgetVehicle(sb, vin, null);
+    if (vehicle) integrationDealerId = vehicle.dealer_id;
+  }
+  if (integrationDealerId) {
+    const integration = await getIntegration(sb, integrationDealerId);
     if (integration && !integration.enabled) return empty200();
     // Account value wins over a caller-supplied ?text= override.
     if (integration?.button_label) buttonLabel = integration.button_label;

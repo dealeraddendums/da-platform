@@ -7,6 +7,7 @@ import {
   sanitizeButtonCss,
   publicSupabase,
   resolveWidgetVehicle,
+  resolveDealerParam,
   getIntegration,
   getVehicleOptions,
   escapeHtml,
@@ -40,11 +41,20 @@ export async function GET(
   const stock = searchParams.get("stock");
   const feature = searchParams.get("feature") || "both";
   const textOverride = searchParams.get("text");
+  const dealerParam = searchParams.get("dealer");
 
   const sb = publicSupabase();
 
+  // Optional ?dealer= scopes the VIN lookup (dealer trades can put the same
+  // VIN under two dealers). Unknown dealer value → empty, like missing data.
+  let dealerScope: string | null = null;
+  if (dealerParam) {
+    dealerScope = await resolveDealerParam(sb, dealerParam);
+    if (!dealerScope) return empty200();
+  }
+
   // 1. Resolve the vehicle (→ id + dealer_id + pricing). No match → empty.
-  const vehicle = await resolveWidgetVehicle(sb, vin, stock);
+  const vehicle = await resolveWidgetVehicle(sb, vin, stock, dealerScope);
   if (!vehicle) return empty200();
 
   // 2. Dealer's dealer_com integration config. Disabled → nothing renders.
