@@ -75,6 +75,21 @@ async function runPurgeJob(): Promise<void> {
   console.log(
     `[purge-old-pdfs] PDF purge complete: scanned ${totalScanned} files, deleted ${totalDeleted} files, failed ${totalFailed} files`
   );
+
+  // Fortellis certification logs: retain >=60 days, purge >90 days.
+  try {
+    const logCutoff = new Date();
+    logCutoff.setDate(logCutoff.getDate() - 90);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: logErr } = await (admin as any)
+      .from("fortellis_api_log")
+      .delete()
+      .lt("at", logCutoff.toISOString());
+    if (logErr) console.error("[purge-old-pdfs] fortellis_api_log purge failed:", logErr.message);
+    else console.log("[purge-old-pdfs] fortellis_api_log rows older than 90 days purged");
+  } catch (err) {
+    console.error("[purge-old-pdfs] fortellis_api_log purge error:", err instanceof Error ? err.message : err);
+  }
 }
 
 /**

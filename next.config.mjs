@@ -27,7 +27,10 @@ const nextConfig = {
   // resolving the package via node_modules at runtime, where the class
   // survives intact.
   experimental: {
-    serverComponentsExternalPackages: ["box-node-sdk"],
+    // ssh2-sftp-client / ssh2 ship a native .node crypto binary that webpack
+    // can't parse; feed-push.ts loads them at runtime via await import(), so
+    // keep them external (same rationale as box-node-sdk).
+    serverComponentsExternalPackages: ["box-node-sdk", "ssh2-sftp-client", "ssh2"],
   },
   // Legacy API Portal (api.dealeraddendums.com) served the widget endpoints at
   // the ROOT — Laravel web.php `generate-addendum/{vin}/{theme}` and

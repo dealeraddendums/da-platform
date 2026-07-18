@@ -1,0 +1,6 @@
+{
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "access_token": "<MASKED Bearer JWT>",
+  "scope": "anonymous"
+}

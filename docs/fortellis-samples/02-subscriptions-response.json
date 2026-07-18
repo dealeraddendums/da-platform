@@ -1,0 +1,44 @@
+{
+  "subscriptions": [
+    {
+      "subscriptionId": "81e14883-c6e5-4678-ab3a-17a2e6230893",
+      "orgId": "01ec9f46-b72b-4a1b-96e0-2ed19b94526d",
+      "orgName": "DEALER ADDENDUMS, INC.",
+      "dealerCodes": [
+        {
+          "franchiseName": "No New Vehicle Sales",
+          "manufacturerCode": "NDL",
+          "manufacturerParentCode": "NDL_MP"
+        }
+      ],
+      "status": "inactive",
+      "activationDate": "2026-07-16",
+      "environment": "Test",
+      "deactivationDate": "2026-07-16",
+      "apiDmsInfo": []
+    },
+    {
+      "subscriptionId": "494f5750-b589-4d8a-9fda-3889196e0b91",
+      "orgId": "98e4b129-99bd-4be5-9bf5-1ac46e0734a3",
+      "orgName": "760-1 CDK FS",
+      "dealerCodes": [
+        {
+          "franchiseName": "Toyota Demo"
+        },
+        {
+          "franchiseName": "Acc Demo",
+          "roadsterDealerId": "accdemo"
+        },
+        {
+          "franchiseName": "Mazda Demo",
+          "roadsterDealerId": "mazdademo"
+        }
+      ],
+      "status": "inactive",
+      "activationDate": "2026-07-17",
+      "environment": "Production",
+      "deactivationDate": "2026-07-17",
+      "apiDmsInfo": []
+    }
+  ]
+}

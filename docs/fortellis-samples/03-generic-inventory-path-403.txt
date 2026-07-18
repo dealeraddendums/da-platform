@@ -1,0 +1,10 @@
+GET https://api.fortellis.io/sales/inventory/v1/merchandisable-vehicles?page=1&pageSize=2
+Headers: Authorization: Bearer <MASKED>, Subscription-Id: test
+--> HTTP 403
+{"message":"App has not requested access to this API. Please select the API from your Developer Account."}
+
+NOTE: This public "Merchandisable Vehicles API" (publisher: CDK Global - Fortellis
+Development; sync page/pageSize) is NOT the API DA subscribed to. DA's accepted API is
+"CDK Drive Get Merchandisable Vehicle" (CDK Global - Data Services) — a CDK-DMS-backed,
+RESTRICTED member of the async "CDK Drive Get*" family (see 04). Do not target the
+/sales/inventory/v1 path.
