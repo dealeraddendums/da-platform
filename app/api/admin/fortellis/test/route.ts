@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
-import { ping, fortellisConfigured } from "@/lib/fortellis-api";
+import { ping, fortellisConfigured, isOutageErrorType } from "@/lib/fortellis-api";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { markHealthy, markDown } from "@/lib/fortellis-sync";
 
@@ -33,9 +33,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const admin = createAdminSupabaseClient();
   try {
+    // Only a true outage (network/5xx/timeout/token) flips the availability state.
+    // 4xx (bad subscription, not-configured, unauthorized) is dealer/config-level.
     if (result.ok) await markHealthy(admin);
-    else if (/401|403|not authorized|unauthorized/i.test(result.error ?? "")) { /* dealer-level, not an outage */ }
-    else await markDown(admin, result.error ?? "test failed");
+    else if (isOutageErrorType(result.errorType)) await markDown(admin, result.error ?? "test failed");
   } catch { /* health tracking is best-effort */ }
 
   return NextResponse.json(result.ok

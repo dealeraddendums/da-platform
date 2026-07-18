@@ -3,8 +3,8 @@ import { requireSuperAdmin } from "@/lib/auth";
 import { fortellisConfigured } from "@/lib/fortellis-api";
 import { createAdminSupabaseClient } from "@/lib/db";
 import {
-  fullSyncDealer, DealerSyncError, markHealthy, markDown, notify401Dealers,
-  type FortellisDealerRow,
+  fullSyncDealer, DealerSyncError, markHealthy, markDown, notify401Dealers, isOutageSyncType,
+  type FortellisDealerRow, type SyncErrorType,
 } from "@/lib/fortellis-sync";
 
 const STATUS_KEY = "fortellis_sync_status";
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const tagged = err instanceof DealerSyncError ? err : new DealerSyncError("other", err instanceof Error ? err.message : String(err));
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (admin as any).from("fortellis_dealers").update({ last_status: tagged.message.slice(0, 300) }).eq("id", id);
-      if (["server", "network", "timeout"].includes(tagged.type)) await markDown(admin, tagged.message).catch(() => {});
+      if (isOutageSyncType(tagged.type)) await markDown(admin, tagged.message).catch(() => {});
       return NextResponse.json({ success: false, error: tagged.message, error_type: tagged.type }, { status: 200 });
     }
   }
@@ -124,7 +124,7 @@ async function runFleet(dealers: FortellisDealerRow[]): Promise<void> {
   // Health: any success means the API is up; a 100%-network/5xx run means down.
   try {
     if (sawHealthy) await markHealthy(admin);
-    else if (status.errors.length > 0 && status.errors.every(e => ["server", "network", "timeout"].includes(e.error_type))) {
+    else if (status.errors.length > 0 && status.errors.every(e => isOutageSyncType(e.error_type as SyncErrorType))) {
       await markDown(admin, status.errors[status.errors.length - 1].error);
     }
   } catch { /* best-effort */ }

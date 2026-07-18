@@ -308,7 +308,7 @@ export async function searchWithTimeout(opts: Omit<SearchOpts, "signal">): Promi
 }
 
 /** Cheap connectivity probe for the Test button + pre-run health check. */
-export async function ping(scope: DealerScope): Promise<{ ok: boolean; count: number; error?: string }> {
+export async function ping(scope: DealerScope): Promise<{ ok: boolean; count: number; error?: string; errorType?: FortellisErrorType }> {
   try {
     // A tiny first-page search is the cheapest real connectivity check.
     const controller = new AbortController();
@@ -319,9 +319,14 @@ export async function ping(scope: DealerScope): Promise<{ ok: boolean; count: nu
       return { ok: true, count: summary.totalCount ?? summary.count ?? results.length };
     } finally { clearTimeout(t); }
   } catch (err) {
-    if (err instanceof FortellisError) return { ok: false, count: 0, error: err.message };
-    return { ok: false, count: 0, error: err instanceof Error ? err.message : String(err) };
+    if (err instanceof FortellisError) return { ok: false, count: 0, error: err.message, errorType: err.type };
+    return { ok: false, count: 0, error: err instanceof Error ? err.message : String(err), errorType: "other" };
   }
+}
+
+/** True only for errors that indicate the API itself is unavailable (vs a client/config/auth error). */
+export function isOutageErrorType(t: FortellisErrorType | undefined): boolean {
+  return t === "network" || t === "server" || t === "timeout" || t === "token";
 }
 
 /** MVS2 modifiedTimeRange format: UTC ISO-8601 with milliseconds + Z. */

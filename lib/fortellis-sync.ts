@@ -61,11 +61,16 @@ export interface FortellisDealerRow {
   last_delta_at: string | null;
 }
 
-export type SyncErrorType = "auth_401" | "no_supabase_dealer" | "timeout" | "server" | "network" | "other";
+export type SyncErrorType = "auth_401" | "no_supabase_dealer" | "timeout" | "server" | "network" | "token" | "other";
 
 export class DealerSyncError extends Error {
   type: SyncErrorType;
   constructor(type: SyncErrorType, message: string) { super(message); this.type = type; }
+}
+
+/** True only for errors meaning the API itself is unavailable (drives the DOWN state). */
+export function isOutageSyncType(t: SyncErrorType): boolean {
+  return t === "network" || t === "server" || t === "timeout" || t === "token";
 }
 
 export interface SyncResult {
@@ -94,12 +99,13 @@ function scopeOf(row: FortellisDealerRow): DealerScope {
   return { subscriptionId: row.subscription_id, webId: row.web_id, dealerCode: row.dealer_code };
 }
 
-/** Wrap a Fortellis API error into a tagged sync error. */
+/** Wrap a Fortellis API error into a tagged sync error, preserving the outage/auth distinction. */
 function tag(err: unknown): DealerSyncError {
   if (err instanceof DealerSyncError) return err;
   if (err instanceof FortellisError) {
-    const t: SyncErrorType = err.type === "token" ? "auth_401" : (err.type as SyncErrorType);
-    return new DealerSyncError(t === "auth_401" && err.httpStatus !== 401 ? "server" : t, err.message);
+    // auth_401 only for a genuine HTTP 401 (dealer unsubscribed); token failures are outages.
+    if (err.type === "auth_401" && err.httpStatus !== 401) return new DealerSyncError("server", err.message);
+    return new DealerSyncError(err.type as SyncErrorType, err.message);
   }
   return new DealerSyncError("other", err instanceof Error ? err.message : String(err));
 }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { fortellisConfigured } from "@/lib/fortellis-api";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { importDealer, DealerSyncError, markHealthy, markDown, type FortellisDealerRow } from "@/lib/fortellis-sync";
+import { importDealer, DealerSyncError, markHealthy, markDown, isOutageSyncType, type FortellisDealerRow } from "@/lib/fortellis-sync";
 
 /**
  * POST /api/admin/fortellis/import
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Record run status on the dealer row.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (admin as any).from("fortellis_dealers").update({ last_status: tagged.message.slice(0, 300) }).eq("id", id);
-    if (tagged.type === "server" || tagged.type === "network" || tagged.type === "timeout") {
+    if (isOutageSyncType(tagged.type)) {
       await markDown(admin, tagged.message).catch(() => {});
     }
     return NextResponse.json({ success: false, error: tagged.message, error_type: tagged.type }, { status: 200 });

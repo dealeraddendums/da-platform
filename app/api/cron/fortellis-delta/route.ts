@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import {
-  deltaDealer, DealerSyncError, markHealthy, markDown, notify401Dealers,
+  deltaDealer, DealerSyncError, markHealthy, markDown, notify401Dealers, isOutageSyncType,
   type FortellisDealerRow,
 } from "@/lib/fortellis-sync";
 import { fortellisConfigured } from "@/lib/fortellis-api";
@@ -65,7 +65,7 @@ async function runDelta(): Promise<void> {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (admin as any).from("fortellis_dealers").update({ last_status: tagged.message.slice(0, 300) }).eq("id", dealer.id);
         if (tagged.type === "auth_401") auth401.push({ dealer_name: dealer.dealer_name, subscription_id: dealer.subscription_id });
-        else if (["server", "network", "timeout"].includes(tagged.type)) networkErrors.push(tagged.message);
+        else if (isOutageSyncType(tagged.type)) networkErrors.push(tagged.message);
       }
     }
 
