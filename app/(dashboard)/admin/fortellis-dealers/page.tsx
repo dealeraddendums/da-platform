@@ -376,6 +376,9 @@ function FleetBanner({ status, stalled, onDismiss }: { status: FleetStatus; stal
 }
 
 // ── Add / Edit modal ─────────────────────────────────────────────────────────
+interface DealerHit { id: string; name: string; dealer_id: string }
+interface Autofill { dealer_id: string; dealer_name: string; dealer_code: string | null; web_id: string | null; cdk_fed: boolean; already_added: boolean }
+
 function EditModal({ initial, onClose, onSaved }: { initial: FortellisRow | null; onClose: () => void; onSaved: () => void }) {
   const [dealerName, setDealerName] = useState(initial?.dealer_name ?? "");
   const [subscriptionId, setSubscriptionId] = useState(initial?.subscription_id ?? "");
@@ -387,19 +390,80 @@ function EditModal({ initial, onClose, onSaved }: { initial: FortellisRow | null
   const [error, setError] = useState<string | null>(null);
   const [subs, setSubs] = useState<Subscription[] | null>(null);
   const [subsError, setSubsError] = useState<string | null>(null);
+  // Dealer picker state (Add mode only — Edit keeps the existing linked dealer)
+  const [dealerQuery, setDealerQuery] = useState("");
+  const [dealerHits, setDealerHits] = useState<DealerHit[]>([]);
+  const [dealerPicked, setDealerPicked] = useState(Boolean(initial?.dealer_id));
+  const [resolving, setResolving] = useState(false);
+  const [cdkFed, setCdkFed] = useState(false);
+  const [alreadyAdded, setAlreadyAdded] = useState(false);
 
   useEffect(() => {
-    if (initial) return; // picker only on Add
     void (async () => {
       const res = await fetch("/api/admin/fortellis/subscriptions");
       if (res.ok) { const j = await res.json() as { subscriptions: Subscription[] }; setSubs(j.subscriptions); }
       else { const j = await res.json().catch(() => ({})) as { error?: string }; setSubsError(j.error ?? "Could not load subscriptions"); }
     })();
-  }, [initial]);
+  }, []);
+
+  // Debounced dealer search (Add mode). Skip once a dealer is chosen.
+  useEffect(() => {
+    if (initial || dealerPicked || dealerQuery.trim().length < 2) { setDealerHits([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/dealers?q=${encodeURIComponent(dealerQuery.trim())}&per_page=12`);
+        const j = await res.json() as { data?: DealerHit[] };
+        const hits = (j.data ?? []).map(d => ({ id: d.id, name: d.name, dealer_id: d.dealer_id }));
+        // CDK-fed dealers (3PA…) first — those are the ones being converted.
+        hits.sort((a, b) => {
+          const aC = /^3PA/i.test(a.dealer_id) ? 0 : 1;
+          const bC = /^3PA/i.test(b.dealer_id) ? 0 : 1;
+          return aC !== bC ? aC - bC : a.name.localeCompare(b.name);
+        });
+        setDealerHits(hits.slice(0, 12));
+      } catch { setDealerHits([]); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [dealerQuery, dealerPicked, initial]);
+
+  async function pickDealer(hit: DealerHit) {
+    setDealerPicked(true);
+    setDealerHits([]);
+    setDealerQuery(hit.name);
+    setDealerName(hit.name);
+    setDealerId(hit.dealer_id);
+    setError(null);
+    setResolving(true);
+    try {
+      const res = await fetch(`/api/admin/fortellis/dealer-autofill?dealer_id=${encodeURIComponent(hit.dealer_id)}`);
+      if (res.ok) {
+        const { autofill } = await res.json() as { autofill: Autofill };
+        setDealerName(autofill.dealer_name);
+        setDealerCode(autofill.dealer_code ?? "");
+        setCdkFed(autofill.cdk_fed);
+        setAlreadyAdded(autofill.already_added);
+        if (autofill.web_id) setWebId(autofill.web_id);
+        // Cross-fill: if a subscription's orgName matches this dealer, preselect it.
+        if (!subscriptionId && subs) {
+          const m = subs.find(s => (s.orgName ?? "").trim().toLowerCase() === autofill.dealer_name.trim().toLowerCase());
+          if (m) setSubscriptionId(m.subscriptionId);
+        }
+      }
+    } finally { setResolving(false); }
+  }
+
+  function clearDealer() {
+    setDealerPicked(false);
+    setDealerId(""); setDealerName(""); setDealerCode(""); setWebId("");
+    setCdkFed(false); setAlreadyAdded(false);
+    setDealerQuery("");
+  }
 
   async function save() {
     setError(null);
-    if (!dealerName.trim() || !subscriptionId.trim()) { setError("Dealer Name and Subscription-Id are required"); return; }
+    if (!dealerId.trim()) { setError("Select a dealer"); return; }
+    if (!subscriptionId.trim()) { setError("A Subscription-Id is required"); return; }
+    if (!initial && alreadyAdded) { setError("That dealer already has a Fortellis connection"); return; }
     setSaving(true);
     const url = initial ? `/api/admin/fortellis-dealers/${initial.id}` : "/api/admin/fortellis-dealers";
     const method = initial ? "PATCH" : "POST";
@@ -415,56 +479,91 @@ function EditModal({ initial, onClose, onSaved }: { initial: FortellisRow | null
   return (
     <Modal title={initial ? "Edit Fortellis Dealer" : "Add Fortellis Dealer"} onClose={onClose}>
       {error && <div style={{ marginBottom: 12, padding: "8px 12px", background: "#ffebee", color: "#c62828", borderRadius: 4, fontSize: 12 }}>{error}</div>}
-      {!initial && (
-        <div style={{ marginBottom: 12 }}>
-          <label style={lbl}>Subscription</label>
-          {subs === null && !subsError ? (
-            <div style={{ fontSize: 12, color: "#78828c" }}>Loading subscriptions…</div>
-          ) : subsError ? (
-            <div style={{ fontSize: 12, color: "#c62828", marginBottom: 6 }}>{subsError} — enter the Subscription-Id manually below.</div>
-          ) : (
-            <select
-              style={inp}
-              value={subscriptionId}
-              onChange={e => {
-                const id = e.target.value;
-                setSubscriptionId(id);
-                const s = subs?.find(x => x.subscriptionId === id);
-                if (s?.orgName && !dealerName) setDealerName(s.orgName);
-              }}
-            >
-              <option value="">— pick a subscription —</option>
-              {subs?.map(s => (
-                <option key={s.subscriptionId} value={s.subscriptionId}>
-                  {(s.orgName ?? s.subscriptionId)}{s.environment ? ` · ${s.environment}` : ""}{s.status ? ` · ${s.status}` : ""}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      )}
+
+      {/* Dealer — searchable picker (Add) or read-only linked dealer (Edit) */}
       <div style={{ marginBottom: 12 }}>
-        <label style={lbl}>Dealer Name</label>
-        <input value={dealerName} onChange={e => setDealerName(e.target.value)} style={inp} placeholder="e.g. White Allen Honda" />
+        <label style={lbl}>Dealer</label>
+        {initial ? (
+          <div style={{ ...inp, display: "flex", alignItems: "center", background: "#fafafa", color: "#555" }}>
+            {dealerName} <span className="font-mono" style={{ marginLeft: 8, fontSize: 11, color: "#999" }}>{dealerId}</span>
+          </div>
+        ) : dealerPicked ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", border: "1px solid #1976d2", borderRadius: 6, background: "#e3f2fd" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, color: "#0d47a1", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {resolving ? "Resolving…" : dealerName}
+                {cdkFed && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 8, background: "#1976d2", color: "#fff" }}>CDK</span>}
+              </div>
+              <div className="font-mono" style={{ fontSize: 11, color: "#1565c0" }}>{dealerId}</div>
+            </div>
+            <button type="button" onClick={clearDealer} style={{ background: "none", border: "none", color: "#1976d2", cursor: "pointer", fontSize: 12, textDecoration: "underline" }}>change</button>
+          </div>
+        ) : (
+          <div style={{ position: "relative" }}>
+            <input value={dealerQuery} onChange={e => setDealerQuery(e.target.value)} style={inp} placeholder="Search by dealer name or ID…" autoFocus />
+            {dealerHits.length > 0 && (
+              <div style={{ position: "absolute", top: 40, left: 0, right: 0, zIndex: 10, background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, maxHeight: 260, overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}>
+                {dealerHits.map(h => (
+                  <button key={h.id} type="button" onClick={() => void pickDealer(h)} style={{ display: "flex", width: "100%", alignItems: "center", gap: 8, padding: "8px 10px", border: "none", borderBottom: "1px solid #f0f0f0", background: "#fff", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
+                    {/^3PA/i.test(h.dealer_id) && <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 8, background: "#e3f2fd", color: "#1976d2" }}>CDK</span>}
+                    <span className="font-mono" style={{ fontSize: 11, color: "#999" }}>{h.dealer_id}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {alreadyAdded && !initial && (
+          <div style={{ marginTop: 6, fontSize: 12, color: "#c62828" }}>This dealer already has a Fortellis connection — remove or edit that row instead.</div>
+        )}
+      </div>
+
+      {/* Subscription */}
+      <div style={{ marginBottom: 12 }}>
+        <label style={lbl}>Subscription</label>
+        {subs === null && !subsError ? (
+          <div style={{ fontSize: 12, color: "#78828c" }}>Loading subscriptions…</div>
+        ) : subsError ? (
+          <div style={{ fontSize: 12, color: "#c62828", marginBottom: 6 }}>{subsError} — enter the Subscription-Id manually below.</div>
+        ) : (
+          <select
+            style={inp}
+            value={subscriptionId}
+            onChange={e => {
+              const id = e.target.value;
+              setSubscriptionId(id);
+              // Cross-fill: picking a subscription suggests its dealer in the search box.
+              const s = subs?.find(x => x.subscriptionId === id);
+              if (s?.orgName && !dealerPicked && !initial) setDealerQuery(s.orgName);
+            }}
+          >
+            <option value="">— pick a subscription —</option>
+            {subs?.map(s => (
+              <option key={s.subscriptionId} value={s.subscriptionId}>
+                {(s.orgName ?? s.subscriptionId)}{s.environment ? ` · ${s.environment}` : ""}{s.status ? ` · ${s.status}` : ""}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <div style={{ marginBottom: 12 }}>
         <label style={lbl}>Subscription-Id</label>
         <input value={subscriptionId} onChange={e => setSubscriptionId(e.target.value)} style={inp} placeholder="Fortellis Subscription-Id" />
       </div>
+
+      {/* Optional scoping filters — autofilled, still editable */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <div style={{ flex: 1 }}>
           <label style={lbl}>webId (optional)</label>
           <input value={webId} onChange={e => setWebId(e.target.value)} style={inp} placeholder="motp-…-cdkinv" />
         </div>
         <div style={{ flex: 1 }}>
-          <label style={lbl}>dealerCode (optional)</label>
+          <label style={lbl}>dealerCode {cdkFed ? "(from CDK)" : "(optional)"}</label>
           <input value={dealerCode} onChange={e => setDealerCode(e.target.value)} style={inp} placeholder="e.g. 5236a" />
         </div>
       </div>
-      <div style={{ marginBottom: 12 }}>
-        <label style={lbl}>Matched dealer_id (Supabase text key)</label>
-        <input value={dealerId} onChange={e => setDealerId(e.target.value)} style={inp} placeholder="dealers.dealer_id / inventory_dealer_id" />
-      </div>
+
       {initial && (
         <div style={{ marginBottom: 12 }}>
           <label style={lbl}>Enabled (included in hourly delta)</label>
@@ -477,7 +576,7 @@ function EditModal({ initial, onClose, onSaved }: { initial: FortellisRow | null
       )}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
         <button className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+        <button className="btn btn-primary" onClick={() => void save()} disabled={saving || resolving || (!initial && alreadyAdded)}>{saving ? "Saving…" : "Save"}</button>
       </div>
     </Modal>
   );
