@@ -36,6 +36,44 @@ type Props = {
 
 // ── Dealership Info Tab ──────────────────────────────────────────────────────
 
+/**
+ * One read-only dealer-identifier line with a copy-to-clipboard button.
+ * Shown for all roles — these IDs aren't secrets and support calls need them.
+ * NULL renders as "—" (and the copy button is hidden so there's nothing to copy).
+ */
+function IdRow({ label, value }: { label: string; value: string | null | undefined }) {
+  const [copied, setCopied] = useState(false);
+  const has = value != null && value !== "";
+  async function copy() {
+    if (!has) return;
+    try {
+      await navigator.clipboard.writeText(String(value));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch { /* clipboard blocked — no-op */ }
+  }
+  return (
+    <span style={{ fontSize: 12, color: "#78828c", display: "inline-flex", alignItems: "center", gap: 6 }}>
+      {label}: <strong style={{ fontFamily: "monospace", color: "#555" }}>{has ? value : "—"}</strong>
+      {has && (
+        <button
+          type="button"
+          onClick={() => void copy()}
+          title={copied ? "Copied" : "Copy"}
+          aria-label={`Copy ${label}`}
+          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", lineHeight: 1, color: copied ? "#4caf50" : "#b0b6bd", width: 16, height: 16, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+        >
+          {copied ? (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+          )}
+        </button>
+      )}
+    </span>
+  );
+}
+
 function InfoTab({ dealer, canEdit }: { dealer: DealerRow; canEdit: boolean }) {
   const [form, setForm] = useState({
     name: dealer.name ?? "",
@@ -109,10 +147,11 @@ function InfoTab({ dealer, canEdit }: { dealer: DealerRow; canEdit: boolean }) {
         <Field label="Zip" value={form.zip} onChange={set("zip")} disabled={!canEdit} style={{ maxWidth: 100 }} />
       </div>
 
-      <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 12, color: "#78828c" }}>
-          Internal ID: <strong>{dealer.internal_id ?? "—"}</strong>
-        </span>
+      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+        <IdRow label="Platform ID" value={dealer.id} />
+        <IdRow label="Dealer ID" value={dealer.dealer_id} />
+        <IdRow label="Inventory Dealer ID" value={dealer.inventory_dealer_id} />
+        <IdRow label="Internal ID" value={dealer.internal_id} />
       </div>
 
       {canEdit && (
