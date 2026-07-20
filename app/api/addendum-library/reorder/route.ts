@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 /**
  * PATCH /api/addendum-library/reorder
@@ -21,18 +22,11 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "order array required" }, { status: 400 });
   }
 
-  const dealerId = body.dealer_id ?? claims.dealer_id;
-  if (!dealerId) {
-    return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
-  }
-  // dealer roles and a group_admin acting as a dealer are scoped to their own
-  // dealer (group_admin without an active dealer has null dealer_id → rejected).
-  if (
-    (claims.role === "dealer_admin" || claims.role === "dealer_user" || claims.role === "group_admin") &&
-    dealerId !== claims.dealer_id
-  ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // Authorize the target dealer (client sends the active dealer's id), falling
+  // back to the caller's effective dealer. Group-membership / tag-scope aware.
+  const authz = await authorizeDealerAction(claims, body.dealer_id ?? claims.dealer_id);
+  if (!authz.ok) return authz.response;
+  const dealerId = authz.dealerId;
 
   const admin = createAdminSupabaseClient();
   await Promise.all(

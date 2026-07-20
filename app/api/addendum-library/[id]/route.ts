@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { AddendumLibraryRow } from "@/lib/db";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 type Params = { params: { id: string } };
 
@@ -35,15 +36,14 @@ export async function PATCH(
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  // dealer roles and a group_admin acting as a dealer may only touch their own
-  // dealer's rows. group_admin without an active dealer has a null dealer_id, so
-  // this rejects them too.
-  if (
-    (claims.role === "dealer_admin" || claims.role === "dealer_user" || claims.role === "group_admin") &&
-    existing.dealer_id !== claims.dealer_id
-  ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // Authorize against the row's OWN dealer (not the caller's claims.dealer_id):
+  // dealer roles → own dealer; group_admin → any in-group dealer; group_user →
+  // in-group + tag scope; super_admin → any. This is what lets a group_admin
+  // operating a member dealer edit its products (parity model), which the old
+  // string-equality-to-claims.dealer_id check blocked when the active-dealer
+  // context wasn't reflected in claims.dealer_id.
+  const authz = await authorizeDealerAction(claims, existing.dealer_id);
+  if (!authz.ok) return authz.response;
 
   // Whitelist updatable fields
   type LibraryPatch = Omit<Partial<AddendumLibraryRow>, 'id' | 'dealer_id' | 'created_at' | 'updated_at'>;
@@ -116,15 +116,9 @@ export async function DELETE(
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  // dealer roles and a group_admin acting as a dealer may only touch their own
-  // dealer's rows. group_admin without an active dealer has a null dealer_id, so
-  // this rejects them too.
-  if (
-    (claims.role === "dealer_admin" || claims.role === "dealer_user" || claims.role === "group_admin") &&
-    existing.dealer_id !== claims.dealer_id
-  ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // Authorize against the row's own dealer (see PATCH above).
+  const authz = await authorizeDealerAction(claims, existing.dealer_id);
+  if (!authz.ok) return authz.response;
 
   const { error: dbError } = await admin
     .from("addendum_library")

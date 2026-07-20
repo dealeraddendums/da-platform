@@ -55,9 +55,30 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
 }
 
+// Product names are stored as rich-text HTML (RichName + DOMPurify is the render
+// gatekeeper), so a literal "&" is stored as "&amp;". The Edit form's Item Name
+// input is a plain text field, so it must show the DECODED text ("Wear & Tear")
+// not the raw HTML source ("Wear &amp; Tear"). Decode the common named/numeric
+// entities; &amp; is decoded LAST (peels exactly one layer) so an already
+// double-encoded value isn't collapsed further. The save path stores the field
+// verbatim (no re-encode), so decode-on-read round-trips without accumulating
+// entities. Any authored inline markup (<b>, colored <span>, <img>) carries no
+// entities and is left intact for power-user editing.
+function decodeNameEntities(s: string): string {
+  if (!s) return "";
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;/g, "'")
+    .replace(/&#x0*27;/gi, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&");
+}
+
 function rowToForm(r: AddendumLibraryRow): FormData {
   return {
-    option_name: r.option_name, item_price: r.item_price, description: r.description,
+    option_name: decodeNameEntities(r.option_name), item_price: r.item_price, description: r.description,
     ad_types: r.ad_types && r.ad_types.length > 0 ? r.ad_types
       : r.ad_type === "New" ? ["New"]
       : r.ad_type === "Used" ? ["Used"]

@@ -60,15 +60,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
-  // group_admin is allowed when acting as a dealer: getJwtClaims resolves their
-  // claims.dealer_id to the active dealer (null otherwise → rejected below).
-  if (
-    claims.role !== "dealer_admin" && claims.role !== "dealer_user" &&
-    claims.role !== "super_admin" && claims.role !== "group_admin"
-  ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
   let body: Partial<AddendumLibraryRow>;
   try {
     body = await req.json();
@@ -76,10 +67,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const dealerId = claims.role === "super_admin" ? (body.dealer_id ?? claims.dealer_id) : claims.dealer_id;
-  if (!dealerId) {
-    return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
-  }
+  // Authorize the target dealer from the request (client sends the active
+  // dealer's id in the body), falling back to the caller's effective dealer.
+  // authorizeDealerAction enforces: dealer roles → own; group_admin → in-group;
+  // group_user → in-group + tag scope; super_admin → any. A dealer role passing
+  // a foreign dealer_id is rejected.
+  const authz = await authorizeDealerAction(claims, body.dealer_id ?? claims.dealer_id);
+  if (!authz.ok) return authz.response;
+  const dealerId = authz.dealerId;
 
   if (!body.option_name?.trim()) {
     return NextResponse.json({ error: "option_name required" }, { status: 400 });

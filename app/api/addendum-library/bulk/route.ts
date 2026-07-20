@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 /**
  * DELETE /api/addendum-library/bulk
@@ -40,20 +41,13 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // dealer roles and a group_admin acting as a dealer may only touch their own
-  // dealer's rows. group_admin without an active dealer has a null dealer_id,
-  // so this rejects them too.
-  if (
-    (claims.role === "dealer_admin" || claims.role === "dealer_user" || claims.role === "group_admin") &&
-    existing.some((r) => r.dealer_id !== claims.dealer_id)
-  ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-  if (
-    claims.role !== "dealer_admin" && claims.role !== "dealer_user" &&
-    claims.role !== "group_admin" && claims.role !== "super_admin"
-  ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Authorize every distinct dealer represented in the selection against the
+  // caller (dealer roles → own; group_admin → in-group; group_user → in-group +
+  // tag scope; super_admin → any). Any unauthorized dealer fails the whole call.
+  const distinctDealerIds = Array.from(new Set(existing.map((r) => r.dealer_id as string)));
+  for (const did of distinctDealerIds) {
+    const authz = await authorizeDealerAction(claims, did);
+    if (!authz.ok) return authz.response;
   }
 
   const foundIds = existing.map((r) => r.id as string);
