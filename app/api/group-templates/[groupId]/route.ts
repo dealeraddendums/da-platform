@@ -10,6 +10,20 @@ function canManage(claims: { role: string; group_id: string | null }, groupId: s
   return false;
 }
 
+/**
+ * Return `requested` if free within the group, otherwise the next available
+ * "{base} v2" / "v3"… suffix. Guards CREATE against silently minting an
+ * exact-duplicate name (the root of the group-template dup problem). PATCH
+ * (renaming an existing row) is unaffected — it keeps its own name.
+ */
+function nextAvailableName(requested: string, existing: Set<string>): string {
+  if (!existing.has(requested)) return requested;
+  const base = requested.replace(/\s+v\d+$/i, "");
+  let n = 2;
+  while (existing.has(`${base} v${n}`)) n++;
+  return `${base} v${n}`;
+}
+
 export async function GET(_req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
@@ -47,11 +61,23 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
   if (!body.document_type) return NextResponse.json({ error: "document_type required" }, { status: 400 });
 
   const admin = createAdminSupabaseClient();
+
+  // Name-collision guard: auto-suffix v2/v3… when this group already has a
+  // template with the requested name, so CREATE never mints an exact duplicate.
+  const { data: existingRows } = await admin
+    .from("group_templates")
+    .select("name")
+    .eq("group_id", params.groupId);
+  const existingNames = new Set(
+    (existingRows ?? []).map((r) => (r.name ?? "").trim()).filter(Boolean),
+  );
+  const finalName = nextAvailableName(body.name.trim(), existingNames);
+
   const { data, error: dbErr } = await admin
     .from("group_templates")
     .insert({
       group_id: params.groupId,
-      name: body.name.trim(),
+      name: finalName,
       document_type: body.document_type as "addendum" | "infosheet",
       vehicle_types: body.vehicle_types ?? [],
       template_json: body.template_json ?? {},

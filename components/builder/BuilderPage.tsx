@@ -1148,7 +1148,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   }, [vehicle, paperSize, fontScale, bgUrl, showToast]);
 
   // ── Save template ──────────────────────────────────────────────────
-  const saveTemplate = useCallback(async () => {
+  const saveTemplate = useCallback(async (asCopy: boolean = false) => {
     // Platform-starter mode: save to /api/starter-templates (name + doc_type +
     // paper + layout). No dealer/group context, no vehicle-type defaults.
     if (starterMode) {
@@ -1201,20 +1201,35 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     try {
       // Group template path: save to group_templates table.
       if (saveAsGroupTemplate && groupId) {
-        // UPDATE the loaded group template (same name) instead of POSTing a
-        // duplicate — the always-POST behaviour created multiple identical
-        // group templates. A rename, or saving a non-group-sourced template as
-        // a group template, still creates a new one.
-        const editGroupId = (loadedTemplateSource === 'group' && loadedTemplateId && name === templateName) ? loadedTemplateId : null;
+        // Save = UPDATE the loaded group template (rename included) — once a
+        // template has been saved this session it holds its id + source, so
+        // every subsequent Save PATCHes the same row instead of POSTing a
+        // duplicate. (The previous `name === templateName` guard re-POSTed on
+        // the very next save because the group branch never synced templateName,
+        // creating the "New Vehicle Template" duplicates.) "Save as new copy"
+        // (asCopy) deliberately creates a fresh "{name} v2" row; the server
+        // bumps to v3… if v2 is taken and also guards plain saves against
+        // exact-duplicate names.
+        const editGroupId = (!asCopy && loadedTemplateSource === 'group' && loadedTemplateId) ? loadedTemplateId : null;
+        const sendName = (!editGroupId && asCopy) ? `${name.replace(/\s+v\d+$/i, '')} v2` : name;
+        const groupBody = { ...body, name: sendName };
         const r = editGroupId
-          ? await fetch(`/api/group-templates/${groupId}/${editGroupId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-          : await fetch(`/api/group-templates/${groupId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          ? await fetch(`/api/group-templates/${groupId}/${editGroupId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(groupBody) })
+          : await fetch(`/api/group-templates/${groupId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(groupBody) });
         if (!r.ok) { const j = await r.json().catch(() => ({})); showToast((j as { error?: string }).error || 'Save failed — try again'); return; }
-        const { data: savedGt } = await r.json().catch(() => ({ data: null })) as { data?: { id: string } };
-        if (savedGt?.id) { setLoadedTemplateId(savedGt.id); setLoadedTemplateSource('group'); }
+        const { data: savedGt } = await r.json().catch(() => ({ data: null })) as { data?: { id: string; name?: string } };
+        const finalName = savedGt?.name ?? sendName;
+        if (savedGt?.id) {
+          setLoadedTemplateId(savedGt.id);
+          setLoadedTemplateSource('group');
+          // Sync the name state so the toolbar shows "Editing: {name} (Group
+          // Template)" and the NEXT save PATCHes this same row.
+          setTemplateName(finalName);
+          setSaveTname(finalName);
+        }
         setShowSave(false);
         isDirtyRef.current = false;
-        showToast(`✓ Group template ${editGroupId ? 'updated' : 'saved'}: ${name}`);
+        showToast(`✓ Group template ${editGroupId ? 'updated' : (asCopy ? 'copied' : 'saved')}: ${finalName}`);
         return;
       }
 
@@ -2141,7 +2156,12 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
             </span>
             <div style={{ display: 'flex', gap: 12 }}>
               <button onClick={() => setShowSave(false)} style={mfClose}>Cancel</button>
-              <button onClick={saveTemplate} style={mfSave}>Save Template</button>
+              {/* Deliberate-duplicate path: only when editing an existing group
+                  template. Creates "{name} v2" instead of overwriting. */}
+              {saveAsGroupTemplate && groupId && loadedTemplateSource === 'group' && loadedTemplateId && (
+                <button onClick={() => saveTemplate(true)} style={mfClose}>Save as new copy</button>
+              )}
+              <button onClick={() => saveTemplate()} style={mfSave}>Save Template</button>
             </div>
           </div>
         </Modal>
