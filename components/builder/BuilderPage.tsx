@@ -692,7 +692,16 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   useEffect(() => {
     // bgimage replaces the old monolithic 'infobox' slot — new templates get
     // the EPA/DOT Fuel Economy image pre-placed (DEFS.bgimage sets imgUrl).
-    const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','bgimage'];
+    //
+    // A new GROUP-template document (?group= context → groupId set, no
+    // templateId) opens on a TRULY BLANK canvas: the standard pre-placed layout
+    // is the right default for a new DEALER doc but wrong for group-template
+    // authoring. Editing an EXISTING group template (templateId set) is loaded
+    // by the template-load effect below and is unaffected.
+    const groupNewDoc = Boolean(groupId) && !dealerId && !templateId;
+    const order = groupNewDoc
+      ? []
+      : ['logo','vehicle','msrp','options','subtotal','askbar','dealer','bgimage'];
     let nextNid = 1;
     let ws: Record<string, Widget> = {};
     order.forEach(type => {
@@ -1431,6 +1440,29 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     isDirtyRef.current = false;
   }, [vehicle, groupId, dealerId]);
 
+  // Truly-blank canvas (empty widgets). Distinct from applyBlankCanvas, which
+  // — despite the name — seeds the standard widget set. Used for new
+  // group-template documents where that standard layout isn't wanted.
+  const applyEmptyCanvas = useCallback(() => {
+    const ws: Record<string, Widget> = {};
+    widgetsRef.current = ws;
+    setWidgets(ws);
+    setNid(1);
+    setSelId(null);
+    setTemplateName('New Template');
+    setLoadedTemplateId(null);
+    setLoadedTemplateLocked(false);
+    setLoadedTemplateSource(null);
+    setSaveAsGroupTemplate(Boolean(groupId) && !dealerId);
+    setPaperSize('standard');
+    paperSizeRef.current = 'standard';
+    setBgUrl(BG_DEFAULT);
+    setFontScale(1.0);
+    setHistory([JSON.stringify({ widgets: ws, nid: 1 })]);
+    setHistIdx(0);
+    isDirtyRef.current = false;
+  }, [groupId, dealerId]);
+
   // Clone a platform starter into a NEW, UNSAVED dealer document: load its
   // bg + widgets + paper + fontScale, but clear loadedTemplateId/locked so a
   // later Save creates the dealer's OWN template (POST /api/templates). The
@@ -1496,6 +1528,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       showToast('New starter');
       return;
     }
+    // Group-template mode: "+ New" opens a truly blank canvas (parity with the
+    // initial group-new-doc open above). Group authoring starts empty, not from
+    // the standard dealer layout or a starter.
+    if (groupId && !dealerId) {
+      applyEmptyCanvas();
+      showToast('New document');
+      return;
+    }
     type SRow = { id: string; name: string; doc_type: string; is_blank_default?: boolean };
     let all: SRow[] = [];
     try {
@@ -1521,7 +1561,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     }
     setStarterPickerList(others);
     setShowNewPicker(true);
-  }, [applyBlankCanvas, loadStarterAsNew, starterMode, showToast]);
+  }, [applyBlankCanvas, applyEmptyCanvas, loadStarterAsNew, starterMode, showToast, groupId, dealerId]);
 
   // ── Selected widget ────────────────────────────────────────────────
   const sel = selId ? widgets[selId] : null;
