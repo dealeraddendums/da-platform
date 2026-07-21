@@ -104,9 +104,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const results: Array<{ email: string; status: "sent" | "skipped" | "error"; detail?: string }> = [];
 
   for (const inv of invites) {
-    // An email with an existing auth login needs no invite — they can sign in.
-    if (signIns.has(inv.email)) {
-      results.push({ email: inv.email, status: "skipped", detail: "already has a login — no invite needed" });
+    // Skip ONLY users who have actually signed in — they have working
+    // credentials, so there's nothing to invite them to. "Has an auth user"
+    // is NOT enough: shuffled legacy admins have an ETL/migration-era auth user
+    // but never signed in and don't know any credentials — they can and must be
+    // (re-)invited. /api/invite/accept resolves the existing auth user and
+    // updates its password on submit (no duplicate user is ever created).
+    if (signIns.get(inv.email)) {
+      results.push({ email: inv.email, status: "skipped", detail: "already active — has signed in, no invite needed" });
       continue;
     }
 

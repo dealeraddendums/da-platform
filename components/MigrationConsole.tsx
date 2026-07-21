@@ -877,7 +877,7 @@ const modalBox: React.CSSProperties = { background: "#fff", borderRadius: 8, pad
 
 function adminStatusChip(a: AdminCandidate): React.ReactNode {
   if (a.last_sign_in) return <span style={{ fontSize: 11, fontWeight: 700, color: "#2e7d32" }}>Active ✓ · signed in {new Date(a.last_sign_in).toLocaleDateString()}</span>;
-  if (a.has_auth) return <span style={{ fontSize: 11, fontWeight: 700, color: "#b06a00" }}>Has login · never signed in</span>;
+  if (a.has_auth) return <span style={{ fontSize: 11, fontWeight: 700, color: "#b06a00" }}>Has login · never signed in — can re-invite</span>;
   return <span style={{ fontSize: 11, fontWeight: 700, color: "#c62828" }}>No 5.0 login</span>;
 }
 
@@ -946,8 +946,12 @@ function InviteAdminsModal({ group, onClose }: { group: { id: string; name: stri
               </div>
             )}
             {info.admins.map((a) => (
-              <label key={a.email} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 4px", borderBottom: "1px solid #f0f0f0", cursor: a.has_auth ? "default" : "pointer" }}>
-                <input type="checkbox" disabled={a.has_auth} checked={checked.has(a.email)} onChange={() => toggle(a.email)} />
+              // Only a user who has actually SIGNED IN is non-selectable — they
+              // already have working credentials. "Has an auth user but never
+              // signed in" is invitable (the common case for shuffled legacy
+              // admins who don't know their credentials).
+              <label key={a.email} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 4px", borderBottom: "1px solid #f0f0f0", cursor: a.last_sign_in ? "default" : "pointer" }}>
+                <input type="checkbox" disabled={!!a.last_sign_in} checked={checked.has(a.email)} onChange={() => toggle(a.email)} />
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: "#333" }}>{a.full_name || a.email}</span>
                   <span style={{ display: "block", fontSize: 11, color: "#78828c" }}>{a.email}</span>
