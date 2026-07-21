@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
@@ -36,7 +36,20 @@ export default async function DashboardLayout({
   const isSuperAdmin = role === "super_admin";
   // A group_user (regional manager) switches into a tagged dealer the same way a
   // group_admin does — resolve their active dealer so the nav flips to dealer parity.
-  const activeDealerUuid = (isGroupAdmin || isGroupUser) ? (profile?.active_dealer_id ?? null) : null;
+  const activeDealerUuidRaw = (isGroupAdmin || isGroupUser) ? (profile?.active_dealer_id ?? null) : null;
+
+  // Route-aware chrome: the layout can't see the URL, so middleware forwards it
+  // as `x-da-pathname`. On a group-scoped route (/groups, /groups/[id], My
+  // Group) we render GROUP nav + GROUP header regardless of a persisted active
+  // dealer — otherwise browser-back / direct-URL / bookmark navigation to a
+  // group page rendered dealer chrome over group content (the entry-point fix
+  // 46b227f only covered the Builder Templates-tab handlers). This is
+  // ignore-on-route: the persisted active_dealer_id is left untouched (generic
+  // pages resume the last dealer), but a group page is ALWAYS group chrome.
+  const pathname = headers().get("x-da-pathname") ?? "";
+  const onGroupRoute = pathname === "/groups" || pathname.startsWith("/groups/");
+  // Effective active dealer for nav/header purposes (null on group routes).
+  const activeDealerUuid = onGroupRoute ? null : activeDealerUuidRaw;
 
   // ── Ghost mode (super_admin only) + impersonation flag ──────────────────────
   // cookieStore is read here (once) for both ghost-token and da_impersonating so
@@ -142,8 +155,10 @@ export default async function DashboardLayout({
   // A switched-in group_admin OR group_user gets the full dealer nav (dealer
   // parity). Otherwise a group_user keeps their own scoped nav (Dashboard ·
   // My Dealers · My Profile · Help) — handled by group_user entries in Sidebar.
+  // On a group route, a super_admin's dealer-ghost overlay must not bleed dealer
+  // nav over the group page either — fall back to their own (admin) nav there.
   const sidebarRole: UserRole = ((isGroupAdmin || isGroupUser) && activeDealerUuid) ? "dealer_admin"
-    : (isSuperAdmin && isGhostMode && !ghostGroupId) ? "dealer_admin"
+    : (isSuperAdmin && isGhostMode && !ghostGroupId && !onGroupRoute) ? "dealer_admin"
     : (isSuperAdmin && ghostGroupId) ? "group_admin"
     : role;
 
@@ -151,7 +166,7 @@ export default async function DashboardLayout({
     email: session.user.email ?? "",
     fullName: profile?.full_name ?? null,
     role,
-    dealerName: (isGhostMode && !ghostGroupId) ? ghostDealerName : dealerName,
+    dealerName: (isGhostMode && !ghostGroupId && !onGroupRoute) ? ghostDealerName : dealerName,
     groupName: ghostGroupId ? ghostGroupName : groupName,
     activeDealerName,
     activeDealerId: activeDealerUuid,

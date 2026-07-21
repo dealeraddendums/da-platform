@@ -211,7 +211,14 @@ export async function middleware(request: NextRequest) {
     return res;
   }
 
-  let response = NextResponse.next({ request });
+  // Expose the request path to server components (the dashboard layout reads
+  // `x-da-pathname` via headers() to render nav/header by ROUTE — e.g. group
+  // chrome on /groups* regardless of a persisted active_dealer_id — instead of
+  // relying on entry-point handlers, which browser-back / direct URLs bypass).
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-da-pathname", pathname);
+
+  let response = NextResponse.next({ request: { headers: requestHeaders } });
 
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
@@ -224,7 +231,7 @@ export async function middleware(request: NextRequest) {
         cookiesToSet.forEach(({ name, value }) =>
           request.cookies.set(name, value)
         );
-        response = NextResponse.next({ request });
+        response = NextResponse.next({ request: { headers: requestHeaders } });
         cookiesToSet.forEach(({ name, value, options }) =>
           response.cookies.set(name, value, options)
         );
