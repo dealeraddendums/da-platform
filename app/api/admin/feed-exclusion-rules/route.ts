@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { ruleIdsInMappings } from "@/lib/feed-export";
 
 // Feed Exports — named, reusable product-exclusion rules. super_admin only.
 // (RLS on with no policies; all access via this service-role route.)
@@ -27,21 +28,23 @@ export async function GET(): Promise<NextResponse> {
     .order("name", { ascending: true });
   if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
 
+  // Usage = feeds whose COLUMN MAPPINGS reference the rule (rule:{id}:{variant}).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: feeds } = await (admin as any)
     .from("feed_companies")
-    .select("id, name, exclusion_rule_id");
-  const usage = new Map<string, string[]>();
-  for (const f of (feeds ?? []) as Array<{ name: string; exclusion_rule_id: string | null }>) {
-    if (!f.exclusion_rule_id) continue;
-    const arr = usage.get(f.exclusion_rule_id) ?? [];
-    arr.push(f.name);
-    usage.set(f.exclusion_rule_id, arr);
+    .select("id, name, column_mappings");
+  const usage = new Map<string, Set<string>>();
+  for (const f of (feeds ?? []) as Array<{ name: string; column_mappings: Array<{ daField?: string }> | null }>) {
+    for (const id of ruleIdsInMappings(f.column_mappings)) {
+      const set = usage.get(id) ?? new Set<string>();
+      set.add(f.name);
+      usage.set(id, set);
+    }
   }
 
   const data = ((rules ?? []) as RuleRow[]).map((r) => ({
     ...r,
-    used_by: usage.get(r.id) ?? [],
+    used_by: Array.from(usage.get(r.id) ?? []),
   }));
   return NextResponse.json({ data });
 }

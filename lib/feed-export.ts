@@ -144,8 +144,49 @@ export const ALL_DA_FIELDS = [...RAW_FIELDS, ...COMPUTED_FIELDS];
 
 interface EffectiveOption { name: string; price: number }
 
+// ── Custom-rule derived fields ────────────────────────────────────────────────
+//
+// A column can be mapped to a rule-filtered WO variant via a STABLE id-based
+// reference `rule:{ruleId}:{variant}` (rename-safe — the display name never
+// enters the stored mapping). Variants mirror the standard WO set: a price sum
+// and a name list. (The standard WO set has no "with price" variant, so rules
+// don't either.)
+export const RULE_FIELD_VARIANTS = ["price", "list"] as const;
+export type RuleFieldVariant = (typeof RULE_FIELD_VARIANTS)[number];
+
+export function ruleFieldRef(ruleId: string, variant: RuleFieldVariant): string {
+  return `rule:${ruleId}:${variant}`;
+}
+
+/** Parse a `rule:{id}:{variant}` daField, or null if it isn't one. */
+export function parseRuleField(daField: string): { ruleId: string; variant: RuleFieldVariant } | null {
+  const m = /^rule:([^:]+):(price|list)$/.exec(daField ?? "");
+  if (!m) return null;
+  return { ruleId: m[1], variant: m[2] as RuleFieldVariant };
+}
+
+/** Distinct rule ids referenced by a set of column mappings (for usage counts
+ *  and the in-use delete guard). */
+export function ruleIdsInMappings(mappings: Array<{ daField?: string }> | null | undefined): string[] {
+  const ids = new Set<string>();
+  for (const m of mappings ?? []) {
+    const rf = parseRuleField(m?.daField ?? "");
+    if (rf) ids.add(rf.ruleId);
+  }
+  return Array.from(ids);
+}
+
 function money(n: number): string {
   return (Math.round(n * 100) / 100).toFixed(2).replace(/\.00$/, "");
+}
+
+/** WO price + name list for a single rule: positive options that survive the
+ *  rule's custom name-exclusion (negatives/discounts always excluded, markup is
+ *  always 0 on V5.0 — same semantics as the standard OP_PRICE_WO_DISCOUNT_MARKUP
+ *  / OPTIONS_WO_DISCOUNT_MARKUP fields). */
+export function ruleWoFields(options: EffectiveOption[], isExcluded: (name: string) => boolean): { price: string; list: string } {
+  const wo = options.filter((o) => o.price >= 0 && !isExcluded(o.name));
+  return { price: money(wo.reduce((s, o) => s + o.price, 0)), list: wo.map((o) => o.name).join(", ") };
 }
 
 /** Decode the common HTML entities operators' product names carry, so a
@@ -307,20 +348,27 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
     : [];
   if (mappings.length === 0) throw new Error("No column mappings configured for this feed");
 
-  // Custom name-based exclusion for the WO computed fields (built-in
-  // markup/discount exclusion always applies regardless). Empty/absent rule →
-  // excludes nothing → WO output identical to before rules existed.
-  let excludePatterns: string[] = [];
-  const exclusionRuleId = (feed as unknown as { exclusion_rule_id?: string | null }).exclusion_rule_id;
-  if (exclusionRuleId) {
-    const { data: rule } = await admin
+  // Custom-rule derived fields: any column mapped to `rule:{id}:{variant}` emits
+  // a rule-filtered variant of the WO computation (built-in markup/discount
+  // exclusion PLUS the rule's name patterns). Standard COMPUTED_FIELDS stay
+  // built-in-only. Load every referenced rule up front; a mapping pointing at a
+  // deleted rule fails the export loudly rather than silently emitting
+  // unfiltered data.
+  const referencedRuleIds = Array.from(new Set(
+    mappings.map((m) => parseRuleField(m.daField)?.ruleId).filter((x): x is string => Boolean(x)),
+  ));
+  const ruleExcluders = new Map<string, (name: string) => boolean>();
+  if (referencedRuleIds.length > 0) {
+    const { data: ruleRows } = await admin
       .from("feed_exclusion_rules")
-      .select("patterns")
-      .eq("id", exclusionRuleId)
-      .maybeSingle() as { data: { patterns: string[] | null } | null };
-    excludePatterns = rule?.patterns ?? [];
+      .select("id, patterns")
+      .in("id", referencedRuleIds) as { data: Array<{ id: string; patterns: string[] | null }> | null };
+    const byId = new Map((ruleRows ?? []).map((r) => [r.id, r.patterns ?? []]));
+    for (const id of referencedRuleIds) {
+      if (!byId.has(id)) throw new Error(`Column mapping references a deleted exclusion rule (${id}). Fix the mapping before exporting.`);
+      ruleExcluders.set(id, makeCustomExcluder(byId.get(id)!));
+    }
   }
-  const isCustomExcluded = makeCustomExcluder(excludePatterns);
 
   const { data: feedDealers } = await admin
     .from("feed_company_dealers")
@@ -464,11 +512,25 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
         ...freshLib.map((l: any) => ({ name: String(l.option_name), price: parseOptionPriceValue(l.item_price) })),
       ];
 
-      const computed = computeFields(dv, effective, isCustomExcluded);
+      // Standard computed fields use built-in exclusion only (no custom rule).
+      const computed = computeFields(dv, effective);
+      // Per-rule WO variants, computed on demand and memoized per vehicle.
+      const ruleFieldCache = new Map<string, string>();
       rows.push(mappings.map((m) => {
         const raw = RAW_FIELD_EXTRACTORS[m.daField];
         if (raw) return raw(dv, ctx);
         if (m.daField in computed) return computed[m.daField];
+        const rf = parseRuleField(m.daField);
+        if (rf) {
+          const key = m.daField;
+          if (!ruleFieldCache.has(key)) {
+            const excluder = ruleExcluders.get(rf.ruleId)!; // presence guaranteed above
+            const wo = ruleWoFields(effective, excluder);
+            ruleFieldCache.set(`rule:${rf.ruleId}:price`, wo.price);
+            ruleFieldCache.set(`rule:${rf.ruleId}:list`, wo.list);
+          }
+          return ruleFieldCache.get(key) ?? "";
+        }
         return "";
       }));
       vehicleCount++;

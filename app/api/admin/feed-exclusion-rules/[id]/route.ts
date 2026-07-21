@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { ruleIdsInMappings } from "@/lib/feed-export";
 
 // Update / delete a single feed-exclusion rule. super_admin only.
 // The default ("Standard") rule is protected: not editable, not deletable.
@@ -49,10 +50,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 }
 
 /**
- * DELETE — only when unused, unless ?reassign=1 which repoints the rule's feeds
- * to the default Standard rule first. The Standard rule itself can't be deleted.
+ * DELETE — only when no column mapping references the rule. The Standard rule
+ * itself can't be deleted. (A referenced rule must have its column mappings
+ * changed first — there's no feed-level assignment to auto-reassign anymore.)
  */
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
+export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
   const { error } = await requireSuperAdmin();
   if (error) return error;
   const admin = createAdminSupabaseClient();
@@ -63,24 +65,19 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   if (!rule) return NextResponse.json({ error: "Rule not found" }, { status: 404 });
   if (rule.is_default) return NextResponse.json({ error: "The Standard rule cannot be deleted" }, { status: 400 });
 
-  const reassign = req.nextUrl.searchParams.get("reassign") === "1";
+  // In use = referenced by any feed's column mappings.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: users } = await (admin as any)
-    .from("feed_companies").select("id, name").eq("exclusion_rule_id", params.id);
-  const inUse = (users ?? []) as Array<{ id: string; name: string }>;
+  const { data: feeds } = await (admin as any)
+    .from("feed_companies").select("name, column_mappings");
+  const inUse = ((feeds ?? []) as Array<{ name: string; column_mappings: Array<{ daField?: string }> | null }>)
+    .filter((f) => ruleIdsInMappings(f.column_mappings).includes(params.id))
+    .map((f) => f.name);
 
   if (inUse.length > 0) {
-    if (!reassign) {
-      return NextResponse.json({
-        error: `Rule is in use by ${inUse.length} feed export(s): ${inUse.map((u) => u.name).join(", ")}. Reassign them to Standard first.`,
-        used_by: inUse.map((u) => u.name),
-      }, { status: 409 });
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: def } = await (admin as any)
-      .from("feed_exclusion_rules").select("id").eq("is_default", true).maybeSingle();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any).from("feed_companies").update({ exclusion_rule_id: def?.id ?? null }).eq("exclusion_rule_id", params.id);
+    return NextResponse.json({
+      error: `Rule is referenced by ${inUse.length} feed export(s): ${inUse.join(", ")}. Remove those column mappings first.`,
+      used_by: inUse,
+    }, { status: 409 });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

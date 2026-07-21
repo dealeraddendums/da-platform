@@ -39,10 +39,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
 
   const admin = createAdminSupabaseClient();
-  // New feeds default to the Standard exclusion rule (built-in behavior only).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: defaultRule } = await (admin as any)
-    .from("feed_exclusion_rules").select("id").eq("is_default", true).maybeSingle();
+  // Exclusion rules are now applied per-column (rule:{id}:{variant} in
+  // column_mappings), not at the feed level — no exclusion_rule_id on create.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error: dbErr } = await (admin as any)
     .from("feed_companies")
@@ -55,7 +53,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       filename: body.filename!.trim(),
       protocol: body.protocol ?? "ftp",
       include_vehicles: body.include_vehicles ?? "printed",
-      exclusion_rule_id: defaultRule?.id ?? null,
       column_mappings: [
         { recipientColumn: "DEALER_ID", daField: "DEALER_ID" },
         { recipientColumn: "VIN_NUMBER", daField: "VIN_NUMBER" },

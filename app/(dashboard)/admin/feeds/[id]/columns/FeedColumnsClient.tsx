@@ -24,11 +24,13 @@ export default function FeedColumnsClient({
   initialMappings,
   rawFields,
   computedFields,
+  customRuleFields = [],
 }: {
   feedId: string;
   initialMappings: ColumnMapping[];
   rawFields: string[];
   computedFields: string[];
+  customRuleFields?: { value: string; label: string }[];
 }) {
   // Normalize: locked rows first (exactly once), then the rest.
   const rest = initialMappings.filter((m, i) => !isLockedRow(m, i));
@@ -96,6 +98,16 @@ export default function FeedColumnsClient({
               <optgroup label="Computed Fields">
                 {computedFields.map((f) => <option key={f} value={f}>{f}</option>)}
               </optgroup>
+              {customRuleFields.length > 0 && (
+                <optgroup label="Custom Rules">
+                  {customRuleFields.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </optgroup>
+              )}
+              {/* A mapping saved against a since-deleted rule keeps its stored
+                  value selectable so it isn't silently dropped on the next save. */}
+              {m.daField.startsWith("rule:") && !customRuleFields.some((f) => f.value === m.daField) && (
+                <option value={m.daField}>{m.daField} (deleted rule)</option>
+              )}
             </select>
             {locked ? (
               <span title="Fixed column" style={{ color: "#c5cad0", textAlign: "center" }}>🔒</span>

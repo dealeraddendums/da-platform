@@ -38,7 +38,6 @@ interface DealerHit { id: string; name: string; dealer_id: string }
 const emptyForm = {
   name: "", ftp_url: "", ftp_username: "", ftp_password: "",
   ftp_port: "" as string | number, filename: "", protocol: "ftp", include_vehicles: "printed",
-  exclusion_rule_id: "" as string,
 };
 
 const inputStyle: React.CSSProperties = {
@@ -116,11 +115,6 @@ export default function FeedsClient() {
 
   useEffect(() => { void load(); void loadRules(); }, [load, loadRules]);
 
-  const ruleName_ = (id: string | null): string => {
-    if (!id) return "Standard — markup & discount only";
-    return rules.find(r => r.id === id)?.name ?? "—";
-  };
-
   // Dealer search (debounced) for the Add Dealer modal.
   useEffect(() => {
     if (!dealersFor || dealerQuery.trim().length < 2) { setDealerHits([]); return; }
@@ -146,7 +140,6 @@ export default function FeedsClient() {
     setForm({
       name: f.name, ftp_url: f.ftp_url, ftp_username: f.ftp_username, ftp_password: "",
       ftp_port: f.ftp_port, filename: f.filename, protocol: f.protocol, include_vehicles: f.include_vehicles,
-      exclusion_rule_id: f.exclusion_rule_id ?? "",
     });
     setFormError(null);
     setEditOpen(true);
@@ -158,7 +151,6 @@ export default function FeedsClient() {
     const body: Record<string, unknown> = {
       name: form.name, ftp_url: form.ftp_url, ftp_username: form.ftp_username,
       filename: form.filename, protocol: form.protocol, include_vehicles: form.include_vehicles,
-      exclusion_rule_id: form.exclusion_rule_id || null,
     };
     if (form.ftp_password) body.ftp_password = form.ftp_password;
     if (String(form.ftp_port).trim() !== "") body.ftp_port = parseInt(String(form.ftp_port), 10);
@@ -417,14 +409,9 @@ export default function FeedsClient() {
                 </select>
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
-                <label style={labelStyle}>Exclusion Rule (applies to the “without discount/markup” fields)</label>
-                <select style={inputStyle} value={form.exclusion_rule_id} onChange={(e) => setForm(f => ({ ...f, exclusion_rule_id: e.target.value }))}>
-                  {rules.map((r) => (
-                    <option key={r.id} value={r.is_default ? "" : r.id}>{r.name}{r.is_default ? "" : ` (${r.patterns.length} pattern${r.patterns.length === 1 ? "" : "s"})`}</option>
-                  ))}
-                </select>
-                <p style={{ fontSize: 11, color: "#78828c", marginTop: 4 }}>
-                  Manage rules with the “Exclusion Rules” button. Built-in markup/discount exclusion always applies.
+                <p style={{ fontSize: 11, color: "#78828c", margin: 0 }}>
+                  Exclusion rules are applied per-column in <strong>Columns</strong> — map a column to a rule&rsquo;s
+                  filtered OPTION PRICE / OPTION LIST. Manage rules with the &ldquo;Exclusion Rules&rdquo; button.
                 </p>
               </div>
             </div>

@@ -33,9 +33,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (typeof body[k] === "string" && (body[k] as string).trim() !== "") patch[k] = k === "ftp_password" ? body[k] : (body[k] as string).trim();
   }
   if (body.ftp_port != null) patch.ftp_port = body.ftp_port;
-  // Exclusion rule assignment (nullable — clearing falls back to no custom exclusion).
-  const exclusionRuleId = (body as unknown as { exclusion_rule_id?: string | null }).exclusion_rule_id;
-  if (exclusionRuleId !== undefined) patch.exclusion_rule_id = exclusionRuleId || null;
 
   const admin = createAdminSupabaseClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
