@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import RichTextEditor from "@/components/RichTextEditor";
+import ProductAuthoringFields from "@/components/ProductAuthoringFields";
 import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
 import FuelRuleSelect from "@/components/FuelRuleSelect";
 import type { GroupOptionRow } from "@/lib/db";
-import { RichName } from "@/lib/product-name";
 
 type FormState = {
   option_name: string;
@@ -199,34 +198,20 @@ export default function CorporateProductModal({
         <div className="px-5 py-4" style={{ overflowY: "auto", maxHeight: "70vh" }}>
           {error && <div style={{ marginBottom: 12, padding: "8px 12px", background: "#ffebee", color: "#c62828", borderRadius: 4, fontSize: 12 }}>{error}</div>}
 
-          <div style={{ marginBottom: 14 }}>
-            <label style={lbl}>Item Name *</label>
-            <input value={form.option_name} onChange={e => f("option_name", e.target.value)} style={inp} placeholder="e.g. Lifetime Powertrain Warranty" />
-            {/* Preview when the name embeds an <img> — shows the
-                thumbnail + label so the editor sees what will actually
-                print instead of the raw tag. */}
-            {form.option_name && /<img\b/i.test(form.option_name) && (
-              <div style={{ marginTop: 6, padding: "6px 10px", background: "#f5f6f7", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 12 }}>
-                <span style={{ color: "#78828c", marginRight: 6, fontSize: 11 }}>Preview:</span>
-                <RichName name={form.option_name} imgMaxH={40} />
-              </div>
-            )}
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <label style={lbl}>Price</label>
-            <input value={form.option_price} onChange={e => f("option_price", e.target.value)} style={inp} placeholder="e.g. 799 or NC or FR" />
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <label style={lbl}>Description</label>
-            <RichTextEditor
-              value={form.description}
-              onChange={(html) => f("description", html)}
-              placeholder="Optional description shown under the product name"
-              minHeight={80}
-            />
-          </div>
+          {/* Item Name + Price + Description — shared with the dealer Configure
+              Product modal (components/ProductAuthoringFields): "?" price helper,
+              ✦ AI Generate, font-size "A", and add-image-to-name/description.
+              Group-authored images upload under a group/{id} prefix in the shared
+              product-images bucket (rendered on every member dealer's addendum). */}
+          <ProductAuthoringFields
+            itemName={form.option_name}
+            price={form.option_price}
+            description={form.description}
+            onItemName={(v) => f("option_name", v)}
+            onPrice={(v) => f("option_price", v)}
+            onDescription={(v) => f("description", v)}
+            imageKeyPrefix={`group/${groupId}`}
+          />
 
           <div style={{ marginBottom: 14 }}>
             <label style={lbl}>Product Type</label>

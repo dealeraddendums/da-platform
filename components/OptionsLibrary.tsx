@@ -3,9 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { formatOptionPrice } from "@/lib/option-price";
 import type { AddendumLibraryRow } from "@/lib/db";
-import ImageUploadPicker from "@/components/ImageUploadPicker";
 import { RichName } from "@/lib/product-name";
-import RichTextEditor from "@/components/RichTextEditor";
+import ProductAuthoringFields from "@/components/ProductAuthoringFields";
 import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
 import FuelRuleSelect from "@/components/FuelRuleSelect";
 
@@ -205,90 +204,18 @@ function InNotIn({ value, onChange }: { value: boolean; onChange: (v: boolean) =
   );
 }
 
-// ── PriceHelp ──────────────────────────────────────────────────────────────────
-
-const PRICE_CODES = [
-  ["NP", "Do not display price"],
-  ["FR", "Free"],
-  ["INC", "Included"],
-  ["NC", "No Charge"],
-  ["%", "Percentage of MSRP (e.g. 5%)"],
-  ["|", "Show price but exclude from subtotal/total"],
-  ["^", "Include in subtotal but hide displayed price"],
-  ["~", "Append extra text after price (e.g. 199~*)"],
-];
-
-function PriceHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
-  if (!open) return null;
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 2000 }} onClick={onClose}>
-      <div
-        style={{ position: "absolute", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: 16, width: 320, boxShadow: "0 4px 20px rgba(0,0,0,0.12)", top: "50%", left: "50%", transform: "translate(-50%,-50%)" }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div style={{ fontWeight: 700, fontSize: 13, color: "#333", marginBottom: 10 }}>Price Modifier Codes</div>
-        {PRICE_CODES.map(([code, desc]) => (
-          <div key={code} style={{ display: "flex", gap: 10, marginBottom: 6, fontSize: 12 }}>
-            <span style={{ background: "#f5f6f7", borderRadius: 3, padding: "2px 7px", fontFamily: "monospace", fontWeight: 700, color: "#1976d2", flexShrink: 0 }}>{code}</span>
-            <span style={{ color: "#55595c" }}>{desc}</span>
-          </div>
-        ))}
-        <button type="button" onClick={onClose} style={{ ...btnGhost, width: "100%", marginTop: 8 }}>Close</button>
-      </div>
-    </div>
-  );
-}
-
 // ── Option form ────────────────────────────────────────────────────────────────
 
 function OptionForm({
-  form, setForm, appliesTo, setAppliesTo, showPriceHelp, setShowPriceHelp,
+  form, setForm, appliesTo, setAppliesTo,
 }: {
   form: FormData;
   setForm: React.Dispatch<React.SetStateAction<FormData>>;
   appliesTo: "all" | "rules" | "none";
   setAppliesTo: (v: "all" | "rules" | "none") => void;
-  showPriceHelp: boolean;
-  setShowPriceHelp: (v: boolean) => void;
 }) {
-  const [aiGenerating, setAiGenerating] = useState(false);
-  const [aiGenerated, setAiGenerated] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [showImagePicker, setShowImagePicker] = useState(false);
-  const [insertTarget, setInsertTarget] = useState<"description" | "item_name">("description");
-  const [descToolbarOpen, setDescToolbarOpen] = useState(false);
-
   function f(field: keyof FormData, value: unknown) {
     setForm(prev => ({ ...prev, [field]: value }));
-  }
-
-  async function handleAiGenerate() {
-    const name = form.option_name.trim();
-    if (!name) { setAiError("Enter an item name first"); return; }
-    setAiGenerating(true);
-    setAiError(null);
-    try {
-      const res = await fetch("/api/ai-content/option-description", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itemName: name, price: form.item_price }),
-      });
-      const text = await res.text();
-      let json: { description?: string; error?: string } = {};
-      try { json = JSON.parse(text) as typeof json; } catch { /* non-JSON response */ }
-      if (!res.ok) {
-        setAiError(json.error ?? `Generation failed (HTTP ${res.status})`);
-        return;
-      }
-      const desc = json.description ?? "";
-      // Wrap plain text in <p> so Tiptap doesn't lose paragraph structure on insert.
-      const html = /<[a-z][^>]*>/i.test(desc) ? desc : (desc ? `<p>${desc.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>` : "");
-      f("description", html);
-      setAiGenerated(true);
-    } catch (err) {
-      setAiError(err instanceof Error ? err.message : "Network error");
-    }
-    finally { setAiGenerating(false); }
   }
 
   const row = (label: string, children: React.ReactNode) => (
@@ -300,79 +227,16 @@ function OptionForm({
 
   return (
     <div>
-      {row("Item Name *", (
-        <div>
-          <input value={form.option_name} onChange={e => f("option_name", e.target.value)} style={inp} placeholder="e.g. Ceramic Tint" />
-          {/* Preview — renders an <img> name as thumbnail + label so the
-              editor sees what will actually print instead of the raw tag. */}
-          {form.option_name && /<img\b/i.test(form.option_name) && (
-            <div style={{ marginTop: 6, padding: "6px 10px", background: "#f5f6f7", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 12 }}>
-              <span style={{ color: "#78828c", marginRight: 6, fontSize: 11 }}>Preview:</span>
-              <RichName name={form.option_name} imgMaxH={40} />
-            </div>
-          )}
-        </div>
-      ))}
-
-      {row("Price", (
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input value={form.item_price} onChange={e => f("item_price", e.target.value)} style={{ ...inp, flex: 1 }} placeholder="e.g. 799 or NC or FR" />
-          <button type="button" onClick={() => setShowPriceHelp(true)}
-            style={{ width: 28, height: 28, borderRadius: "50%", background: "#e3f2fd", border: "none", cursor: "pointer", color: "#1976d2", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
-            ?
-          </button>
-        </div>
-      ))}
-
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5, gap: 8 }}>
-          <label style={lbl}>Description</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button type="button" onClick={() => void handleAiGenerate()} disabled={aiGenerating}
-              style={{ background: "none", border: "none", cursor: aiGenerating ? "default" : "pointer", color: "#1565c0", fontSize: 12, fontWeight: 700, padding: "2px 6px", display: "flex", alignItems: "center", gap: 3 }}>
-              {aiGenerating ? "Generating…" : "✦ Generate"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setDescToolbarOpen(o => !o)}
-              title={descToolbarOpen ? "Hide formatting" : "Show formatting"}
-              style={{
-                height: 22, padding: "0 8px", fontSize: 12, fontWeight: 700,
-                border: "1px solid #e0e0e0", borderRadius: 6,
-                background: descToolbarOpen ? "#1976d2" : "#fff",
-                color: descToolbarOpen ? "#fff" : "#78828c",
-                cursor: "pointer", lineHeight: 1,
-              }}
-            >
-              A
-            </button>
-          </div>
-        </div>
-        <RichTextEditor
-          value={form.description}
-          onChange={(html) => { f("description", html); setAiGenerated(false); }}
-          placeholder={aiGenerating ? "Generating description…" : "Optional description shown under the product name"}
-          disabled={aiGenerating}
-          minHeight={64}
-          toolbarOpen={descToolbarOpen}
-        />
-        {aiGenerated && !aiGenerating && (
-          <p style={{ fontSize: 11, color: "#1565c0", marginTop: 4, marginBottom: 0 }}>✦ AI generated — edit as needed</p>
-        )}
-        {aiError && (
-          <p style={{ fontSize: 11, color: "#c62828", marginTop: 4, marginBottom: 0 }}>{aiError}</p>
-        )}
-        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-          <button type="button" onClick={() => { setInsertTarget("description"); setShowImagePicker(true); }}
-            style={{ padding: "4px 10px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#55595c", fontWeight: 600 }}>
-            ＋ Add image to description
-          </button>
-          <button type="button" onClick={() => { setInsertTarget("item_name"); setShowImagePicker(true); }}
-            style={{ padding: "4px 10px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#55595c", fontWeight: 600 }}>
-            ＋ Add image to item name
-          </button>
-        </div>
-      </div>
+      {/* Item Name + Price + Description — shared with the group Corporate
+          Product modal (components/ProductAuthoringFields). */}
+      <ProductAuthoringFields
+        itemName={form.option_name}
+        price={form.item_price}
+        description={form.description}
+        onItemName={(v) => f("option_name", v)}
+        onPrice={(v) => f("item_price", v)}
+        onDescription={(v) => f("description", v)}
+      />
 
       {/* Required vs Suggested — uses the shared blue=selected / white=unselected
           toggle convention. Keep CorporateProductModal's mirror in sync. */}
@@ -561,33 +425,6 @@ function OptionForm({
             style={{ ...inp, width: 70 }} />
         </div>
       </div>
-
-      {showImagePicker && (
-        <ImageUploadPicker
-          title="Product Image Library"
-          tab1Label="Library"
-          listEndpoint="/api/upload-image?bucket=addendum-product-images"
-          uploadBucket="addendum-product-images"
-          acceptedTypes="image/png,image/jpeg,image/jpg,image/gif,image/webp"
-          maxSizeMB={5}
-          requestAlt
-          onSelect={(url, meta) => {
-            // Embed an alt attribute so the product-name renderer
-            // (<ProductName>) and any future readers can show a readable
-            // label instead of the raw URL filename. Meta-supplied alt
-            // wins; falls back to "" only when the user explicitly cleared it.
-            const altAttr = (meta?.alt ?? "").replace(/"/g, "&quot;");
-            const tag = `<img src="${url}" alt="${altAttr}" width="125" style="max-width:125px;" />`;
-            if (insertTarget === "item_name") {
-              f("option_name", form.option_name + tag);
-            } else {
-              f("description", form.description + tag);
-            }
-            setShowImagePicker(false);
-          }}
-          onClose={() => setShowImagePicker(false)}
-        />
-      )}
     </div>
   );
 }
@@ -629,7 +466,6 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
   const [editItem, setEditItem] = useState<AddendumLibraryRow | null>(null);
   const [form, setForm] = useState<FormData>(BLANK);
   const [appliesTo, setAppliesTo] = useState<"all" | "rules" | "none">("all");
-  const [showPriceHelp, setShowPriceHelp] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -1135,7 +971,6 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
           <OptionForm
             form={form} setForm={setForm}
             appliesTo={appliesTo} setAppliesTo={setAppliesTo}
-            showPriceHelp={showPriceHelp} setShowPriceHelp={setShowPriceHelp}
           />
         </Modal>
       )}
@@ -1174,8 +1009,6 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
         </div>
       )}
 
-      {/* Price help popover */}
-      <PriceHelp open={showPriceHelp} onClose={() => setShowPriceHelp(false)} />
     </div>
   );
 }
