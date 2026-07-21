@@ -308,7 +308,7 @@ export default function FeedsClient() {
       )}
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 12 }}>
-        <button className="btn btn-secondary" onClick={() => setRulesOpen(true)}>Product Rules</button>
+        <button className="btn btn-secondary" onClick={() => setRulesOpen(true)}>Custom Rules</button>
         <button className="btn btn-primary" onClick={openCreate}>+ Add New</button>
       </div>
 
@@ -415,7 +415,7 @@ export default function FeedsClient() {
               <div style={{ gridColumn: "1 / -1" }}>
                 <p style={{ fontSize: 11, color: "#78828c", margin: 0 }}>
                   Product rules are applied per-column in <strong>Columns</strong> — map a column to a rule&rsquo;s
-                  filtered OPTION PRICE / OPTION LIST. Manage rules with the &ldquo;Product Rules&rdquo; button.
+                  filtered OPTION PRICE / OPTION LIST. Manage rules with the &ldquo;Custom Rules&rdquo; button.
                 </p>
               </div>
             </div>
@@ -506,12 +506,12 @@ export default function FeedsClient() {
         </div>
       )}
 
-      {/* ── Product Rules manager ── */}
+      {/* ── Custom Rules manager ── */}
       {rulesOpen && (
         <div style={modalShell} onClick={() => setRulesOpen(false)}>
           <div style={{ ...modalCard, maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <h2 style={{ fontSize: 16, fontWeight: 600 }}>Product Rules</h2>
+              <h2 style={{ fontSize: 16, fontWeight: 600 }}>Custom Rules</h2>
               <button className="btn btn-primary" onClick={openNewRule}>+ New Rule</button>
             </div>
             <p style={{ fontSize: 12, color: "#78828c", marginBottom: 16 }}>
@@ -528,23 +528,27 @@ export default function FeedsClient() {
                 </tr>
               </thead>
               <tbody>
-                {rules.map((r) => (
+                {/* The built-in Standard rule is not a custom rule — it's plain
+                    WO-field behavior already covered by the Computed Fields in the
+                    mapping dropdown — so it's never listed here. */}
+                {rules.filter((r) => !r.is_default).length === 0 && (
+                  <tr><td style={{ ...tdStyle, color: "#78828c" }} colSpan={5}>No custom rules yet — click “+ New Rule” to create one.</td></tr>
+                )}
+                {rules.filter((r) => !r.is_default).map((r) => (
                   <tr key={r.id}>
-                    <td style={tdStyle}><div style={{ fontWeight: 600 }}>{r.name}</div>{r.is_default && <div style={{ fontSize: 11, color: "#78828c" }}>default · built-in only</div>}</td>
+                    <td style={tdStyle}><div style={{ fontWeight: 600 }}>{r.name}</div></td>
                     <td style={tdStyle}>
-                      {r.is_default ? <span style={{ color: "#78828c" }}>—</span> : (
-                        <span style={{ fontSize: 11, fontWeight: 600, borderRadius: 4, padding: "2px 7px", background: r.mode === "include" ? "#e8f5e9" : "#eceff1", color: r.mode === "include" ? "#2e7d32" : "#546e7a" }}>
-                          {r.mode === "include" ? "Include" : "Exclude"}{r.match_type === "exact" ? " · exact" : ""}
-                        </span>
-                      )}
+                      <span style={{ fontSize: 11, fontWeight: 600, borderRadius: 4, padding: "2px 7px", background: r.mode === "include" ? "#e8f5e9" : "#eceff1", color: r.mode === "include" ? "#2e7d32" : "#546e7a" }}>
+                        {r.mode === "include" ? "Include" : "Exclude"}{r.match_type === "exact" ? " · exact" : ""}
+                      </span>
                     </td>
                     <td style={tdStyle}>{r.patterns.length === 0 ? <span style={{ color: "#78828c" }}>—</span> : r.patterns.join(", ")}</td>
                     <td style={tdStyle}>{r.used_by.length === 0 ? <span style={{ color: "#78828c" }}>none</span> : <span title={r.used_by.join(", ")}>{r.used_by.length} feed{r.used_by.length === 1 ? "" : "s"}</span>}</td>
                     <td style={{ ...tdStyle, textAlign: "right" }}>
                       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
                         <button style={actionBtn} onClick={() => void duplicateRule(r)}>Duplicate</button>
-                        {!r.is_default && <button style={actionBtn} onClick={() => openEditRule(r)}>Edit</button>}
-                        {!r.is_default && <button style={{ ...actionBtn, color: "#c62828" }} onClick={() => void deleteRule(r)}>Delete</button>}
+                        <button style={actionBtn} onClick={() => openEditRule(r)}>Edit</button>
+                        <button style={{ ...actionBtn, color: "#c62828" }} onClick={() => void deleteRule(r)}>Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -562,7 +566,7 @@ export default function FeedsClient() {
       {ruleEdit !== null && (
         <div style={{ ...modalShell, zIndex: 210 }} onClick={() => !ruleSaving && setRuleEdit(null)}>
           <div style={modalCard} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{ruleEdit === "new" ? "New Product Rule" : "Edit Product Rule"}</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{ruleEdit === "new" ? "New Custom Rule" : "Edit Custom Rule"}</h2>
             {ruleEdit !== "new" && (ruleEdit as ExclusionRule).used_by.length > 0 && (
               <p style={{ fontSize: 12, color: "#e65100", background: "#fff3e0", border: "1px solid #ffe0b2", borderRadius: 4, padding: "8px 10px", marginBottom: 12 }}>
                 ⚠ Used by {(ruleEdit as ExclusionRule).used_by.length} feed export(s): {(ruleEdit as ExclusionRule).used_by.join(", ")}. Editing changes all of them — use Duplicate to customize for one dealer.

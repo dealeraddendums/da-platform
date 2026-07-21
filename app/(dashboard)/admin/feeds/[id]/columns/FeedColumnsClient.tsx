@@ -1,8 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import type { ColumnMapping } from "@/lib/feed-export";
+
+// DA Field option for the dropdown's "Custom Rules" group.
+type RuleField = { value: string; label: string };
+// Mirrors lib/feed-export ruleFieldRef() + RULE_FIELD_VARIANTS — kept inline so
+// this client component doesn't import feed-export's runtime (server-only db dep).
+const VARIANT_LABEL: Record<string, string> = { price: "OPTION PRICE", list: "OPTION LIST" };
+function buildRuleFields(rules: Array<{ id: string; name: string; is_default?: boolean }>): RuleField[] {
+  return rules
+    .filter((r) => !r.is_default)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .flatMap((r) =>
+      (["price", "list"] as const).map((v) => ({ value: `rule:${r.id}:${v}`, label: `${r.name} — ${VARIANT_LABEL[v]}` })),
+    );
+}
 
 // First three mappings are the fixed identity block — always present, locked.
 const LOCKED: ColumnMapping[] = [
@@ -24,19 +38,38 @@ export default function FeedColumnsClient({
   initialMappings,
   rawFields,
   computedFields,
-  customRuleFields = [],
+  customRuleFields: initialCustomRuleFields = [],
 }: {
   feedId: string;
   initialMappings: ColumnMapping[];
   rawFields: string[];
   computedFields: string[];
-  customRuleFields?: { value: string; label: string }[];
+  customRuleFields?: RuleField[];
 }) {
   // Normalize: locked rows first (exactly once), then the rest.
   const rest = initialMappings.filter((m, i) => !isLockedRow(m, i));
   const [rows, setRows] = useState<ColumnMapping[]>([...LOCKED, ...rest.filter(r => !LOCKED.some(l => l.recipientColumn === r.recipientColumn && l.daField === r.daField))]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Custom Rules dropdown group. Seeded from the server prop for instant paint,
+  // then refetched live on mount so renames/adds/deletes made in the rules
+  // manager show immediately — even on a soft client-side navigation, where
+  // Next's Router Cache would otherwise serve a stale server payload (this was
+  // the "Tuttleclick exclusions" phantom: the old name of a since-renamed rule).
+  const [customRuleFields, setCustomRuleFields] = useState<RuleField[]>(initialCustomRuleFields);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/feed-exclusion-rules", { cache: "no-store" });
+        if (!res.ok) return;
+        const j = (await res.json()) as { data?: Array<{ id: string; name: string; is_default?: boolean }> };
+        if (!cancelled && Array.isArray(j.data)) setCustomRuleFields(buildRuleFields(j.data));
+      } catch { /* keep the server-seeded list on network error */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   function update(i: number, key: keyof ColumnMapping, value: string) {
     setRows((prev) => prev.map((r, j) => (j === i ? { ...r, [key]: value } : r)));

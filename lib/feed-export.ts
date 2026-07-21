@@ -377,7 +377,7 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
     const byId = new Map((ruleRows ?? []).map((r) => [r.id, r]));
     for (const id of referencedRuleIds) {
       const r = byId.get(id);
-      if (!r) throw new Error(`Column mapping references a deleted product rule (${id}). Fix the mapping before exporting.`);
+      if (!r) throw new Error(`Column mapping references a deleted custom rule (${id}). Fix the mapping before exporting.`);
       ruleResolvers.set(id, {
         matches: makeRuleMatcher(r.patterns ?? [], r.match_type ?? "contains"),
         mode: r.mode ?? "exclude",
