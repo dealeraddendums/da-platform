@@ -24,7 +24,7 @@ function normalizePatterns(input: unknown): string[] {
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
   const { error } = await requireSuperAdmin();
   if (error) return error;
-  let body: { name?: string; patterns?: unknown };
+  let body: { name?: string; patterns?: unknown; mode?: string; match_type?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
 
   const admin = createAdminSupabaseClient();
@@ -37,11 +37,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim();
   if (body.patterns !== undefined) patch.patterns = normalizePatterns(body.patterns);
+  if (body.mode === "exclude" || body.mode === "include") patch.mode = body.mode;
+  if (body.match_type === "contains" || body.match_type === "exact") patch.match_type = body.match_type;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error: dbErr } = await (admin as any)
     .from("feed_exclusion_rules").update(patch).eq("id", params.id)
-    .select("id, name, patterns, is_default, created_at").maybeSingle();
+    .select("id, name, patterns, is_default, mode, match_type, created_at").maybeSingle();
   if (dbErr) {
     const msg = /duplicate|unique/i.test(dbErr.message) ? "A rule with that name already exists" : dbErr.message;
     return NextResponse.json({ error: msg }, { status: 400 });

@@ -180,14 +180,8 @@ function money(n: number): string {
   return (Math.round(n * 100) / 100).toFixed(2).replace(/\.00$/, "");
 }
 
-/** WO price + name list for a single rule: positive options that survive the
- *  rule's custom name-exclusion (negatives/discounts always excluded, markup is
- *  always 0 on V5.0 — same semantics as the standard OP_PRICE_WO_DISCOUNT_MARKUP
- *  / OPTIONS_WO_DISCOUNT_MARKUP fields). */
-export function ruleWoFields(options: EffectiveOption[], isExcluded: (name: string) => boolean): { price: string; list: string } {
-  const wo = options.filter((o) => o.price >= 0 && !isExcluded(o.name));
-  return { price: money(wo.reduce((s, o) => s + o.price, 0)), list: wo.map((o) => o.name).join(", ") };
-}
+export type RuleMode = "exclude" | "include";
+export type RuleMatchType = "contains" | "exact";
 
 /** Decode the common HTML entities operators' product names carry, so a
  *  pattern like "Doc Fee" matches "Doc Fee &amp; Handling". Mirrors the
@@ -200,17 +194,34 @@ function decodeEntities(s: string): string {
     .replace(/&amp;/g, "&");
 }
 
-/** Build a custom-exclusion predicate from a rule's patterns: case-insensitive
- *  SUBSTRING match against the entity-decoded name; patterns OR together. An
- *  empty pattern list (e.g. the default Standard rule) excludes nothing, so the
- *  WO fields keep their exact built-in behavior. */
-export function makeCustomExcluder(patterns: string[] | null | undefined): (name: string) => boolean {
+/** Build a name-matcher from a rule's patterns. `contains` = case-insensitive
+ *  substring; `exact` = case-insensitive whole-name equality. Patterns OR
+ *  together; empty pattern list matches nothing. Matches against the
+ *  entity-decoded name. */
+export function makeRuleMatcher(patterns: string[] | null | undefined, matchType: RuleMatchType = "contains"): (name: string) => boolean {
   const pats = (patterns ?? []).map((p) => p.trim().toLowerCase()).filter(Boolean);
   if (pats.length === 0) return () => false;
   return (name: string) => {
-    const hay = decodeEntities(name).toLowerCase();
-    return pats.some((p) => hay.includes(p));
+    const hay = decodeEntities(name).trim().toLowerCase();
+    return matchType === "exact" ? pats.some((p) => hay === p) : pats.some((p) => hay.includes(p));
   };
+}
+
+/**
+ * Price + name list for a single rule, per mode.
+ *   exclude — positive options that DON'T match (built-in negative/discount
+ *     exclusion still applies; markup is always 0 on V5.0). Same semantics as
+ *     the standard OP_PRICE_WO_DISCOUNT_MARKUP / OPTIONS_WO_DISCOUNT_MARKUP.
+ *   include — ONLY the matching options, negatives included (built-in negative
+ *     exclusion bypassed) so an "only Dealer Discounts" rule can surface
+ *     negative lines; price sums the matched line values (negatives sum
+ *     naturally).
+ */
+export function ruleFields(options: EffectiveOption[], matches: (name: string) => boolean, mode: RuleMode): { price: string; list: string } {
+  const sel = mode === "include"
+    ? options.filter((o) => matches(o.name))
+    : options.filter((o) => o.price >= 0 && !matches(o.name));
+  return { price: money(sel.reduce((s, o) => s + o.price, 0)), list: sel.map((o) => o.name).join(", ") };
 }
 
 /**
@@ -349,24 +360,28 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
   if (mappings.length === 0) throw new Error("No column mappings configured for this feed");
 
   // Custom-rule derived fields: any column mapped to `rule:{id}:{variant}` emits
-  // a rule-filtered variant of the WO computation (built-in markup/discount
-  // exclusion PLUS the rule's name patterns). Standard COMPUTED_FIELDS stay
-  // built-in-only. Load every referenced rule up front; a mapping pointing at a
-  // deleted rule fails the export loudly rather than silently emitting
+  // a rule-filtered variant (exclude mode → WO-style: positives minus matches;
+  // include mode → only matches, negatives included). Standard COMPUTED_FIELDS
+  // stay built-in-only. Load every referenced rule up front; a mapping pointing
+  // at a deleted rule fails the export loudly rather than silently emitting
   // unfiltered data.
   const referencedRuleIds = Array.from(new Set(
     mappings.map((m) => parseRuleField(m.daField)?.ruleId).filter((x): x is string => Boolean(x)),
   ));
-  const ruleExcluders = new Map<string, (name: string) => boolean>();
+  const ruleResolvers = new Map<string, { matches: (name: string) => boolean; mode: RuleMode }>();
   if (referencedRuleIds.length > 0) {
     const { data: ruleRows } = await admin
       .from("feed_exclusion_rules")
-      .select("id, patterns")
-      .in("id", referencedRuleIds) as { data: Array<{ id: string; patterns: string[] | null }> | null };
-    const byId = new Map((ruleRows ?? []).map((r) => [r.id, r.patterns ?? []]));
+      .select("id, patterns, mode, match_type")
+      .in("id", referencedRuleIds) as { data: Array<{ id: string; patterns: string[] | null; mode: RuleMode | null; match_type: RuleMatchType | null }> | null };
+    const byId = new Map((ruleRows ?? []).map((r) => [r.id, r]));
     for (const id of referencedRuleIds) {
-      if (!byId.has(id)) throw new Error(`Column mapping references a deleted exclusion rule (${id}). Fix the mapping before exporting.`);
-      ruleExcluders.set(id, makeCustomExcluder(byId.get(id)!));
+      const r = byId.get(id);
+      if (!r) throw new Error(`Column mapping references a deleted product rule (${id}). Fix the mapping before exporting.`);
+      ruleResolvers.set(id, {
+        matches: makeRuleMatcher(r.patterns ?? [], r.match_type ?? "contains"),
+        mode: r.mode ?? "exclude",
+      });
     }
   }
 
@@ -524,10 +539,10 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
         if (rf) {
           const key = m.daField;
           if (!ruleFieldCache.has(key)) {
-            const excluder = ruleExcluders.get(rf.ruleId)!; // presence guaranteed above
-            const wo = ruleWoFields(effective, excluder);
-            ruleFieldCache.set(`rule:${rf.ruleId}:price`, wo.price);
-            ruleFieldCache.set(`rule:${rf.ruleId}:list`, wo.list);
+            const resolver = ruleResolvers.get(rf.ruleId)!; // presence guaranteed above
+            const rfv = ruleFields(effective, resolver.matches, resolver.mode);
+            ruleFieldCache.set(`rule:${rf.ruleId}:price`, rfv.price);
+            ruleFieldCache.set(`rule:${rf.ruleId}:list`, rfv.list);
           }
           return ruleFieldCache.get(key) ?? "";
         }

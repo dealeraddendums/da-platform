@@ -11,6 +11,8 @@ interface RuleRow {
   name: string;
   patterns: string[];
   is_default: boolean;
+  mode: "exclude" | "include";
+  match_type: "contains" | "exact";
   created_at: string;
 }
 
@@ -23,7 +25,7 @@ export async function GET(): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: rules, error: dbErr } = await (admin as any)
     .from("feed_exclusion_rules")
-    .select("id, name, patterns, is_default, created_at")
+    .select("id, name, patterns, is_default, mode, match_type, created_at")
     .order("is_default", { ascending: false })
     .order("name", { ascending: true });
   if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
@@ -68,22 +70,27 @@ function normalizePatterns(input: unknown): string[] {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { error } = await requireSuperAdmin();
   if (error) return error;
-  let body: { name?: string; patterns?: unknown; duplicate_of?: string };
+  let body: { name?: string; patterns?: unknown; duplicate_of?: string; mode?: string; match_type?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
 
   const admin = createAdminSupabaseClient();
 
   let name = (body.name ?? "").toString().trim();
   let patterns = normalizePatterns(body.patterns);
+  let mode = body.mode === "include" ? "include" : "exclude";
+  let matchType = body.match_type === "exact" ? "exact" : "contains";
 
-  // Duplicate: fork the source rule's patterns under a "{name} (copy)" name.
+  // Duplicate: fork the source rule's patterns + mode + match type under a
+  // "{name} (copy)" name (an explicit mode/match_type in the body still wins).
   if (body.duplicate_of) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: src } = await (admin as any)
-      .from("feed_exclusion_rules").select("name, patterns").eq("id", body.duplicate_of).maybeSingle();
+      .from("feed_exclusion_rules").select("name, patterns, mode, match_type").eq("id", body.duplicate_of).maybeSingle();
     if (!src) return NextResponse.json({ error: "Source rule not found" }, { status: 404 });
     patterns = normalizePatterns(src.patterns);
     name = name || `${src.name} (copy)`;
+    if (body.mode === undefined) mode = src.mode === "include" ? "include" : "exclude";
+    if (body.match_type === undefined) matchType = src.match_type === "exact" ? "exact" : "contains";
   }
 
   if (!name) return NextResponse.json({ error: "Rule name is required" }, { status: 400 });
@@ -91,8 +98,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error: dbErr } = await (admin as any)
     .from("feed_exclusion_rules")
-    .insert({ name, patterns, is_default: false })
-    .select("id, name, patterns, is_default, created_at")
+    .insert({ name, patterns, is_default: false, mode, match_type: matchType })
+    .select("id, name, patterns, is_default, mode, match_type, created_at")
     .single();
   if (dbErr) {
     const msg = /duplicate|unique/i.test(dbErr.message) ? "A rule with that name already exists" : dbErr.message;

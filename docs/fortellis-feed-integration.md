@@ -1,9 +1,11 @@
 # Fortellis Feed Integration — Planning Spec
 
-> **Status:** Planned — CC prompt: `cc-prompt-fortellis-dealers.txt`
+> **Status:** ✅ SHIPPED 2026-07-18 — live on prod (commits `6f03e38` feature + `b9a4f8d` health-classification fix; **migration 133 applied**). CC prompt: `cc-prompt-fortellis-dealers.txt`; Phase 0 findings: `da-platform/docs/fortellis-samples/FINDINGS.md`.
+> **Outstanding:** (1) EasyCron hourly-delta job — dashboard-registered, see §5b; (2) CDK must activate DA's Test subscription (Test calls currently 400 "Invalid SubscriptionId or Implementation provider is not configured" — path/auth verified correct); live vehicle E2E + the DOWN→UP alert simulation are deferred until then.
 > **Owner:** Allan | **Authored:** 2026-07-18 (planning Claude)
 > **Context:** CDK PIP sunset Oct 23, 2026 — see `cdk-fortellis-migration-brief.md`
 > **Decisions (Allan, 2026-07-18):** engine lives in **da-platform + EasyCron**; writes **Supabase only** (`dealer_vehicles`); Workflow Template doc filled out in parallel.
+> **As-built divergences (CC, folded in):** token call requires **`scope=anonymous`** (400 without it); env-specific service paths `/{cdk|cdk-test}/sales/inventory/v2/merchandisable-vehicles`; per-dealer scoping is `web_id`/`dealer_code` (no Department-Id); **sold = `dealer_vehicles.status='inactive'`** (canonical — no 'sold' enum; printed rows `print_status=1` and manual vehicles never touched); build fix: `ssh2-sftp-client`/`ssh2` added to `serverComponentsExternalPackages` (pre-existing blocker from feed-push.ts).
 
 ---
 
@@ -156,7 +158,7 @@ Trigger: dealer row added on the tab (or Import clicked while `is_new`). Full in
 - Sidebar: FEEDS → **"Fortellis Dealers"** immediately below "CDK Dealers" (`components/Sidebar.tsx`). super_admin only.
 - Page is a structural clone of `app/(dashboard)/admin/cdk-dealers/page.tsx` (PageHeader, white cards, `1px solid #e0e0e0`, no shadow, Roboto, blue `#1976d2` primaries, orange `#ffa500` for the bulk Update button):
   - Table: Dealer Name · Subscription ID · Matched dealer (`dealer_id`) · NEW badge · Last Delta · Last Full Sync · Status · row actions **Test / Full Sync / ✕**.
-  - **Add Dealer** modal: pick from `getSubscriptions()` (or paste a Subscription-Id) + dealer name + match to Supabase dealer.
+  - **Add Dealer** modal *(as-built, `4613e6a`)*: searchable dealer picker over existing dealers replaces free-text name; selection autofills dealer_name, read-only dealer_id chip, and dealer_code (from `cdk_dealers.DEALER_ID` match, else `inventory_dealer_id` fallback); subscription↔dealer cross-fill (orgName seeding / name-match preselect); manual Subscription-Id paste fallback; dup-guard blocks save when the dealer already has a `fortellis_dealers` row. Mapping helper: `lib/fortellis-autofill.ts resolveDealerAutofill()` (shared with the Phase 5 cutover converter).
   - **Test** button: live one-call probe, shows vehicle count (parity with CDK Test).
   - **Fortellis Update** orange button: fleet full sync with progress + error summary.
   - Health banner (per §6). Sort: NEW first, then alphabetical. Exclude test/allan pattern on fleet runs.

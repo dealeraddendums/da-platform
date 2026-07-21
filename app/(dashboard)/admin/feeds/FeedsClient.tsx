@@ -23,6 +23,8 @@ interface ExclusionRule {
   name: string;
   patterns: string[];
   is_default: boolean;
+  mode: "exclude" | "include";
+  match_type: "contains" | "exact";
   used_by: string[];
 }
 
@@ -84,6 +86,8 @@ export default function FeedsClient() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [ruleEdit, setRuleEdit] = useState<ExclusionRule | "new" | null>(null);
   const [ruleName, setRuleName] = useState("");
+  const [ruleMode, setRuleMode] = useState<"exclude" | "include">("exclude");
+  const [ruleMatchType, setRuleMatchType] = useState<"contains" | "exact">("contains");
   const [rulePatterns, setRulePatterns] = useState<string[]>([]);
   const [rulePatternInput, setRulePatternInput] = useState("");
   const [ruleSaving, setRuleSaving] = useState(false);
@@ -231,12 +235,12 @@ export default function FeedsClient() {
     void load();
   }
 
-  // ── Exclusion-rule editor ──
+  // ── Product-rule editor ──
   function openNewRule() {
-    setRuleEdit("new"); setRuleName(""); setRulePatterns([]); setRulePatternInput(""); setRuleError(null);
+    setRuleEdit("new"); setRuleName(""); setRuleMode("exclude"); setRuleMatchType("contains"); setRulePatterns([]); setRulePatternInput(""); setRuleError(null);
   }
   function openEditRule(r: ExclusionRule) {
-    setRuleEdit(r); setRuleName(r.name); setRulePatterns([...r.patterns]); setRulePatternInput(""); setRuleError(null);
+    setRuleEdit(r); setRuleName(r.name); setRuleMode(r.mode); setRuleMatchType(r.match_type); setRulePatterns([...r.patterns]); setRulePatternInput(""); setRuleError(null);
   }
   function addPattern() {
     const p = rulePatternInput.trim();
@@ -251,7 +255,7 @@ export default function FeedsClient() {
       const res = await fetch(isNew ? "/api/admin/feed-exclusion-rules" : `/api/admin/feed-exclusion-rules/${(ruleEdit as ExclusionRule).id}`, {
         method: isNew ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: ruleName.trim(), patterns: rulePatterns }),
+        body: JSON.stringify({ name: ruleName.trim(), patterns: rulePatterns, mode: ruleMode, match_type: ruleMatchType }),
       });
       const j = (await res.json()) as { error?: string };
       if (!res.ok) { setRuleError(j.error ?? "Save failed"); setRuleSaving(false); return; }
@@ -304,7 +308,7 @@ export default function FeedsClient() {
       )}
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 12 }}>
-        <button className="btn btn-secondary" onClick={() => setRulesOpen(true)}>Exclusion Rules</button>
+        <button className="btn btn-secondary" onClick={() => setRulesOpen(true)}>Product Rules</button>
         <button className="btn btn-primary" onClick={openCreate}>+ Add New</button>
       </div>
 
@@ -410,8 +414,8 @@ export default function FeedsClient() {
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
                 <p style={{ fontSize: 11, color: "#78828c", margin: 0 }}>
-                  Exclusion rules are applied per-column in <strong>Columns</strong> — map a column to a rule&rsquo;s
-                  filtered OPTION PRICE / OPTION LIST. Manage rules with the &ldquo;Exclusion Rules&rdquo; button.
+                  Product rules are applied per-column in <strong>Columns</strong> — map a column to a rule&rsquo;s
+                  filtered OPTION PRICE / OPTION LIST. Manage rules with the &ldquo;Product Rules&rdquo; button.
                 </p>
               </div>
             </div>
@@ -502,21 +506,22 @@ export default function FeedsClient() {
         </div>
       )}
 
-      {/* ── Exclusion Rules manager ── */}
+      {/* ── Product Rules manager ── */}
       {rulesOpen && (
         <div style={modalShell} onClick={() => setRulesOpen(false)}>
-          <div style={{ ...modalCard, maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ ...modalCard, maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <h2 style={{ fontSize: 16, fontWeight: 600 }}>Product-Exclusion Rules</h2>
+              <h2 style={{ fontSize: 16, fontWeight: 600 }}>Product Rules</h2>
               <button className="btn btn-primary" onClick={openNewRule}>+ New Rule</button>
             </div>
             <p style={{ fontSize: 12, color: "#78828c", marginBottom: 16 }}>
-              Rules add name-based exclusions to the “without discount/markup” feed fields. Rules are shared — an edit affects every feed using it, so <strong>Duplicate</strong> before customizing for one dealer. Built-in markup/discount exclusion always applies.
+              Each rule becomes a selectable field (option price + option list) in a feed’s Column Mapping. An <strong>exclude</strong> rule drops matching products (built-in markup/discount exclusion still applies); an <strong>include</strong> rule keeps ONLY matching products (and can surface discount/markdown lines). Rules are shared — an edit affects every feed using it, so <strong>Duplicate</strong> before customizing for one dealer.
             </p>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr>
                   <th style={thStyle}>Rule</th>
+                  <th style={thStyle}>Mode</th>
                   <th style={thStyle}>Patterns</th>
                   <th style={thStyle}>Used By</th>
                   <th style={thStyle}></th>
@@ -526,6 +531,13 @@ export default function FeedsClient() {
                 {rules.map((r) => (
                   <tr key={r.id}>
                     <td style={tdStyle}><div style={{ fontWeight: 600 }}>{r.name}</div>{r.is_default && <div style={{ fontSize: 11, color: "#78828c" }}>default · built-in only</div>}</td>
+                    <td style={tdStyle}>
+                      {r.is_default ? <span style={{ color: "#78828c" }}>—</span> : (
+                        <span style={{ fontSize: 11, fontWeight: 600, borderRadius: 4, padding: "2px 7px", background: r.mode === "include" ? "#e8f5e9" : "#eceff1", color: r.mode === "include" ? "#2e7d32" : "#546e7a" }}>
+                          {r.mode === "include" ? "Include" : "Exclude"}{r.match_type === "exact" ? " · exact" : ""}
+                        </span>
+                      )}
+                    </td>
                     <td style={tdStyle}>{r.patterns.length === 0 ? <span style={{ color: "#78828c" }}>—</span> : r.patterns.join(", ")}</td>
                     <td style={tdStyle}>{r.used_by.length === 0 ? <span style={{ color: "#78828c" }}>none</span> : <span title={r.used_by.join(", ")}>{r.used_by.length} feed{r.used_by.length === 1 ? "" : "s"}</span>}</td>
                     <td style={{ ...tdStyle, textAlign: "right" }}>
@@ -550,7 +562,7 @@ export default function FeedsClient() {
       {ruleEdit !== null && (
         <div style={{ ...modalShell, zIndex: 210 }} onClick={() => !ruleSaving && setRuleEdit(null)}>
           <div style={modalCard} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{ruleEdit === "new" ? "New Exclusion Rule" : "Edit Exclusion Rule"}</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{ruleEdit === "new" ? "New Product Rule" : "Edit Product Rule"}</h2>
             {ruleEdit !== "new" && (ruleEdit as ExclusionRule).used_by.length > 0 && (
               <p style={{ fontSize: 12, color: "#e65100", background: "#fff3e0", border: "1px solid #ffe0b2", borderRadius: 4, padding: "8px 10px", marginBottom: 12 }}>
                 ⚠ Used by {(ruleEdit as ExclusionRule).used_by.length} feed export(s): {(ruleEdit as ExclusionRule).used_by.join(", ")}. Editing changes all of them — use Duplicate to customize for one dealer.
@@ -558,7 +570,45 @@ export default function FeedsClient() {
             )}
             <label style={labelStyle}>Rule Name *</label>
             <input style={{ ...inputStyle, marginBottom: 12 }} value={ruleName} onChange={(e) => setRuleName(e.target.value)} placeholder="e.g. TuttleClick — Doc Fee" />
-            <label style={labelStyle}>Exclusion Patterns (case-insensitive substring; OR)</label>
+
+            <label style={labelStyle}>Rule Type</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+              {([
+                { v: "exclude", t: "Exclude matching products" },
+                { v: "include", t: "Include ONLY matching products" },
+              ] as const).map((o) => {
+                const active = ruleMode === o.v;
+                return (
+                  <button key={o.v} type="button" onClick={() => setRuleMode(o.v)}
+                    style={{
+                      flex: 1, padding: "10px 12px", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600, textAlign: "left",
+                      border: active ? "2px solid #1976d2" : "1px solid #e0e0e0",
+                      background: active ? "#e3f2fd" : "white", color: active ? "#1565c0" : "#37404a",
+                    }}>
+                    {o.t}
+                  </button>
+                );
+              })}
+            </div>
+            <p style={{ fontSize: 12, color: "#78828c", marginBottom: 12 }}>
+              {ruleMode === "include"
+                ? "Output keeps ONLY products matching a pattern below. Built-in discount/markup exclusion is bypassed, so negative lines (e.g. Dealer Discounts) can be surfaced. Patterns alone define what’s captured."
+                : "Matching products are dropped from output. Built-in markup/discount exclusion also applies. With no patterns, only the built-in exclusion runs."}
+            </p>
+
+            <label style={labelStyle}>Match Type</label>
+            <div style={{ display: "flex", gap: 16, marginBottom: 12, fontSize: 13 }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="radio" name="ruleMatchType" checked={ruleMatchType === "contains"} onChange={() => setRuleMatchType("contains")} />
+                Contains <span style={{ color: "#78828c" }}>(substring)</span>
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="radio" name="ruleMatchType" checked={ruleMatchType === "exact"} onChange={() => setRuleMatchType("exact")} />
+                Exact <span style={{ color: "#78828c" }}>(whole name)</span>
+              </label>
+            </div>
+
+            <label style={labelStyle}>Patterns (case-insensitive; OR)</label>
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <input style={inputStyle} value={rulePatternInput}
                 onChange={(e) => setRulePatternInput(e.target.value)}
@@ -567,7 +617,7 @@ export default function FeedsClient() {
               <button className="btn btn-secondary" onClick={addPattern}>Add</button>
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, minHeight: 28, marginBottom: 12 }}>
-              {rulePatterns.length === 0 ? <span style={{ fontSize: 12, color: "#78828c" }}>No patterns yet — built-in markup/discount exclusion still applies.</span>
+              {rulePatterns.length === 0 ? <span style={{ fontSize: 12, color: "#78828c" }}>{ruleMode === "include" ? "No patterns yet — an include rule with no patterns produces empty output." : "No patterns yet — built-in markup/discount exclusion still applies."}</span>
                 : rulePatterns.map((p) => (
                 <span key={p} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#e3f2fd", color: "#1565c0", borderRadius: 12, padding: "3px 10px", fontSize: 12 }}>
                   {p}
