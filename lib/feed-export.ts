@@ -148,12 +148,54 @@ function money(n: number): string {
   return (Math.round(n * 100) / 100).toFixed(2).replace(/\.00$/, "");
 }
 
-function computeFields(dv: Dv, options: EffectiveOption[]): Record<string, string> {
+/** Decode the common HTML entities operators' product names carry, so a
+ *  pattern like "Doc Fee" matches "Doc Fee &amp; Handling". Mirrors the
+ *  Products-page decodeNameEntities (client) — &amp; decoded last. */
+function decodeEntities(s: string): string {
+  if (!s) return "";
+  return s
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+    .replace(/&#0*39;/g, "'").replace(/&#x0*27;/gi, "'").replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&");
+}
+
+/** Build a custom-exclusion predicate from a rule's patterns: case-insensitive
+ *  SUBSTRING match against the entity-decoded name; patterns OR together. An
+ *  empty pattern list (e.g. the default Standard rule) excludes nothing, so the
+ *  WO fields keep their exact built-in behavior. */
+export function makeCustomExcluder(patterns: string[] | null | undefined): (name: string) => boolean {
+  const pats = (patterns ?? []).map((p) => p.trim().toLowerCase()).filter(Boolean);
+  if (pats.length === 0) return () => false;
+  return (name: string) => {
+    const hay = decodeEntities(name).toLowerCase();
+    return pats.some((p) => hay.includes(p));
+  };
+}
+
+/**
+ * @param isCustomExcluded  drops matching products from the "without" (WO)
+ *   computed outputs ONLY (price sums + option-name lists), on top of the
+ *   built-in markup/discount exclusion. Non-WO fields (OPTION_LIST,
+ *   OPTION_PRICE/TOTAL_ADDS, OPTIONS_WITH_PRICE, GRAND_TOTAL, SELLING_PRICE)
+ *   are untouched — mirroring the existing symmetry where the WO fields exclude
+ *   discounts (negatives) and the rest include everything.
+ */
+function computeFields(
+  dv: Dv,
+  options: EffectiveOption[],
+  isCustomExcluded: (name: string) => boolean = () => false,
+): Record<string, string> {
   const positives = options.filter((o) => o.price >= 0);
   const negatives = options.filter((o) => o.price < 0);
   const totalAdds = positives.reduce((s, o) => s + o.price, 0);
   const discounts = Math.abs(negatives.reduce((s, o) => s + o.price, 0));
   const msrp = typeof dv.msrp === "number" ? dv.msrp : parseFloat(String(dv.msrp ?? "")) || 0;
+
+  // The "without" set: positives that also survive the custom name-exclusion.
+  // (Negatives/discounts are already excluded from every WO field; markup is
+  // always 0 on V5.0.)
+  const woPositives = positives.filter((o) => !isCustomExcluded(o.name));
+  const woTotal = woPositives.reduce((s, o) => s + o.price, 0);
 
   return {
     TOTAL_ADDS: money(totalAdds),
@@ -163,12 +205,12 @@ function computeFields(dv: Dv, options: EffectiveOption[]): Record<string, strin
     OPTION_PRICE: money(totalAdds),
     OPTIONS_WITH_PRICE: options.map((o) => `${o.name}: $${money(o.price)}`).join("\n"),
     ADDED_MARKUP: "0",
-    OPTIONS_WO_ADDED_MARKUP: money(totalAdds),
+    OPTIONS_WO_ADDED_MARKUP: money(woTotal),
     DEALER_DISCOUNTS: money(discounts),
     DEALER_DISCOUNTS_NUM: money(discounts),
     DEALER_DISCOUNTS_TEXT: negatives.map((o) => o.name).join(", "),
-    OP_PRICE_WO_DISCOUNT_MARKUP: money(totalAdds),
-    OPTIONS_WO_DISCOUNT_MARKUP: positives.map((o) => o.name).join(", "),
+    OP_PRICE_WO_DISCOUNT_MARKUP: money(woTotal),
+    OPTIONS_WO_DISCOUNT_MARKUP: woPositives.map((o) => o.name).join(", "),
     ADDED_MARKUP_TEXT: "",
     GRAND_TOTAL: money(msrp + totalAdds - discounts),
   };
@@ -264,6 +306,21 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
     ? feed.column_mappings.filter((m) => m && m.recipientColumn && m.daField)
     : [];
   if (mappings.length === 0) throw new Error("No column mappings configured for this feed");
+
+  // Custom name-based exclusion for the WO computed fields (built-in
+  // markup/discount exclusion always applies regardless). Empty/absent rule →
+  // excludes nothing → WO output identical to before rules existed.
+  let excludePatterns: string[] = [];
+  const exclusionRuleId = (feed as unknown as { exclusion_rule_id?: string | null }).exclusion_rule_id;
+  if (exclusionRuleId) {
+    const { data: rule } = await admin
+      .from("feed_exclusion_rules")
+      .select("patterns")
+      .eq("id", exclusionRuleId)
+      .maybeSingle() as { data: { patterns: string[] | null } | null };
+    excludePatterns = rule?.patterns ?? [];
+  }
+  const isCustomExcluded = makeCustomExcluder(excludePatterns);
 
   const { data: feedDealers } = await admin
     .from("feed_company_dealers")
@@ -407,7 +464,7 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
         ...freshLib.map((l: any) => ({ name: String(l.option_name), price: parseOptionPriceValue(l.item_price) })),
       ];
 
-      const computed = computeFields(dv, effective);
+      const computed = computeFields(dv, effective, isCustomExcluded);
       rows.push(mappings.map((m) => {
         const raw = RAW_FIELD_EXTRACTORS[m.daField];
         if (raw) return raw(dv, ctx);

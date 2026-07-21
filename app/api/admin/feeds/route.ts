@@ -12,7 +12,7 @@ export async function GET(): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error: dbErr } = await (admin as any)
     .from("feed_companies")
-    .select("id, name, ftp_url, ftp_username, ftp_port, filename, protocol, include_vehicles, last_push_at, last_push_status, created_at")
+    .select("id, name, ftp_url, ftp_username, ftp_port, filename, protocol, include_vehicles, exclusion_rule_id, last_push_at, last_push_status, created_at")
     .order("name", { ascending: true });
   if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
 
@@ -39,6 +39,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
 
   const admin = createAdminSupabaseClient();
+  // New feeds default to the Standard exclusion rule (built-in behavior only).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: defaultRule } = await (admin as any)
+    .from("feed_exclusion_rules").select("id").eq("is_default", true).maybeSingle();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error: dbErr } = await (admin as any)
     .from("feed_companies")
@@ -51,6 +55,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       filename: body.filename!.trim(),
       protocol: body.protocol ?? "ftp",
       include_vehicles: body.include_vehicles ?? "printed",
+      exclusion_rule_id: defaultRule?.id ?? null,
       column_mappings: [
         { recipientColumn: "DEALER_ID", daField: "DEALER_ID" },
         { recipientColumn: "VIN_NUMBER", daField: "VIN_NUMBER" },

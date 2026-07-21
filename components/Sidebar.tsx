@@ -294,6 +294,18 @@ const nav: NavEntry[] = [
       </svg>
     ),
   },
+  {
+    label: "Feed Exports",
+    href: "/admin/feeds",
+    roles: ["super_admin"],
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 11a9 9 0 0 1 9 9" />
+        <path d="M4 4a16 16 0 0 1 16 16" />
+        <circle cx="5" cy="19" r="1" />
+      </svg>
+    ),
+  },
   // ── Admin section ─────────────────────────────────────────────────────────────
   {
     section: "Admin",
@@ -403,18 +415,6 @@ const nav: NavEntry[] = [
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
         <polyline points="14 2 14 8 20 8" />
         <polyline points="10 17 12 19 16 15" />
-      </svg>
-    ),
-  },
-  {
-    label: "Feeds",
-    href: "/admin/feeds",
-    roles: ["super_admin"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M4 11a9 9 0 0 1 9 9" />
-        <path d="M4 4a16 16 0 0 1 16 16" />
-        <circle cx="5" cy="19" r="1" />
       </svg>
     ),
   },

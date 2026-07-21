@@ -23,7 +23,7 @@ export default async function FeedsPage() {
   return (
     <div>
       <PageHeader
-        title="Feeds"
+        title="Feed Exports"
         subtitle="Push vehicle + addendum CSVs to inventory feed companies via FTP/SFTP."
       />
       <FeedsClient />
