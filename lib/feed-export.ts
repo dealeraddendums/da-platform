@@ -588,6 +588,11 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
       if (effective.length === 0) {
         effective = addendumByVin.get(String(dv.vin ?? "").trim().toUpperCase()) ?? [];
       }
+      // Option names are stored as rich-text HTML (e.g. "SCELZI 11&#039; UTILTY").
+      // The 4.0 HUB emits plain decoded text in the CSV; decode so name lists
+      // (OPTIONS_WO_DISCOUNT_MARKUP, DEALER_DISCOUNTS_TEXT, ADDED_MARKUP_TEXT, …)
+      // match rather than differing only by entity encoding.
+      effective = effective.map((o) => ({ name: decodeEntities(o.name), price: o.price }));
 
       // Standard computed fields use built-in exclusion only (no custom rule).
       const computed = computeFields(dv, effective);
