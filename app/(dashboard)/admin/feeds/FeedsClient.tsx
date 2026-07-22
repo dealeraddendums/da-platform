@@ -35,7 +35,13 @@ interface FeedDealerRow {
   dealers: { id: string; dealer_id: string; name: string } | null;
 }
 
-interface DealerHit { id: string; name: string; dealer_id: string }
+interface DealerHit { id: string; name: string; dealer_id: string; inventory_dealer_id: string | null }
+
+// The feed provider's dealer ID defaults to the dealer's feed/supplier id
+// (inventory_dealer_id), falling back to the internal dealer_id when NULL.
+function defaultFeedDealerId(d: DealerHit): string {
+  return (d.inventory_dealer_id && d.inventory_dealer_id.trim()) || d.dealer_id || "";
+}
 
 const emptyForm = {
   name: "", ftp_url: "", ftp_username: "", ftp_password: "",
@@ -125,8 +131,8 @@ export default function FeedsClient() {
     const t = setTimeout(async () => {
       try {
         const res = await fetch(`/api/dealers?q=${encodeURIComponent(dealerQuery.trim())}&limit=10`);
-        const j = (await res.json()) as { data?: Array<{ id: string; name: string; dealer_id: string }> };
-        setDealerHits((j.data ?? []).slice(0, 10).map(d => ({ id: d.id, name: d.name, dealer_id: d.dealer_id })));
+        const j = (await res.json()) as { data?: Array<{ id: string; name: string; dealer_id: string; inventory_dealer_id: string | null }> };
+        setDealerHits((j.data ?? []).slice(0, 10).map(d => ({ id: d.id, name: d.name, dealer_id: d.dealer_id, inventory_dealer_id: d.inventory_dealer_id ?? null })));
       } catch { setDealerHits([]); }
     }, 350);
     return () => clearTimeout(t);
@@ -480,7 +486,7 @@ export default function FeedsClient() {
                         <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, zIndex: 10, maxHeight: 220, overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,.08)" }}>
                           {dealerHits.map((d) => (
                             <button key={d.id} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
-                              onClick={() => { setPickedDealer(d); setDealerHits([]); }}>
+                              onClick={() => { setPickedDealer(d); setDealerHits([]); setFeedDealerId(defaultFeedDealerId(d)); }}>
                               {d.name} <span style={{ color: "#78828c", fontSize: 11 }}>({d.dealer_id})</span>
                             </button>
                           ))}
@@ -492,6 +498,9 @@ export default function FeedsClient() {
                 <div>
                   <label style={labelStyle}>Feed Dealer ID *</label>
                   <input style={inputStyle} value={feedDealerId} onChange={(e) => setFeedDealerId(e.target.value)} placeholder="Provider's ID for this dealer" />
+                  {pickedDealer && feedDealerId === defaultFeedDealerId(pickedDealer) && (
+                    <p style={{ fontSize: 11, color: "#78828c", margin: "4px 0 0" }}>Prefilled from dealer record — edit if the provider uses a different ID.</p>
+                  )}
                 </div>
               </div>
               {dealerError && <p style={{ color: "#c62828", fontSize: 13, marginTop: 10 }}>{dealerError}</p>}
