@@ -22,6 +22,7 @@ import {
   newlyAddedLibraryMatches,
   savedRowSurvivesLibraryRules,
   parseOptionPriceValue,
+  isPipeExcludedPrice,
 } from "@/lib/options-engine";
 
 export interface ColumnMapping {
@@ -142,7 +143,7 @@ export const ALL_DA_FIELDS = [...RAW_FIELDS, ...COMPUTED_FIELDS];
 //   SELLING_PRICE              = MSRP − DEALER_DISCOUNTS
 //   GRAND_TOTAL                = MSRP + TOTAL_ADDS − DEALER_DISCOUNTS
 
-interface EffectiveOption { name: string; price: number }
+interface EffectiveOption { name: string; price: number; rawPrice?: string }
 
 // ── Custom-rule derived fields ────────────────────────────────────────────────
 //
@@ -545,7 +546,7 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
       }
       byVinName.forEach((m, vin) => {
         const items = (Array.from(m.values()) as Dv[]).sort((a, b) => (Number(a.order_by) || 0) - (Number(b.order_by) || 0));
-        addendumByVin.set(vin, items.map((it) => ({ name: String(it.item_name), price: parseOptionPriceValue(it.item_price) })));
+        addendumByVin.set(vin, items.map((it) => ({ name: String(it.item_name), price: parseOptionPriceValue(it.item_price), rawPrice: String(it.item_price ?? "") })));
       });
     }
 
@@ -577,10 +578,10 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
         .filter((r) => !dismissed.has(r.id));
 
       let effective: EffectiveOption[] = [
-        ...groupEffective.map((g) => ({ name: g.option_name, price: parseOptionPriceValue(g.option_price) })),
-        ...savedFiltered.map((s) => ({ name: String(s.option_name), price: parseOptionPriceValue(s.option_price) })),
+        ...groupEffective.map((g) => ({ name: g.option_name, price: parseOptionPriceValue(g.option_price), rawPrice: String(g.option_price ?? "") })),
+        ...savedFiltered.map((s) => ({ name: String(s.option_name), price: parseOptionPriceValue(s.option_price), rawPrice: String(s.option_price ?? "") })),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ...freshLib.map((l: any) => ({ name: String(l.option_name), price: parseOptionPriceValue(l.item_price) })),
+        ...freshLib.map((l: any) => ({ name: String(l.option_name), price: parseOptionPriceValue(l.item_price), rawPrice: String(l.item_price ?? "") })),
       ];
 
       // Legacy fallback: no 5.0 options for this vehicle → use its addendum_data
@@ -588,6 +589,15 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
       if (effective.length === 0) {
         effective = addendumByVin.get(String(dv.vin ?? "").trim().toUpperCase()) ?? [];
       }
+
+      // SINGLE SOURCE GATE: drop pipe-priced (`|N`) products from the export
+      // entirely — Allan's rule is they "show on the addendum but never appear
+      // in ANY exported field" (no WO/list/price/discount/markup column, no
+      // custom-rule column, include OR exclude mode). Filtering here, before any
+      // field computation, covers both data sources at once. (The printed
+      // addendum still shows them — that path is unaffected; see 23d09ef.)
+      effective = effective.filter((o) => !isPipeExcludedPrice(o.rawPrice));
+
       // Option names are stored as rich-text HTML (e.g. "SCELZI 11&#039; UTILTY").
       // The 4.0 HUB emits plain decoded text in the CSV; decode so name lists
       // (OPTIONS_WO_DISCOUNT_MARKUP, DEALER_DISCOUNTS_TEXT, ADDED_MARKUP_TEXT, …)

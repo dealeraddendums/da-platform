@@ -554,4 +554,4 @@ export async function getGroupDisclaimer(
 }
 
 // Re-export client-safe price helpers
-export { formatOptionPrice, parseOptionPriceValue } from "@/lib/option-price";
+export { formatOptionPrice, parseOptionPriceValue, isPipeExcludedPrice } from "@/lib/option-price";

@@ -92,6 +92,18 @@ export function formatCurrencyAmount(amount: number, decimals: boolean): string 
   });
 }
 
+/**
+ * True when a raw price string uses the `|N` pipe modifier ("show the price on
+ * the addendum but exclude it from subtotals/totals" — e.g. "|85|" for a doc
+ * fee). The addendum still DISPLAYS these (see formatOptionPrice), but the feed
+ * export excludes them from every column. Detect on the raw stored string —
+ * once parsed to a number the modifier is gone.
+ */
+export function isPipeExcludedPrice(price: string | null | undefined): boolean {
+  if (price == null) return false;
+  return String(price).trim().startsWith('|');
+}
+
 export function parseOptionPriceValue(price: string | null | undefined): number {
   if (price == null) return 0;
   const p = String(price).trim();
