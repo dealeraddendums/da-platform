@@ -60,7 +60,11 @@ export function formatOptionPrice(price: string | null | undefined, decimals: bo
   }
 
   const n = parseFloat(body);
-  if (!isNaN(n)) return `$${formatNumber(n, decimals)}${suffix}`;
+  // The minus sign belongs to the LEFT of the dollar sign: -$5,000, not $-5,000.
+  if (!isNaN(n)) {
+    const sign = n < 0 ? '-' : '';
+    return `${sign}$${formatNumber(Math.abs(n), decimals)}${suffix}`;
+  }
   return p;
 }
 
@@ -80,7 +84,9 @@ export function priceSetUsesDecimals(amounts: Array<number | null | undefined>):
  * one addendum aligned.
  */
 export function formatCurrencyAmount(amount: number, decimals: boolean): string {
-  return '$' + amount.toLocaleString('en-US', {
+  // Negative amounts read "-$5,000", not "$-5,000".
+  const sign = amount < 0 ? '-' : '';
+  return sign + '$' + Math.abs(amount).toLocaleString('en-US', {
     minimumFractionDigits: decimals ? 2 : 0,
     maximumFractionDigits: decimals ? 2 : 0,
   });
