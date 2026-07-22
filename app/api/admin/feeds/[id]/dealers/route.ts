@@ -30,6 +30,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const { data: dealer } = await admin
     .from("dealers").select("id, name").eq("id", dealerUuid).maybeSingle<{ id: string; name: string }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
+
+  // Defensive duplicate guard (in addition to the UNIQUE(feed_company_id,
+  // dealer_uuid) constraint): reject a second attach of the same dealer to this
+  // feed with a 409, even if a client races past the UI's hide-attached filter.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: existing } = await (admin as any)
+    .from("feed_company_dealers")
+    .select("id")
+    .eq("feed_company_id", params.id)
+    .eq("dealer_uuid", dealerUuid)
+    .maybeSingle();
+  if (existing) return NextResponse.json({ error: "That dealer is already in this feed" }, { status: 409 });
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error: dbErr } = await (admin as any)
     .from("feed_company_dealers")
@@ -37,8 +50,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .select("id, dealer_uuid, feed_dealer_id")
     .single();
   if (dbErr) {
-    const msg = /duplicate|unique/i.test(dbErr.message) ? "That dealer is already in this feed" : dbErr.message;
-    return NextResponse.json({ error: msg }, { status: 400 });
+    // Lost a race between the check above and the insert → the UNIQUE constraint
+    // still catches it; report the same 409.
+    if (/duplicate|unique/i.test(dbErr.message)) {
+      return NextResponse.json({ error: "That dealer is already in this feed" }, { status: 409 });
+    }
+    return NextResponse.json({ error: dbErr.message }, { status: 400 });
   }
   return NextResponse.json({ data }, { status: 201 });
 }

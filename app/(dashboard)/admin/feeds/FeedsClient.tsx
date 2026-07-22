@@ -482,16 +482,25 @@ export default function FeedsClient() {
                   ) : (
                     <>
                       <input style={inputStyle} value={dealerQuery} onChange={(e) => setDealerQuery(e.target.value)} placeholder="Search dealers…" />
-                      {dealerHits.length > 0 && (
-                        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, zIndex: 10, maxHeight: 220, overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,.08)" }}>
-                          {dealerHits.map((d) => (
-                            <button key={d.id} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
-                              onClick={() => { setPickedDealer(d); setDealerHits([]); setFeedDealerId(defaultFeedDealerId(d)); }}>
-                              {d.name} <span style={{ color: "#78828c", fontSize: 11 }}>({d.dealer_id})</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      {(() => {
+                        // Hide dealers already attached to THIS feed (filter at
+                        // render so a removal reappears immediately without a
+                        // refetch). Scoped to this feed only — a dealer on a
+                        // different feed still shows here.
+                        const attached = new Set(feedDealers.map((r) => r.dealer_uuid));
+                        const hits = dealerHits.filter((d) => !attached.has(d.id));
+                        if (hits.length === 0) return null;
+                        return (
+                          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, zIndex: 10, maxHeight: 220, overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,.08)" }}>
+                            {hits.map((d) => (
+                              <button key={d.id} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+                                onClick={() => { setPickedDealer(d); setDealerHits([]); setFeedDealerId(defaultFeedDealerId(d)); }}>
+                                {d.name} <span style={{ color: "#78828c", fontSize: 11 }}>({d.dealer_id})</span>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </>
                   )}
                 </div>
