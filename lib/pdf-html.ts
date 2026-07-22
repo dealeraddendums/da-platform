@@ -155,25 +155,29 @@ export async function buildPdfHtml({
     if (w.type === 'msrp' && msrpParsed != null) {
       d.value = formatCurrencyAmount(msrpParsed, decimals);
     }
+    // On a real vehicle render the COMPUTED value always wins — 0 is a
+    // legitimate result (e.g. the only option is a |XX| doc-fee that's excluded
+    // from the subtotal, or the vehicle has no includable options at all). The
+    // old `> 0` guards treated 0 as "no data" and left the widget's baked
+    // template SAMPLE value in place, leaking the Builder demo products
+    // (Ceramic Tint/… = $1,496) into printed addendums. Sample values may only
+    // survive when authoring with no vehicle context (vehicle == null).
     if (w.type === 'askbar' && vehicle) {
       if (paperSize === 'infosheet') {
-        // Infosheet: asking price = MSRP only (no addendum options total)
-        if (msrpParsed != null && msrpParsed > 0) {
-          d.value = formatCurrencyAmount(msrpParsed, decimals);
-          console.log('[pdf-html] infosheet askbar msrp:', msrpParsed, '→', d.value);
-        }
+        // Infosheet: asking price = MSRP only (no addendum options total).
+        d.value = formatCurrencyAmount(msrpParsed ?? 0, decimals);
       } else {
-        // Asking price = MSRP + required options only
-        if (askingTotal > 0) d.value = formatCurrencyAmount(askingTotal, decimals);
+        // Asking price = MSRP + required (includable) options only.
+        d.value = formatCurrencyAmount(askingTotal, decimals);
       }
     }
-    if (w.type === 'subtotal') {
-      // Subtotal = required options only
-      if (requiredTotal > 0) d.value = formatCurrencyAmount(requiredTotal, decimals);
+    if (w.type === 'subtotal' && vehicle) {
+      // Subtotal = required (includable) options only. $0 is valid.
+      d.value = formatCurrencyAmount(requiredTotal, decimals);
     }
     if (w.type === 'suggested_price' && vehicle) {
-      // Suggested asking price = MSRP + all options (required + suggested)
-      if (suggestedTotal > 0) d.value = formatCurrencyAmount(suggestedTotal, decimals);
+      // Suggested asking price = MSRP + all includable options (required + suggested).
+      d.value = formatCurrencyAmount(suggestedTotal, decimals);
     }
 
     if (vehicle) {
