@@ -224,6 +224,22 @@ export function ruleFields(options: EffectiveOption[], matches: (name: string) =
   return { price: money(sel.reduce((s, o) => s + o.price, 0)), list: sel.map((o) => o.name).join(", ") };
 }
 
+// "Added Mark-Up" detection. The legacy 4.0 HUB feed split "Added Mark-Up"
+// lines into the ADDED_MARKUP columns and excluded them from the WO fields,
+// while regular options (incl. "market adjustment") stayed in WO. There is NO
+// markup flag anywhere in the data — not in addendum_data (or_or_ad is uniformly
+// 1 = "addendum") nor vehicle_options — so 4.0 keys purely on the item NAME.
+// This regex reproduces 4.0 exactly across the Tuttle-Click fleet: it matches
+// "Added Mark-Up" / "ADDED MARK-UP" / "…markup…" but NOT "market adjustment".
+// Applied uniformly to every option source (legacy addendum_data and 5.0-native
+// vehicle_options), since the distinction is name-based, not source-based — this
+// is also what fixes the SA250377 leak where "ADDED MARK-UP" landed in the WO
+// field with 0 in ADDED_MARKUP.
+const ADDED_MARKUP_RE = /mark[\s-]?up/i;
+function isAddedMarkup(name: string): boolean {
+  return ADDED_MARKUP_RE.test(name || "");
+}
+
 /**
  * @param isCustomExcluded  drops matching products from the "without" (WO)
  *   computed outputs ONLY (price sums + option-name lists), on top of the
@@ -237,16 +253,23 @@ function computeFields(
   options: EffectiveOption[],
   isCustomExcluded: (name: string) => boolean = () => false,
 ): Record<string, string> {
-  const positives = options.filter((o) => o.price >= 0);
+  // Classification (matches 4.0): a line is a DISCOUNT when its parsed price is
+  // negative; an ADDED MARK-UP when its name matches the markup regex; otherwise
+  // a regular positive option. Zero/|-excluded/NC lines (price 0) contribute to
+  // nothing and never appear in the WO name list (this is the Doc Fee "|85|"
+  // case — it must not leak into OPTIONS_WO_DISCOUNT_MARKUP).
+  const positives = options.filter((o) => o.price > 0);
   const negatives = options.filter((o) => o.price < 0);
-  const totalAdds = positives.reduce((s, o) => s + o.price, 0);
+  const markups = positives.filter((o) => isAddedMarkup(o.name));
+  const totalAdds = positives.reduce((s, o) => s + o.price, 0); // incl. markup
+  const markupTotal = markups.reduce((s, o) => s + o.price, 0);
   const discounts = Math.abs(negatives.reduce((s, o) => s + o.price, 0));
   const msrp = typeof dv.msrp === "number" ? dv.msrp : parseFloat(String(dv.msrp ?? "")) || 0;
 
-  // The "without" set: positives that also survive the custom name-exclusion.
-  // (Negatives/discounts are already excluded from every WO field; markup is
-  // always 0 on V5.0.)
-  const woPositives = positives.filter((o) => !isCustomExcluded(o.name));
+  // The "without discount & markup" set: positive options that are neither an
+  // added-markup line nor dropped by a custom name-exclusion. (Discounts are
+  // negative and already excluded.)
+  const woPositives = positives.filter((o) => !isAddedMarkup(o.name) && !isCustomExcluded(o.name));
   const woTotal = woPositives.reduce((s, o) => s + o.price, 0);
 
   return {
@@ -256,14 +279,14 @@ function computeFields(
     OPTION_LIST_COMMA: options.map((o) => o.name).join(", "),
     OPTION_PRICE: money(totalAdds),
     OPTIONS_WITH_PRICE: options.map((o) => `${o.name}: $${money(o.price)}`).join("\n"),
-    ADDED_MARKUP: "0",
+    ADDED_MARKUP: money(markupTotal),
     OPTIONS_WO_ADDED_MARKUP: money(woTotal),
     DEALER_DISCOUNTS: money(discounts),
     DEALER_DISCOUNTS_NUM: money(discounts),
     DEALER_DISCOUNTS_TEXT: negatives.map((o) => o.name).join(", "),
     OP_PRICE_WO_DISCOUNT_MARKUP: money(woTotal),
     OPTIONS_WO_DISCOUNT_MARKUP: woPositives.map((o) => o.name).join(", "),
-    ADDED_MARKUP_TEXT: "",
+    ADDED_MARKUP_TEXT: markups.map((o) => o.name).join(", "),
     GRAND_TOTAL: money(msrp + totalAdds - discounts),
   };
 }
@@ -493,6 +516,39 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
       }
     }
 
+    // 4b. Legacy addendum source. Unmigrated dealers (all of Tuttle-Click, etc.)
+    //     have an EMPTY vehicle_options table — that's only populated by console
+    //     Sync, never run for them — so the live widget/PDF and the 4.0 HUB read
+    //     the vehicle's addendum from `addendum_data` (Aurora-synced nightly,
+    //     Job 7). Mirror da-api-service getVehicleOptions: fetch once per dealer,
+    //     group by VIN, dedup by item_name keeping the newest created_at (this
+    //     table accumulates stale/duplicate rows from two ETL paths), order by
+    //     order_by. Used ONLY as a per-vehicle fallback when the 5.0 pipeline
+    //     yields nothing, so migrated/synced dealers are unaffected.
+    const addendumByVin = new Map<string, EffectiveOption[]>();
+    {
+      const adRows = await fetchAllRows<Dv>((from, to) => admin
+        .from("addendum_data")
+        .select("vin_number, item_name, item_price, created_at, order_by")
+        .eq("legacy_dealer_id", dealerTextId)
+        .in("active", ["1", "yes"])
+        .range(from, to));
+      const byVinName = new Map<string, Map<string, Dv>>();
+      for (const r of adRows) {
+        const vin = String(r.vin_number ?? "").trim().toUpperCase();
+        const name = String(r.item_name ?? "");
+        if (!vin || !name) continue;
+        const m = byVinName.get(vin) ?? new Map<string, Dv>();
+        const prev = m.get(name);
+        if (!prev || String(r.created_at ?? "") > String(prev.created_at ?? "")) m.set(name, r);
+        byVinName.set(vin, m);
+      }
+      byVinName.forEach((m, vin) => {
+        const items = (Array.from(m.values()) as Dv[]).sort((a, b) => (Number(a.order_by) || 0) - (Number(b.order_by) || 0));
+        addendumByVin.set(vin, items.map((it) => ({ name: String(it.item_name), price: parseOptionPriceValue(it.item_price) })));
+      });
+    }
+
     // 5. Per-vehicle: effective options → computed fields → mapped CSV row.
     for (const dv of vehicles) {
       const rulesVehicle = toRulesVehicle(dv, dealerTextId);
@@ -520,12 +576,18 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
         .filter((r) => matchesRulesRow(r as any, rulesVehicle as any))
         .filter((r) => !dismissed.has(r.id));
 
-      const effective: EffectiveOption[] = [
+      let effective: EffectiveOption[] = [
         ...groupEffective.map((g) => ({ name: g.option_name, price: parseOptionPriceValue(g.option_price) })),
         ...savedFiltered.map((s) => ({ name: String(s.option_name), price: parseOptionPriceValue(s.option_price) })),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...freshLib.map((l: any) => ({ name: String(l.option_name), price: parseOptionPriceValue(l.item_price) })),
       ];
+
+      // Legacy fallback: no 5.0 options for this vehicle → use its addendum_data
+      // (the source the live widget/PDF renders for unmigrated dealers).
+      if (effective.length === 0) {
+        effective = addendumByVin.get(String(dv.vin ?? "").trim().toUpperCase()) ?? [];
+      }
 
       // Standard computed fields use built-in exclusion only (no custom rule).
       const computed = computeFields(dv, effective);
