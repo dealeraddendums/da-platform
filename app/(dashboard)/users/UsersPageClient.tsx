@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
 import { PageHeader } from "@/components/PageHeader";
-import EntityTagsCard from "@/components/EntityTagsCard";
+import StoreTagsEditor from "@/components/StoreTagsEditor";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -542,13 +542,14 @@ function EditUserModal({ user, onClose, onSuccess, dealerMode, canImpersonate, o
           )}
           {!dealerMode && form.role === "group_user" && (
             <div>
-              <label style={labelStyle}>Scope Tags</label>
+              <label style={labelStyle}>Store Tags</label>
               <p style={{ fontSize: 12, color: "#78828c", margin: "0 0 6px" }}>
                 This manager sees and controls only their group&apos;s dealers carrying one of these tags.
                 Saved immediately. Set the Group above and Save Changes to apply the role.
               </p>
-              {/* Writes user_tags via PUT /api/users/[id]/tags (super_admin only). */}
-              <EntityTagsCard kind="users" id={user.id} editable />
+              {/* Group-scoped tag picker + live "Sees N dealers" preview; writes
+                  user_tags via PUT /api/users/[id]/tags (super_admin only). */}
+              <StoreTagsEditor userId={user.id} />
             </div>
           )}
           <div style={{ borderTop: "1px solid #e0e0e0", paddingTop: 14 }}>

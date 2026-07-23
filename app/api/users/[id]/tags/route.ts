@@ -64,6 +64,14 @@ export async function PUT(req: NextRequest, { params }: Params): Promise<NextRes
     if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
   }
 
+  // Audit the scope change (fire-and-forget; must be awaited or supabase-js
+  // never executes it — see lib/db fireWrite note).
+  await admin.from("admin_audit").insert({
+    admin_user_id: claims.sub,
+    action: "user_scope_tags_set",
+    metadata: { user_id: params.id, tag_ids: tagIds, count: tagIds.length },
+  });
+
   const { data } = await admin
     .from("user_tags")
     .select("tags(id, name, color)")
