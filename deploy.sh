@@ -25,6 +25,14 @@ TARGET="${1:-origin/main}"
 [ -d "$REPO/.git" ] || { echo "[deploy] $REPO is not a git checkout — run the one-time setup first."; exit 1; }
 [ -f "$SHARED/.env.production" ] || { echo "[deploy] missing $SHARED/.env.production — run the one-time setup first."; exit 1; }
 
+# 0. Startup prune — a wedged/timed-out prior deploy skips the end-of-run prune (step 7), so its
+#    release dir lingers and the retry mints another → duplicate dirs the retention window can
+#    serve as mixed content. Clean stale dirs up front: keep the newest 5, never touch `current`.
+CUR_START=$(readlink "$BASE/current" 2>/dev/null || true)
+ls -1dt "$BASE"/releases/*/ 2>/dev/null | sed 's:/*$::' | tail -n +6 | while read -r d; do
+  [ -n "$d" ] && [ "$d" != "$CUR_START" ] && rm -rf "$d"
+done
+
 echo "[deploy] fetch + checkout $TARGET in $REPO …"
 git -C "$REPO" fetch --quiet origin
 git -C "$REPO" checkout --quiet --detach "$TARGET"
@@ -83,7 +91,47 @@ if [ -z "$healthy" ]; then
   exit 1
 fi
 
-# 7. Prune — keep the last 5 releases
-ls -1dt "$BASE"/releases/*/ | tail -n +6 | xargs -r rm -rf
+# 6b. CONVERGENCE gate — every cluster worker must run from $REL. A rolling `pm2 reload`
+#     that wedges/times out can leave one worker on the PREVIOUS release while the other is
+#     new: the health gate above still passes (one healthy worker answers 200), but users get
+#     HTML from one build with chunk requests round-robined to the other → chunk 404s and the
+#     "client-side exception" that no cache-clear fixes. So verify all workers resolved cwd ==
+#     $REL; if not, force a clean hard restart (kill+respawn both from cwd->current->$REL);
+#     if STILL mixed, fail loudly rather than leaving prod half-broken.
+worker_dirs() {   # resolved release dir of each live worker (via /proc — the real cwd, not pm_cwd)
+  local pid
+  for pid in $(pm2 pid "$APP" 2>/dev/null); do
+    [ -n "$pid" ] && [ -e "/proc/$pid/cwd" ] && readlink "/proc/$pid/cwd" 2>/dev/null || true
+  done
+}
+converged() {     # true iff there is exactly one distinct worker dir and it equals $REL
+  local dirs count
+  dirs=$(worker_dirs | sort -u)
+  count=$(printf '%s\n' "$dirs" | grep -c . || true)
+  [ "$count" = "1" ] && [ "$dirs" = "$REL" ]
+}
+for i in $(seq 1 10); do sleep 2; converged && break; done
+if ! converged; then
+  echo "[deploy] workers did NOT all converge on the new release after reload — forcing a clean restart…"
+  echo "[deploy] pre-restart worker dirs:"; worker_dirs | sort | uniq -c
+  pm2 restart "$APP" --update-env || true
+  for i in $(seq 1 10); do sleep 2; converged && break; done
+fi
+if ! converged; then
+  echo "[deploy] FATAL: workers are on MIXED/old builds even after a hard restart — prod would serve"
+  echo "         inconsistent chunks. NOT declaring success. Current worker dirs:"
+  worker_dirs | sort | uniq -c
+  echo "[deploy] expected all == $REL ; investigate now: pm2 logs $APP ; pm2 restart $APP"
+  exit 1
+fi
+echo "[deploy] all workers converged on $REL"
+
+# 7. Prune — keep the last 5 releases (NEVER delete the live `current`). Runs on every successful
+#     deploy; a startup prune also happens below so leftover dirs from a past wedged run can't
+#     linger and be served as mixed content.
+CUR_REAL=$(readlink "$BASE/current" 2>/dev/null || true)
+ls -1dt "$BASE"/releases/*/ | sed 's:/*$::' | tail -n +6 | while read -r d; do
+  [ -n "$d" ] && [ "$d" != "$CUR_REAL" ] && rm -rf "$d"
+done
 
 echo "[deploy] done. $SHA is live at $REL"
