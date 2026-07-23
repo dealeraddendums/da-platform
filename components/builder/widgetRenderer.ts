@@ -74,7 +74,10 @@ export function renderW(type: string, d: D, fontScale: number): string {
   if (type === 'logo') {
     if (d.imgUrl === null) return '';  // dealer has no logo — render blank
     if (d.imgUrl)
-      return `<img style="width:100%;height:100%;object-fit:contain;object-position:left center;display:block;" src="${d.imgUrl}" alt="Logo">`;
+      // Always center the logo horizontally + vertically within the widget box
+      // (aspect-ratio-preserving contain). Injected dealer logos (group
+      // templates, 1d4248d) of arbitrary aspect ratios especially need this.
+      return `<img style="width:100%;height:100%;object-fit:contain;object-position:center center;display:block;" src="${d.imgUrl}" alt="Logo">`;
     return `<div style="width:100%;height:100%;background:#f5f6f7;display:flex;align-items:center;justify-content:center;color:#78828c;font-size:12px;">Upload logo in Settings</div>`;
   }
 

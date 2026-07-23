@@ -42,6 +42,7 @@ export default function TemplateList({ fixedDealerId, role, groupId, initialTemp
   // delete confirm state
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const isAdminPicker = role === "super_admin" || role === "group_admin";
 
@@ -121,16 +122,23 @@ export default function TemplateList({ fixedDealerId, role, groupId, initialTemp
 
   async function handleDelete(id: string) {
     setDeletingId(id);
+    setDeleteError(null);
     try {
       const res = await fetch(`/api/templates/${id}`, { method: "DELETE" });
       if (res.ok || res.status === 204) {
         setTemplates((prev) => prev.filter((t) => t.id !== id));
+        setConfirmDeleteId(null);
+      } else {
+        // Surface the failure (e.g. 409 "this template is a default …") and keep
+        // the row + confirm open — never silently close as if it deleted.
+        let msg = "Delete failed.";
+        try { const j = await res.json() as { error?: string }; if (j.error) msg = j.error; } catch { /* keep default */ }
+        setDeleteError(msg);
       }
     } catch {
-      // ignore
+      setDeleteError("Network error — try again.");
     } finally {
       setDeletingId(null);
-      setConfirmDeleteId(null);
     }
   }
 
@@ -346,29 +354,34 @@ export default function TemplateList({ fixedDealerId, role, groupId, initialTemp
                   Edit
                 </button>
                 {confirmDeleteId === t.id ? (
-                  <div className="flex gap-2 items-center">
-                    <span className="text-xs" style={{ color: "var(--text-secondary)" }}>Delete?</span>
-                    <button
-                      className="text-xs px-2 py-1 rounded"
-                      style={{ background: "var(--error)", color: "#fff", border: "none", cursor: "pointer", borderRadius: 4 }}
-                      onClick={() => handleDelete(t.id)}
-                      disabled={deletingId === t.id}
-                    >
-                      {deletingId === t.id ? "…" : "Confirm"}
-                    </button>
-                    <button
-                      className="text-xs"
-                      style={{ color: "var(--text-muted)" }}
-                      onClick={() => setConfirmDeleteId(null)}
-                    >
-                      Cancel
-                    </button>
+                  <div className="flex flex-col gap-1" style={{ alignItems: "flex-end" }}>
+                    <div className="flex gap-2 items-center">
+                      <span className="text-xs" style={{ color: "var(--text-secondary)" }}>Delete?</span>
+                      <button
+                        className="text-xs px-2 py-1 rounded"
+                        style={{ background: "var(--error)", color: "#fff", border: "none", cursor: "pointer", borderRadius: 4 }}
+                        onClick={() => handleDelete(t.id)}
+                        disabled={deletingId === t.id}
+                      >
+                        {deletingId === t.id ? "…" : "Confirm"}
+                      </button>
+                      <button
+                        className="text-xs"
+                        style={{ color: "var(--text-muted)" }}
+                        onClick={() => { setConfirmDeleteId(null); setDeleteError(null); }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    {deleteError && (
+                      <span className="text-xs" style={{ color: "var(--error)", maxWidth: 320, textAlign: "right" }}>{deleteError}</span>
+                    )}
                   </div>
                 ) : (
                   <button
                     className="btn btn-secondary text-xs"
                     style={{ color: "var(--error)" }}
-                    onClick={() => setConfirmDeleteId(t.id)}
+                    onClick={() => { setConfirmDeleteId(t.id); setDeleteError(null); }}
                   >
                     Delete
                   </button>

@@ -197,13 +197,27 @@ export async function DELETE(
     .maybeSingle();
 
   if (settings) {
-    const assignedIds = [
-      settings.default_addendum_new, settings.default_addendum_used, settings.default_addendum_cpo,
-      settings.default_infosheet_new, settings.default_infosheet_used, settings.default_infosheet_cpo,
-      settings.default_buyersguide_new, settings.default_buyersguide_used, settings.default_buyersguide_cpo,
-    ];
-    if (assignedIds.includes(params.id)) {
-      return NextResponse.json({ error: "Template is assigned as a default and cannot be deleted" }, { status: 409 });
+    // Name every default slot this template currently occupies so the operator
+    // knows exactly which default(s) to reassign before deleting.
+    const SLOT_LABELS: Record<string, string> = {
+      default_addendum_new: "Addendum · New Vehicles",
+      default_addendum_used: "Addendum · Used Vehicles",
+      default_addendum_cpo: "Addendum · CPO Vehicles",
+      default_infosheet_new: "Infosheet · New Vehicles",
+      default_infosheet_used: "Infosheet · Used Vehicles",
+      default_infosheet_cpo: "Infosheet · CPO Vehicles",
+      default_buyersguide_new: "Buyer's Guide · New Vehicles",
+      default_buyersguide_used: "Buyer's Guide · Used Vehicles",
+      default_buyersguide_cpo: "Buyer's Guide · CPO Vehicles",
+    };
+    const occupied = Object.keys(SLOT_LABELS).filter(
+      (col) => (settings as Record<string, string | null>)[col] === params.id
+    );
+    if (occupied.length) {
+      const which = occupied.map((c) => SLOT_LABELS[c]).join(", ");
+      return NextResponse.json({
+        error: `This template is the default for: ${which}. Change ${occupied.length === 1 ? "that default" : "those defaults"} first, then delete.`,
+      }, { status: 409 });
     }
   }
 
