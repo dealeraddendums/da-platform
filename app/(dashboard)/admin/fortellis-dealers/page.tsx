@@ -58,7 +58,7 @@ export default function FortellisDealersPage() {
   const [editRow, setEditRow] = useState<FortellisRow | "new" | null>(null);
   const [deleteRow, setDeleteRow] = useState<FortellisRow | null>(null);
   const [search, setSearch] = useState("");
-  const [testResult, setTestResult] = useState<Record<number, { ok: boolean; msg: string } | null>>({});
+  const [testResult, setTestResult] = useState<Record<number, { ok: boolean; msg: string; requestId?: string; httpStatus?: number } | null>>({});
   const [testing, setTesting] = useState<Record<number, boolean>>({});
   const [syncing, setSyncing] = useState<Record<number, boolean>>({});
   const [importing, setImporting] = useState<Record<number, boolean>>({});
@@ -122,10 +122,10 @@ export default function FortellisDealersPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ subscription_id: r.subscription_id, web_id: r.web_id, dealer_code: r.dealer_code }),
       });
-      const j = await res.json() as { success?: boolean; count?: number; error?: string };
+      const j = await res.json() as { success?: boolean; count?: number; error?: string; request_id?: string; http_status?: number };
       setTestResult(p => ({ ...p, [r.id]: j.success
-        ? { ok: true, msg: `Connection successful — ${j.count ?? 0} vehicles found` }
-        : { ok: false, msg: `Connection failed — ${j.error ?? "unknown error"}` } }));
+        ? { ok: true, msg: `Connection successful — ${j.count ?? 0} vehicles found`, requestId: j.request_id, httpStatus: j.http_status }
+        : { ok: false, msg: `Connection failed — ${j.error ?? "unknown error"}`, requestId: j.request_id, httpStatus: j.http_status } }));
       void loadHealth();
     } finally { setTesting(p => ({ ...p, [r.id]: false })); }
   }
@@ -275,6 +275,12 @@ export default function FortellisDealersPage() {
                         <td colSpan={7} className="px-4 py-2 text-xs" style={{ background: (tr ?? rm)!.ok ? "#e8f5e9" : "#ffebee", color: (tr ?? rm)!.ok ? "#2e7d32" : "#c62828" }}>
                           {(tr ?? rm)!.ok ? "✓" : "✕"} {(tr ?? rm)!.msg}
                           <button onClick={() => { setTestResult(p => ({ ...p, [r.id]: null })); setRowMsg(p => ({ ...p, [r.id]: null })); }} style={{ background: "none", border: "none", color: "inherit", marginLeft: 12, cursor: "pointer", fontSize: 12, opacity: 0.6 }}>dismiss</button>
+                          {tr?.requestId && (
+                            <div className="font-mono" style={{ fontSize: 11, marginTop: 4, opacity: 0.85, display: "flex", alignItems: "center", gap: 6 }}>
+                              <span>HTTP {tr.httpStatus ?? "—"} · Request-Id {tr.requestId}</span>
+                              <CopyChip text={tr.requestId} />
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}
@@ -293,6 +299,21 @@ export default function FortellisDealersPage() {
         <DeleteModal row={deleteRow} onClose={() => setDeleteRow(null)} onConfirm={() => void removeDealer(deleteRow)} />
       )}
     </div>
+  );
+}
+
+// ── Copy-to-clipboard chip (Request-Id support-ticket helper) ─────────────────
+function CopyChip({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      title="Copy Request-Id"
+      onClick={() => { void navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => {}); }}
+      style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 11, color: "inherit", opacity: copied ? 1 : 0.7, lineHeight: 1, fontFamily: "inherit" }}
+    >
+      {copied ? "✓ copied" : "⧉ copy"}
+    </button>
   );
 }
 
@@ -393,6 +414,7 @@ function EditModal({ initial, onClose, onSaved }: { initial: FortellisRow | null
   // Dealer picker state (Add mode only — Edit keeps the existing linked dealer)
   const [dealerQuery, setDealerQuery] = useState("");
   const [dealerHits, setDealerHits] = useState<DealerHit[]>([]);
+  const [noMatch, setNoMatch] = useState(false);
   const [dealerPicked, setDealerPicked] = useState(Boolean(initial?.dealer_id));
   const [resolving, setResolving] = useState(false);
   const [cdkFed, setCdkFed] = useState(false);
@@ -408,6 +430,7 @@ function EditModal({ initial, onClose, onSaved }: { initial: FortellisRow | null
 
   // Debounced dealer search (Add mode). Skip once a dealer is chosen.
   useEffect(() => {
+    setNoMatch(false);
     if (initial || dealerPicked || dealerQuery.trim().length < 2) { setDealerHits([]); return; }
     const t = setTimeout(async () => {
       try {
@@ -421,6 +444,9 @@ function EditModal({ initial, onClose, onSaved }: { initial: FortellisRow | null
           return aC !== bC ? aC - bC : a.name.localeCompare(b.name);
         });
         setDealerHits(hits.slice(0, 12));
+        // Zero-match feedback: covers both typed queries and the orgName cross-fill
+        // seed (which often isn't a dealership name and silently matched nothing).
+        setNoMatch(hits.length === 0);
       } catch { setDealerHits([]); }
     }, 300);
     return () => clearTimeout(t);
@@ -512,6 +538,11 @@ function EditModal({ initial, onClose, onSaved }: { initial: FortellisRow | null
                 ))}
               </div>
             )}
+          </div>
+        )}
+        {noMatch && !dealerPicked && !initial && (
+          <div style={{ marginTop: 6, fontSize: 12, color: "#78828c" }}>
+            No dealer matches &lsquo;{dealerQuery.trim()}&rsquo; — clear and search by dealer name or ID.
           </div>
         )}
         {alreadyAdded && !initial && (

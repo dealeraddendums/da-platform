@@ -236,7 +236,12 @@ function scopeParams(opts: SearchOpts): URLSearchParams {
   return p;
 }
 
-async function searchPage(opts: SearchOpts, offset: number, rid: string): Promise<{ summary: { totalCount?: number; count?: number }; results: unknown[] }> {
+/** Filled in by searchPage after the HTTP exchange (even when it throws) so callers
+ *  can surface the Request-Id + status for Fortellis support tickets. requestId is
+ *  the response's echoed Request-Id when present, else the one we sent. */
+export interface CallMeta { requestId?: string; httpStatus?: number }
+
+async function searchPage(opts: SearchOpts, offset: number, rid: string, meta?: CallMeta): Promise<{ summary: { totalCount?: number; count?: number }; results: unknown[] }> {
   const token = await getToken();
   const params = scopeParams(opts);
   params.set("limit", String(PAGE_SIZE));
@@ -250,6 +255,7 @@ async function searchPage(opts: SearchOpts, offset: number, rid: string): Promis
   };
   if (opts.dealerCode) headers["dealerCode"] = opts.dealerCode;
 
+  if (meta) meta.requestId = rid;
   const started = Date.now();
   let res: Response;
   try {
@@ -258,6 +264,10 @@ async function searchPage(opts: SearchOpts, offset: number, rid: string): Promis
     const isAbort = (err as { name?: string })?.name === "AbortError";
     logCall({ method: "GET", url, subscriptionId: opts.subscriptionId, requestId: rid, durationMs: Date.now() - started, requestHeaders: { ...headers, Authorization: maskAuth(headers.Authorization) }, error: err instanceof Error ? err.message : String(err) });
     throw new FortellisError(isAbort ? "timeout" : "network", err instanceof Error ? err.message : String(err));
+  }
+  if (meta) {
+    meta.requestId = res.headers.get("Request-Id") ?? res.headers.get("Fort-Request-Id") ?? rid;
+    meta.httpStatus = res.status;
   }
   const body = await res.text();
   logCall({
@@ -307,20 +317,23 @@ export async function searchWithTimeout(opts: Omit<SearchOpts, "signal">): Promi
   } finally { clearTimeout(t); }
 }
 
-/** Cheap connectivity probe for the Test button + pre-run health check. */
-export async function ping(scope: DealerScope): Promise<{ ok: boolean; count: number; error?: string; errorType?: FortellisErrorType }> {
+/** Cheap connectivity probe for the Test button + pre-run health check.
+ *  Always reports the call's Request-Id (+ HTTP status when a response arrived)
+ *  so failures can go straight into a Fortellis support ticket. */
+export async function ping(scope: DealerScope): Promise<{ ok: boolean; count: number; error?: string; errorType?: FortellisErrorType; requestId?: string; httpStatus?: number }> {
+  const meta: CallMeta = {};
   try {
     // A tiny first-page search is the cheapest real connectivity check.
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
     try {
       const rid = requestId();
-      const { summary, results } = await searchPage({ ...scope, signal: controller.signal }, 0, rid);
-      return { ok: true, count: summary.totalCount ?? summary.count ?? results.length };
+      const { summary, results } = await searchPage({ ...scope, signal: controller.signal }, 0, rid, meta);
+      return { ok: true, count: summary.totalCount ?? summary.count ?? results.length, requestId: meta.requestId, httpStatus: meta.httpStatus };
     } finally { clearTimeout(t); }
   } catch (err) {
-    if (err instanceof FortellisError) return { ok: false, count: 0, error: err.message, errorType: err.type };
-    return { ok: false, count: 0, error: err instanceof Error ? err.message : String(err), errorType: "other" };
+    if (err instanceof FortellisError) return { ok: false, count: 0, error: err.message, errorType: err.type, requestId: meta.requestId, httpStatus: meta.httpStatus ?? err.httpStatus };
+    return { ok: false, count: 0, error: err instanceof Error ? err.message : String(err), errorType: "other", requestId: meta.requestId, httpStatus: meta.httpStatus };
   }
 }
 

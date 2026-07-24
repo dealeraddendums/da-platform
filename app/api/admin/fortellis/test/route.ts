@@ -39,7 +39,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     else if (isOutageErrorType(result.errorType)) await markDown(admin, result.error ?? "test failed");
   } catch { /* health tracking is best-effort */ }
 
+  // request_id/http_status surfaced so a failed Test can go straight into a
+  // Fortellis support ticket without querying fortellis_api_log.
   return NextResponse.json(result.ok
-    ? { success: true, count: result.count }
-    : { success: false, error: result.error });
+    ? { success: true, count: result.count, request_id: result.requestId, http_status: result.httpStatus }
+    : { success: false, error: result.error, request_id: result.requestId, http_status: result.httpStatus });
 }
