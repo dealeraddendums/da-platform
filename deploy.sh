@@ -16,6 +16,17 @@
 
 set -euo pipefail
 
+# Single-runner guard — two concurrent deploys race pm2 reload ("Reload already in
+# progress") and mint duplicate release dirs (observed 2026-07-24: an SSH-level retry
+# double-invoked this script). The lock is held for the whole run and self-releases
+# when the process exits, however it exits.
+LOCKFILE=/tmp/da-platform-deploy.lock
+exec 9>"$LOCKFILE"
+if ! flock -n 9; then
+  echo "[deploy] another deploy is already running (lock: $LOCKFILE) — aborting this one."
+  exit 1
+fi
+
 APP=da-platform
 BASE=/var/www/$APP
 REPO=$BASE/repo
