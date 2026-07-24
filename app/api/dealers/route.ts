@@ -139,6 +139,15 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
 }
 
 // Strip HTML tags from dealer names
+/**
+ * PostgREST `.or()` treats `,` `(` `)` as logic-tree syntax, so a raw free-text
+ * query like "DEALER ADDENDUMS, INC." fails to parse. Double-quote the ilike
+ * pattern (escaping embedded quotes/backslashes) so such names are searchable.
+ */
+function ilikePattern(q: string): string {
+  return `"%${q.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}%"`;
+}
+
 function sanitizeName(name: string | null | undefined): string {
   if (!name) return "";
   return name.replace(/<[^>]*>/g, "").trim();
@@ -263,8 +272,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       // Free-text also matches tag names → fold in in-group dealers carrying a matching tag.
       const tagMatchIds = await dealerIdsMatchingTagName(admin, q);
       const orClause = tagMatchIds.length
-        ? `name.ilike.%${q}%,id.in.(${tagMatchIds.join(",")})`
-        : `name.ilike.%${q}%`;
+        ? `name.ilike.${ilikePattern(q)},id.in.(${tagMatchIds.join(",")})`
+        : `name.ilike.${ilikePattern(q)}`;
       query = query.or(orClause);
     }
     if (activeFilter === "true")  query = query.eq("active", true);
@@ -310,7 +319,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .eq("group_id", claims.group_id)
       .in("id", scopedUuids)
       .order("name");
-    if (q) query = query.or(`name.ilike.%${q}%`);
+    if (q) query = query.or(`name.ilike.${ilikePattern(q)}`);
     if (activeFilter === "true")  query = query.eq("active", true);
     if (activeFilter === "false") query = query.eq("active", false);
     const { data, count } = await query;
@@ -348,7 +357,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (atRisk) {
     let allQuery = admin.from("dealers").select("*, groups(name)").eq("active", true).limit(2500);
-    if (q) allQuery = allQuery.or(`name.ilike.%${q}%,dealer_id.ilike.%${q}%`);
+    if (q) allQuery = allQuery.or(`name.ilike.${ilikePattern(q)},dealer_id.ilike.${ilikePattern(q)}`);
     if (createdSinceIso) allQuery = allQuery.gte("created_at", createdSinceIso);
     const { data: allDealers, error: allErr } = await allQuery;
     if (allErr) return NextResponse.json({ error: allErr.message }, { status: 500 });
@@ -399,7 +408,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (q) {
     // Free-text also matches tag names → fold in dealers carrying a matching tag.
     const tagMatchIds = await dealerIdsMatchingTagName(admin, q);
-    const base = `name.ilike.%${q}%,dealer_id.ilike.%${q}%,city.ilike.%${q}%,primary_contact.ilike.%${q}%`;
+    const base = `name.ilike.${ilikePattern(q)},dealer_id.ilike.${ilikePattern(q)},city.ilike.${ilikePattern(q)},primary_contact.ilike.${ilikePattern(q)}`;
     query = query.or(tagMatchIds.length ? `${base},id.in.(${tagMatchIds.join(",")})` : base);
   }
   if (active === "true") query = query.eq("active", true);
