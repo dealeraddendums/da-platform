@@ -134,10 +134,13 @@ function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, 
   return {
     // Identity / four-ID block
     name:        d.name,
-    // dealerid is a Number-type property in HubSpot — only send when the value
-    // is a pure numeric CDK/Aurora dealer ID. Self-serve dealers have
-    // inventory_dealer_id = "ss_…" which is not numeric and would 400.
-    dealerid:    (d.inventory_dealer_id != null && /^\d+$/.test(String(d.inventory_dealer_id))) ? String(d.inventory_dealer_id) : null,
+    // dealerid is a string/text property in HubSpot (verified via the
+    // properties API 2026-07-25 — an earlier comment called it Number-type,
+    // and the old /^\d+$/ guard silently dropped legitimate TEXT feed ids
+    // like "bussfordlincoln" / "mp23083" / "KiaTemecula"). Skip only "ss_…"
+    // placeholders — a self-serve dealer's provisional id isn't a real
+    // inventory id and shouldn't overwrite/announce itself in HubSpot.
+    dealerid:    (d.inventory_dealer_id != null && String(d.inventory_dealer_id).trim() !== "" && !/^ss_/i.test(String(d.inventory_dealer_id))) ? String(d.inventory_dealer_id).trim() : null,
     platformid:  platformId,
     da_dealer_:  platformId,                                          // legacy export field — write same value as platformid
     billingid:   billingId,
