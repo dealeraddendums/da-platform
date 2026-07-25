@@ -3,6 +3,7 @@ import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
 import { applyInventoryDealerIdChange, DealerIdSyncError } from "@/lib/dealer-id-sync";
+import { fireDealerSync } from "@/lib/sync-hubspot";
 
 type Params = { params: { id: string } };
 
@@ -93,6 +94,12 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       .eq("dealer_id", dealer.dealer_id)
       .eq("status", "active");
   }
+
+  // HubSpot: inventory_dealer_id maps to the Company `dealerid` property (sent
+  // only once numeric). The general dealer PATCH fires this on every edit; this
+  // dedicated route was the one write path that didn't — ss_→numeric assignments
+  // made here never reached HubSpot (Buss Ford, 2026-07-25).
+  fireDealerSync(params.id);
 
   fireWrite(admin.from("admin_audit").insert({
     admin_user_id: claims.sub,

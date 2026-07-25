@@ -1,15 +1,31 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
+/**
+ * Dual-purpose password page:
+ *   - FORCED reset (app_metadata.force_password_reset) — middleware pins the
+ *     user here until they set a password; continue to /dashboard.
+ *   - VOLUNTARY change — reached via the profile "Change Password →" link;
+ *     returns to /profile?tab=security with an explicit success state.
+ */
 export default function ResetPasswordPage() {
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [forced, setForced] = useState(false);
+
+  useEffect(() => {
+    const supabase = createClient();
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      setForced(session?.user.app_metadata?.force_password_reset === true);
+    });
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -32,17 +48,19 @@ export default function ResetPasswordPage() {
       const { error: updateErr } = await supabase.auth.updateUser({ password });
       if (updateErr) throw new Error(updateErr.message);
 
-      // Clear the force_password_reset flag via API
+      // Clear the force_password_reset flag via API (no-op when not forced)
       const res = await fetch("/api/auth/clear-force-reset", { method: "POST" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(body.error ?? "Failed to clear reset flag");
       }
 
-      router.push("/dashboard");
+      setSuccess(true);
+      setTimeout(() => {
+        router.push(forced ? "/dashboard" : "/profile?tab=security");
+      }, 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
-    } finally {
       setLoading(false);
     }
   }
@@ -71,10 +89,12 @@ export default function ResetPasswordPage() {
         </div>
 
         <h1 className="text-xl font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
-          Set your password
+          {forced ? "Set your password" : "Change your password"}
         </h1>
         <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
-          Your account requires a new password before continuing.
+          {forced
+            ? "Your account requires a new password before continuing."
+            : "Choose a new password for your account."}
         </p>
 
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
@@ -126,20 +146,35 @@ export default function ResetPasswordPage() {
               {error}
             </p>
           )}
+          {success && (
+            <p className="text-sm rounded px-3 py-2" style={{ background: "#e8f5e9", color: "#2e7d32" }}>
+              ✓ Password updated — taking you back…
+            </p>
+          )}
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || success}
             className="w-full font-medium text-sm rounded text-white"
             style={{
               height: 36,
-              background: loading ? "#a5d6a7" : "var(--success)",
-              cursor: loading ? "not-allowed" : "pointer",
+              background: loading || success ? "#a5d6a7" : "var(--success)",
+              cursor: loading || success ? "not-allowed" : "pointer",
               border: "none",
             }}
           >
-            {loading ? "Saving…" : "Set password & continue"}
+            {success ? "Password updated ✓" : loading ? "Saving…" : forced ? "Set password & continue" : "Change password"}
           </button>
+
+          {!forced && !success && (
+            <a
+              href="/profile?tab=security"
+              className="block text-center text-sm"
+              style={{ color: "#1976d2", textDecoration: "none" }}
+            >
+              ← Back to My Profile
+            </a>
+          )}
         </form>
       </div>
     </div>

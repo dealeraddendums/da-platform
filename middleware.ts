@@ -297,13 +297,12 @@ export async function middleware(request: NextRequest) {
     return redirectRes;
   }
 
-  if (isResetRoute && session) {
-    const redirectRes = NextResponse.redirect(
-      new URL("/dashboard", request.url)
-    );
-    applySecurityHeaders(redirectRes, pathname);
-    return redirectRes;
-  }
+  // NOTE: /reset-password is deliberately reachable with a session — it doubles
+  // as the voluntary change-password page (profile "Change Password →" link).
+  // A previous session-bounce here sent every logged-in user to /dashboard,
+  // which made that link a silent no-op for all roles. The forced-reset flow is
+  // handled above (force_password_reset users are pinned TO this route);
+  // unauthenticated visitors are pushed to /login by the isProtected branch.
 
   applySecurityHeaders(response, pathname);
   return response;
