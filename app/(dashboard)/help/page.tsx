@@ -18,28 +18,31 @@ type Article = {
 
 type ChatMsg = { role: "user" | "assistant"; content: string };
 
+const TAB_LABELS = { guides: "Help Guides", assistant: "Ask for Help", dealertrack: "DealerTrack" } as const;
+type HelpTab = keyof typeof TAB_LABELS;
+
 export default function HelpPage() {
-  const [tab, setTab] = useState<"guides" | "assistant">("guides");
+  const [tab, setTab] = useState<HelpTab>("guides");
 
   return (
     <div>
       <PageHeader title="Help" subtitle="Guides for using the platform, plus an assistant that knows your account." />
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        {(["guides", "assistant"] as const).map((t) => (
+        {(Object.keys(TAB_LABELS) as HelpTab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             style={{
               padding: "8px 16px", borderRadius: 6, border: "1px solid #e0e0e0", cursor: "pointer", fontFamily: "inherit",
               fontSize: 13, fontWeight: 600,
               background: tab === t ? "#1976d2" : "#fff", color: tab === t ? "#fff" : "#55595c",
             }}>
-            {t === "guides" ? "Help Guides" : "Ask for Help"}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
       {/* White card so the (dark) guide/assistant text is readable on the dark
           dashboard background, matching other dashboard pages. */}
       <div className="card" style={{ padding: 24 }}>
-        {tab === "guides" ? <Guides /> : <Assistant />}
+        {tab === "guides" ? <Guides /> : tab === "assistant" ? <Assistant /> : <DealerTrack />}
       </div>
     </div>
   );
@@ -119,6 +122,61 @@ function Guides() {
           </div>
         ))
       )}
+    </div>
+  );
+}
+
+// ─── DealerTrack (inventory feed setup — Scheduled Job credentials) ──────────
+function DealerTrack() {
+  const mono: React.CSSProperties = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 600, color: "#2a2b3c" };
+  const td: React.CSSProperties = { padding: "10px 14px", borderBottom: "1px solid #e0e0e0", fontSize: 14, color: "#33363d", verticalAlign: "top" };
+  const rows: Array<[string, string, React.ReactNode]> = [
+    ["A", "Key / Name", <>Key: <span style={mono}>DDA</span> · Name: <span style={mono}>Dealer Addendums</span></>],
+    ["B", "Filename", <>Your choice — <strong>less than 9 characters</strong></>],
+    ["C", "User ID", <span style={mono}>DT2022!!</span>],
+    ["D", "FTP IP address", <span style={mono}>34.193.4.78</span>],
+    ["E", "Password", <span style={mono}>dt22!!NEW-</span>],
+  ];
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <h2 style={{ fontSize: 20, fontWeight: 700, color: "#2a2b3c", margin: "0 0 10px" }}>
+        Getting your inventory from DealerTrack to DealerAddendums
+      </h2>
+      <p style={{ fontSize: 14, lineHeight: 1.65, color: "#33363d", margin: "0 0 18px" }}>
+        To send us your inventory from DealerTrack, create a <strong>Scheduled Job</strong> inside DealerTrack.
+        Below is the information you&rsquo;ll need, plus a short video tutorial if you&rsquo;re unfamiliar with Scheduled Jobs.
+      </p>
+
+      <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden", marginBottom: 14 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+          <tbody>
+            {rows.map(([key, label, value], i) => (
+              <tr key={key}>
+                <td style={{ ...td, width: 34, fontWeight: 700, color: "#78828c", background: "#fafafa", textAlign: "center", ...(i === rows.length - 1 ? { borderBottom: "none" } : {}) }}>{key}</td>
+                <td style={{ ...td, width: 160, fontWeight: 600, ...(i === rows.length - 1 ? { borderBottom: "none" } : {}) }}>{label}</td>
+                <td style={{ ...td, ...(i === rows.length - 1 ? { borderBottom: "none" } : {}) }}>{value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ padding: "10px 14px", background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 6, fontSize: 13, fontWeight: 700, color: "#7a5c00", marginBottom: 18 }}>
+        NOTE: username and password ARE CASE SENSITIVE.
+      </div>
+
+      <p style={{ fontSize: 14, lineHeight: 1.65, color: "#33363d", margin: "0 0 14px" }}>
+        We created a short two-minute video showing how to set up DealerTrack&rsquo;s inventory export —
+        follow along using the information above (A–E):
+      </p>
+      <a href="https://www.screencast.com/t/t2pVnNuwQ" target="_blank" rel="noopener noreferrer"
+        style={{ display: "inline-block", padding: "10px 18px", background: "#1976d2", color: "#fff", borderRadius: 6, fontSize: 14, fontWeight: 600, textDecoration: "none", marginBottom: 18 }}>
+        ▶ Watch the setup video
+      </a>
+
+      <p style={{ fontSize: 13, color: "#78828c", margin: 0 }}>
+        Questions? Contact <a href="mailto:support@dealeraddendums.com" style={{ color: "#1976d2", textDecoration: "none" }}>support@dealeraddendums.com</a>.
+      </p>
     </div>
   );
 }

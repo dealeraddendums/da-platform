@@ -32,6 +32,9 @@ const FLAGS   = process.argv.filter(a => a.startsWith("--") && a !== "--dry-run"
 // existing contact to its existing company. Skips any profile without a
 // hubspot_contact_id and any company without a hubspot_company_id.
 const ASSOC_ONLY = FLAGS.includes("assoc-only");
+// ONLY_DEALER_IDS_FILE=<path> — newline-separated dealers.dealer_id text keys;
+// restricts the dealers pass to exactly that set (targeted re-link/create runs).
+const ONLY_FILE = process.env.ONLY_DEALER_IDS_FILE ?? null;
 const RUN_DEALERS  = !ASSOC_ONLY && (FLAGS.length === 0 || FLAGS.includes("dealers"));
 const RUN_GROUPS   = !ASSOC_ONLY && (FLAGS.length === 0 || FLAGS.includes("groups"));
 const RUN_PROFILES = ASSOC_ONLY || FLAGS.length === 0 || FLAGS.includes("profiles");
@@ -186,7 +189,10 @@ function dealerProps(d, groupName, groupInternalId) {
   const platformId = d.dealer_id;
   return {
     name: d.name,
-    dealerid: d.inventory_dealer_id != null ? String(d.inventory_dealer_id) : null,
+    // Same guard as live sync (lib/sync-hubspot.ts, d402e65): dealerid is a
+    // string property, but ss_ placeholder ids are provisional and never sent.
+    dealerid: (d.inventory_dealer_id != null && String(d.inventory_dealer_id).trim() !== "" && !/^ss_/i.test(String(d.inventory_dealer_id)))
+      ? String(d.inventory_dealer_id).trim() : null,
     platformid: platformId,
     da_dealer_: platformId,
     billingid: d.billing_customer_id ?? d.internal_id ?? null,
@@ -281,10 +287,16 @@ async function run() {
   const stats = { dealers: { ok: 0, err: 0 }, groups: { ok: 0, err: 0 }, profiles: { ok: 0, err: 0 } };
 
   if (RUN_DEALERS) {
-    const dealers = await fetchAll("dealers",
+    let dealers = await fetchAll("dealers",
       "id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at, downgraded_at",
       [["active", true]],
     );
+    if (ONLY_FILE) {
+      const { readFileSync } = await import("node:fs");
+      const only = new Set(readFileSync(ONLY_FILE, "utf8").split("\n").map(s => s.trim()).filter(Boolean));
+      dealers = dealers.filter(d => only.has(d.dealer_id));
+      console.log(`\nONLY_DEALER_IDS_FILE: ${only.size} ids requested, ${dealers.length} matched active dealers`);
+    }
     console.log(`\nDealers to process: ${dealers.length}`);
     warnSharedHubspotIds(dealers, "dealers");
     // Preload groups once
