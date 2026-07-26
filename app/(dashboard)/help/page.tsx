@@ -133,9 +133,9 @@ function DealerTrack() {
   const rows: Array<[string, string, React.ReactNode]> = [
     ["A", "Key / Name", <>Key: <span style={mono}>DDA</span> · Name: <span style={mono}>Dealer Addendums</span></>],
     ["B", "Filename", <>Your choice — <strong>less than 9 characters</strong></>],
-    ["C", "User ID", <span style={mono}>DT2022!!</span>],
+    ["C", "User ID", <span style={mono}>dealertrack</span>],
     ["D", "FTP IP address", <span style={mono}>34.193.4.78</span>],
-    ["E", "Password", <span style={mono}>dt22!!NEW-</span>],
+    ["E", "Password", <span style={mono}>DealerTrack@2626</span>],
   ];
   return (
     <div style={{ maxWidth: 720 }}>
