@@ -3,10 +3,12 @@
 // assignable tags + the dealers a given tag selection would resolve to, via the
 // SAME group∩tag logic authorizeDealerAction uses (in-group AND the dealer
 // carries one of the scope tags). Powers the "Sees N dealers" live preview in
-// the Store Tags editor. super_admin only (Phase 1 — matches the tags routes).
+// the Store Tags editor. super_admin, or group_admin for a group_user in their
+// own group (Phase 3 slice, 2026-07-26 — matches the tags routes).
 import { NextRequest, NextResponse } from "next/server";
-import { requireSuperAdmin } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { authorizeStoreTagsAccess } from "@/lib/user-authz";
 
 type Params = { params: { id: string } };
 
@@ -20,16 +22,15 @@ type Params = { params: { id: string } };
  * param is omitted). A user who isn't group-scoped returns empty sets.
  */
 export async function GET(req: NextRequest, { params }: Params): Promise<NextResponse> {
-  const { error } = await requireSuperAdmin();
+  const { claims, error } = await requireAuth();
   if (error) return error;
 
   const admin = createAdminSupabaseClient() as any;
 
-  const { data: profile } = await admin
-    .from("profiles").select("id, group_id, role").eq("id", params.id).maybeSingle();
-  if (!profile) return NextResponse.json({ error: "User not found" }, { status: 404 });
+  const authz = await authorizeStoreTagsAccess(admin, claims, params.id);
+  if (!authz.ok) return authz.response;
 
-  const groupId: string | null = profile.group_id ?? null;
+  const groupId: string | null = authz.target.group_id ?? null;
   if (!groupId) {
     return NextResponse.json({ group_id: null, available: [], resolved: { count: 0, dealers: [] } });
   }

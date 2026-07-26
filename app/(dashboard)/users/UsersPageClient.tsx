@@ -439,7 +439,9 @@ function EditUserModal({ user, onClose, onSuccess, dealerMode, canImpersonate, o
     email:           user.email,
     role:            user.role,
     dealer:          user.dealer_id && user.dealer_name ? { dealer_id: user.dealer_id, name: user.dealer_name } : null,
-    group:           user.group_id  && user.group_name  ? { id: user.group_id, name: user.group_name }          : null,
+    // Seed even when group_name is missing — an empty seed makes a plain Save
+    // send group_id: null, detaching the user from their group.
+    group:           user.group_id ? { id: user.group_id, name: user.group_name ?? "(current group)" } : null,
     active:          user.active,
     newPassword:     "",
     confirmPassword: "",
@@ -548,7 +550,10 @@ function EditUserModal({ user, onClose, onSuccess, dealerMode, canImpersonate, o
                 Saved immediately. Set the Group above and Save Changes to apply the role.
               </p>
               {/* Group-scoped tag picker + live "Sees N dealers" preview; writes
-                  user_tags via PUT /api/users/[id]/tags (super_admin only). */}
+                  user_tags via PUT /api/users/[id]/tags (super_admin, or
+                  group_admin for group_users in their own group). Renders for
+                  super_admin on the admin Users page AND for group_admin on
+                  their group Users tab (both are !dealerMode). */}
               <StoreTagsEditor userId={user.id} />
             </div>
           )}
@@ -715,12 +720,13 @@ function InviteUserModal({ onClose, onSuccess }: {
 
 // ── Role tabs for super_admin ─────────────────────────────────────────────────
 
-type SuperAdminTab = "all" | "super_admin" | "group_admin" | "dealer_admin" | "dealer_user" | "dealer_restricted" | "staff";
+type SuperAdminTab = "all" | "super_admin" | "group_admin" | "group_user" | "dealer_admin" | "dealer_user" | "dealer_restricted" | "staff";
 
 const SUPER_ADMIN_TABS: { value: SuperAdminTab; label: string }[] = [
   { value: "all",               label: "All" },
   { value: "super_admin",       label: "Super Admin" },
   { value: "group_admin",       label: "Group Admin" },
+  { value: "group_user",        label: "Group User" },
   { value: "dealer_admin",      label: "Dealer Admin" },
   { value: "dealer_user",       label: "Dealer User" },
   { value: "dealer_restricted", label: "Dealer Restricted" },

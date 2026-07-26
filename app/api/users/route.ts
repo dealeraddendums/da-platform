@@ -146,10 +146,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const dealerMap = new Map((dealerRows ?? []).map(d => [d.dealer_id, d.name]));
     const lastSignIn = await lastSignInByEmail();
 
+    // Group-level rows (group_admin / group_user) need the group's name — the
+    // Edit modal seeds its Group field from it, and a null seed used to make a
+    // plain Save send group_id: null (detaching the user from the group).
+    const { data: groupRow } = await admin
+      .from("groups").select("name").eq("id", groupId).maybeSingle<{ name: string }>();
+    const groupName = groupRow?.name ?? null;
+
     const users = rows.map(p => ({
       ...p,
       dealer_name: p.dealer_id ? (dealerMap.get(p.dealer_id) ?? null) : null,
-      group_name:  null,
+      group_name:  p.group_id === groupId ? groupName : null,
       last_sign_in_at: lastSignIn.get((p.email ?? "").toLowerCase()) ?? null,
       hubspot_contact_id: null,
     }));

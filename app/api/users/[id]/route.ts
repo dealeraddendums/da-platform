@@ -2,61 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import type { UserRole, ProfileRow } from "@/lib/db";
-import { authorizeDealerAction } from "@/lib/dealer-authz";
-import type { JwtClaims } from "@/lib/auth";
+// authorizeUserTarget moved to lib/user-authz.ts (shared with the Store Tags
+// routes). History: PATCH/DELETE originally only branched
+// super_admin/dealer_admin, so ANY group-context operator managing a member
+// dealer's users 403'd — the same authorization hole fixed for
+// addendum-library writes (2277b77); fixed in cae70d5.
+import { authorizeUserTarget } from "@/lib/user-authz";
 
 type ProfilePatch = Partial<Pick<ProfileRow, "full_name" | "email" | "role" | "dealer_id" | "group_id" | "active">>;
 
 type Params = { params: { id: string } };
 
 const DEALER_ROLES: UserRole[] = ["dealer_admin", "dealer_user", "dealer_restricted"];
-
-type TargetUser = { dealer_id: string | null; group_id: string | null; role: string; email: string };
-
-/**
- * Authorize a write against a target user, by the SAME canonical rule the rest
- * of the platform uses (docs/group-admin-dealer-parity.md):
- *   - super_admin                → any user
- *   - dealer_admin               → users on their own dealer
- *   - group_admin                → users on an in-group dealer, OR a group-level
- *                                  user (no dealer_id) of their own group
- *   - group_user (regional mgr)  → users on an in-group dealer within tag scope
- *
- * Previously PATCH/DELETE only branched super_admin/dealer_admin, so ANY
- * group-context operator managing a member dealer's users 403'd — the same
- * authorization hole fixed for addendum-library writes (2277b77). (This is how a
- * super_admin reaching a member-dealer Users tab through the group flow hit the
- * "Forbidden" on delete.)
- */
-async function authorizeUserTarget(
-  admin: ReturnType<typeof createAdminSupabaseClient>,
-  claims: JwtClaims,
-  targetId: string,
-): Promise<{ ok: true; target: TargetUser } | { ok: false; response: NextResponse }> {
-  const { data: target } = await admin
-    .from("profiles")
-    .select("dealer_id, group_id, role, email")
-    .eq("id", targetId)
-    .maybeSingle<TargetUser>();
-  if (!target) return { ok: false, response: NextResponse.json({ error: "User not found" }, { status: 404 }) };
-
-  if (claims.role === "super_admin") return { ok: true, target };
-
-  // Dealer-level target → canonical dealer authorization (own / in-group / tag).
-  if (target.dealer_id) {
-    const authz = await authorizeDealerAction(claims, target.dealer_id);
-    if (!authz.ok) return { ok: false, response: authz.response };
-    return { ok: true, target };
-  }
-
-  // Group-level target (no dealer_id): only a group_admin of the SAME group may
-  // manage them (group_user has dealer-parity only, not group management).
-  if (target.group_id && claims.role === "group_admin" && claims.group_id === target.group_id) {
-    return { ok: true, target };
-  }
-
-  return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
-}
 
 /**
  * PATCH /api/users/[id]
@@ -112,8 +69,15 @@ export async function PATCH(
         return NextResponse.json({ error: "Invalid role" }, { status: 400 });
       }
     }
-    // group_admin: may set any non-super_admin role and move users within their
-    // own group; authorizeUserTarget already confirmed the target is in-group.
+    // group_admin: may set any non-super_admin role; authorizeUserTarget
+    // already confirmed the target is in-group. Enforce "within their own
+    // group": a group_id of anything else — including null, which the group
+    // Users tab's Edit modal used to send when the list API omitted
+    // group_name — would detach the user from the group (or hand them to a
+    // foreign group).
+    if (role === "group_admin" && body.group_id !== undefined && body.group_id !== claims.group_id) {
+      return NextResponse.json({ error: "You can only assign users to your own group" }, { status: 400 });
+    }
   }
 
   const profilePatch: ProfilePatch = {};
