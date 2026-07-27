@@ -77,6 +77,27 @@ export async function applyInventoryDealerIdChange(
         missing,
       );
     }
+    // V5.0-native dealer losing its ss_ prefix: the dashboard migration gate
+    // (eac7ed8) admits dealers by ss_ prefix OR migration_status='migrated'.
+    // Without this marker, renaming a live self-serve dealer to their real
+    // inventory id locks them out at /not-migrated (Buss Ford, 2026-07-27).
+    // Native dealers have nothing to migrate — mark them migrated as part of
+    // the rename. Fire-and-forget semantics are NOT ok here (lockout risk), so
+    // failures surface as an error log for the operator.
+    if (/^ss_/i.test(dealer.dealer_id) && !/^ss_/i.test(newInventoryId)) {
+      const { error: gateErr } = await admin
+        .from("dealers")
+        .update({ migration_status: "migrated" })
+        .eq("id", dealer.id)
+        .neq("migration_status", "migrated");
+      if (gateErr) {
+        console.error(
+          `[dealer-id-sync] renamed native dealer ${dealer.id} but FAILED to set migration_status=migrated — ` +
+          `they will bounce to /not-migrated until fixed: ${gateErr.message}`,
+        );
+      }
+    }
+
     return { changed: true, cascaded: true, oldDealerId: dealer.dealer_id, newDealerId: newInventoryId };
   }
 
