@@ -115,7 +115,13 @@ export default async function DashboardLayout({
   // (da_impersonating=1) so admins can preview unmigrated dealer accounts
   // without getting trapped on the /not-migrated page.
   if (isDealerRole && !isImpersonating) {
-    const isV5Native = dealerData?.dealer_id?.startsWith("ss_") === true;
+    // V5-native prefixes: ss_ = self-serve trial (lib/provisioning.ts),
+    // ga_ = group_admin-created dealer (app/api/dealers POST). Both are born
+    // on V5.0 and have nothing to migrate. Dealers renamed to a real inventory
+    // id get migration_status='migrated' as part of the cascade
+    // (lib/dealer-id-sync.ts) so they keep passing after losing the prefix.
+    const dealerTextId = dealerData?.dealer_id ?? "";
+    const isV5Native = dealerTextId.startsWith("ss_") || dealerTextId.startsWith("ga_");
     const isMigrated = dealerData?.migration_status === "migrated";
     if (!isV5Native && !isMigrated) {
       redirect("/not-migrated");
