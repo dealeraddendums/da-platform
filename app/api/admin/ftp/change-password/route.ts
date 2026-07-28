@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { changePassword, cerberusConfigured, CerberusError } from "@/lib/cerberus";
 
-const PASSWORD_RE = /^(?=.{10,})(?=.*?[^\w\s])(?=.*?[0-9])(?=.*?[A-Z]).*?[a-z].*$/;
+// FTP account passwords (Allan, 2026-07-28): min 6 chars, >=1 letter,
+// >=1 number, >=1 uppercase. No special-char requirement. FTP accounts
+// ONLY — platform user passwords keep their own rules.
+const PASSWORD_RE = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[A-Z]).{6,}$/;
 
 /**
  * POST /api/admin/ftp/change-password
@@ -26,7 +29,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const newPassword = body.newPassword;
   if (!username) return NextResponse.json({ error: "username required" }, { status: 400 });
   if (!newPassword || !PASSWORD_RE.test(newPassword)) {
-    return NextResponse.json({ error: "Password must be 10+ chars with upper, lower, number, and one special char" }, { status: 400 });
+    return NextResponse.json({ error: "At least 6 characters, with a letter, a number, and an uppercase letter." }, { status: 400 });
   }
 
   try {

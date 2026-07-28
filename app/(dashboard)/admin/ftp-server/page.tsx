@@ -10,7 +10,10 @@ interface FtpUserRow {
   note: string;
 }
 
-const PASSWORD_RE = /^(?=.{10,})(?=.*?[^\w\s])(?=.*?[0-9])(?=.*?[A-Z]).*?[a-z].*$/;
+// FTP account passwords (Allan, 2026-07-28): min 6 chars, >=1 letter,
+// >=1 number, >=1 uppercase. No special-char requirement. FTP accounts
+// ONLY — platform user passwords keep their own rules.
+const PASSWORD_RE = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[A-Z]).{6,}$/;
 const PROTECTED = new Set(["admin", "allantone"]);
 const PAGE_SIZE = 25;
 
@@ -271,7 +274,7 @@ function AddUserModal({ existingUsernames, onClose, onAdded }: {
     setError(null);
     if (!username.trim()) { setError("Username is required"); return; }
     if (!PASSWORD_RE.test(password)) {
-      setError("Password must be 10+ chars with upper, lower, number, and one special char");
+      setError("At least 6 characters, with a letter, a number, and an uppercase letter.");
       return;
     }
     setSaving(true);
@@ -306,7 +309,7 @@ function AddUserModal({ existingUsernames, onClose, onAdded }: {
       </div>
       <div style={{ marginBottom: 12 }}>
         <label style={lbl}>Password *</label>
-        <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} style={inp} placeholder="At least 10 chars, 1 upper, 1 lower, 1 number, 1 special" />
+        <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} style={inp} placeholder="At least 6 chars, with a letter, a number, and an uppercase" />
       </div>
       <div style={{ marginBottom: 12 }}>
         <label style={lbl}>Select Existing Folder (optional)</label>
@@ -350,7 +353,7 @@ function ChangePasswordModal({ row, onClose, onSaved }: { row: FtpUserRow; onClo
     setError(null);
     if (pw1 !== pw2) { setError("Passwords don't match"); return; }
     if (!PASSWORD_RE.test(pw1)) {
-      setError("Password must be 10+ chars with upper, lower, number, and one special char");
+      setError("At least 6 characters, with a letter, a number, and an uppercase letter.");
       return;
     }
     setSaving(true);
@@ -380,7 +383,7 @@ function ChangePasswordModal({ row, onClose, onSaved }: { row: FtpUserRow; onClo
         <input type="text" value={pw2} onChange={(e) => setPw2(e.target.value)} style={inp} />
       </div>
       <p style={{ fontSize: 11, color: "#78828c", marginBottom: 16 }}>
-        At least 10 chars, 1 upper, 1 lower, 1 number, 1 special char.
+        At least 6 characters, with a letter, a number, and an uppercase letter.
       </p>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <button className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>

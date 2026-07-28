@@ -3,7 +3,10 @@ import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { addUser, cerberusConfigured, CerberusError } from "@/lib/cerberus";
 
-const PASSWORD_RE = /^(?=.{10,})(?=.*?[^\w\s])(?=.*?[0-9])(?=.*?[A-Z]).*?[a-z].*$/;
+// FTP account passwords (Allan, 2026-07-28): min 6 chars, >=1 letter,
+// >=1 number, >=1 uppercase. No special-char requirement. FTP accounts
+// ONLY — platform user passwords keep their own rules.
+const PASSWORD_RE = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[A-Z]).{6,}$/;
 const USERNAME_RE = /^[a-zA-Z0-9_-]{1,32}$/;
 
 /**
@@ -34,7 +37,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid username (letters, numbers, _ or - only; up to 32 chars)" }, { status: 400 });
   }
   if (!password || !PASSWORD_RE.test(password)) {
-    return NextResponse.json({ error: "Password must be 10+ chars with upper, lower, number, and one special char" }, { status: 400 });
+    return NextResponse.json({ error: "At least 6 characters, with a letter, a number, and an uppercase letter." }, { status: 400 });
   }
 
   try {
