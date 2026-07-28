@@ -148,9 +148,13 @@ function buildInsert(v: FortellisVehicle, dealerTextId: string, createdBy: strin
   };
 }
 
-/** Changed-field patch for an existing feed-owned, unprinted row. */
+/** Changed-field patch for an existing feed-owned, unprinted row.
+ *  Sets status back to 'active': a vehicle present in the feed and not sold is on
+ *  the lot, so a previously sold-marked (or falsely sold-marked — see the
+ *  pagination-skew note in fullSyncDealer) row resurrects on its next update. */
 function buildUpdate(v: FortellisVehicle): Record<string, unknown> {
   return {
+    status: "active",
     year: clampYear(v.year),
     make: clip(v.make, 50),
     model: clip(v.model, 50),
@@ -258,11 +262,28 @@ export async function fullSyncDealer(admin: Admin, row: FortellisDealerRow): Pro
   const imported = await insertRows(admin, inserts);
 
   // Reconcile removals: feed-owned rows still 'active' but absent from the snapshot → sold.
+  // MVS2 pagination is limit/offset over an unstable sort, so a single snapshot can
+  // MISS in-stock vehicles that shift across page boundaries mid-run (verified live
+  // 2026-07-28: 3 in-stock demo-store vehicles skipped → falsely marked sold).
+  // Confirm absence against a second snapshot before marking anything sold.
   let sold = 0;
+  const absentCandidates: Array<[string, ExistingRow]> = [];
   for (const [vin, ex] of Array.from(existing.entries())) {
     if (snapshotVins.has(vin)) continue;
     if (ex.status !== "active") continue;
-    if (await markSold(admin, ex)) sold++;
+    if (!FEED_CREATED_BY.test(ex.created_by ?? "")) continue; // manual rows are never feed-reconciled
+    absentCandidates.push([vin, ex]);
+  }
+  if (absentCandidates.length > 0) {
+    const confirmVins = new Set<string>();
+    for (const v of await fetchWithTimeout(scopeOf(row), {})) {
+      const vin = (v.vin ?? "").trim().toUpperCase();
+      if (vin) confirmVins.add(vin);
+    }
+    for (const [vin, ex] of absentCandidates) {
+      if (confirmVins.has(vin)) continue; // present after all — pagination skew, leave active
+      if (await markSold(admin, ex)) sold++;
+    }
   }
   await stampDealer(admin, row.id, { is_new: false, last_full_sync_at: nowIso, last_delta_at: nowIso, last_status: "ok" });
   return { imported, updated, sold, skipped, found: vehicles.length };
