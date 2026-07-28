@@ -1332,6 +1332,17 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       const templatesUrl = groupId ? `/api/group-templates/${groupId}` : `/api/templates${qs}`;
       const [tRes, sRes] = await Promise.all([fetch(templatesUrl), fetch(`/api/settings${qs}`)]);
       if (tRes.ok) { const j = await tRes.json(); setSavedTemplates(j.data ?? []); }
+      // Group mode: also list the platform Starter Layouts below the group's
+      // templates, so a fresh group isn't a dead end (dealer modal unchanged).
+      if (groupId && !dealerId) {
+        try {
+          const r = await fetch('/api/starter-templates');
+          if (r.ok) {
+            const j = await r.json() as { data?: Array<{ id: string; name: string; doc_type: string; is_blank_default?: boolean }> };
+            setStarterPickerList((j.data ?? []).filter(s => !s.is_blank_default && (s.doc_type === 'addendum' || s.doc_type === 'infosheet')));
+          }
+        } catch { /* starters section just stays empty */ }
+      }
       if (sRes.ok) {
         const sj = await sRes.json() as { data?: Record<string, string | null> };
         const defaults = new Set(
@@ -1511,9 +1522,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       if (json.bgUrl) setBgUrl(json.bgUrl);
       setFontScale(typeof json.fontScale === 'number' ? json.fontScale : 1.0);
       setPaperSize(psKey); paperSizeRef.current = psKey;
-      // NEW, UNSAVED doc — Save → POST /api/templates (dealer's own).
+      // NEW, UNSAVED doc — Save → POST /api/templates (dealer's own), or the
+      // group-templates create path when authoring in group mode. Clearing the
+      // loaded id/source keeps the group save logic (eef9e5a) in create mode
+      // until the first Save; starters seed CONTENT only.
       setLoadedTemplateId(null);
       setLoadedTemplateLocked(false);
+      setLoadedTemplateSource(null);
+      setSaveAsGroupTemplate(Boolean(groupId) && !dealerId);
       // Pre-fill the Save modal's doc_type from the starter (dealer picker only
       // ever surfaces addendum/infosheet starters).
       const dt = tmpl?.doc_type;
@@ -1529,7 +1545,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {
       showToast('Failed to load starter layout');
     }
-  }, [showToast, vehicle, applyBlankCanvas]);
+  }, [showToast, vehicle, applyBlankCanvas, groupId, dealerId]);
 
   // "+ New" handler. super_admin starter-mode → new blank STARTER (unchanged).
   // Dealer/group → offer Blank + platform starters; zero starters falls straight
@@ -1543,14 +1559,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       showToast('New starter');
       return;
     }
-    // Group-template mode: "+ New" opens a truly blank canvas (parity with the
-    // initial group-new-doc open above). Group authoring starts empty, not from
-    // the standard dealer layout or a starter.
-    if (groupId && !dealerId) {
-      applyEmptyCanvas();
-      showToast('New document');
-      return;
-    }
+    const groupMode = Boolean(groupId) && !dealerId;
     type SRow = { id: string; name: string; doc_type: string; is_blank_default?: boolean };
     let all: SRow[] = [];
     try {
@@ -1561,7 +1570,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       }
     } catch { /* ignore — fall through to Blank */ }
     // The blank-default backs the dedicated "Blank" button (loaded from the DB,
-    // hardcode fallback); it's not listed among the other starters.
+    // hardcode fallback); it's not listed among the other starters. In group
+    // mode "Blank" always means the truly-empty canvas instead.
     const blank = all.find(s => s.is_blank_default);
     const blankId = blank?.id ?? null;
     setBlankStarterId(blankId);
@@ -1569,8 +1579,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     // dealer templates API rejects them on save.
     const others = all.filter(s => !s.is_blank_default && (s.doc_type === 'addendum' || s.doc_type === 'infosheet'));
     if (others.length === 0) {
-      // Only Blank available — load it straight away (record or hardcode).
-      if (blankId) await loadStarterAsNew(blankId);
+      // Only Blank available — load it straight away.
+      if (groupMode) { applyEmptyCanvas(); showToast('New document'); }
+      else if (blankId) await loadStarterAsNew(blankId);
       else { applyBlankCanvas(); showToast('New document'); }
       return;
     }
@@ -2036,11 +2047,17 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
               Start from a blank canvas or a platform starter layout. Picking a starter creates a new, editable document you save as your own.
             </div>
             <button
-              onClick={() => { if (blankStarterId) { void loadStarterAsNew(blankStarterId); } else { applyBlankCanvas(); setShowNewPicker(false); showToast('New document'); } }}
+              onClick={() => {
+                // Group mode: Blank = the truly-empty canvas (group authoring
+                // starts empty — e080d62), never the standard dealer layout.
+                if (groupId && !dealerId) { applyEmptyCanvas(); setShowNewPicker(false); showToast('New document'); }
+                else if (blankStarterId) { void loadStarterAsNew(blankStarterId); }
+                else { applyBlankCanvas(); setShowNewPicker(false); showToast('New document'); }
+              }}
               style={{ width: '100%', textAlign: 'left', padding: '12px 14px', marginBottom: 8, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 14, color: '#2a2b3c' }}>Blank</div>
-                <div style={{ fontSize: 12, color: '#78828c', marginTop: 2 }}>Empty canvas with the default widgets.</div>
+                <div style={{ fontSize: 12, color: '#78828c', marginTop: 2 }}>{groupId && !dealerId ? 'Truly empty canvas.' : 'Empty canvas with the default widgets.'}</div>
               </div>
             </button>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.05em', margin: '14px 0 6px' }}>Starter Layouts</div>
@@ -2172,7 +2189,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         <Modal onClose={() => setShowOpenModal(false)} title="Open Template">
           <div style={{ padding: '16px 24px', maxHeight: 400, overflowY: 'auto' }}>
             {savedTemplates.length === 0 ? (
-              <div style={{ textAlign: 'center', color: '#78828c', padding: 24, fontSize: 13 }}>No saved templates yet.</div>
+              <div style={{ textAlign: 'center', color: '#78828c', padding: 24, fontSize: 13 }}>
+                {groupId && !dealerId
+                  ? 'No group templates yet — start from a starter layout below or a blank canvas.'
+                  : 'No saved templates yet.'}
+              </div>
             ) : savedTemplates.map(t => {
               const isDefault = defaultTemplateIds.has(t.id);
               const isConfirming = deleteConfirmId === t.id;
@@ -2228,6 +2249,26 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 </div>
               );
             })}
+            {/* Group mode: platform Starter Layouts below the group's templates.
+                Picking one seeds a NEW unsaved group template (content only). */}
+            {groupId && !dealerId && starterPickerList.length > 0 && (
+              <div style={{ marginTop: savedTemplates.length > 0 ? 16 : 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.05em', margin: '4px 0 6px' }}>Starter Layouts</div>
+                {starterPickerList.map(s => (
+                  <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f0f0f0', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>{s.name}</div>
+                      <div style={{ fontSize: 11, color: '#78828c', marginTop: 2 }}>{s.doc_type === 'infosheet' ? 'Infosheet' : 'Addendum'} · platform starter</div>
+                    </div>
+                    <button
+                      onClick={() => { setShowOpenModal(false); void loadStarterAsNew(s.id); }}
+                      style={{ padding: '5px 12px', background: '#fff', color: '#1976d2', border: '1px solid #1976d2', borderRadius: 4, fontSize: 12, cursor: 'pointer', flexShrink: 0, fontFamily: 'inherit' }}>
+                      Start from
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div style={{ padding: '16px 24px', borderTop: '1px solid #e0e0e0', display: 'flex', justifyContent: 'flex-end' }}>
             <button onClick={() => setShowOpenModal(false)} style={mfClose}>Close</button>

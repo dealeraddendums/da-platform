@@ -10,6 +10,7 @@ import EntityTagsCard from "@/components/EntityTagsCard";
 import { PageHeader } from "@/components/PageHeader";
 import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
 import { DMS_PROVIDERS, OTHER_PROVIDERS, isDmsProvider } from "@/lib/inventory-providers";
+import { loginAsDealer } from "@/lib/admin-login-as";
 import type { SubscriptionBillingResult } from "@/lib/billing-subscription";
 
 // Subscription-tier options for the super_admin inline editor. Values are the
@@ -313,6 +314,14 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
     setSaving(false);
   }
 
+  const [loggingIn, setLoggingIn] = useState(false);
+  async function handleLoginAs() {
+    setLoggingIn(true);
+    const err = await loginAsDealer({ uuid: dealer.id, textId: dealer.dealer_id, name: decodeHtmlEntities(dealer.name) });
+    if (err) { setError(err); setLoggingIn(false); }
+    // on success loginAsDealer navigates away
+  }
+
   async function toggleActive() {
     setToggling(true);
     const res = await fetch(`/api/dealers/${dealer.id}`, {
@@ -541,16 +550,19 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
         subtitle={`Inventory ID: ${dealer.inventory_dealer_id ?? dealer.dealer_id}`}
         action={
           <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
-            <span
-              className="text-xs font-semibold px-2 py-0.5 rounded-full"
-              style={{
-                background: dealer.active ? "#e8f5e9" : "#fafafa",
-                color: dealer.active ? "#2e7d32" : "#78828c",
-                border: `1px solid ${dealer.active ? "#c8e6c9" : "#e0e0e0"}`,
-              }}
-            >
-              {dealer.active ? "Active" : "Inactive"}
-            </span>
+            {isSuperAdmin && !editing && (
+              // One-click entry: impersonate the dealer_admin, ghost when none.
+              // Replaces the Active/Inactive pill (status lives on the
+              // Deactivate/Activate button + the Status row in Dealer Information).
+              <button
+                className="btn btn-primary"
+                onClick={() => void handleLoginAs()}
+                disabled={loggingIn}
+                style={{ fontSize: 13, opacity: loggingIn ? 0.6 : 1 }}
+              >
+                {loggingIn ? "Logging in…" : "Login"}
+              </button>
+            )}
             {dealer.is_test && (
               <span
                 className="text-xs font-semibold px-2 py-0.5"
@@ -819,6 +831,20 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
             Dealer Information
           </p>
           <div className="space-y-4">
+            {/* Status — moved here from the header pill (replaced by Login). */}
+            <div className="flex items-start justify-between gap-4">
+              <span className="text-sm" style={{ color: "var(--text-secondary)", flexShrink: 0 }}>Status</span>
+              <span
+                className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                style={{
+                  background: dealer.active ? "#e8f5e9" : "#fafafa",
+                  color: dealer.active ? "#2e7d32" : "#78828c",
+                  border: `1px solid ${dealer.active ? "#c8e6c9" : "#e0e0e0"}`,
+                }}
+              >
+                {dealer.active ? "Active" : "Inactive"}
+              </span>
+            </div>
             {/* Internal ID — read-only, never changes */}
             <div className="flex items-start justify-between gap-4">
               <div>

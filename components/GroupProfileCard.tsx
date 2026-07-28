@@ -8,6 +8,7 @@ import { HubSpotEmail } from "@/components/HubSpotEmail";
 import type { GroupRow, GroupUpdate, DealerRow, GroupBranding } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
 import EntityTagsCard from "@/components/EntityTagsCard";
+import { loginAsGroup } from "@/lib/admin-login-as";
 import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
 import { rememberDealerReturnPath } from "@/lib/dealer-return";
 
@@ -143,6 +144,14 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
     setSaving(false);
   }
 
+  const [loggingIn, setLoggingIn] = useState(false);
+  async function handleLoginAs() {
+    setLoggingIn(true);
+    const err = await loginAsGroup({ id: group.id, name: decodeHtmlEntities(group.name) });
+    if (err) { setError(err); setLoggingIn(false); }
+    // on success loginAsGroup navigates away
+  }
+
   async function toggleActive() {
     setToggling(true);
     const res = await fetch(`/api/groups/${group.id}`, {
@@ -248,16 +257,19 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
         subtitle={`Group ID: ${group.id.slice(0, 8)}…`}
         action={
           <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
-            <span
-              className="text-xs font-semibold px-2 py-0.5 rounded-full"
-              style={{
-                background: group.active ? "#e8f5e9" : "#fafafa",
-                color: group.active ? "#2e7d32" : "#78828c",
-                border: `1px solid ${group.active ? "#c8e6c9" : "#e0e0e0"}`,
-              }}
-            >
-              {group.active ? "Active" : "Inactive"}
-            </span>
+            {isSuperAdmin && !editing && (
+              // One-click entry: impersonate a group_admin, ghost when none.
+              // Replaces the Active/Inactive pill (status lives on the
+              // Deactivate/Activate button + the Status row below).
+              <button
+                className="btn btn-primary"
+                onClick={() => void handleLoginAs()}
+                disabled={loggingIn}
+                style={{ fontSize: 13, opacity: loggingIn ? 0.6 : 1 }}
+              >
+                {loggingIn ? "Logging in…" : "Login"}
+              </button>
+            )}
             {group.is_test && (
               <span
                 className="text-xs font-semibold px-2 py-0.5"
@@ -337,6 +349,20 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
           <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
             Group Information
           </p>
+          {/* Status — moved here from the header pill (replaced by Login). */}
+          <div className="flex items-start justify-between gap-4" style={{ marginBottom: 16 }}>
+            <span className="text-sm" style={{ color: "var(--text-secondary)", flexShrink: 0 }}>Status</span>
+            <span
+              className="text-xs font-semibold px-2 py-0.5 rounded-full"
+              style={{
+                background: group.active ? "#e8f5e9" : "#fafafa",
+                color: group.active ? "#2e7d32" : "#78828c",
+                border: `1px solid ${group.active ? "#c8e6c9" : "#e0e0e0"}`,
+              }}
+            >
+              {group.active ? "Active" : "Inactive"}
+            </span>
+          </div>
           <div className="space-y-4">
             <Field label="Group Name" value={form.name} editing={editing} required onChange={set("name")} view={decodeHtmlEntities(group.name)} />
             <Field label="Primary Contact" value={form.primary_contact} editing={editing} onChange={set("primary_contact")} view={group.primary_contact} />
