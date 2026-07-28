@@ -1339,7 +1339,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           const r = await fetch('/api/starter-templates');
           if (r.ok) {
             const j = await r.json() as { data?: Array<{ id: string; name: string; doc_type: string; is_blank_default?: boolean }> };
-            setStarterPickerList((j.data ?? []).filter(s => !s.is_blank_default && (s.doc_type === 'addendum' || s.doc_type === 'infosheet')));
+            const all = j.data ?? [];
+            setBlankStarterId(all.find(s => s.is_blank_default)?.id ?? null);
+            setStarterPickerList(all.filter(s => !s.is_blank_default && (s.doc_type === 'addendum' || s.doc_type === 'infosheet')));
           }
         } catch { /* starters section just stays empty */ }
       }
@@ -2060,6 +2062,18 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 <div style={{ fontSize: 12, color: '#78828c', marginTop: 2 }}>{groupId && !dealerId ? 'Truly empty canvas.' : 'Empty canvas with the default widgets.'}</div>
               </div>
             </button>
+            {groupId && !dealerId && (
+              // Group mode splits what the dealer "Blank" bundles: Blank above is
+              // truly empty; this loads the base/standard layout as seed content.
+              <button
+                onClick={() => { if (blankStarterId) { void loadStarterAsNew(blankStarterId); } else { applyBlankCanvas(); setShowNewPicker(false); showToast('New document'); } }}
+                style={{ width: '100%', textAlign: 'left', padding: '12px 14px', marginBottom: 8, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: '#2a2b3c' }}>Standard Layout</div>
+                  <div style={{ fontSize: 12, color: '#78828c', marginTop: 2 }}>The platform&rsquo;s base widget set (logo, vehicle, options, totals…).</div>
+                </div>
+              </button>
+            )}
             <div style={{ fontSize: 11, fontWeight: 700, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.05em', margin: '14px 0 6px' }}>Starter Layouts</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {starterPickerList.map(s => (
@@ -2251,9 +2265,22 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
             })}
             {/* Group mode: platform Starter Layouts below the group's templates.
                 Picking one seeds a NEW unsaved group template (content only). */}
-            {groupId && !dealerId && starterPickerList.length > 0 && (
+            {groupId && !dealerId && (starterPickerList.length > 0 || blankStarterId) && (
               <div style={{ marginTop: savedTemplates.length > 0 ? 16 : 0 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.05em', margin: '4px 0 6px' }}>Starter Layouts</div>
+                {blankStarterId && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f0f0f0', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>Standard Layout</div>
+                      <div style={{ fontSize: 11, color: '#78828c', marginTop: 2 }}>The platform&rsquo;s base widget set</div>
+                    </div>
+                    <button
+                      onClick={() => { setShowOpenModal(false); void loadStarterAsNew(blankStarterId); }}
+                      style={{ padding: '5px 12px', background: '#fff', color: '#1976d2', border: '1px solid #1976d2', borderRadius: 4, fontSize: 12, cursor: 'pointer', flexShrink: 0, fontFamily: 'inherit' }}>
+                      Start from
+                    </button>
+                  </div>
+                )}
                 {starterPickerList.map(s => (
                   <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f0f0f0', gap: 8 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
