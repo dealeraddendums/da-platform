@@ -13,7 +13,11 @@
 // differs on the first live call.
 //
 //   - OAuth 2.0 client-credentials, scope=anonymous, 1h Bearer tokens.
-//   - Service URL: https://api.fortellis.io/{cdk|cdk-test}/sales/inventory/v2/merchandisable-vehicles
+//   - Service URL (PRODUCTION, verified live 2026-07-28 per Fortellis case 03225140):
+//       https://api.fortellis.io/sales/inventory/v2/merchandisable-vehicles
+//     NO {cdk|cdk-test} namespace — the Developer Guide's /cdk/… path 404s
+//     ("Unable to identify proxy"). MVS2 is production-test only; the Test
+//     subscription never activates. Set FORTELLIS_MV_URL to pin the full URL.
 //   - GET /        vehicleSearchUsingGET → { summary:{totalCount,limit,offset}, results:[…] }
 //   - GET /ping    connectivity probe
 //   - Headers: Authorization, Subscription-Id, Request-Id (GUID). Accept/Accept-*
@@ -32,9 +36,14 @@ const API_KEY = process.env.FORTELLIS_API_KEY ?? "";
 const API_SECRET = process.env.FORTELLIS_API_SECRET ?? "";
 const API_BASE = (process.env.FORTELLIS_API_BASE ?? "https://api.fortellis.io").replace(/\/+$/, "");
 // 'test' -> /cdk-test namespace, 'production' -> /cdk (per the MVS2 guide's service URL).
+// NOTE: the guide is wrong for production — see FORTELLIS_MV_URL below.
 const FORTELLIS_ENV = (process.env.FORTELLIS_ENV ?? "test").toLowerCase();
 // Path after the namespace. Overridable, but the guide fixes it to this.
 const MV_PATH = (process.env.FORTELLIS_MV_PATH ?? "sales/inventory/v2/merchandisable-vehicles").replace(/^\/+|\/+$/g, "");
+// Full service-URL override. When set, it wins over the {namespace}/{path} template
+// entirely. Production uses this (no /cdk namespace — verified live 2026-07-28):
+//   FORTELLIS_MV_URL=https://api.fortellis.io/sales/inventory/v2/merchandisable-vehicles
+const MV_URL_OVERRIDE = (process.env.FORTELLIS_MV_URL ?? "").trim().replace(/\/+$/, "");
 const SUBSCRIPTIONS_URL =
   process.env.FORTELLIS_SUBSCRIPTIONS_URL ??
   "https://subscriptions.fortellis.io/v1/solution/subscriptions";
@@ -50,8 +59,10 @@ function namespace(): string {
   return FORTELLIS_ENV === "production" || FORTELLIS_ENV === "prod" ? "cdk" : "cdk-test";
 }
 
-/** Base service URL, e.g. https://api.fortellis.io/cdk-test/sales/inventory/v2/merchandisable-vehicles */
+/** Base service URL. FORTELLIS_MV_URL (full-URL override) wins when set;
+ *  otherwise falls back to the guide's {namespace}/{path} template. */
 export function mvBaseUrl(): string {
+  if (MV_URL_OVERRIDE) return MV_URL_OVERRIDE;
   return `${API_BASE}/${namespace()}/${MV_PATH}`;
 }
 
