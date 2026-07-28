@@ -17,7 +17,8 @@
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import {
-  searchVehicles, mapVehicle, FortellisError, type DealerScope, type FortellisVehicle,
+  searchVehicles, mapVehicle, ping, getSubscriptions, isOutageErrorType,
+  FortellisError, type DealerScope, type FortellisVehicle,
 } from "@/lib/fortellis-api";
 
 const CALL_TIMEOUT_MS = 30_000;
@@ -358,9 +359,23 @@ async function stampDealer(admin: Admin, id: number, patch: Record<string, unkno
 }
 
 // ── Availability state machine (admin_settings.fortellis_health) ──────────────
+//
+// Alert debounce (2026-07-28): transient Fortellis 502s self-heal in seconds and
+// were producing DOWN/UP email pairs for every blip. Rule: only email when the API
+// has been down for MORE THAN 5 MINUTES. On the up→down transition we record the
+// state (the admin tab banner may go red immediately — that's fine) but send no
+// email; a fire-and-forget re-probe ~5 min later confirms the outage before the
+// first alert. Because health events are call-driven, every markDown while down
+// also re-evaluates age — so a process restart mid-wait just delays the email to
+// the next failing call. Recovery emails pair 1:1 with sent alerts: a blip that
+// never alerted recovers silently.
 
 const HEALTH_KEY = "fortellis_health";
 const RE_ALERT_MS = 6 * 60 * 60 * 1000; // re-alert at most every 6h while down
+// Overridable for tests; production default 5 minutes.
+const ALERT_AFTER_MS = Number(process.env.FORTELLIS_ALERT_AFTER_MS ?? 5 * 60 * 1000);
+// Confirm probe fires just past the alert threshold so a still-down probe emails immediately.
+const CONFIRM_PROBE_DELAY_MS = ALERT_AFTER_MS + 15_000;
 
 export interface FortellisHealth {
   state: "up" | "down";
@@ -368,6 +383,8 @@ export interface FortellisHealth {
   last_error?: string;
   last_alert_at?: string;
   last_ok_at?: string;
+  /** True once the "unavailable" email for the CURRENT outage has been sent. */
+  alert_sent?: boolean;
 }
 
 export async function getHealth(admin: Admin): Promise<FortellisHealth> {
@@ -383,17 +400,20 @@ async function writeHealth(admin: Admin, h: FortellisHealth): Promise<void> {
   );
 }
 
-/** Record a healthy call. Sends a recovery email on a down→up transition. */
+/** Record a healthy call. Sends a recovery email on a down→up transition ONLY when
+ *  the outage actually alerted — a blip that never emailed recovers silently. */
 export async function markHealthy(admin: Admin): Promise<void> {
   const cur = await getHealth(admin);
   const nowIso = new Date().toISOString();
   if (cur.state === "down") {
     await writeHealth(admin, { state: "up", last_ok_at: nowIso });
-    await safeEmail(
-      "✅ Fortellis API recovered",
-      `<p>The Fortellis API is responding again as of <strong>${fmtPt(nowIso)}</strong>.</p>
-       ${cur.since ? `<p>It was unavailable since ${fmtPt(cur.since)}.</p>` : ""}`,
-    );
+    if (cur.alert_sent) {
+      await safeEmail(
+        "✅ Fortellis API recovered",
+        `<p>The Fortellis API is responding again as of <strong>${fmtPt(nowIso)}</strong>.</p>
+         ${cur.since ? `<p>It was unavailable since ${fmtPt(cur.since)}.</p>` : ""}`,
+      );
+    }
   } else if (cur.last_ok_at == null || cur.state !== "up") {
     await writeHealth(admin, { state: "up", last_ok_at: nowIso });
   } else {
@@ -401,20 +421,37 @@ export async function markHealthy(admin: Admin): Promise<void> {
   }
 }
 
-/** Record an outage. Sends an alert on up→down and re-alerts at most every 6h while down. */
+/** Record an outage. No email on the up→down transition — the first alert goes out
+ *  only once the outage is older than ALERT_AFTER_MS (confirmed by the scheduled
+ *  re-probe, or by whichever failing call arrives first past the threshold). While
+ *  down and alerted, re-alerts at most every 6h. */
 export async function markDown(admin: Admin, lastError: string): Promise<void> {
   const cur = await getHealth(admin);
   const nowIso = new Date().toISOString();
+
   if (cur.state !== "down") {
-    await writeHealth(admin, { state: "down", since: nowIso, last_error: lastError, last_alert_at: nowIso });
-    await safeEmail(
-      "🚨 Fortellis API unavailable",
-      `<p>The Fortellis API is unavailable as of <strong>${fmtPt(nowIso)}</strong>.</p>
-       <p>Last error: <code>${escapeHtml(lastError)}</code></p>
-       <p>The Fortellis Dealers hourly delta cannot run until it recovers. A recovery email will follow.</p>`,
-    );
+    // Transition: record the outage, alert later if it survives the debounce window.
+    await writeHealth(admin, { state: "down", since: nowIso, last_error: lastError, alert_sent: false });
+    scheduleOutageConfirm();
     return;
   }
+
+  if (!cur.alert_sent) {
+    const sinceMs = cur.since ? new Date(cur.since).getTime() : 0;
+    if (Date.now() - sinceMs > ALERT_AFTER_MS) {
+      await writeHealth(admin, { ...cur, last_error: lastError, alert_sent: true, last_alert_at: nowIso });
+      await safeEmail(
+        "🚨 Fortellis API unavailable",
+        `<p>The Fortellis API has been unavailable since <strong>${cur.since ? fmtPt(cur.since) : "unknown"}</strong> (more than ${Math.round(ALERT_AFTER_MS / 60_000)} minutes).</p>
+         <p>Latest error: <code>${escapeHtml(lastError)}</code></p>
+         <p>The Fortellis Dealers hourly delta cannot run until it recovers. A recovery email will follow.</p>`,
+      );
+    } else {
+      await writeHealth(admin, { ...cur, last_error: lastError });
+    }
+    return;
+  }
+
   const lastAlert = cur.last_alert_at ? new Date(cur.last_alert_at).getTime() : 0;
   if (Date.now() - lastAlert > RE_ALERT_MS) {
     await writeHealth(admin, { ...cur, last_error: lastError, last_alert_at: nowIso });
@@ -426,6 +463,54 @@ export async function markDown(admin: Admin, lastError: string): Promise<void> {
   } else {
     await writeHealth(admin, { ...cur, last_error: lastError });
   }
+}
+
+// ── Outage confirmation (the active half of the debounce) ─────────────────────
+
+let confirmTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** On the up→down transition, schedule a one-shot in-process re-probe just past the
+ *  alert threshold. If the process restarts mid-wait, the passive age check in
+ *  markDown covers it on the next failing call. */
+function scheduleOutageConfirm(): void {
+  if (confirmTimer) return;
+  confirmTimer = setTimeout(() => {
+    confirmTimer = null;
+    confirmOutage().catch(err => console.error("[fortellis] outage confirm failed:", err instanceof Error ? err.message : err));
+  }, CONFIRM_PROBE_DELAY_MS);
+  // Don't hold the process open for the probe.
+  (confirmTimer as { unref?: () => void }).unref?.();
+}
+
+async function confirmOutage(): Promise<void> {
+  const admin = createAdminSupabaseClient();
+  const cur = await getHealth(admin);
+  if (cur.state !== "down" || cur.alert_sent) return; // recovered meanwhile, or already alerted
+  const probe = await reprobe(admin);
+  if (probe.ok) { await markHealthy(admin); return; }  // silent recovery — no alert was sent
+  // Still down past the threshold — markDown's age check sends the alert.
+  await markDown(admin, probe.error ?? "confirmation probe failed");
+}
+
+/** Availability probe (Layer-1 retry included via ping/getSubscriptions). Uses any
+ *  configured dealer's scope for a real vehicle-search ping; falls back to the
+ *  subscriptions endpoint when no dealers exist. A 4xx counts as UP — the API
+ *  answered; config errors are not outages. */
+async function reprobe(admin: Admin): Promise<{ ok: boolean; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (admin as any)
+    .from("fortellis_dealers")
+    .select("subscription_id, web_id, dealer_code")
+    .order("enabled", { ascending: false })
+    .limit(1);
+  const row = (data ?? [])[0] as { subscription_id: string; web_id: string | null; dealer_code: string | null } | undefined;
+  if (row) {
+    const r = await ping({ subscriptionId: row.subscription_id, webId: row.web_id, dealerCode: row.dealer_code });
+    if (r.ok || !isOutageErrorType(r.errorType)) return { ok: true };
+    return { ok: false, error: r.error };
+  }
+  try { await getSubscriptions(); return { ok: true }; }
+  catch (err) { return { ok: false, error: err instanceof Error ? err.message : String(err) }; }
 }
 
 // ── 401 support notification ──────────────────────────────────────────────────

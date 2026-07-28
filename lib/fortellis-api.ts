@@ -80,7 +80,40 @@ export class FortellisError extends Error {
   }
 }
 export class FortellisAuthError extends FortellisError {
-  constructor(message: string) { super("token", message); }
+  /** True when the failure is transport-level or 5xx — a one-shot retry is worthwhile. */
+  retryable: boolean;
+  constructor(message: string, retryable = false) { super("token", message); this.retryable = retryable; }
+}
+
+// ── Retry-on-5xx (Layer 1) ────────────────────────────────────────────────────
+// Transient Fortellis 502s are common (4+ in one hour observed 2026-07-28, each
+// self-healing in seconds). 5xx and network failures retry ONCE after a short
+// jittered backoff with a fresh Request-Id; both attempts are cert-logged.
+// 4xx never retries (429 included — respect rate limits); an aborted signal
+// (per-dealer time budget spent) never retries.
+
+const RETRY_BACKOFF_MIN_MS = 2_000;
+const RETRY_BACKOFF_MAX_MS = 4_000;
+
+function retryBackoffMs(): number {
+  return RETRY_BACKOFF_MIN_MS + Math.random() * (RETRY_BACKOFF_MAX_MS - RETRY_BACKOFF_MIN_MS);
+}
+
+/** Sleep that returns early (without throwing) if the signal aborts. */
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    if (signal?.aborted) { resolve(); return; }
+    const t = setTimeout(done, ms);
+    function done() { clearTimeout(t); signal?.removeEventListener("abort", done); resolve(); }
+    signal?.addEventListener("abort", done);
+  });
+}
+
+function isRetryableSearchError(err: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return false;                       // budget spent — no retry
+  if (!(err instanceof FortellisError)) return false;
+  if (err.type === "network") return true;                 // transport failure
+  return err.type === "server" && (err.httpStatus ?? 0) >= 500; // 5xx (429 maps to "other")
 }
 
 // ── Token manager (module-level cache, single-flight refresh) ─────────────────
@@ -104,36 +137,48 @@ export async function getToken(force = false): Promise<string> {
     if (!fortellisConfigured()) {
       throw new FortellisAuthError("FORTELLIS_API_KEY / FORTELLIS_API_SECRET not set");
     }
-    const started = Date.now();
     const basic = Buffer.from(`${API_KEY}:${API_SECRET}`).toString("base64");
-    let res: Response;
     try {
-      res = await fetch(TOKEN_URL, {
-        method: "POST",
-        headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded" },
-        // scope=anonymous is REQUIRED — the server 400s without a scope (Phase 0).
-        body: "grant_type=client_credentials&scope=anonymous",
-      });
+      return await tokenAttempt(basic);
     } catch (err) {
-      logCall({ method: "POST", url: TOKEN_URL, requestHeaders: { Authorization: "Basic ####…" }, durationMs: Date.now() - started, error: err instanceof Error ? err.message : String(err) });
-      throw new FortellisAuthError(`Token request failed: ${err instanceof Error ? err.message : String(err)}`);
+      // Retry once on transport failure / 5xx (never on 4xx). Both attempts logged.
+      if (!(err instanceof FortellisAuthError) || !err.retryable) throw err;
+      await abortableSleep(retryBackoffMs());
+      return await tokenAttempt(basic);
     }
-    const bodyText = await res.text();
-    logCall({
-      method: "POST", url: TOKEN_URL, httpStatus: res.status, durationMs: Date.now() - started,
-      requestHeaders: { Authorization: "Basic ####…", "Content-Type": "application/x-www-form-urlencoded" },
-      responseBody: bodyText.replace(/"access_token"\s*:\s*"[^"]+"/, '"access_token":"####…"'),
-    });
-    if (res.status < 200 || res.status >= 300) {
-      throw new FortellisAuthError(`Token endpoint HTTP ${res.status}: ${bodyText.slice(0, 200)}`);
-    }
-    let parsed: { access_token?: string; expires_in?: number };
-    try { parsed = JSON.parse(bodyText); } catch { throw new FortellisAuthError("Token endpoint returned non-JSON"); }
-    if (!parsed.access_token) throw new FortellisAuthError("Token endpoint returned no access_token");
-    cachedToken = { token: parsed.access_token, expiresAt: Date.now() + (parsed.expires_in ?? 3600) * 1000 };
-    return parsed.access_token;
   })().finally(() => { inflight = null; });
   return inflight;
+}
+
+/** One token-endpoint exchange: logs the call, caches + returns the token on success. */
+async function tokenAttempt(basic: string): Promise<string> {
+  const started = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded" },
+      // scope=anonymous is REQUIRED — the server 400s without a scope (Phase 0).
+      body: "grant_type=client_credentials&scope=anonymous",
+    });
+  } catch (err) {
+    logCall({ method: "POST", url: TOKEN_URL, requestHeaders: { Authorization: "Basic ####…" }, durationMs: Date.now() - started, error: err instanceof Error ? err.message : String(err) });
+    throw new FortellisAuthError(`Token request failed: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+  const bodyText = await res.text();
+  logCall({
+    method: "POST", url: TOKEN_URL, httpStatus: res.status, durationMs: Date.now() - started,
+    requestHeaders: { Authorization: "Basic ####…", "Content-Type": "application/x-www-form-urlencoded" },
+    responseBody: bodyText.replace(/"access_token"\s*:\s*"[^"]+"/, '"access_token":"####…"'),
+  });
+  if (res.status < 200 || res.status >= 300) {
+    throw new FortellisAuthError(`Token endpoint HTTP ${res.status}: ${bodyText.slice(0, 200)}`, res.status >= 500);
+  }
+  let parsed: { access_token?: string; expires_in?: number };
+  try { parsed = JSON.parse(bodyText); } catch { throw new FortellisAuthError("Token endpoint returned non-JSON"); }
+  if (!parsed.access_token) throw new FortellisAuthError("Token endpoint returned no access_token");
+  cachedToken = { token: parsed.access_token, expiresAt: Date.now() + (parsed.expires_in ?? 3600) * 1000 };
+  return parsed.access_token;
 }
 
 // ── Certification logging ─────────────────────────────────────────────────────
@@ -252,7 +297,21 @@ function scopeParams(opts: SearchOpts): URLSearchParams {
  *  the response's echoed Request-Id when present, else the one we sent. */
 export interface CallMeta { requestId?: string; httpStatus?: number }
 
+/** One page fetch with a single retry on 5xx/network (fresh Request-Id on the retry;
+ *  both attempts cert-logged by searchPageOnce). 4xx/429 and aborted budgets never retry;
+ *  only a failed retry propagates to the error taxonomy / health machine. */
 async function searchPage(opts: SearchOpts, offset: number, rid: string, meta?: CallMeta): Promise<{ summary: { totalCount?: number; count?: number }; results: unknown[] }> {
+  try {
+    return await searchPageOnce(opts, offset, rid, meta);
+  } catch (err) {
+    if (!isRetryableSearchError(err, opts.signal)) throw err;
+    await abortableSleep(retryBackoffMs(), opts.signal);
+    if (opts.signal?.aborted) throw err;
+    return await searchPageOnce(opts, offset, requestId(), meta);
+  }
+}
+
+async function searchPageOnce(opts: SearchOpts, offset: number, rid: string, meta?: CallMeta): Promise<{ summary: { totalCount?: number; count?: number }; results: unknown[] }> {
   const token = await getToken();
   const params = scopeParams(opts);
   params.set("limit", String(PAGE_SIZE));
