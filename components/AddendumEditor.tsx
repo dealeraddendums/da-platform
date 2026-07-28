@@ -67,6 +67,8 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
 
   const [options, setOptions] = useState<(VehicleOptionRow | MatchedOption)[]>([]);
   const [groupOptions, setGroupOptions] = useState<GroupOption[]>([]);
+  // Read-only legacy 4.0 addendum_data items (unmigrated dealers) — display only.
+  const [legacyAddendum, setLegacyAddendum] = useState<Array<{ item_name: string; item_price: string }>>([]);
   const [source, setSource] = useState<string>("loading");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -120,10 +122,11 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
     setError(null);
     try {
       const res = await fetch(`/api/options/${vehicleId}`);
-      const json = await res.json() as { data: (VehicleOptionRow | MatchedOption)[]; groupOptions?: GroupOption[]; source: string };
+      const json = await res.json() as { data: (VehicleOptionRow | MatchedOption)[]; groupOptions?: GroupOption[]; source: string; legacyAddendum?: Array<{ item_name: string; item_price: string }> };
       if (!res.ok) throw new Error((json as { error?: string }).error ?? "Failed to load");
       setOptions(json.data ?? []);
       setGroupOptions(json.groupOptions ?? []);
+      setLegacyAddendum(json.legacyAddendum ?? []);
       setSource(json.source);
       setDirty(json.source === "matched"); // matched defaults need a save
     } catch (e) {
@@ -669,6 +672,32 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
                 })}
               </tbody>
             </table>
+          )}
+
+          {/* Legacy 4.0 addendum items — READ-ONLY. These are the vehicle's
+              live addendum_data rows (what the widget/feed/4.0 print render
+              for unmigrated dealers). They are deliberately NOT part of the
+              editable options list: a bulk save materializes whatever is in
+              `options` into vehicle_options (1fc67cd), and these must never
+              be silently persisted or deleted unless the user re-creates
+              them as real options. */}
+          {!loading && legacyAddendum.length > 0 && (
+            <div style={{ borderTop: "1px solid var(--border)" }}>
+              <div className="px-4 py-2" style={{ background: "#fff8e1", borderBottom: "1px solid #ffe082" }}>
+                <span className="text-xs font-semibold" style={{ color: "#7a5c00", textTransform: "uppercase", letterSpacing: ".04em" }}>
+                  Legacy 4.0 addendum items
+                </span>
+                <span className="text-xs" style={{ color: "#7a5c00", marginLeft: 8 }}>
+                  Read-only — these print on the current 4.0 addendum and appear in feeds. Saving here does not change them.
+                </span>
+              </div>
+              {legacyAddendum.map((l, i) => (
+                <div key={i} className="px-4 py-2 flex items-center justify-between text-sm" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
+                  <span style={{ color: "var(--text-secondary)" }} dangerouslySetInnerHTML={{ __html: sanitizeProductDescription(l.item_name) }} />
+                  <span className="font-medium" style={{ color: "var(--text-secondary)", flexShrink: 0 }}>{formatOptionPrice(l.item_price)}</span>
+                </div>
+              ))}
+            </div>
           )}
 
           {/* Add form */}

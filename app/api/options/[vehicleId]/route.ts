@@ -10,6 +10,53 @@ type Params = { params: { vehicleId: string } };
 function isUUID(v: string) { return v.includes("-"); }
 function isManual(v: string) { return isUUID(v) || v === "0"; }
 
+export type LegacyAddendumItem = { item_name: string; item_price: string; order_by: number };
+
+/**
+ * Legacy 4.0 addendum items for a vehicle — the rows the live widget/PDF and
+ * feed export actually render for UNMIGRATED dealers (addendum_data, synced
+ * from Aurora and reconciled nightly against 4.0 deletions/edits). Returned in
+ * a SEPARATE `legacyAddendum` field so the AddendumEditor can display them
+ * read-only: they must never enter the editable `data` list, or the
+ * bulk-save-materializes-reads behavior (1fc67cd class) would silently persist
+ * them into vehicle_options — and a later save could delete them. Empty for
+ * migrated dealers and vehicles with no legacy rows.
+ */
+async function loadLegacyAddendum(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  dealerTextId: string,
+  vin: string | null | undefined,
+): Promise<LegacyAddendumItem[]> {
+  if (!vin) return [];
+  const { data: dealer } = await admin
+    .from("dealers")
+    .select("migration_status")
+    .eq("dealer_id", dealerTextId)
+    .maybeSingle<{ migration_status: string | null }>();
+  if (!dealer || dealer.migration_status === "migrated") return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rows } = await (admin as any)
+    .from("addendum_data")
+    .select("item_name, item_price, order_by, created_at")
+    .eq("legacy_dealer_id", dealerTextId)
+    .eq("vin_number", vin.trim().toUpperCase())
+    .in("active", ["1", "yes"]);
+  // Dedupe by name keeping the newest row (defensive — reconcile keeps this
+  // table current, but duplicates from the two historical ETL paths exist).
+  const byName = new Map<string, { item_name: string; item_price: string; order_by: number; created_at: string | null }>();
+  for (const r of (rows ?? []) as Array<{ item_name: string | null; item_price: string | null; order_by: number | null; created_at: string | null }>) {
+    const name = String(r.item_name ?? "");
+    if (!name) continue;
+    const prev = byName.get(name);
+    if (!prev || String(r.created_at ?? "") > String(prev.created_at ?? "")) {
+      byName.set(name, { item_name: name, item_price: String(r.item_price ?? ""), order_by: Number(r.order_by) || 0, created_at: r.created_at });
+    }
+  }
+  return Array.from(byName.values())
+    .sort((a, b) => a.order_by - b.order_by)
+    .map(({ item_name, item_price, order_by }) => ({ item_name, item_price, order_by }));
+}
+
 /**
  * Load the dealer_vehicle and shape it into the VehicleRow contract used by
  * the options-engine rules evaluator. Returns undefined for the legacy "0"
@@ -276,6 +323,16 @@ export async function GET(
 
       const vehicleForRules = await loadVehicleForRules(admin, vid);
       const groupOptions = await getGroupOptionsForDealer(effectiveDealerId, vehicleForRules, isUUID(vid) ? vid : undefined);
+      // Read-only legacy 4.0 items (unmigrated dealers) — displayed alongside
+      // whatever the 5.0 pipeline yields so the operator sees what actually
+      // exports/prints. Items whose name is already in the outgoing data are
+      // filtered below to avoid double display.
+      const legacyAll = await loadLegacyAddendum(admin, effectiveDealerId, vehicleForRules?.VIN_NUMBER);
+      const legacyMinus = (names: Array<string | null | undefined>) => {
+        if (!legacyAll.length) return [];
+        const seen = new Set(names.map((n) => normalizeOptionName(String(n ?? ""))));
+        return legacyAll.filter((l) => !seen.has(normalizeOptionName(l.item_name)));
+      };
 
       // Check for saved options keyed by this vehicleId
       const { data: saved } = await admin
@@ -288,7 +345,7 @@ export async function GET(
       if (saved && saved.length > 0) {
         const lib = await loadDealerLibrary(admin, effectiveDealerId);
         const hydrated = hydrateSavedAgainstLibrary(lib, saved, vehicleForRules);
-        return NextResponse.json({ data: hydrated, groupOptions, source: "saved" });
+        return NextResponse.json({ data: hydrated, groupOptions, source: "saved", legacyAddendum: legacyMinus(hydrated.map((h) => h.option_name)) });
       }
 
       // If UUID and nothing found, also check legacy '0' sentinel as fallback
@@ -303,7 +360,7 @@ export async function GET(
         if (legacySaved && legacySaved.length > 0) {
           const lib = await loadDealerLibrary(admin, effectiveDealerId);
           const hydrated = hydrateSavedAgainstLibrary(lib, legacySaved, vehicleForRules);
-          return NextResponse.json({ data: hydrated, groupOptions, source: "saved" });
+          return NextResponse.json({ data: hydrated, groupOptions, source: "saved", legacyAddendum: legacyMinus(hydrated.map((h) => h.option_name)) });
         }
       }
 
@@ -350,7 +407,7 @@ export async function GET(
         required: (r.required ?? true) as boolean,
       }));
 
-      return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false });
+      return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false, legacyAddendum: legacyMinus(matched.map((m) => m.option_name)) });
     }
 
     // ── Non-UUID, non-"0" vehicleId: not supported ──────────────────────────────
