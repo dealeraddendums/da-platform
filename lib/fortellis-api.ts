@@ -400,16 +400,20 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Find an amount in a typed price array (financials.prices[] or mathbox priceLineItems[]). */
+/** Find an amount in a typed price array. Handles all three MVS2 shapes:
+ *  financials.prices[] ({type, amount}), mathbox priceLineItems[] ({type, priceValue}),
+ *  and the top-level prices[] real payloads carry ({priceType, value}) — verified live
+ *  2026-07-28. Non-positive amounts are treated as absent: the API sends value "0.0"
+ *  with displayableValue "Contact Us" when a store doesn't publish the price. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function priceOfType(arr: any, types: string[]): number | null {
   if (!Array.isArray(arr)) return null;
   const wanted = types.map(t => t.toLowerCase());
   for (const row of arr) {
-    const t = String(row?.type ?? "").toLowerCase();
+    const t = String(row?.priceType ?? row?.type ?? "").toLowerCase();
     if (wanted.includes(t)) {
-      const amt = toNum(row?.amount ?? row?.priceValue);
-      if (amt != null) return amt;
+      const amt = toNum(row?.amount ?? row?.priceValue ?? row?.value);
+      if (amt != null && amt > 0) return amt;
     }
   }
   return null;
@@ -434,16 +438,21 @@ export function mapVehicle(raw: any): FortellisVehicle {
   const invStatus = String(pick(raw, "vehicleStatus.inventoryStatus", "vehicleStatus.displayableInventoryStatus", "status") ?? "").toLowerCase();
   const sold = deleted === true || marketable === false || /sold|delet|remov|inactive/.test(invStatus);
 
-  // pricing: financials.prices[] (only with includeAllPrices) then mathbox price line items.
+  // pricing: financials.prices[] (only with includeAllPrices), then the top-level
+  // prices[] array real payloads carry ({priceType: RetailPrice|SalePrice, value}),
+  // then mathbox price line items.
   const finPrices = pick(raw, "financials.prices");
+  const topPrices = pick(raw, "prices");
   const cashItems = pick(raw, "mathbox.cash.priceLineItems");
   const leaseItems = pick(raw, "mathbox.lease.priceLineItems");
   const msrp =
     priceOfType(finPrices, ["BASE_RETAIL", "RETAIL", "MSRP", "STICKER"]) ??
+    priceOfType(topPrices, ["RetailPrice", "MSRP"]) ??
     priceOfType(cashItems, ["RetailPrice"]) ??
     priceOfType(leaseItems, ["RetailPrice"]);
   const advertised =
     priceOfType(finPrices, ["ADVERTISED", "SELLING", "INTERNET"]) ??
+    priceOfType(topPrices, ["SalePrice", "InternetPrice"]) ??
     priceOfType(cashItems, ["SalePrice"]) ??
     priceOfType(leaseItems, ["SalePrice"]);
 
