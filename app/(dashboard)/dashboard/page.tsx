@@ -128,22 +128,45 @@ function GroupAdminView({
 }
 
 // ── dealer dashboard view ───────────────────────────────────────────────────
-// Shared by a real dealer_admin/dealer_user AND a group_admin who has switched
-// into one of their dealers (active_dealer_id). Stats + inventory, scoped to the
-// dealer's text id; print buttons gated by canPrintForDealer.
-async function DealerDashboardView({ dealerId }: { dealerId: string }) {
+// Shared by a real dealer_admin/dealer_user, a group_admin who has switched
+// into one of their dealers (active_dealer_id), AND a super_admin in ghost
+// mode (bypassGate — no print-eligibility gate). Stats + inventory, scoped to
+// the dealer's text id.
+//
+// Card layout (2026-07-29):
+//   Vehicles — active total + added today
+//   Prints   — printed last 30 days + last 365 days
+//   Coverage — lifetime printed (active) + % of inventory covered
+//   Queued   — mobile print queue, ready to print
+// Print metrics read dealer_vehicles.print_status/print_date so legacy
+// ETL-printed and platform-printed vehicles count uniformly.
+async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId: string; bypassGate?: boolean }) {
   const admin = createAdminSupabaseClient();
-  const startOfMonth = new Date();
-  startOfMonth.setDate(1);
-  startOfMonth.setHours(0, 0, 0, 0);
-  const startOfMonthDate = startOfMonth.toISOString().split("T")[0];
+  const now = new Date();
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const d30 = new Date(now.getTime() - 30 * 86_400_000).toISOString().split("T")[0];
+  const d365 = new Date(now.getTime() - 365 * 86_400_000).toISOString().split("T")[0];
 
-  const [{ count: totalVehiclesCount }, { count: printedMonthCount }, { count: printedLifetimeCount }, { count: queuedCount }] = await Promise.all([
+  const [
+    { count: totalVehiclesCount },
+    { count: addedTodayCount },
+    { count: printed30Count },
+    { count: printed365Count },
+    { count: printedLifetimeCount },
+    { count: queuedCount },
+  ] = await Promise.all([
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active"),
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active")
-      .eq("print_status", 1).gte("print_date", startOfMonthDate),
+      .gte("date_added", startOfToday.toISOString()),
+    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId).eq("status", "active")
+      .eq("print_status", 1).gte("print_date", d30),
+    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
+      .eq("dealer_id", dealerId).eq("status", "active")
+      .eq("print_status", 1).gte("print_date", d365),
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active")
       .eq("print_status", 1),
@@ -154,18 +177,40 @@ async function DealerDashboardView({ dealerId }: { dealerId: string }) {
   ]);
 
   const totalVehicles = totalVehiclesCount ?? 0;
-  const printedThisMonth = printedMonthCount ?? 0;
+  const addedToday = addedTodayCount ?? 0;
+  const printed30 = printed30Count ?? 0;
+  const printed365 = printed365Count ?? 0;
   const lifetimePrinted = printedLifetimeCount ?? 0;
-  const unprintedNever = Math.max(0, totalVehicles - lifetimePrinted);
+  const queued = queuedCount ?? 0;
+  const coveragePct = totalVehicles > 0 ? Math.round((lifetimePrinted / totalVehicles) * 100) : 0;
+  const coverageColor = coveragePct >= 75 ? "#4caf50" : coveragePct >= 50 ? "var(--text-muted)" : "#ffa500";
 
-  const dealerStats = [
-    { label: "Total Vehicles",     value: totalVehicles },
-    { label: "Printed This Month", value: printedThisMonth },
-    { label: "Unprinted",          value: unprintedNever },
-    { label: "Queued",             value: queuedCount ?? 0 },
+  const dealerStats: { label: string; value: string; note: string; noteColor?: string }[] = [
+    {
+      label: "Vehicles",
+      value: totalVehicles.toLocaleString(),
+      note: `${addedToday.toLocaleString()} added today`,
+      noteColor: addedToday > 0 ? "#4caf50" : undefined,
+    },
+    {
+      label: "Prints",
+      value: printed30.toLocaleString(),
+      note: `Last 30 days · ${printed365.toLocaleString()} in last 365`,
+    },
+    {
+      label: "Coverage",
+      value: lifetimePrinted.toLocaleString(),
+      note: `${coveragePct}% of inventory printed`,
+      noteColor: coverageColor,
+    },
+    {
+      label: "Queued",
+      value: queued.toLocaleString(),
+      note: "Ready to print",
+    },
   ];
 
-  const printGate = await canPrintForDealer(dealerId);
+  const printGate = bypassGate ? undefined : await canPrintForDealer(dealerId);
 
   return (
     <div>
@@ -174,7 +219,8 @@ async function DealerDashboardView({ dealerId }: { dealerId: string }) {
         {dealerStats.map((s) => (
           <div key={s.label} className="card p-4">
             <p style={STAT_LABEL}>{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{s.value.toLocaleString()}</p>
+            <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{s.value}</p>
+            <p className="text-xs mt-1" style={{ color: s.noteColor ?? "var(--text-muted)" }}>{s.note}</p>
           </div>
         ))}
       </div>
@@ -256,56 +302,9 @@ export default async function DashboardPage() {
   // Must be checked before the super_admin branch so ghost mode shows dealer view.
   if (role === "super_admin") {
     if (ghostCtx?.dealer_text_id) {
-      // Treat as dealer — fall through to dealer view below using ghost dealer_id
-      const ghostDealerId = ghostCtx.dealer_text_id;
-      const startOfMonthGhost = new Date();
-      startOfMonthGhost.setDate(1);
-      startOfMonthGhost.setHours(0, 0, 0, 0);
-
-      const startOfMonthGhostDate = startOfMonthGhost.toISOString().split("T")[0];
-      const [{ count: ghostTotal }, { count: ghostMonthCount }, { count: ghostLifetimeCount }, { count: ghostQueuedCount }] = await Promise.all([
-        admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-          .eq("dealer_id", ghostDealerId).eq("status", "active"),
-        admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-          .eq("dealer_id", ghostDealerId).eq("status", "active")
-          .eq("print_status", 1).gte("print_date", startOfMonthGhostDate),
-        admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-          .eq("dealer_id", ghostDealerId).eq("status", "active")
-          .eq("print_status", 1),
-        admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-          .eq("dealer_id", ghostDealerId).eq("status", "active")
-          .eq("print_queue", 1),
-      ]);
-
-      const ghostTotalVehicles = ghostTotal ?? 0;
-      const ghostPrintedMonth = ghostMonthCount ?? 0;
-      const ghostLifetimePrinted = ghostLifetimeCount ?? 0;
-      const ghostUnprinted = Math.max(0, ghostTotalVehicles - ghostLifetimePrinted);
-
-      const ghostStats = [
-        { label: "Total Vehicles",     value: ghostTotalVehicles },
-        { label: "Printed This Month", value: ghostPrintedMonth },
-        { label: "Unprinted",          value: ghostUnprinted },
-        { label: "Queued",             value: ghostQueuedCount ?? 0 },
-      ];
-
-      const ghostStatCard = (s: { label: string; value: number }) => (
-        <div key={s.label} className="card p-4">
-          <p style={STAT_LABEL}>{s.label}</p>
-          <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{s.value.toLocaleString()}</p>
-        </div>
-      );
-
-      return (
-        <div>
-          <PageHeader title="Dashboard" />
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
-            {ghostStats.map(ghostStatCard)}
-          </div>
-          {/* super_admin in ghost mode bypasses the gate — leave printGate undefined */}
-          <ManualVehicleInventory dealerId={ghostDealerId} />
-        </div>
-      );
+      // Treat as dealer — shared dealer view; ghost mode bypasses the
+      // print-eligibility gate (printGate stays undefined).
+      return <DealerDashboardView dealerId={ghostCtx.dealer_text_id} bypassGate />;
     }
   }
 
