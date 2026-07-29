@@ -12,6 +12,33 @@ interface TekionRow {
   last_update?: string | null;
 }
 
+interface TestResult {
+  dealer_id: string;
+  verdict: "green" | "amber" | "red";
+  feed_file: {
+    checked: boolean;
+    error?: string;
+    exists: boolean;
+    filename: string;
+    size_bytes?: number;
+    modified_at?: string | null;
+    age_hours?: number | null;
+    fresh?: boolean;
+  };
+  inventory: {
+    checked: boolean;
+    error?: string;
+    dealer_matched: boolean;
+    dealer_name?: string;
+    da_dealer_id?: string;
+    active_count?: number;
+    last_updated_at?: string | null;
+    last_added_at?: string | null;
+    added_last_7d?: number;
+  };
+  tested_at: string;
+}
+
 type FormState = { dealer_name: string; dealer_id: string };
 const BLANK_FORM: FormState = { dealer_name: "", dealer_id: "" };
 
@@ -24,6 +51,7 @@ export default function TekionDealersPage() {
   const [editRow, setEditRow] = useState<TekionRow | "new" | null>(null);
   const [deleteRow, setDeleteRow] = useState<TekionRow | null>(null);
   const [search, setSearch] = useState("");
+  const [testRow, setTestRow] = useState<TekionRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,6 +114,7 @@ export default function TekionDealersPage() {
                   <td className="px-4 py-2.5"><span className="font-mono text-xs" style={{ color: "var(--text-secondary)" }}>{r.dealer_id ?? "—"}</span></td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-3">
+                      <button className="text-xs" style={{ color: "var(--blue)", background: "none", border: "none", cursor: "pointer", padding: 0 }} onClick={() => setTestRow(r)}>Test</button>
                       <button className="text-xs" style={{ color: "var(--blue)", background: "none", border: "none", cursor: "pointer", padding: 0 }} onClick={() => setEditRow(r)}>Edit</button>
                       <button className="text-xs" style={{ color: "var(--error)", background: "none", border: "none", cursor: "pointer", padding: 0 }} onClick={() => setDeleteRow(r)}>Delete</button>
                     </div>
@@ -111,6 +140,10 @@ export default function TekionDealersPage() {
           onClose={() => setDeleteRow(null)}
           onDeleted={() => { setDeleteRow(null); void load(); }}
         />
+      )}
+
+      {testRow && (
+        <TestModal row={testRow} onClose={() => setTestRow(null)} />
       )}
     </div>
   );
@@ -194,6 +227,123 @@ function DeleteModal({ row, onClose, onDeleted }: { row: TekionRow; onClose: () 
         >
           {deleting ? "Deleting…" : "Delete"}
         </button>
+      </div>
+    </Modal>
+  );
+}
+
+function fmtWhen(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles",
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
+function fmtSize(bytes: number | undefined): string {
+  if (bytes === undefined || bytes === null) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const VERDICT_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
+  green: { bg: "#e8f5e9", fg: "#2e7d32", label: "Feed healthy" },
+  amber: { bg: "#fff8e1", fg: "#b26a00", label: "Feed file stale" },
+  red:   { bg: "#ffebee", fg: "#c62828", label: "No feed file — Tekion not delivering" },
+};
+
+function TestModal({ row, onClose }: { row: TekionRow; onClose: () => void }) {
+  const [result, setResult] = useState<TestResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/tekion-dealers/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dealer_id: row.dealer_id }),
+        });
+        const j = await res.json();
+        if (cancelled) return;
+        if (!res.ok) { setError((j as { error?: string }).error ?? "Test failed"); return; }
+        setResult(j as TestResult);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [row.dealer_id]);
+
+  const rowStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, borderBottom: "1px solid #f0f0f0" };
+  const kStyle: React.CSSProperties = { color: "#78828c" };
+  const vStyle: React.CSSProperties = { color: "#333", fontWeight: 500, textAlign: "right" };
+  const secStyle: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", margin: "16px 0 4px" };
+
+  const ff = result?.feed_file;
+  const inv = result?.inventory;
+  const verdict = result ? VERDICT_STYLE[result.verdict] : null;
+
+  return (
+    <Modal title={`Test Feed — ${row.dealer_name ?? row.dealer_id}`} onClose={onClose}>
+      {!result && !error && (
+        <div style={{ padding: "24px 0", textAlign: "center", color: "#78828c", fontSize: 13 }}>
+          Checking FTP + inventory…
+        </div>
+      )}
+      {error && (
+        <div style={{ marginBottom: 12, padding: "8px 12px", background: "#ffebee", color: "#c62828", borderRadius: 4, fontSize: 12 }}>{error}</div>
+      )}
+      {result && verdict && (
+        <>
+          <div style={{ padding: "10px 14px", background: verdict.bg, color: verdict.fg, borderRadius: 6, fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+            {verdict.label}
+          </div>
+
+          <div style={secStyle}>Feed file (FTP · tekion23ftp)</div>
+          {ff?.error ? (
+            <div style={{ fontSize: 12, color: "#c62828" }}>FTP check failed: {ff.error}</div>
+          ) : (
+            <>
+              <div style={rowStyle}><span style={kStyle}>Expected file</span><span style={{ ...vStyle, fontFamily: "monospace", fontSize: 12 }}>{ff?.filename}</span></div>
+              <div style={rowStyle}><span style={kStyle}>Present</span><span style={{ ...vStyle, color: ff?.exists ? "#2e7d32" : "#c62828" }}>{ff?.exists ? "Yes" : "No — nothing delivered"}</span></div>
+              {ff?.exists && (
+                <>
+                  <div style={rowStyle}><span style={kStyle}>Last modified</span><span style={vStyle}>{fmtWhen(ff.modified_at)}{ff.age_hours != null ? ` (${ff.age_hours} h ago)` : ""}</span></div>
+                  <div style={rowStyle}><span style={kStyle}>Size</span><span style={vStyle}>{fmtSize(ff.size_bytes)}</span></div>
+                </>
+              )}
+            </>
+          )}
+
+          <div style={secStyle}>Platform inventory</div>
+          {inv?.error ? (
+            <div style={{ fontSize: 12, color: "#c62828" }}>Inventory check failed: {inv.error}</div>
+          ) : !inv?.dealer_matched ? (
+            <div style={{ fontSize: 12, color: "#b26a00" }}>
+              No dealer record matches this Tekion ID (checked inventory_dealer_id and dealer_id) — inventory can’t be verified.
+            </div>
+          ) : (
+            <>
+              <div style={rowStyle}><span style={kStyle}>Dealer</span><span style={vStyle}>{inv.dealer_name ?? "—"} ({inv.da_dealer_id})</span></div>
+              <div style={rowStyle}><span style={kStyle}>Active vehicles</span><span style={vStyle}>{inv.active_count ?? 0}</span></div>
+              <div style={rowStyle}><span style={kStyle}>Last inventory update</span><span style={vStyle}>{fmtWhen(inv.last_updated_at)}</span></div>
+              <div style={rowStyle}><span style={kStyle}>Newest vehicle added</span><span style={vStyle}>{fmtWhen(inv.last_added_at)}</span></div>
+              <div style={rowStyle}><span style={kStyle}>Added in last 7 days</span><span style={vStyle}>{inv.added_last_7d ?? 0}</span></div>
+            </>
+          )}
+
+          <div style={{ fontSize: 11, color: "#9aa4ae", marginTop: 12 }}>
+            Tekion delivers {"{dealer id}"}.csv hourly to the tekion23ftp FTP account; ETL2 job 40 imports at :25 past each hour.
+          </div>
+        </>
+      )}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+        <button className="btn btn-secondary" onClick={onClose}>Close</button>
       </div>
     </Modal>
   );
