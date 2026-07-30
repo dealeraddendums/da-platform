@@ -40,6 +40,7 @@ export interface FeedCompanyRow {
   filename: string;
   protocol: "ftp" | "sftp";
   include_vehicles: "printed" | "all";
+  push_schedule: "manual" | "hourly" | "daily";
   column_mappings: ColumnMapping[];
   last_push_at: string | null;
   last_push_status: string | null;

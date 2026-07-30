@@ -29,7 +29,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  for (const k of ["name", "ftp_url", "ftp_username", "ftp_password", "filename", "protocol", "include_vehicles"] as const) {
+  for (const k of ["name", "ftp_url", "ftp_username", "ftp_password", "filename", "protocol", "include_vehicles", "push_schedule"] as const) {
     if (typeof body[k] === "string" && (body[k] as string).trim() !== "") patch[k] = k === "ftp_password" ? body[k] : (body[k] as string).trim();
   }
   if (body.ftp_port != null) patch.ftp_port = body.ftp_port;

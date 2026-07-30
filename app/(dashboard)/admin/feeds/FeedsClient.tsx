@@ -12,6 +12,7 @@ interface FeedRow {
   filename: string;
   protocol: "ftp" | "sftp";
   include_vehicles: "printed" | "all";
+  push_schedule: "manual" | "hourly" | "daily";
   exclusion_rule_id: string | null;
   last_push_at: string | null;
   last_push_status: string | null;
@@ -46,6 +47,7 @@ function defaultFeedDealerId(d: DealerHit): string {
 const emptyForm = {
   name: "", ftp_url: "", ftp_username: "", ftp_password: "",
   ftp_port: "" as string | number, filename: "", protocol: "ftp", include_vehicles: "printed",
+  push_schedule: "manual",
 };
 
 const inputStyle: React.CSSProperties = {
@@ -150,6 +152,7 @@ export default function FeedsClient() {
     setForm({
       name: f.name, ftp_url: f.ftp_url, ftp_username: f.ftp_username, ftp_password: "",
       ftp_port: f.ftp_port, filename: f.filename, protocol: f.protocol, include_vehicles: f.include_vehicles,
+      push_schedule: f.push_schedule ?? "manual",
     });
     setFormError(null);
     setEditOpen(true);
@@ -161,6 +164,7 @@ export default function FeedsClient() {
     const body: Record<string, unknown> = {
       name: form.name, ftp_url: form.ftp_url, ftp_username: form.ftp_username,
       filename: form.filename, protocol: form.protocol, include_vehicles: form.include_vehicles,
+      push_schedule: form.push_schedule,
     };
     if (form.ftp_password) body.ftp_password = form.ftp_password;
     if (String(form.ftp_port).trim() !== "") body.ftp_port = parseInt(String(form.ftp_port), 10);
@@ -327,15 +331,16 @@ export default function FeedsClient() {
                 <th style={thStyle}>URL</th>
                 <th style={thStyle}>Username</th>
                 <th style={thStyle}>Dealers</th>
+                <th style={thStyle}>Schedule</th>
                 <th style={thStyle}>Last Push</th>
                 <th style={thStyle}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td style={tdStyle} colSpan={6}>Loading…</td></tr>
+                <tr><td style={tdStyle} colSpan={7}>Loading…</td></tr>
               ) : feeds.length === 0 ? (
-                <tr><td style={{ ...tdStyle, color: "#78828c" }} colSpan={6}>No feed companies yet — click “+ Add New”.</td></tr>
+                <tr><td style={{ ...tdStyle, color: "#78828c" }} colSpan={7}>No feed companies yet — click “+ Add New”.</td></tr>
               ) : feeds.map((f) => (
                 <tr key={f.id}>
                   <td style={tdStyle}>
@@ -345,6 +350,15 @@ export default function FeedsClient() {
                   <td style={tdStyle}>{f.ftp_url}</td>
                   <td style={tdStyle}>{f.ftp_username}</td>
                   <td style={{ ...tdStyle, textAlign: "center" }}>{f.dealer_count}</td>
+                  <td style={tdStyle}>
+                    <span style={{
+                      fontSize: 11, fontWeight: 600, borderRadius: 4, padding: "2px 7px", whiteSpace: "nowrap",
+                      background: f.push_schedule === "hourly" ? "#e3f2fd" : f.push_schedule === "daily" ? "#e8f5e9" : "#eceff1",
+                      color: f.push_schedule === "hourly" ? "#1565c0" : f.push_schedule === "daily" ? "#2e7d32" : "#546e7a",
+                    }}>
+                      {f.push_schedule === "hourly" ? "Hourly" : f.push_schedule === "daily" ? "Daily" : "Manual"}
+                    </span>
+                  </td>
                   <td style={tdStyle}>
                     <div>{fmtDate(f.last_push_at)}</div>
                     {f.last_push_status && (
@@ -416,6 +430,14 @@ export default function FeedsClient() {
                 <select style={inputStyle} value={form.include_vehicles} onChange={(e) => setForm(f => ({ ...f, include_vehicles: e.target.value }))}>
                   <option value="printed">Printed only (active)</option>
                   <option value="all">All active vehicles</option>
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>Push Schedule</label>
+                <select style={inputStyle} value={form.push_schedule} onChange={(e) => setForm(f => ({ ...f, push_schedule: e.target.value }))}>
+                  <option value="manual">Manual (Push button only)</option>
+                  <option value="hourly">Hourly (automatic)</option>
+                  <option value="daily">Daily (automatic)</option>
                 </select>
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
