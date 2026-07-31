@@ -579,33 +579,35 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
         .filter((r) => matchesRulesRow(r as any, rulesVehicle as any))
         .filter((r) => !dismissed.has(r.id));
 
-      // When the vehicle has NO saved vehicle_options, seed the dealer-library
-      // matches exactly as the options GET "matched" source does (the editor's
-      // unsaved preview) — otherwise never-saved vehicles at 5.0-native/synced
-      // dealers export zeros (their vehicle_options is empty and addendum_data is
-      // empty too, since Tuttle etc. now work in 5.0). When saved rows DO exist,
-      // savedFiltered + newlyAddedLibraryMatches stay exactly as-is (they encode
-      // deliberate-removal semantics — a removed product predates the save and
-      // must not be resurrected).
-      const seededLib = saved.length === 0
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? autoMatchedLibraryRows(libRows as any[], rulesVehicle as any)
-        : [];
-
       let effective: EffectiveOption[] = [
         ...groupEffective.map((g) => ({ name: g.option_name, price: parseOptionPriceValue(g.option_price), rawPrice: String(g.option_price ?? "") })),
         ...savedFiltered.map((s) => ({ name: String(s.option_name), price: parseOptionPriceValue(s.option_price), rawPrice: String(s.option_price ?? "") })),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...freshLib.map((l: any) => ({ name: String(l.option_name), price: parseOptionPriceValue(l.item_price), rawPrice: String(l.item_price ?? "") })),
-        ...seededLib.map((s) => ({ name: s.option_name, price: parseOptionPriceValue(s.option_price), rawPrice: String(s.option_price ?? "") })),
       ];
 
-      // Legacy fallback: STILL no options for this vehicle (no saved rows, no
-      // group products, and the library seed matched nothing) → use its
-      // addendum_data (what the live widget/PDF render for genuine legacy
-      // dealers). Now only fires when the seed also yields nothing.
+      // No saved/group products for this vehicle. Two fallback sources, in
+      // PRECEDENCE ORDER (this order matters — getting it backwards zeroed 72
+      // legacy Tuttle rows on 2026-07-31):
+      //   1. addendum_data — AUTHORITATIVE for unmigrated dealers whose real
+      //      products live there (the live widget/PDF render exactly this). A
+      //      legacy dealer often ALSO has a stale/NC-priced library that would
+      //      rule-match, so the seed must NOT pre-empt addendum_data.
+      //   2. library seed (autoMatchedLibraryRows) — the editor's "matched"
+      //      preview, for 5.0-native/synced NEVER-saved vehicles that have no
+      //      addendum_data at all (the original bug: they exported zeros).
       if (effective.length === 0) {
-        effective = addendumByVin.get(String(dv.vin ?? "").trim().toUpperCase()) ?? [];
+        const legacy = addendumByVin.get(String(dv.vin ?? "").trim().toUpperCase()) ?? [];
+        if (legacy.length > 0) {
+          effective = legacy;
+        } else if (saved.length === 0) {
+          effective = autoMatchedLibraryRows(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            libRows as any[],
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            rulesVehicle as any,
+          ).map((s) => ({ name: s.option_name, price: parseOptionPriceValue(s.option_price), rawPrice: String(s.option_price ?? "") }));
+        }
       }
 
       // SINGLE SOURCE GATE: drop pipe-priced (`|N`) products from the export
