@@ -21,6 +21,7 @@ import {
   normalizeOptionName,
   newlyAddedLibraryMatches,
   savedRowSurvivesLibraryRules,
+  autoMatchedLibraryRows,
   parseOptionPriceValue,
   isPipeExcludedPrice,
 } from "@/lib/options-engine";
@@ -578,15 +579,31 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
         .filter((r) => matchesRulesRow(r as any, rulesVehicle as any))
         .filter((r) => !dismissed.has(r.id));
 
+      // When the vehicle has NO saved vehicle_options, seed the dealer-library
+      // matches exactly as the options GET "matched" source does (the editor's
+      // unsaved preview) — otherwise never-saved vehicles at 5.0-native/synced
+      // dealers export zeros (their vehicle_options is empty and addendum_data is
+      // empty too, since Tuttle etc. now work in 5.0). When saved rows DO exist,
+      // savedFiltered + newlyAddedLibraryMatches stay exactly as-is (they encode
+      // deliberate-removal semantics — a removed product predates the save and
+      // must not be resurrected).
+      const seededLib = saved.length === 0
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? autoMatchedLibraryRows(libRows as any[], rulesVehicle as any)
+        : [];
+
       let effective: EffectiveOption[] = [
         ...groupEffective.map((g) => ({ name: g.option_name, price: parseOptionPriceValue(g.option_price), rawPrice: String(g.option_price ?? "") })),
         ...savedFiltered.map((s) => ({ name: String(s.option_name), price: parseOptionPriceValue(s.option_price), rawPrice: String(s.option_price ?? "") })),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...freshLib.map((l: any) => ({ name: String(l.option_name), price: parseOptionPriceValue(l.item_price), rawPrice: String(l.item_price ?? "") })),
+        ...seededLib.map((s) => ({ name: s.option_name, price: parseOptionPriceValue(s.option_price), rawPrice: String(s.option_price ?? "") })),
       ];
 
-      // Legacy fallback: no 5.0 options for this vehicle → use its addendum_data
-      // (the source the live widget/PDF renders for unmigrated dealers).
+      // Legacy fallback: STILL no options for this vehicle (no saved rows, no
+      // group products, and the library seed matched nothing) → use its
+      // addendum_data (what the live widget/PDF render for genuine legacy
+      // dealers). Now only fires when the seed also yields nothing.
       if (effective.length === 0) {
         effective = addendumByVin.get(String(dv.vin ?? "").trim().toUpperCase()) ?? [];
       }

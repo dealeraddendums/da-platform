@@ -247,6 +247,56 @@ export function newlyAddedLibraryMatches<
   });
 }
 
+export type AutoMatchedRow = {
+  default_id: string;
+  option_name: string;
+  option_price: string;
+  description: string | null;
+  sort_order: number;
+  source: "default";
+  required: boolean;
+};
+
+/**
+ * The dealer-library auto-match ("matched" preview) for a vehicle that has NO
+ * saved vehicle_options — the unsaved set the addendum editor shows on a
+ * never-touched vehicle. SINGLE SOURCE, shared by the options GET "matched"
+ * branch and the feed export so the two can't drift (the feed used to lack a
+ * seed and exported zeros for every never-saved vehicle at 5.0-native/synced
+ * dealers).
+ *
+ * Semantics (identical to the options GET seed):
+ *  - active rows only;
+ *  - applies_to='none' never auto-adds;
+ *  - rule-matched via matchesRulesRow, which honors a "-NONE"/"NONE" sentinel in
+ *    a list field as "don't auto-add" (NOT normalized away — that normalization
+ *    is only for the SAVED-row survival gate, savedRowSurvivesLibraryRules);
+ *  - when `vehicle` is undefined (legacy "0"/manual, no dealer_vehicle) the rule
+ *    filter is skipped, returning all active non-'none' rows (GET parity).
+ *
+ * Deliberately does NOT dedupe same-name library rows — it mirrors the editor
+ * exactly, so a dealer with a duplicate library entry surfaces it in both the
+ * editor and the feed (rather than the feed silently disagreeing with the
+ * editor). Dedup, if ever wanted, belongs here so both call sites stay identical.
+ */
+export function autoMatchedLibraryRows(
+  libRows: Array<Record<string, unknown> & { id: unknown; option_name: unknown }>,
+  vehicle: VehicleRow | undefined,
+): AutoMatchedRow[] {
+  return libRows
+    .filter((r) => (r.active as boolean | null | undefined) !== false && r.applies_to !== "none")
+    .filter((r) => (vehicle ? matchesRulesRow(r as unknown as RulesRow, vehicle) : true))
+    .map((r, i) => ({
+      default_id: String(r.id),
+      option_name: String(r.option_name),
+      option_price: (r.item_price as string | null) ?? "NC",
+      description: (r.description as string | null) ?? null,
+      sort_order: (r.sort_order as number | null) ?? i,
+      source: "default" as const,
+      required: (r.required as boolean | null | undefined) !== false,
+    }));
+}
+
 /**
  * Read/print-time gate for options ALREADY SAVED on a vehicle (vehicle_options)
  * against their current addendum_library definition(s). Shared by the options

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { getGroupOptionsForDealer, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows } from "@/lib/options-engine";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import type { VehicleOptionRow } from "@/lib/db";
 
@@ -364,7 +364,9 @@ export async function GET(
         }
       }
 
-      // No saved options — seed from dealer's addendum_library, rules-filtered
+      // No saved options — seed from the dealer's addendum_library, rules-
+      // filtered. Shared with the feed export via autoMatchedLibraryRows so the
+      // editor preview and the feed emit the identical matched set.
       const { data: library } = await admin
         .from("addendum_library")
         .select("*")
@@ -373,39 +375,7 @@ export async function GET(
         .neq("applies_to", "none")
         .order("sort_order", { ascending: true });
 
-      const libRows = library ?? [];
-      const ruleFiltered = vehicleForRules
-        ? libRows.filter(r => matchesRulesRow({
-            applies_to: r.applies_to as string | null,
-            ad_types: r.ad_types as string[] | null,
-            makes: r.makes as string | null,
-            makes_not: r.makes_not as boolean | undefined,
-            models: r.models as string | null,
-            models_not: r.models_not as boolean | undefined,
-            trims: r.trims as string | null,
-            trims_not: r.trims_not as boolean | undefined,
-            body_styles: r.body_styles as string | null,
-            fuel: r.fuel as string | null,
-            fuel_not: r.fuel_not as boolean | undefined,
-            year_condition: r.year_condition as number | undefined,
-            year_value: r.year_value as number | null | undefined,
-            miles_condition: r.miles_condition as number | undefined,
-            miles_value: r.miles_value as number | null | undefined,
-            msrp_condition: r.msrp_condition as number | undefined,
-            msrp1: r.msrp1 as number | null | undefined,
-            msrp2: r.msrp2 as number | null | undefined,
-          }, vehicleForRules))
-        : libRows;
-
-      const matched = ruleFiltered.map((r, i) => ({
-        default_id: r.id,
-        option_name: r.option_name,
-        option_price: r.item_price ?? "NC",
-        description: r.description ?? null,
-        sort_order: r.sort_order ?? i,
-        source: "default" as const,
-        required: (r.required ?? true) as boolean,
-      }));
+      const matched = autoMatchedLibraryRows(library ?? [], vehicleForRules);
 
       return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false, legacyAddendum: legacyMinus(matched.map((m) => m.option_name)) });
     }
@@ -433,7 +403,7 @@ export async function GET(
       return NextResponse.json({ data: hydrated, groupOptions, source: "saved" });
     }
 
-    // No saved options — seed from dealer's addendum_library
+    // No saved options — seed from the dealer's addendum_library (shared helper).
     const { data: library } = await admin
       .from("addendum_library")
       .select("*")
@@ -442,37 +412,7 @@ export async function GET(
       .neq("applies_to", "none")
       .order("sort_order", { ascending: true });
 
-    const libRowsFallback = library ?? [];
-    const ruleFilteredFallback = vehicleForRulesFallback
-      ? libRowsFallback.filter(r => matchesRulesRow({
-          applies_to: r.applies_to as string | null,
-          ad_types: r.ad_types as string[] | null,
-          makes: r.makes as string | null,
-          makes_not: r.makes_not as boolean | undefined,
-          models: r.models as string | null,
-          models_not: r.models_not as boolean | undefined,
-          trims: r.trims as string | null,
-          trims_not: r.trims_not as boolean | undefined,
-          body_styles: r.body_styles as string | null,
-          year_condition: r.year_condition as number | undefined,
-          year_value: r.year_value as number | null | undefined,
-          miles_condition: r.miles_condition as number | undefined,
-          miles_value: r.miles_value as number | null | undefined,
-          msrp_condition: r.msrp_condition as number | undefined,
-          msrp1: r.msrp1 as number | null | undefined,
-          msrp2: r.msrp2 as number | null | undefined,
-        }, vehicleForRulesFallback))
-      : libRowsFallback;
-
-    const matched = ruleFilteredFallback.map((r, i) => ({
-      default_id: r.id,
-      option_name: r.option_name,
-      option_price: r.item_price ?? "NC",
-      description: r.description ?? null,
-      sort_order: r.sort_order ?? i,
-      source: "default" as const,
-      required: (r.required ?? true) as boolean,
-    }));
+    const matched = autoMatchedLibraryRows(library ?? [], vehicleForRulesFallback);
 
     return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false });
 
