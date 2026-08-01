@@ -5,6 +5,7 @@ import type { DealerSettingsRow, BuyersGuideDefaults } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/record-print";
+import type { SaveOption } from "@/lib/vehicle-options-save";
 // buildBuyersGuidePdf is pdf-lib only (no Puppeteer). The bulk
 // buyer_guide branch still renders it locally; if we ever want it on
 // the PDF service too, the single buyers-guide route's pattern shows
@@ -37,6 +38,9 @@ interface BulkBgJob {
   dealerUuid: string | null;
   docType: "addendum" | "infosheet" | "buyer_guide";
   options: { option_name: string; option_price: string; description: string | null; required?: boolean }[];
+  /** Save-on-print: the NON-group set to persist into vehicle_options at
+   *  confirm (effective saved/seed + newly-added). Excludes group options. */
+  saveOptions?: SaveOption[];
 }
 
 /**
@@ -691,6 +695,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           ...freshLibOptions,
         ];
 
+        // Save-on-print: NON-group set to persist on confirm (effective
+        // saved/seed + newly-added). Group products excluded (merge at read).
+        const saveOptions: SaveOption[] = [...effectiveFiltered, ...freshLibOptions].map(o => ({
+          option_name: o.option_name,
+          option_price: o.option_price ?? "NC",
+          description: o.description ?? null,
+          required: o.required !== false,
+          source: "default",
+        }));
+
         console.log(`[BULK]   options_result source=${optionsSource} count=${options.length} names=[${options.map(o => o.option_name).join(", ")}]`);
 
         const disclaimers = await getGroupDisclaimers(textDealerId, dealer?.state ?? null, docType);
@@ -907,7 +921,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           customDims: customPaperDims,
           s3Key,
         });
-        bgJobs.push({ vehicleId, s3Key, dvDealerId: dv.dealer_id, dvVin: dv.vin ?? null, dealerUuid: dealer?.id ?? null, docType, options });
+        bgJobs.push({ vehicleId, s3Key, dvDealerId: dv.dealer_id, dvVin: dv.vin ?? null, dealerUuid: dealer?.id ?? null, docType, options, saveOptions });
         console.log(`[BULK]   queued vehicleId=${vehicleId}`);
 
       } catch (err) {
@@ -1041,6 +1055,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     s3Key: job.s3Key,
     pdfUrl: job.preUploadedSignedUrl ?? null,
     options: job.options,
+    saveOptions: job.saveOptions,
   }));
   let printToken: string | null = null;
   if (printPayloads.length > 0) {

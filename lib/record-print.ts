@@ -21,6 +21,7 @@ import type { createAdminSupabaseClient } from "@/lib/db";
 import type { AddendumDataInsert, AddendumHistoryInsert, VehicleAuditLogInsert } from "@/lib/db";
 import { signPdfKey } from "@/lib/s3-upload";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
+import { persistPrintedOptions, type SaveOption } from "@/lib/vehicle-options-save";
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>;
 
@@ -46,6 +47,12 @@ export interface PrintRecordPayload {
    *  path); otherwise recordPrint signs s3Key itself. */
   pdfUrl?: string | null;
   options: PrintRecordOption[];
+  /** Save-on-print: the NON-group effective set the PDF rendered (saved-
+   *  surviving + newly-added + library-seed matches), to persist into
+   *  vehicle_options at confirm. Group options are excluded — they're group-
+   *  owned and merge at read time; persisting them would duplicate on every
+   *  read. Absent for buyer_guide / when there's nothing to persist. */
+  saveOptions?: SaveOption[];
 }
 
 /**
@@ -190,6 +197,24 @@ export async function recordPrint(admin: Admin, printedBy: string, p: PrintRecor
         required: o.required !== false,
       })),
     });
+  }
+
+  // Save-on-print: persist the rendered non-group option set into vehicle_options
+  // so a printed vehicle becomes a saved snapshot (web ⇄ mobile parity; the feed
+  // then finds its products). Guarded to SKIP legacy addendum_data vehicles and
+  // unchanged sets (idempotent) — see lib/vehicle-options-save.ts. Uses the
+  // vehicle's dealer context (p.dealerTextId), not the actor's, so ghost/
+  // impersonation/mobile-Bearer confirms all write to the right dealer.
+  if (p.source !== "buyer_guide" && p.docType === "addendum" && p.saveOptions && p.saveOptions.length > 0) {
+    const outcome = await persistPrintedOptions(admin, {
+      vehicleId: p.vehicleId,
+      dealerTextId: p.dealerTextId,
+      vin: p.vin,
+      options: p.saveOptions,
+    });
+    if (outcome === "persisted") {
+      console.log(`[record-print] save-on-print persisted ${p.saveOptions.length} option(s) for vehicle ${p.vehicleId}`);
+    }
   }
 
   if (p.source === "generate") {

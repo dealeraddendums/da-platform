@@ -18,7 +18,8 @@ import {
   LAYOUT_INFOSHEET,
   makeWidget,
 } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows } from "@/lib/options-engine";
+import type { SaveOption } from "@/lib/vehicle-options-save";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent } from "@/lib/ai-content";
 import QRCode from "qrcode";
@@ -170,7 +171,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // none" duplicate win the slot and drop the real product at print time
     // (KARR-on-Maverick bug).
     const libRulesByName = new Map<string, Parameters<typeof matchesRulesRow>[0][]>();
-    if ((optionRows ?? []).length > 0) {
+    // Load the library unconditionally (was gated on optionRows>0): the
+    // never-saved SEED below needs it so single-generate renders matched
+    // products just like the editor + pdf/bulk (save-on-print, 2026-08-01).
+    {
       const { data: libRows } = await admin
         .from("addendum_library")
         .select("id, option_name, item_price, description, required, active, created_at, separator_above, separator_below, spaces, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
@@ -276,6 +280,57 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       vehicleData,
     );
 
+    // Never-saved SEED: when the vehicle has NO saved options, render the matched
+    // dealer-library set (source:"default"), exactly as the options GET editor +
+    // pdf/bulk do — single-generate previously printed group-only for these.
+    // applies_to='none' manual-only products are excluded (never auto-add);
+    // legacy addendum_data vehicles are left to that path (the save-on-print
+    // guard skips persisting them so the feed keeps its authoritative values).
+    const seededMatches = (optionRows ?? []).length === 0
+      ? autoMatchedLibraryRows(dealerLib, vehicleData)
+      : [];
+
+    const savedFilteredMapped = savedFiltered.map(r => {
+      const key = normalizeOptionName(r.option_name as string);
+      const layout = libLayoutMap[key];
+      const live = liveRequired.get(key);
+      return {
+        ...r,
+        description: r.description ?? libDescMap[key] ?? null,
+        // Live library type wins over the value cached at save time; the
+        // saved flag only applies to custom one-offs with no library row.
+        required: live !== undefined ? live : (r.required as boolean | undefined) !== false,
+        separator_above: layout?.separator_above === true,
+        separator_below: layout?.separator_below === true,
+        spaces: layout?.spaces ?? 0,
+      };
+    });
+
+    const seededMapped = seededMatches.map(r => {
+      const layout = libLayoutMap[normalizeOptionName(r.option_name)];
+      return {
+        option_name: r.option_name,
+        option_price: r.option_price,
+        description: r.description,
+        active: true as const,
+        required: r.required,
+        separator_above: layout?.separator_above === true,
+        separator_below: layout?.separator_below === true,
+        spaces: layout?.spaces ?? 0,
+      };
+    });
+
+    const freshLibMapped = freshLibOptions.map(r => ({
+      option_name: r.option_name,
+      option_price: r.item_price ?? "NC",
+      description: r.description ?? null,
+      active: true as const,
+      required: r.required !== false,
+      separator_above: r.separator_above === true,
+      separator_below: r.separator_below === true,
+      spaces: typeof r.spaces === "number" ? r.spaces : 0,
+    }));
+
     const options = [
       ...groupOpts.map(g => ({
         option_name: g.option_name,
@@ -289,30 +344,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         separator_below: g.separator_below === true,
         spaces: g.spaces ?? 0,
       })),
-      ...savedFiltered.map(r => {
-        const key = normalizeOptionName(r.option_name as string);
-        const layout = libLayoutMap[key];
-        const live = liveRequired.get(key);
-        return {
-          ...r,
-          description: r.description ?? libDescMap[key] ?? null,
-          // Live library type wins over the value cached at save time; the
-          // saved flag only applies to custom one-offs with no library row.
-          required: live !== undefined ? live : (r.required as boolean | undefined) !== false,
-          separator_above: layout?.separator_above === true,
-          separator_below: layout?.separator_below === true,
-          spaces: layout?.spaces ?? 0,
-        };
-      }),
-      ...freshLibOptions.map(r => ({
+      ...savedFilteredMapped,
+      ...freshLibMapped,
+      ...seededMapped,
+    ];
+
+    // Save-on-print: the NON-group set to persist on confirm (saved-surviving +
+    // newly-added + seed). Group products are excluded — they merge at read time.
+    const saveOptions: SaveOption[] = [
+      ...savedFilteredMapped.map(r => ({
+        option_name: r.option_name as string,
+        option_price: (r.option_price as string | null) ?? "NC",
+        description: (r.description as string | null) ?? null,
+        required: (r.required as boolean | undefined) !== false,
+        source: ((r as { source?: string }).source) ?? "default",
+      })),
+      ...freshLibMapped.map(r => ({
         option_name: r.option_name,
-        option_price: r.item_price ?? "NC",
-        description: r.description ?? null,
-        active: true as const,
-        required: r.required !== false,
-        separator_above: r.separator_above === true,
-        separator_below: r.separator_below === true,
-        spaces: typeof r.spaces === "number" ? r.spaces : 0,
+        option_price: r.option_price,
+        description: r.description,
+        required: r.required,
+        source: "default",
+      })),
+      ...seededMapped.map(r => ({
+        option_name: r.option_name,
+        option_price: r.option_price,
+        description: r.description,
+        required: r.required,
+        source: "default",
       })),
     ];
 
@@ -739,6 +798,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       docType,
       s3Key,
       options,
+      saveOptions,
     };
 
     // Phase E: async mode. Browser sends ?async=1 to get a jobId back
