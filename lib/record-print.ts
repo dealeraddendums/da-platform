@@ -209,7 +209,6 @@ export async function recordPrint(admin: Admin, printedBy: string, p: PrintRecor
     const outcome = await persistPrintedOptions(admin, {
       vehicleId: p.vehicleId,
       dealerTextId: p.dealerTextId,
-      vin: p.vin,
       options: p.saveOptions,
     });
     if (outcome === "persisted") {

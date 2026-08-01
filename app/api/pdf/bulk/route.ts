@@ -5,7 +5,7 @@ import type { DealerSettingsRow, BuyersGuideDefaults } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/record-print";
-import type { SaveOption } from "@/lib/vehicle-options-save";
+import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-save";
 // buildBuyersGuidePdf is pdf-lib only (no Puppeteer). The bulk
 // buyer_guide branch still renders it locally; if we ever want it on
 // the PDF service too, the single buyers-guide route's pattern shows
@@ -697,7 +697,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         // Save-on-print: NON-group set to persist on confirm (effective
         // saved/seed + newly-added). Group products excluded (merge at read).
-        const saveOptions: SaveOption[] = [...effectiveFiltered, ...freshLibOptions].map(o => ({
+        // Legacy guard (never-saved 'library' path only): if the vehicle has
+        // legacy addendum_data, the seed prints but is NOT persisted so the feed
+        // keeps its authoritative values (checked pre-print; 2026-07-31 class).
+        const bulkLegacyPresent = optionsSource === "library" && effectiveFiltered.length > 0
+          ? await hasLegacyAddendumData(admin, dv.dealer_id, dv.vin ?? null)
+          : false;
+        const saveOptions: SaveOption[] = (bulkLegacyPresent ? freshLibOptions : [...effectiveFiltered, ...freshLibOptions]).map(o => ({
           option_name: o.option_name,
           option_price: o.option_price ?? "NC",
           description: o.description ?? null,

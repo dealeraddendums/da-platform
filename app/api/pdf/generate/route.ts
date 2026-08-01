@@ -19,7 +19,7 @@ import {
   makeWidget,
 } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows } from "@/lib/options-engine";
-import type { SaveOption } from "@/lib/vehicle-options-save";
+import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-save";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent } from "@/lib/ai-content";
 import QRCode from "qrcode";
@@ -289,6 +289,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const seededMatches = (optionRows ?? []).length === 0
       ? autoMatchedLibraryRows(dealerLib, vehicleData)
       : [];
+    // Save-on-print legacy guard (checked at generation, before recordPrint
+    // writes its own addendum_data): if this never-saved vehicle has legacy
+    // addendum_data, the seed renders on the PDF but is NOT persisted — the feed
+    // keeps its authoritative addendum_data values (2026-07-31 regression class).
+    const legacyAddendumPresent = seededMatches.length > 0
+      ? await hasLegacyAddendumData(admin, dv.dealer_id, dv.vin)
+      : false;
 
     const savedFilteredMapped = savedFiltered.map(r => {
       const key = normalizeOptionName(r.option_name as string);
@@ -366,13 +373,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         required: r.required,
         source: "default",
       })),
-      ...seededMapped.map(r => ({
+      ...(legacyAddendumPresent ? [] : seededMapped.map(r => ({
         option_name: r.option_name,
         option_price: r.option_price,
         description: r.description,
         required: r.required,
         source: "default",
-      })),
+      }))),
     ];
 
     // ── Load dealer's saved default template from dealer_settings ────────────
