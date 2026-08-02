@@ -9,7 +9,6 @@ import { fortellisConfigured } from "@/lib/fortellis-api";
 export const dynamic = "force-dynamic";
 
 const RUN_KEY = "fortellis_delta_running";
-const EXCLUSION_RE = /(test|allan)/i;
 const STALE_LOCK_MS = 30 * 60 * 1000; // a lock older than this is treated as dead
 
 /**
@@ -46,9 +45,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 async function runDelta(): Promise<void> {
   const admin = createAdminSupabaseClient();
   try {
+    // enabled=true is the SOLE gate (2026-08-02): the hourly delta runs on EVERY
+    // enabled row — including the "Allans Test Account" demo-store fixture — so
+    // Fortellis can observe successful hourly runs during certification. The
+    // disable path is the row's Enabled toggle in /admin/fortellis-dealers (the
+    // old /(test|allan)/i name exclusion was removed at Allan's direction).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: dealersRaw } = await (admin as any).from("fortellis_dealers").select("*").eq("enabled", true);
-    const dealers = ((dealersRaw ?? []) as FortellisDealerRow[]).filter(d => !EXCLUSION_RE.test(d.dealer_name ?? ""));
+    const dealers = (dealersRaw ?? []) as FortellisDealerRow[];
 
     let added = 0, updated = 0, sold = 0, failed = 0, sawHealthy = false;
     const auth401: Array<{ dealer_name: string; subscription_id: string }> = [];
