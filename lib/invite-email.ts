@@ -228,3 +228,109 @@ export function buildGroupAdminMigrationInviteEmail(opts: {
 </div>
 `;
 }
+
+// Admin Users page "Send invite" — the account already exists (created by an
+// admin via + Add User); this email hands the user their credentials. Same
+// scanner-proof one-time CODE + inert link pattern as buildInviteEmail. Works
+// for every role incl. super_admin/staff (orgName is optional).
+export function buildAccountReadyEmail(opts: {
+  firstName: string;
+  /** The account's email — doubles as the username, called out in the copy. */
+  email: string;
+  /** Human label for the role, e.g. "Super Admin" / "Dealer Admin". */
+  roleLabel: string;
+  /** Dealer or group name, when the user belongs to one. */
+  orgName: string | null;
+  /** Setup page URL (/signup?invite=token) — inert, just opens the form. */
+  inviteUrl: string;
+  /** One-time 8-digit setup code the user types in. */
+  setupCode: string;
+}): string {
+  const spacedCode = opts.setupCode.split("").join(" ");
+  const orgLine = opts.orgName
+    ? `You have <strong>${escapeHtml(opts.roleLabel)}</strong> access to <strong>${escapeHtml(opts.orgName)}</strong>.`
+    : `You have <strong>${escapeHtml(opts.roleLabel)}</strong> access.`;
+  return `
+<div style="font-family: Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; color: #333;">
+  <div style="margin-bottom: 24px;">
+    <img src="${APP_URL}/images/da-logo.png" alt="DA Platform" width="40" height="40" style="border-radius: 50%;" />
+  </div>
+  <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">Your DealerAddendums 5.0 account is ready</h2>
+  <p style="margin: 0 0 16px; color: #55595c;">Hi ${escapeHtml(opts.firstName)},</p>
+  <p style="margin: 0 0 16px; color: #55595c;">
+    Your account on DealerAddendums Platform 5.0 is ready to use. Your username is your email address:
+    <strong>${escapeHtml(opts.email)}</strong>. ${orgLine}
+  </p>
+
+  <div style="margin: 0 0 8px; color: #55595c; font-size: 14px;">Your setup code:</div>
+  <div style="font-family: 'Courier New', monospace; font-size: 28px; font-weight: 700; letter-spacing: 8px;
+              background: #f5f6f8; border: 1px solid #e0e0e0; border-radius: 6px; padding: 14px 18px;
+              text-align: center; margin: 0 0 20px; color: #2a2b3c;">
+    ${escapeHtml(spacedCode)}
+  </div>
+
+  <p style="margin: 0 0 16px; color: #55595c;">
+    Open the setup page, enter your email address and the code above. You can sign in with just the code,
+    or choose a password during setup.
+  </p>
+  <a href="${opts.inviteUrl}"
+     style="display: inline-block; background: #1976d2; color: #fff; text-decoration: none;
+            padding: 10px 24px; border-radius: 4px; font-weight: 600; font-size: 14px; margin: 0 0 24px;">
+    Set Up Your Account
+  </a>
+  <p style="color: #78828c; font-size: 12px; margin: 0;">
+    This code expires in 7 days. If you did not expect this email, you can safely ignore it —
+    nothing happens until the code is entered.
+  </p>
+</div>
+`;
+}
+
+// Admin Users page "Send reset email" — same machinery for a user who has
+// already signed in before; the copy is a password reset rather than a
+// first-time welcome. Entering the code (or setting a new password on the
+// setup page) is what applies the change — the link alone does nothing.
+export function buildPasswordResetEmail(opts: {
+  firstName: string;
+  /** The account's email — doubles as the username, called out in the copy. */
+  email: string;
+  /** Setup page URL (/signup?invite=token) — inert, just opens the form. */
+  inviteUrl: string;
+  /** One-time 8-digit code the user types in. */
+  setupCode: string;
+}): string {
+  const spacedCode = opts.setupCode.split("").join(" ");
+  return `
+<div style="font-family: Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; color: #333;">
+  <div style="margin-bottom: 24px;">
+    <img src="${APP_URL}/images/da-logo.png" alt="DA Platform" width="40" height="40" style="border-radius: 50%;" />
+  </div>
+  <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">Reset your DealerAddendums 5.0 password</h2>
+  <p style="margin: 0 0 16px; color: #55595c;">Hi ${escapeHtml(opts.firstName)},</p>
+  <p style="margin: 0 0 16px; color: #55595c;">
+    A password reset was requested for your DealerAddendums Platform 5.0 account
+    (<strong>${escapeHtml(opts.email)}</strong> is your username). Use the one-time code below.
+  </p>
+
+  <div style="margin: 0 0 8px; color: #55595c; font-size: 14px;">Your reset code:</div>
+  <div style="font-family: 'Courier New', monospace; font-size: 28px; font-weight: 700; letter-spacing: 8px;
+              background: #f5f6f8; border: 1px solid #e0e0e0; border-radius: 6px; padding: 14px 18px;
+              text-align: center; margin: 0 0 20px; color: #2a2b3c;">
+    ${escapeHtml(spacedCode)}
+  </div>
+
+  <p style="margin: 0 0 16px; color: #55595c;">
+    Open the reset page, enter your email address and either the code above or a new password:
+  </p>
+  <a href="${opts.inviteUrl}"
+     style="display: inline-block; background: #1976d2; color: #fff; text-decoration: none;
+            padding: 10px 24px; border-radius: 4px; font-weight: 600; font-size: 14px; margin: 0 0 24px;">
+    Reset Password
+  </a>
+  <p style="color: #78828c; font-size: 12px; margin: 0;">
+    This code expires in 7 days. If you did not request a reset, you can safely ignore this email —
+    nothing changes until the code is entered.
+  </p>
+</div>
+`;
+}

@@ -214,11 +214,32 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const dealerMap = new Map((dealerRes.data ?? []).map(d => [d.dealer_id, d.name]));
   const groupMap  = new Map((groupRes.data  ?? []).map(g => [g.id,        g.name]));
 
+  // Pending-invitation hint for the "Send invite" action: latest unaccepted,
+  // unexpired invitation per email on this page (created_at = last sent).
+  const emails = Array.from(new Set(rows.map(p => p.email).filter(Boolean))) as string[];
+  const invitedMap = new Map<string, string>();
+  if (emails.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: pendingInvites } = await (admin as any)
+      .from("invitations")
+      .select("email, created_at")
+      .in("email", emails)
+      .is("accepted_at", null)
+      .gt("expires_at", new Date().toISOString()) as
+      { data: { email: string; created_at: string }[] | null };
+    for (const inv of pendingInvites ?? []) {
+      const key = inv.email.toLowerCase();
+      const prev = invitedMap.get(key);
+      if (!prev || inv.created_at > prev) invitedMap.set(key, inv.created_at);
+    }
+  }
+
   const users = rows.map(p => ({
     ...p,
     dealer_name:        p.dealer_id ? (dealerMap.get(p.dealer_id) ?? null) : null,
     group_name:         p.group_id  ? (groupMap.get(p.group_id)   ?? null) : null,
     last_sign_in_at:    lastSignIn.get((p.email ?? "").toLowerCase()) ?? null,
+    invited_at:         invitedMap.get((p.email ?? "").toLowerCase()) ?? null,
     hubspot_contact_id: hubspotContactMap.get(p.email?.toLowerCase() ?? "") ?? null,
   }));
 

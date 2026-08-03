@@ -72,10 +72,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const isGroupInvite = !!inv.group_id && !inv.dealer_id;
+  // Staff invite (admin Users page "Send invite"): no dealer AND no group —
+  // super_admin or other org-less users. No dealer/group resolution needed.
+  const isStaffInvite = !inv.dealer_id && !inv.group_id;
 
   // For dealer invitations, resolve the dealer's text dealer_id
   let dealerTextId: string | null = null;
-  if (!isGroupInvite) {
+  if (!isGroupInvite && !isStaffInvite) {
     const { data: dealer } = await admin
       .from("dealers")
       .select("dealer_id, name")
@@ -91,7 +94,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // user lands AS the invited role — no leftover impersonation/ghost context).
   // A brand-new createUser sets role (+ password) in one shot. For an existing
   // user (a prior partial attempt) we resolve the id and patch role/password.
-  const fullName = `${inv.first_name} ${inv.last_name}`;
+  const fullName = [inv.first_name, inv.last_name].filter(Boolean).join(" ");
   const { data: createData, error: createErr } = await admin.auth.admin.createUser({
     email: inv.email,
     ...(usingPassword ? { password } : {}),

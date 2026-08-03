@@ -36,6 +36,7 @@ type UserRow = {
   force_password_reset: boolean;
   last_login: string | null;
   last_sign_in_at: string | null;
+  invited_at?: string | null;
   created_at: string;
   hubspot_contact_id: number | null;
 };
@@ -645,6 +646,59 @@ function DeleteConfirmModal({ user, onClose, onSuccess }: {
   );
 }
 
+// ── SendInviteModal ───────────────────────────────────────────────────────────
+// Admin Users page (super_admin): send an existing user their credentials —
+// "Send invite" for never-signed-in users, "Send reset email" otherwise.
+// Same underlying action (POST /api/users/[id]/send-invite).
+
+function SendInviteModal({ user, onClose, onSuccess }: {
+  user: UserRow;
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}) {
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const isReset = !!user.last_sign_in_at;
+
+  async function confirm() {
+    setSending(true);
+    setErr(null);
+    const res = await fetch(`/api/users/${user.id}/send-invite`, { method: "POST" });
+    const json = await res.json() as { error?: string; mode?: string };
+    setSending(false);
+    if (!res.ok) { setErr(json.error ?? "Failed to send"); return; }
+    onSuccess(json.mode === "reset" ? `Reset email sent to ${user.email}` : `Invite sent to ${user.email}`);
+  }
+
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div style={{ padding: "24px" }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, color: "#333", margin: "0 0 12px" }}>
+          {isReset ? "Send reset email" : "Send invite"} to {user.full_name ?? user.email}?
+        </h2>
+        <p style={{ fontSize: 14, color: "#55595c", margin: "0 0 12px", lineHeight: 1.6 }}>
+          <strong>{user.email}</strong> will receive an email with an 8-digit setup code and a link.
+          {isReset
+            ? " Entering the code (or choosing a new password) resets their access — their old password stops working."
+            : " Their email address is their username; they can sign in with the code or choose a password during setup."}
+        </p>
+        {user.invited_at && (
+          <p style={{ fontSize: 13, color: "#e65100", background: "#fff8e1", border: "1px solid #ffe0b2", borderRadius: 4, padding: "8px 12px", margin: "0 0 12px" }}>
+            An invitation was already sent {formatDate(user.invited_at)} — sending again replaces the old code.
+          </p>
+        )}
+        {err && <p style={{ fontSize: 13, color: "#ff5252", margin: "0 0 12px" }}>{err}</p>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={sending}>Cancel</button>
+          <button type="button" className="btn btn-primary" onClick={() => void confirm()} disabled={sending}>
+            {sending ? "Sending…" : isReset ? "Send Reset Email" : "Send Invite"}
+          </button>
+        </div>
+      </div>
+    </ModalOverlay>
+  );
+}
+
 // ── InviteUserModal ───────────────────────────────────────────────────────────
 
 function InviteUserModal({ onClose, onSuccess }: {
@@ -769,6 +823,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
   const [inviteAllResult, setInviteAllResult] = useState<{ invited: number; already_existed: number; failed: number } | null>(null);
   const [editUser, setEditUser]       = useState<UserRow | null>(null);
   const [deleteUser, setDeleteUser]   = useState<UserRow | null>(null);
+  const [sendInviteUser, setSendInviteUser] = useState<UserRow | null>(null);
   const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
   const [impersonating, setImpersonating] = useState<string | null>(null);
 
@@ -821,9 +876,15 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
     setShowInvite(false);
     setEditUser(null);
     setDeleteUser(null);
+    setSendInviteUser(null);
     showToast(msg);
     void fetchUsers();
   }
+
+  // "Send invite / reset email" is an admin-Users-page action (super_admin
+  // only, not in ghost or dealer/group scoped contexts). The API is the real
+  // gate; this just mirrors it.
+  const canSendInvite = viewerRole === "super_admin" && !isGhostMode && !dealerMode && !groupMode;
 
   async function handleInviteAll() {
     if (!viewerDealerId) return;
@@ -1106,9 +1167,26 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
                     {u.active ? "Active" : "Inactive"}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text-muted)" }}>{formatDate(u.last_sign_in_at)}</td>
+                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text-muted)" }}>
+                  {formatDate(u.last_sign_in_at)}
+                  {!u.last_sign_in_at && u.invited_at && (
+                    <span style={{ display: "block", fontSize: 10, color: "#e65100" }}>invited {formatDate(u.invited_at)}</span>
+                  )}
+                </td>
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-1 justify-end">
+                    {canSendInvite && (
+                      <button
+                        title={u.last_sign_in_at ? "Send reset email" : "Send invite"}
+                        onClick={() => setSendInviteUser(u)}
+                        style={{ width: 28, height: 28, borderRadius: 4, border: "1px solid var(--border)", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#1976d2" }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M22 2L11 13" />
+                          <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+                        </svg>
+                      </button>
+                    )}
                     <button
                       title="Edit user"
                       onClick={() => setEditUser(u)}
@@ -1249,6 +1327,13 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
         <DeleteConfirmModal
           user={deleteUser}
           onClose={() => setDeleteUser(null)}
+          onSuccess={handleSuccess}
+        />
+      )}
+      {sendInviteUser && (
+        <SendInviteModal
+          user={sendInviteUser}
+          onClose={() => setSendInviteUser(null)}
           onSuccess={handleSuccess}
         />
       )}
