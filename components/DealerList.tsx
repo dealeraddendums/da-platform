@@ -23,10 +23,14 @@ type DealerListRow = DealerRow & {
 };
 
 // A dealer is on the V5.0 platform once migrated, or if it was created
-// natively on 5.0 (self-serve, dealer_id prefixed "ss_"). Same rule as the
-// dashboard migration gate. Everything else is still on legacy 4.0.
+// natively on 5.0 (self-serve "ss_" / group-admin-created "ga_" dealer_id
+// prefixes). Same rule as the dashboard migration gate (layout.tsx), which
+// has admitted ga_ since 6f12e37 — this badge was missing it (Pugmire
+// Carrollton/Bremen showed "Active 4.0"). New app-created dealers also get
+// migration_status='migrated' at INSERT now, so the prefixes only matter
+// for rows created before that fix.
 function platformVersion(d: Pick<DealerListRow, "migration_status" | "dealer_id">): "5.0" | "4.0" {
-  const isV5 = d.migration_status === "migrated" || d.dealer_id?.startsWith("ss_");
+  const isV5 = d.migration_status === "migrated" || d.dealer_id?.startsWith("ss_") || d.dealer_id?.startsWith("ga_");
   return isV5 ? "5.0" : "4.0";
 }
 

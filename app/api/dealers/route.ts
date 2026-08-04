@@ -552,6 +552,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     ...rest,
     account_purpose: accountPurpose,
     is_test: accountPurpose !== "real",
+    // A dealer born in the 5.0 admin (super_admin New Dealer / group-admin
+    // Create Dealer) is V5-NATIVE — there is no 4.0/Aurora counterpart to
+    // migrate. Without this marker the row inherits the column default
+    // 'legacy' and the platform badge shows "4.0" (and, for ids without an
+    // ss_/ga_ prefix, the dashboard gate would bounce its users). Placed
+    // after ...rest so a client payload can never override it.
+    migration_status: "migrated",
   };
   let { data, error: dbError } = await admin.from("dealers").insert(insertPayload).select().single();
 
