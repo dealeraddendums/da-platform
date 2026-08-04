@@ -368,6 +368,9 @@ type DealerInsert = {
   converted_at?: string | null;
   acquisition?: Record<string, unknown> | null;
   account_purpose?: "real" | "test" | "sales_demo";
+  /** App-created dealers are V5-native: POST /api/dealers inserts them with
+   *  'migrated' so the platform badge/gate never reads them as legacy 4.0. */
+  migration_status?: string;
   created_at?: string | null;
 };
 
