@@ -97,7 +97,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // Expired/consumed/absent invitations stay silent (same as unknown email).
       // Throttle the auto-resend hard (once per 10 min, keyed on the MATCHED
       // invitation) so hammering the OTP form can't spam an invitee's inbox.
-      if (isPendingInvitation(inv) && rateLimit(`otp-login-invite-resend:${inv.id}`, 1, 10 * 60_000)) {
+      // The in-memory limiter is per-worker (PM2 cluster runs 2), so the real
+      // gate is the audit ledger: a successful otp_fallback resend in the last
+      // 10 min blocks another, cluster-wide. (No audit row is written when the
+      // send fails, so a transient email failure stays retryable.)
+      let recentlyResent = false;
+      if (isPendingInvitation(inv)) {
+        const { data: recent } = await admin
+          .from("admin_audit")
+          .select("id")
+          .eq("action", "invitation_resent")
+          .contains("metadata", { invitation_id: inv.id })
+          .gte("created_at", new Date(Date.now() - 10 * 60_000).toISOString())
+          .limit(1)
+          .maybeSingle();
+        recentlyResent = !!recent;
+      }
+      if (isPendingInvitation(inv) && !recentlyResent && rateLimit(`otp-login-invite-resend:${inv.id}`, 1, 10 * 60_000)) {
         await resendPendingInvitationEmail(admin, inv);
         fireWrite(admin.from("admin_audit").insert({
           admin_user_id: SYSTEM_USER_ID,
