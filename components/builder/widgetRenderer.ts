@@ -176,8 +176,14 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   if (type === 'suggested_options') {
-    const sz = Math.round(10 * fs * ((d.fontSize as number) || 1));
-    const szm = Math.round(9 * fs * ((d.fontSize as number) || 1));
+    // Split font sizes (2026-08-04): labelFontSize scales the header-bar text,
+    // productsFontSize the item rows/descriptions. Both fall back to the
+    // legacy single fontSize so saved templates render identically without
+    // any data rewrite.
+    const legacyMult = (d.fontSize as number) || 1;
+    const labelSz = Math.round(10 * fs * ((d.labelFontSize as number) || legacyMult));
+    const sz = Math.round(10 * fs * ((d.productsFontSize as number) || legacyMult));
+    const szm = Math.round(9 * fs * ((d.productsFontSize as number) || legacyMult));
     const ls = (d.lineSpacing as number) || 1.2;
     type OptItem = { name: string; desc: string; price: string; separator_above?: boolean; separator_below?: boolean; spaces?: number };
     const items = (d.items as OptItem[]) || [];
@@ -186,15 +192,26 @@ export function renderW(type: string, d: D, fontScale: number): string {
     // list renders below in the normal, uncolored area of the widget.
     const bg = (d.bgColor as string) || '';
     const tc = (d.textColor as string) || '#ffffff';
+    // Empty/whitespace section label ⇒ the header box doesn't render at all
+    // (no empty color stripe); content starts at the top of the widget. Only
+    // the boxed variant auto-hides — a legacy plain-text header keeps its
+    // (invisible) div so ground-truthed layouts don't shift by its margin.
+    const labelRich = rich(d.sectionLabel);
+    const hasLabel = !!labelRich.replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/g, ' ').trim();
     const header = bg
-      ? `<div style="background:${bg};color:${tc};font-size:${sz}px;font-weight:700;padding:4px 8px;box-sizing:border-box;margin-bottom:4px">${rich(d.sectionLabel)}</div>`
-      : `<div style="font-size:${sz}px;color:#555;margin-bottom:4px">${rich(d.sectionLabel)}</div>`;
+      ? (hasLabel ? `<div style="background:${bg};color:${tc};font-size:${labelSz}px;font-weight:700;padding:4px 8px;box-sizing:border-box;margin-bottom:4px">${labelRich}</div>` : '')
+      : `<div style="font-size:${labelSz}px;color:#555;margin-bottom:4px">${labelRich}</div>`;
+    // Boxed variant: the header bar bleeds edge-to-edge by design, but the
+    // flowing content below must not touch the widget border — inset it to
+    // match the bar's own 8px text padding (names off the left border,
+    // right-aligned prices off the right). Legacy no-box widgets keep flush
+    // content: their layouts are pixel-ground-truthed.
+    const inset = bg ? 'padding:0 8px;box-sizing:border-box' : '';
     if (items.length === 0) {
-      return `<div style="padding:3px 0">${header}<div style="font-size:${szm}px;color:#bbb;font-style:italic;padding:0 ${bg ? '8px' : '0'}">Suggested products will appear here at print time.</div></div>`;
+      return `<div style="padding:3px 0">${header}<div style="font-size:${szm}px;color:#bbb;font-style:italic;${inset || 'padding:0'}">Suggested products will appear here at print time.</div></div>`;
     }
-    return `<div style="padding:3px 0">${header}${items.map(it =>
-      renderProductRow(it, sz, szm, ls)
-    ).join('')}</div>`;
+    const rows = items.map(it => renderProductRow(it, sz, szm, ls)).join('');
+    return `<div style="padding:3px 0">${header}${inset ? `<div style="${inset}">${rows}</div>` : rows}</div>`;
   }
 
   // askbar + suggested_price are white-label bars overlaying a pre-printed bar

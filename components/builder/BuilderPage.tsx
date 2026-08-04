@@ -2572,7 +2572,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Fd label="Text Color">
             <ColorSwatches value={(d.textColor as string) || '#ffffff'} onChange={v => u('textColor', v)} />
           </Fd>
-          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>The header label sits on the colored box; the product list prints below it.</div>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>The header label sits on the colored box; the product list prints below it. Clear the label to remove the bar entirely.</div>
         </EpSection>
       )}
 
@@ -2641,7 +2641,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Fd label="Text"><input value={(d.text as string) || ''} onChange={e => u('text', e.target.value)} style={fiStyle} /></Fd>
           <Eps style={{ marginTop: 8 }}>Color</Eps>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-            {[['#1a1916','Black'],['#374151','Slate'],['#2563EB','Blue'],['#DC2626','Red'],['#15803D','Green'],['#7C3AED','Purple'],['#D97706','Gold'],['#ffffff','White']].map(([c,n]) => (
+            {[['#1a1916','Black'],['#898989','Gray'],['#2563EB','Blue'],['#DC2626','Red'],['#15803D','Green'],['#7C3AED','Purple'],['#D97706','Gold'],['#ffffff','White']].map(([c,n]) => (
               <div key={c} title={n} onClick={() => u('color', c)}
                 style={{ width: 22, height: 22, borderRadius: 4, background: c, cursor: 'pointer', border: `1.5px solid ${(d.color as string) === c ? '#1976d2' : (c === '#ffffff' ? '#ccc' : 'transparent')}`, boxShadow: (d.color as string) === c ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }} />
             ))}
@@ -2652,7 +2652,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
             {/* Auto = auto-contrast against the bar color (current default). */}
             <div title="Auto (contrast)" onClick={() => u('fontColor', '')}
               style={{ width: 22, height: 22, borderRadius: 4, background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#55595c', border: `1.5px solid ${!d.fontColor ? '#1976d2' : '#ccc'}`, boxShadow: !d.fontColor ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }}>A</div>
-            {[['#1a1916','Black'],['#374151','Slate'],['#2563EB','Blue'],['#DC2626','Red'],['#15803D','Green'],['#7C3AED','Purple'],['#D97706','Gold'],['#ffffff','White']].map(([c,n]) => (
+            {[['#1a1916','Black'],['#898989','Gray'],['#2563EB','Blue'],['#DC2626','Red'],['#15803D','Green'],['#7C3AED','Purple'],['#D97706','Gold'],['#ffffff','White']].map(([c,n]) => (
               <div key={c} title={n} onClick={() => u('fontColor', c)}
                 style={{ width: 22, height: 22, borderRadius: 4, background: c, cursor: 'pointer', border: `1.5px solid ${(d.fontColor as string) === c ? '#1976d2' : (c === '#ffffff' ? '#ccc' : 'transparent')}`, boxShadow: (d.fontColor as string) === c ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }} />
             ))}
@@ -2678,7 +2678,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           </div>
           <Eps style={{ marginTop: 8 }}>Color</Eps>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-            {[['#1a1916','Black'],['#374151','Slate'],['#2563EB','Blue'],['#1a237e','Dark Blue'],['#DC2626','Red'],['#15803D','Green'],['#9aa0a6','Gray'],['#ffffff','White']].map(([c,n]) => (
+            {[['#1a1916','Black'],['#898989','Gray'],['#2563EB','Blue'],['#1a237e','Dark Blue'],['#DC2626','Red'],['#15803D','Green'],['#9aa0a6','Light Gray'],['#ffffff','White']].map(([c,n]) => (
               <div key={c} title={n} onClick={() => u('color', c)}
                 style={{ width: 22, height: 22, borderRadius: 4, background: c, cursor: 'pointer', border: `1.5px solid ${(d.color as string) === c ? '#1976d2' : (c === '#ffffff' ? '#ccc' : 'transparent')}`, boxShadow: (d.color as string) === c ? '0 0 0 2px rgba(37,99,235,.2)' : 'none' }} />
             ))}
@@ -3060,12 +3060,30 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
-      {w.type === 'suggested_options' && (
-        <EpSection>
-          <Eps>Font Size</Eps>
-          <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
-        </EpSection>
-      )}
+      {w.type === 'suggested_options' && (() => {
+        // Split pickers (2026-08-04): Section Label (header bar) vs Products
+        // (item rows). Both seed from the legacy single fontSize so an old
+        // template's steppers show — and adjust from — the value it actually
+        // renders with; the first click writes the new key (renderer falls
+        // back until then, so nothing shifts until the user changes it).
+        const legacyMult = (d.fontSize as number) || 1.0;
+        const dSeeded = {
+          ...d,
+          labelFontSize: (d.labelFontSize as number) ?? legacyMult,
+          productsFontSize: (d.productsFontSize as number) ?? legacyMult,
+        };
+        const afSeeded = (key: string, delta: number) => {
+          const cur = (d[key] as number) ?? legacyMult;
+          u(key, Math.round(Math.max(0.5, Math.min(3.0, cur + delta)) * 10) / 10);
+        };
+        return (
+          <EpSection>
+            <Eps>Font Size</Eps>
+            <FontStepper label="Section label font size" fkey="labelFontSize" base={10.5} d={dSeeded} fontScale={fontScale} af={afSeeded} />
+            <FontStepper label="Products font size" fkey="productsFontSize" base={10.5} d={dSeeded} fontScale={fontScale} af={afSeeded} />
+          </EpSection>
+        );
+      })()}
       {w.type === 'suggested_price' && (
         <EpSection>
           <Eps>Font Size</Eps>
@@ -3289,7 +3307,7 @@ function ColorPair({ value, onChange }: { value: string; onChange: (v: string) =
 // Richer swatch palette (matches the Header Bar / Divider pickers) for the
 // background + text color controls on the price/suggested bars.
 const BAR_SWATCHES: [string, string][] = [
-  ['#000000', 'Black'], ['#1a1916', 'Ink'], ['#374151', 'Slate'], ['#1976d2', 'Blue'],
+  ['#000000', 'Black'], ['#1a1916', 'Ink'], ['#898989', 'Gray'], ['#1976d2', 'Blue'],
   ['#1a237e', 'Navy'], ['#c62828', 'Red'], ['#15803D', 'Green'], ['#ffffff', 'White'],
 ];
 function ColorSwatches({ value, onChange }: { value: string; onChange: (v: string) => void }) {
