@@ -83,20 +83,26 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
 
   // Migration invitations → dealer_id (uuid) → latest invite (for invite status +
   // wave). purpose='migration' only; resilient to wave_id (migration 103) absence.
-  type InvRow = { dealer_id: string | null; accepted_at: string | null; expires_at: string | null; created_at: string | null; wave_id?: string | null };
+  type InvRow = { dealer_id: string | null; email?: string | null; accepted_at: string | null; expires_at: string | null; created_at: string | null; wave_id?: string | null };
   let invitations: InvRow[];
   try {
-    invitations = await fetchAll<InvRow>(admin, "invitations", "dealer_id, accepted_at, expires_at, created_at, wave_id", (q: Admin) => q.eq("purpose", "migration"));
+    invitations = await fetchAll<InvRow>(admin, "invitations", "dealer_id, email, accepted_at, expires_at, created_at, wave_id", (q: Admin) => q.eq("purpose", "migration"));
   } catch (e) {
     if (/wave_id|column/i.test(e instanceof Error ? e.message : String(e))) {
-      invitations = await fetchAll<InvRow>(admin, "invitations", "dealer_id, accepted_at, expires_at, created_at", (q: Admin) => q.eq("purpose", "migration"));
+      invitations = await fetchAll<InvRow>(admin, "invitations", "dealer_id, email, accepted_at, expires_at, created_at", (q: Admin) => q.eq("purpose", "migration"));
     } else { throw e; }
   }
   const invByDealer = new Map<string, InvRow>();
+  const recipientsByDealer = new Map<string, string[]>();
   for (const iv of invitations) {
     if (!iv.dealer_id) continue;
     const prev = invByDealer.get(iv.dealer_id);
     if (!prev || (iv.created_at ?? "") > (prev.created_at ?? "")) invByDealer.set(iv.dealer_id, iv);
+    if (iv.email) {
+      const list = recipientsByDealer.get(iv.dealer_id) ?? [];
+      list.push(iv.accepted_at ? `${iv.email} ✓` : iv.email);
+      recipientsByDealer.set(iv.dealer_id, list);
+    }
   }
 
   // 13d: FreshBooks-stop tracking (separate so a missing migration 104 doesn't
@@ -128,6 +134,7 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
       billingByCustomer,
       now,
       invitation: invByDealer.get(d.id) ?? null,
+      inviteRecipients: recipientsByDealer.get(d.id) ?? [],
       freshbooksStoppedAt: fbStopped.get(d.id) ?? null,
       assignedTo: assignedBy.get(d.id) ?? null,
     });

@@ -23,6 +23,7 @@ interface Row {
   inviteStatus: "not-invited" | "invited" | "stalled" | "expired" | "migrated";
   invitedAt: string | null;
   waveId: string | null;
+  inviteRecipients?: string[];
   freshbooksStoppedAt: string | null;
   freshbooksStopPending: boolean;
   assignedTo: string | null;
@@ -52,10 +53,12 @@ const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = 
   expired: { bg: "#ffebee", fg: "#c62828", label: "Expired" },
   migrated: { bg: "#e8f5e9", fg: "#2e7d32", label: "Migrated" },
 };
-const StatusBadge = ({ status, invitedAt }: { status: string; invitedAt: string | null }) => {
+const StatusBadge = ({ status, invitedAt, recipients }: { status: string; invitedAt: string | null; recipients?: string[] }) => {
   const s = STATUS_STYLE[status] ?? STATUS_STYLE["not-invited"];
   const date = invitedAt && (status === "invited" || status === "stalled" || status === "expired") ? new Date(invitedAt).toLocaleDateString() : null;
-  return <span title={date ? `invited ${date}` : s.label} style={{ background: s.bg, color: s.fg, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>{s.label}{date ? ` · ${date}` : ""}</span>;
+  // Hover shows the multi-recipient invite list (✓ = that recipient completed).
+  const title = [date ? `invited ${date}` : s.label, ...(recipients && recipients.length ? ["sent to:", ...recipients.map(r => `  ${r}`)] : [])].join("\n");
+  return <span title={title} style={{ background: s.bg, color: s.fg, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>{s.label}{date ? ` · ${date}` : ""}</span>;
 };
 
 // Per-row billing activation state.
@@ -478,7 +481,7 @@ export default function MigrationConsole() {
       </td>
       <td style={td}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <StatusBadge status={r.inviteStatus} invitedAt={r.invitedAt} />
+          <StatusBadge status={r.inviteStatus} invitedAt={r.invitedAt} recipients={r.inviteRecipients} />
           {(r.inviteStatus === "invited" || r.inviteStatus === "stalled" || r.inviteStatus === "expired") && (
             <button type="button" onClick={() => void resend(r)} disabled={resendingId === r.id}
               title="Resend the migration invite (fresh code)"

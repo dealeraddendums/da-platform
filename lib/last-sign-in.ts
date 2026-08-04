@@ -9,9 +9,22 @@ import { createAdminSupabaseClient } from "@/lib/db";
 // email → last_sign_in_at map, cached briefly so admin pages don't re-scan
 // thousands of users on every request. Matching by EMAIL (not profiles.id)
 // also survives ETL/legacy profiles whose id != their auth user id.
+//
+// IMPERSONATION EXCLUSION (2026-08-04): a super_admin impersonation mints a
+// real GoTrue session (generateLink + /auth/v1/verify), which stamps
+// auth.users.last_sign_in_at exactly like a human login. That polluted signal
+// falsely satisfied group-migration Gate A, flipped the Invite-admins modal to
+// "skip", and showed misleading dates in Users lists. Every impersonation
+// endpoint writes an admin_audit row (action 'impersonate'/'impersonate_group',
+// metadata.target_email) in the same request as the mint, so a sign-in within
+// ±10 min of an impersonation event for the same email is treated as NOT a
+// real sign-in. When the latest sign-in is excluded this way we fall back to
+// legacy profiles.last_login (4.0-era data) if set, else null ("never") — for
+// the gates, under-counting is the safe direction.
 
 let cache: { at: number; map: Map<string, string | null> } | null = null;
 const TTL_MS = 60_000;
+const IMPERSONATION_WINDOW_MS = 10 * 60_000;
 
 /**
  * Resolve an existing auth user's id by email via the GoTrue admin API. Used by
@@ -32,10 +45,50 @@ export async function getAuthUserIdByEmail(email: string): Promise<string | null
   }
 }
 
+/** email (lowercase) → impersonation-mint timestamps (ms). */
+async function impersonationEventsByEmail(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+): Promise<Map<string, number[]>> {
+  const map = new Map<string, number[]>();
+  for (let from = 0; ; from += 1000) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (admin as any)
+      .from("admin_audit")
+      .select("created_at, metadata")
+      .in("action", ["impersonate", "impersonate_group"])
+      .order("created_at", { ascending: true })
+      .range(from, from + 999) as {
+        data: { created_at: string | null; metadata: { target_email?: string } | null }[] | null;
+        error: { message: string } | null;
+      };
+    if (error) {
+      // admin_audit missing (pre-migration-127 env) → no exclusion, raw values.
+      console.error("[last-sign-in] admin_audit read failed:", error.message);
+      break;
+    }
+    for (const row of data ?? []) {
+      const email = (row.metadata?.target_email ?? "").trim().toLowerCase();
+      const ts = row.created_at ? Date.parse(row.created_at) : NaN;
+      if (!email || Number.isNaN(ts)) continue;
+      const arr = map.get(email) ?? [];
+      arr.push(ts);
+      map.set(email, arr);
+    }
+    if ((data ?? []).length < 1000) break;
+  }
+  return map;
+}
+
+/**
+ * email (lowercase) → last REAL sign-in (impersonation-minted sign-ins
+ * excluded — see header comment). This is the platform-wide "has this human
+ * ever signed in" signal: Gate A, the Invite-admins modal, invite-vs-reset
+ * copy, and every Users-list display consume it.
+ */
 export async function lastSignInByEmail(): Promise<Map<string, string | null>> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.map;
   const admin = createAdminSupabaseClient();
-  const map = new Map<string, string | null>();
+  const raw = new Map<string, string | null>();
   for (let page = 1; ; page++) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
     if (error) {
@@ -44,10 +97,40 @@ export async function lastSignInByEmail(): Promise<Map<string, string | null>> {
     }
     const users = data?.users ?? [];
     for (const u of users) {
-      if (u.email) map.set(u.email.toLowerCase(), u.last_sign_in_at ?? null);
+      if (u.email) raw.set(u.email.toLowerCase(), u.last_sign_in_at ?? null);
     }
     if (users.length < 1000) break;
   }
-  cache = { at: Date.now(), map };
-  return map;
+
+  // Exclude impersonation-coincident sign-ins.
+  const events = await impersonationEventsByEmail(admin);
+  const polluted: string[] = [];
+  events.forEach((timestamps: number[], email: string) => {
+    const signIn = raw.get(email);
+    if (!signIn) return;
+    const signInMs = Date.parse(signIn);
+    if (timestamps.some(t => Math.abs(signInMs - t) <= IMPERSONATION_WINDOW_MS)) {
+      polluted.push(email);
+    }
+  });
+  if (polluted.length > 0) {
+    // Best-effort fallback to legacy profiles.last_login for the excluded set
+    // (an earlier REAL sign-in isn't recoverable from GoTrue — it only keeps
+    // the latest). Missing fallback → null = "never signed in".
+    const fallback = new Map<string, string | null>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: profs } = await (admin as any)
+      .from("profiles")
+      .select("email, last_login")
+      .in("email", polluted) as { data: { email: string | null; last_login: string | null }[] | null };
+    for (const p of profs ?? []) {
+      if (p.email) fallback.set(p.email.toLowerCase(), p.last_login ?? null);
+    }
+    for (const email of polluted) {
+      raw.set(email, fallback.get(email) ?? null);
+    }
+  }
+
+  cache = { at: Date.now(), map: raw };
+  return raw;
 }

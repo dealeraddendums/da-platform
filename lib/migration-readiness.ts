@@ -92,6 +92,9 @@ export interface ReadinessRow {
   inviteStatus: InviteStatus;
   invitedAt: string | null;
   waveId: string | null;
+  /** Emails the migration invite went to (multi-recipient, 2026-08-04);
+   *  "✓"-suffixed when that recipient completed their invitation. */
+  inviteRecipients: string[];
   // ── 13d: legacy FreshBooks recurring-stop tracking (operator-managed) ───────
   freshbooksStoppedAt: string | null;
   freshbooksStopPending: boolean; // migrated but FreshBooks recurring not yet stopped
@@ -148,6 +151,7 @@ export function computeReadiness(
     billingByCustomer: Map<string, BillingTemplateInfo>;
     now: number;
     invitation?: { accepted_at: string | null; expires_at: string | null; wave_id?: string | null } | null;
+    inviteRecipients?: string[];
     freshbooksStoppedAt?: string | null;
     assignedTo?: string | null;
   },
@@ -231,6 +235,7 @@ export function computeReadiness(
     billingStaged, billingReason, billingApplicable, templateConfirmed, eligible, eligibleReason, synced, ready,
     settingsMissing, logoMissing, zeroInventory, warnings,
     inviteStatus, invitedAt: d.invited_at ?? null, waveId: ctx.invitation?.wave_id ?? null,
+    inviteRecipients: ctx.inviteRecipients ?? [],
     freshbooksStoppedAt: ctx.freshbooksStoppedAt ?? null,
     freshbooksStopPending: inviteStatus === "migrated" && !ctx.freshbooksStoppedAt,
     assignedTo: ctx.assignedTo ?? null,
