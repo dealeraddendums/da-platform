@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { sendOtpCode } from "@/lib/migration-invite";
 import { rateLimit } from "@/lib/rate-limit";
 import { resolveBrandForHost, normalizeHost } from "@/lib/brand";
+import {
+  PENDING_INVITATION_COLUMNS,
+  isPendingInvitation,
+  resendPendingInvitationEmail,
+  type PendingInvitationRow,
+} from "@/lib/invite-resend";
+
+// Zero-UUID system actor for admin_audit rows with no human admin behind them
+// (same convention as CRON_SYSTEM_USER_ID in lib/feed-push-runner.ts).
+const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 // POST /api/auth/otp-login  { email }
 // Passwordless sign-in fallback: emails a one-time code to an EXISTING auth
@@ -10,6 +20,15 @@ import { resolveBrandForHost, normalizeHost } from "@/lib/brand";
 // so: rate-limited per IP and per email, guarded on user existence (generateLink
 // would otherwise create a user), and ALWAYS returns { ok: true } regardless of
 // whether the email has an account — no enumeration (mirrors /api/onboard/resend).
+//
+// PENDING-INVITATION FALLBACK: an invitee who hasn't set up their account yet
+// (no profile/auth user) but HAS a live invitation almost always lands here
+// first — they got the invite email, then went to the login page and asked for
+// a code that can never arrive. Instead of the silent dead-end, re-send their
+// invitation (fresh setup code, same email template) so the email that shows
+// up actually gets them in. The response stays identical either way — the
+// client's neutral copy covers both the account and invitation cases, so
+// nothing is enumerable.
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   if (!rateLimit(`otp-login-ip:${ip}`, 10, 60_000)) {
@@ -57,6 +76,43 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ...(next ? { next } : {}),
         ...(brand.isDefault ? {} : { brandName: brand.displayName, loginUrl: `https://${host}/login` }),
       });
+    } else {
+      // No profile → no account to send a login code to. If this email has a
+      // live pending invitation (staff/dealer/group/migration — they all share
+      // the invitations store), auto-re-send it so the invitee isn't stranded.
+      // Escape ilike wildcards — the lookup must be an exact (case-insensitive)
+      // match, never a pattern an attacker could use to fuzzy-probe invitations.
+      const exactEmail = email.replace(/[\\%_]/g, (m) => `\\${m}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: inv } = await (admin as any)
+        .from("invitations")
+        .select(PENDING_INVITATION_COLUMNS)
+        .ilike("email", exactEmail)
+        .is("accepted_at", null)
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle() as { data: PendingInvitationRow | null };
+
+      // Expired/consumed/absent invitations stay silent (same as unknown email).
+      // Throttle the auto-resend hard (once per 10 min, keyed on the MATCHED
+      // invitation) so hammering the OTP form can't spam an invitee's inbox.
+      if (isPendingInvitation(inv) && rateLimit(`otp-login-invite-resend:${inv.id}`, 1, 10 * 60_000)) {
+        await resendPendingInvitationEmail(admin, inv);
+        fireWrite(admin.from("admin_audit").insert({
+          admin_user_id: SYSTEM_USER_ID,
+          action: "invitation_resent",
+          metadata: {
+            source: "otp_fallback",
+            email,
+            invitation_id: inv.id,
+            role: inv.role,
+            purpose: inv.purpose ?? "standard",
+            dealer_uuid: inv.dealer_id,
+            group_id: inv.group_id,
+          },
+        }), "admin_audit");
+      }
     }
   } catch (err) {
     console.error("[auth/otp-login] failed:", err instanceof Error ? err.message : err);

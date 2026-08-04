@@ -91,7 +91,7 @@ export default function OtpCodeForm({
       // resend endpoints always report success to avoid leaking account existence
     }
     setCode("");
-    setNotice("If an account exists for that email, a new code is on its way. It may take a minute to arrive.");
+    setNotice("Check your inbox — a new email is on its way (it may take a minute). If you were invited to set up a new account, use the setup link in that email instead.");
     codeRef.current?.focus();
   }
 

@@ -276,8 +276,12 @@ function LoginForm() {
   if (mode === "code") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        {/* Neutral copy — identical whether the email has an account, a pending
+            invitation (otp-login auto-resends it), or nothing. Never reveal which. */}
         <p style={{ fontSize: 14, color: "var(--da-text-soft)", margin: 0 }}>
-          We emailed a sign-in code to <strong>{codeEmail || "your email"}</strong>. Enter it below — no password needed.
+          We&apos;ve sent an email to <strong>{codeEmail || "your email"}</strong>. Enter the sign-in code
+          below — no password needed. If you were invited to set up a new account, use the setup
+          link and code in that email instead.
         </p>
         <OtpCodeForm
           initialEmail={codeEmail}

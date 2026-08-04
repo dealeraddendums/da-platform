@@ -50,6 +50,10 @@ export function buildInviteEmail(opts: {
             padding: 10px 24px; border-radius: 4px; font-weight: 600; font-size: 14px; margin: 0 0 24px;">
     Set Up Your Account
   </a>
+  <p style="margin: 0 0 16px; color: #55595c; font-size: 13px;">
+    Tip: use the setup link and code in this email to create your account — the regular
+    sign-in page won't work until your account is set up.
+  </p>
   <p style="color: #78828c; font-size: 12px; margin: 0;">
     This invitation and code expire in 7 days. If you did not expect this email, you can safely ignore it —
     nothing happens until the code is entered.
@@ -103,6 +107,7 @@ export function buildMigrationInviteEmail(opts: {
     <div style="text-align:center;margin-bottom:24px;">
       <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">Get started &rarr;</a>
     </div>
+    <p style="font-size:13px;color:#78828c;line-height:1.6;margin:0 0 24px;text-align:center;">Tip: use the link and code in this email to set up your account — the regular sign-in page won't work until your account is set up.</p>
     <div style="background:#fff8ed;border:1px solid #ffe4a0;border-radius:6px;padding:14px 18px;">
       <p style="font-size:13px;color:#7a5a00;margin:0;line-height:1.6;"><strong>Heads up:</strong> Platform 4.0 will remain available until <strong>${sunsetFormatted}</strong>. After that, the new platform will be your home. No rush — but it's good to know.</p>
     </div>
@@ -167,6 +172,7 @@ export function buildMigrationFollowUpEmail(opts: {
     <div style="text-align:center;margin-bottom:24px;">
       <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">Start migration &rarr;</a>
     </div>
+    <p style="font-size:13px;color:#78828c;line-height:1.6;margin:0 0 24px;text-align:center;">Tip: use the link and code in this email to set up your account — the regular sign-in page won't work until your account is set up.</p>
     <div style="background:#fff8ed;border:1px solid #ffe4a0;border-radius:6px;padding:14px 18px;">
       <p style="font-size:13px;color:#7a5a00;margin:0;line-height:1.6;">Platform 4.0 will be available until <strong>${sunsetFormatted}</strong>. Nothing changes until you confirm the migration.</p>
     </div>
@@ -221,6 +227,10 @@ export function buildGroupAdminMigrationInviteEmail(opts: {
             padding: 10px 24px; border-radius: 4px; font-weight: 600; font-size: 14px; margin: 0 0 24px;">
     Set Up Your Account
   </a>
+  <p style="margin: 0 0 16px; color: #55595c; font-size: 13px;">
+    Tip: use the setup link and code in this email to create your account — the regular
+    sign-in page won't work until your account is set up.
+  </p>
   <p style="color: #78828c; font-size: 12px; margin: 0;">
     This invitation and code expire in 7 days. If you did not expect this email, you can safely ignore it —
     nothing happens until the code is entered.
