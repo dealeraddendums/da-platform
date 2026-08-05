@@ -26,6 +26,7 @@ interface Row {
   inviteRecipients?: string[];
   freshbooksStoppedAt: string | null;
   freshbooksStopPending: boolean;
+  isNative: boolean;
   assignedTo: string | null;
   migrationStatus: string | null;
   synced: boolean;
@@ -236,7 +237,7 @@ export default function MigrationConsole() {
       const res = await fetch("/api/migration/freshbooks-stopped", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealerId: row.id, stopped }) });
       const j = await res.json();
       if (!res.ok) { alert(j.error ?? "Update failed"); return; }
-      setData((d) => d && { ...d, rows: d.rows.map((r) => r.id === row.id ? { ...r, freshbooksStoppedAt: j.freshbooks_stopped_at, freshbooksStopPending: r.inviteStatus === "migrated" && !j.freshbooks_stopped_at } : r) });
+      setData((d) => d && { ...d, rows: d.rows.map((r) => r.id === row.id ? { ...r, freshbooksStoppedAt: j.freshbooks_stopped_at, freshbooksStopPending: r.inviteStatus === "migrated" && !j.freshbooks_stopped_at && !r.isNative } : r) });
     } catch { alert("Update failed"); }
   }
 
@@ -384,7 +385,7 @@ export default function MigrationConsole() {
       total: mine.length,
       ready: mine.filter((r) => r.ready).length,
       invited: mine.filter((r) => r.inviteStatus === "invited" || r.inviteStatus === "stalled" || r.inviteStatus === "expired").length,
-      migrated: mine.filter((r) => r.inviteStatus === "migrated").length,
+      migrated: mine.filter((r) => r.inviteStatus === "migrated" && !r.isNative).length,
     };
   }, [data, me]);
 
@@ -400,7 +401,7 @@ export default function MigrationConsole() {
       readyPool: rows.filter((r) => r.billingStaged && r.eligible).length,
       invited: rows.filter((r) => r.inviteStatus === "invited").length,
       stalled: rows.filter((r) => r.inviteStatus === "stalled" || r.inviteStatus === "expired").length,
-      migrated: rows.filter((r) => r.inviteStatus === "migrated").length,
+      migrated: rows.filter((r) => r.inviteStatus === "migrated" && !r.isNative).length,
       fbPending: rows.filter((r) => r.freshbooksStopPending).length,
       staged: rows.filter((r) => r.synced).length,
       unassigned: rows.filter((r) => r.eligible && !r.assignedTo).length,
@@ -481,7 +482,9 @@ export default function MigrationConsole() {
       </td>
       <td style={td}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <StatusBadge status={r.inviteStatus} invitedAt={r.invitedAt} recipients={r.inviteRecipients} />
+          {r.isNative
+            ? <span title="Created on Platform 5.0 — never lived on 4.0; nothing was migrated" style={{ background: "#e8eaf6", color: "#3949ab", border: "1px solid #c5cae9", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>5.0 native</span>
+            : <StatusBadge status={r.inviteStatus} invitedAt={r.invitedAt} recipients={r.inviteRecipients} />}
           {(r.inviteStatus === "invited" || r.inviteStatus === "stalled" || r.inviteStatus === "expired") && (
             <button type="button" onClick={() => void resend(r)} disabled={resendingId === r.id}
               title="Resend the migration invite (fresh code)"
@@ -507,7 +510,8 @@ export default function MigrationConsole() {
             </button>
           )}
         </div>
-        {r.inviteStatus === "migrated" && (
+        {/* FreshBooks tracking is a 4.0->5.0 migration concept — natives never had FreshBooks. */}
+        {r.inviteStatus === "migrated" && !r.isNative && (
           <div style={{ fontSize: 11, marginTop: 4 }}>
             {r.freshbooksStoppedAt
               ? <span style={{ color: "#2e7d32" }} title={`stopped ${new Date(r.freshbooksStoppedAt).toLocaleString()}`}>FreshBooks stopped ✓ <button type="button" onClick={() => void markFbStopped(r, false)} style={{ fontSize: 10, color: "#9aa0a6", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>undo</button></span>
@@ -537,6 +541,12 @@ export default function MigrationConsole() {
     if (unassigned) ownerParts.push(`unassigned ×${unassigned}`);
     const allMine = members.length > 0 && owners.size === 1 && owners.has(me) && unassigned === 0;
     const busy = claimingGroup === groupId;
+    // Group fully on 5.0 (every member migrated or 5.0-native) → nothing left
+    // to migrate; show an inert state instead of "Migrate group…". All-native
+    // groups (born on 5.0) additionally have no Aurora counterpart, so "Sync
+    // group" is meaningless — hide it.
+    const allOn50 = members.length > 0 && members.every((m) => m.inviteStatus === "migrated");
+    const allNative = members.length > 0 && members.every((m) => m.isNative);
     return (
       <tr key={`g-${groupId}`} style={{ background: "#eef3fb" }}>
         <td colSpan={11} style={{ padding: "8px 10px", borderBottom: "1px solid #d6e1f2", borderTop: "2px solid #d6e1f2" }}>
@@ -549,21 +559,28 @@ export default function MigrationConsole() {
               {allMine ? "owned by you" : `owner: ${ownerParts.join(", ")}`}
             </span>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-              <button type="button" onClick={() => void syncGroup(groupId, groupName)} disabled={busy || syncingGroup !== null}
-                title="Pull every member dealer's current Platform 4.0 data (products, logo, settings) into 5.0"
-                style={{ height: 28, padding: "0 12px", border: "1px solid #2e7d32", borderRadius: 6, background: "#fff", color: "#2e7d32", fontSize: 12, fontWeight: 600, cursor: syncingGroup ? "default" : "pointer", opacity: syncingGroup && syncingGroup !== groupId ? 0.5 : 1 }}>
-                {syncingGroup === groupId ? "Syncing…" : "Sync group"}
-              </button>
+              {!allNative && (
+                <button type="button" onClick={() => void syncGroup(groupId, groupName)} disabled={busy || syncingGroup !== null}
+                  title="Pull every member dealer's current Platform 4.0 data (products, logo, settings) into 5.0"
+                  style={{ height: 28, padding: "0 12px", border: "1px solid #2e7d32", borderRadius: 6, background: "#fff", color: "#2e7d32", fontSize: 12, fontWeight: 600, cursor: syncingGroup ? "default" : "pointer", opacity: syncingGroup && syncingGroup !== groupId ? 0.5 : 1 }}>
+                  {syncingGroup === groupId ? "Syncing…" : "Sync group"}
+                </button>
+              )}
               <button type="button" onClick={() => setInviteAdminsGroup({ id: groupId, name: groupName ?? "Group" })}
                 title="Invite this group's admin(s) to set up their Platform 5.0 login"
                 style={{ height: 28, padding: "0 12px", border: "1px solid #7b1fa2", borderRadius: 6, background: "#fff", color: "#7b1fa2", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
                 Invite admins…
               </button>
-              <button type="button" onClick={() => setMigrateGroup({ id: groupId, name: groupName ?? "Group" })}
-                title="Migrate every member dealer + take the group's da-billing customer Live (guarded checklist)"
-                style={{ height: 28, padding: "0 12px", border: "none", borderRadius: 6, background: NAVY, color: "#ffa500", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                Migrate group…
-              </button>
+              {allOn50
+                ? <span title={allNative ? "Every member was created on 5.0 — nothing to migrate" : "Every active member is on 5.0"}
+                    style={{ height: 28, display: "inline-flex", alignItems: "center", padding: "0 12px", borderRadius: 6, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", fontSize: 12, fontWeight: 700 }}>
+                    ✓ Group on 5.0
+                  </span>
+                : <button type="button" onClick={() => setMigrateGroup({ id: groupId, name: groupName ?? "Group" })}
+                    title="Migrate every member dealer + take the group's da-billing customer Live (guarded checklist)"
+                    style={{ height: 28, padding: "0 12px", border: "none", borderRadius: 6, background: NAVY, color: "#ffa500", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                    Migrate group…
+                  </button>}
               <button type="button" onClick={() => void claimGroup(groupId, groupName)} disabled={busy}
                 title="Assign every dealer in this group to you (one owner per group)"
                 style={{ height: 28, padding: "0 12px", border: "1px solid #1976d2", borderRadius: 6, background: allMine ? "#e3f2fd" : "#fff", color: "#1976d2", fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}>

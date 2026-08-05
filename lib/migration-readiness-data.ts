@@ -31,7 +31,7 @@ async function fetchAll<T>(admin: Admin, table: string, columns: string, filter?
 
 const DEALER_COLS =
   "id, dealer_id, name, state, group_id, account_purpose, is_test, migration_status, invited_at, active, account_type, " +
-  "subscription_billed_to, billing_customer_id, logo_url, primary_contact_email, address, city, zip, inventory_dealer_id, last_synced_at";
+  "subscription_billed_to, billing_customer_id, logo_url, primary_contact_email, address, city, zip, inventory_dealer_id, last_synced_at, is_native";
 const DEALER_COLS_WITH_FLAGS = DEALER_COLS + ", migration_complex, template_confirmed";
 
 export interface ReadinessResult {

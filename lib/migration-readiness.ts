@@ -36,6 +36,8 @@ export interface ReadinessDealer {
   account_purpose: string | null;
   is_test: boolean | null;
   migration_status: string | null;
+  /** True = created ON 5.0 (migration 138) — status 'migrated' without a 4.0 past. */
+  is_native?: boolean | null;
   active?: boolean | null;
   migration_complex: boolean | null;
   template_confirmed: boolean | null;
@@ -97,7 +99,9 @@ export interface ReadinessRow {
   inviteRecipients: string[];
   // ── 13d: legacy FreshBooks recurring-stop tracking (operator-managed) ───────
   freshbooksStoppedAt: string | null;
-  freshbooksStopPending: boolean; // migrated but FreshBooks recurring not yet stopped
+  freshbooksStopPending: boolean; // migrated but FreshBooks recurring not yet stopped (never for natives)
+  /** True = born on 5.0 (migration 138): console shows "5.0 native", no FreshBooks affordances. */
+  isNative: boolean;
   // ── operator assignment (who owns this dealer's migration) ──────────────────
   assignedTo: string | null;
   // ── staging: raw dealers.migration_status ('pending' = synced/prepared) ─────
@@ -208,7 +212,7 @@ export function computeReadiness(
   const hasSelfServeContact = present(d.primary_contact_email) || ctx.hasDealerAdmin;
   let eligible = true;
   let eligibleReason = 'eligible';
-  if (d.migration_status === 'migrated') { eligible = false; eligibleReason = 'already migrated'; }
+  if (d.migration_status === 'migrated') { eligible = false; eligibleReason = d.is_native === true ? 'created on 5.0 — nothing to migrate' : 'already migrated'; }
   // Deactivated dealers (e.g. Dealer General rooftops out of the paid+active
   // scope, 2026-07-14) never migrate — blocks wave-send and claim-next too.
   else if (d.active === false) { eligible = false; eligibleReason = 'deactivated dealer'; }
@@ -237,7 +241,9 @@ export function computeReadiness(
     inviteStatus, invitedAt: d.invited_at ?? null, waveId: ctx.invitation?.wave_id ?? null,
     inviteRecipients: ctx.inviteRecipients ?? [],
     freshbooksStoppedAt: ctx.freshbooksStoppedAt ?? null,
-    freshbooksStopPending: inviteStatus === "migrated" && !ctx.freshbooksStoppedAt,
+    // Natives never had FreshBooks — nothing to stop, never "pending".
+    freshbooksStopPending: inviteStatus === "migrated" && !ctx.freshbooksStoppedAt && d.is_native !== true,
+    isNative: d.is_native === true,
     assignedTo: ctx.assignedTo ?? null,
     migrationStatus: d.migration_status ?? null,
     lastSyncedAt: d.last_synced_at ?? null,
