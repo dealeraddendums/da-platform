@@ -293,7 +293,16 @@ export async function fullSyncDealer(admin: Admin, row: FortellisDealerRow): Pro
 // ── Hourly delta: modified window add/update + deleted pass ────────────────────
 export async function deltaDealer(admin: Admin, row: FortellisDealerRow): Promise<SyncResult> {
   const dealerTextId = await resolveDealerTextId(admin, row);
-  const since = row.last_delta_at ? new Date(row.last_delta_at) : new Date(Date.now() - 60 * 60 * 1000);
+  // Window starts 5 minutes BEFORE the last successful delta (per the submitted
+  // Integration Workflow doc): the overlap protects against boundary misses on
+  // Fortellis's modifiedTimeRange, and re-seen VINs reconcile idempotently
+  // (existing-VIN map → update path, markSold no-ops when already inactive).
+  // Never-run fallback stays 1 hour back. Both passes (normal + deleted=true)
+  // share this window.
+  const OVERLAP_MS = 5 * 60 * 1000;
+  const since = row.last_delta_at
+    ? new Date(new Date(row.last_delta_at).getTime() - OVERLAP_MS)
+    : new Date(Date.now() - 60 * 60 * 1000);
   const until = new Date();
   const scope = scopeOf(row);
 
