@@ -371,6 +371,8 @@ type DealerInsert = {
   /** App-created dealers are V5-native: POST /api/dealers inserts them with
    *  'migrated' so the platform badge/gate never reads them as legacy 4.0. */
   migration_status?: string;
+  /** Born-on-5.0 marker (migration 138) — set true by every app creation path. */
+  is_native?: boolean;
   created_at?: string | null;
 };
 

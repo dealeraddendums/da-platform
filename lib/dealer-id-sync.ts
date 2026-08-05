@@ -87,7 +87,7 @@ export async function applyInventoryDealerIdChange(
     if (/^ss_/i.test(dealer.dealer_id) && !/^ss_/i.test(newInventoryId)) {
       const { error: gateErr } = await admin
         .from("dealers")
-        .update({ migration_status: "migrated" })
+        .update({ migration_status: "migrated", is_native: true })
         .eq("id", dealer.id)
         .neq("migration_status", "migrated");
       if (gateErr) {

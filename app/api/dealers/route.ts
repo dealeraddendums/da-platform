@@ -557,8 +557,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // migrate. Without this marker the row inherits the column default
     // 'legacy' and the platform badge shows "4.0" (and, for ids without an
     // ss_/ga_ prefix, the dashboard gate would bounce its users). Placed
-    // after ...rest so a client payload can never override it.
+    // after ...rest so a client payload can never override it. is_native
+    // (migration 138) marks it born-on-5.0 so the Migration Console shows
+    // "5.0 native" and never derives FreshBooks-stop-pending for it.
     migration_status: "migrated",
+    is_native: true,
   };
   let { data, error: dbError } = await admin.from("dealers").insert(insertPayload).select().single();
 

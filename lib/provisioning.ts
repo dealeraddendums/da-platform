@@ -65,6 +65,10 @@ export async function createTrialDealer(input: {
     name: sanitizeName(input.dealership),
     internal_id: internalId,
     account_type: "Trial",
+    // Born-on-5.0 marker (migration 138) — keeps the Migration Console from
+    // ever deriving FreshBooks affordances for this dealer, incl. after an
+    // ss_->real-id rename sets migration_status='migrated'.
+    is_native: true,
     primary_contact: input.contactName.trim(),
     primary_contact_email: input.email.trim().toLowerCase(),
     phone: input.phone || null,
