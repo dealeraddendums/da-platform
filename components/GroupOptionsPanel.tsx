@@ -7,6 +7,7 @@ import CorporateProductModal from "@/components/CorporateProductModal";
 import AssignProductModal from "@/components/AssignProductModal";
 import GroupBillingTab from "@/components/GroupBillingTab";
 import { decodeHtmlEntities } from "@/lib/format";
+import { RichName } from "@/lib/product-name";
 
 type Props = {
   groupId: string;
@@ -666,7 +667,9 @@ function OptionSection({ groupId }: { groupId: string }) {
                 return (
                   <tr key={opt.id} style={{ borderBottom: i < options.length - 1 ? "1px solid var(--border)" : "none", opacity: opt.active ? 1 : 0.5 }}>
                     <td className="px-4 py-2.5">
-                      <span style={{ color: "var(--text-primary)" }}>{opt.option_name}</span>
+                      {/* Rich-text names (colored spans, logo <img>) render sanitized
+                          — same pipeline as the dealer products table. */}
+                      <RichName name={opt.option_name} showLabel style={{ color: "var(--text-primary)" }} />
                     </td>
                     <td className="px-4 py-2.5" style={{ width: 120 }}>
                       <span style={{ color: "var(--text-secondary)" }}>{opt.option_price}</span>

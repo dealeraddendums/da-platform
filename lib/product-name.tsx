@@ -137,11 +137,39 @@ function runSanitize(raw: string, tags: string[], styleProps: Set<string>): stri
   }
 }
 
+// Legacy-ETL rows (Aurora-era, e.g. the 2026-05-10 LLumar imports) stored the
+// WHOLE rich-text value entity-ESCAPED ("&lt;img src=&quot;…&quot;/&gt;…").
+// DOMPurify rightly treats entities as literal text, so every surface except
+// the Edit modal (which runs decodeNameEntities before its preview) displayed
+// raw HTML source — including on printed stickers. Normalize at READ time:
+// when the value contains no real tag but does contain escaped angle
+// brackets, peel exactly ONE entity layer (same order as decodeNameEntities —
+// &amp; LAST so double-encoded values aren't collapsed) and adopt the decoded
+// value only if it now contains an authorable tag. A name that legitimately
+// renders escaped text (e.g. "Under &lt;$500&gt;") fails the tag probe and
+// stays untouched. Typed and picker-inserted HTML (stored raw) is unaffected.
+// XSS posture unchanged: the decoded value goes through the SAME sanitizer —
+// an escaped <script>/onerror payload decodes and is then stripped like any
+// raw one.
+const ESCAPED_TAG_PROBE = /<\s*(img|br|b|strong|i|em|u|span|sub|sup|p|ul|ol|li)[\s/>]/i;
+function normalizeEscapedHtml(raw: string): string {
+  if (raw.includes("<") || !/&lt;/i.test(raw)) return raw;
+  const decoded = raw
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;/g, "'")
+    .replace(/&#x0*27;/gi, "'")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&");
+  return ESCAPED_TAG_PROBE.test(decoded) ? decoded : raw;
+}
+
 /** Sanitize a product NAME — tight, inline-only allowlist (bold/colored span/
  *  logo img). Returns clean HTML safe for dangerouslySetInnerHTML. */
 export function sanitizeProductHtml(raw: string | null | undefined): string {
   if (!raw) return "";
-  return runSanitize(String(raw), NAME_TAGS, NAME_STYLE_PROPS);
+  return runSanitize(normalizeEscapedHtml(String(raw)), NAME_TAGS, NAME_STYLE_PROPS);
 }
 
 /** Sanitize a product DESCRIPTION — the name allowlist plus the block structure
@@ -151,7 +179,7 @@ export function sanitizeProductHtml(raw: string | null | undefined): string {
  *  canvas, print) so authored bullets/breaks/size survive instead of collapsing. */
 export function sanitizeProductDescription(raw: string | null | undefined): string {
   if (!raw) return "";
-  return runSanitize(String(raw), DESCRIPTION_TAGS, DESCRIPTION_STYLE_PROPS);
+  return runSanitize(normalizeEscapedHtml(String(raw)), DESCRIPTION_TAGS, DESCRIPTION_STYLE_PROPS);
 }
 
 // ── Parsed-name helpers (image metadata extraction) ──────────────────
