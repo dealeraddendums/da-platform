@@ -4,6 +4,21 @@ export const SNAP = 4;
 export const MIN_W = 40;
 export const MIN_H = 16;
 
+// CANVAS-ONLY sample content for the Suggested Products widget. Suggested
+// items exist only at print time, so pure authoring used to render an empty
+// placeholder — authors could not see that their box/font sizing overflows
+// with real content (the Napleton wrap incident). BuilderPage injects these
+// at RENDER TIME ONLY (never written into widget d / saved template JSON);
+// the PDF path always overwrites d.items from the vehicle's real suggested
+// options and never sets sampleBadge, so samples cannot leak into prints
+// (same guard philosophy as the 23d09ef subtotal/asking fix). Three items
+// with two-bullet descriptions ≈ realistic print volume.
+export const SAMPLE_SUGGESTED_ITEMS = [
+  { name: 'Appearance Protection', desc: '<ul><li>Professionally applied ceramic treatment protects exterior paint and interior surfaces.</li><li>Limited warranty guards against stains, odors, fading and small rips or tears.</li></ul>', price: '$998.00' },
+  { name: 'Theft Deterrent', desc: '<ul><li>Permanent theft deterrent system professionally installed.</li><li>Associated 3-year warranty pays toward a replacement vehicle if yours is stolen and declared a total loss.</li></ul>', price: '$399.00' },
+  { name: 'Key Replacement', desc: '<ul><li>Key/fob replacement coverage and locksmith assistance for the term selected.</li><li>Substitute transportation reimbursement during covered repairs.</li></ul>', price: '$429.00' },
+];
+
 export const BG_DEFAULT = 'https://new-addendum-backgrounds.s3.us-east-1.amazonaws.com/01_Addendum_Default.png';
 export const IS_BG_DEFAULT = 'https://new-infosheet-backgrounds.s3.us-east-1.amazonaws.com/BaseTemplate.png';
 export const IB_DEFAULT = 'https://new-infobox-images.s3.us-east-1.amazonaws.com/EPA_Infobox_Default.png';

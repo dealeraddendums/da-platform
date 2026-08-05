@@ -210,7 +210,13 @@ export function renderW(type: string, d: D, fontScale: number): string {
     if (items.length === 0) {
       return `<div style="padding:3px 0">${header}<div style="font-size:${szm}px;color:#bbb;font-style:italic;${inset || 'padding:0'}">Suggested products will appear here at print time.</div></div>`;
     }
-    const rows = items.map(it => renderProductRow(it, sz, szm, ls)).join('');
+    // Canvas authoring mode (BuilderPage injects sample items + this flag at
+    // render time — never persisted, never set on the PDF path): label the
+    // list so nobody mistakes samples for a dealer's real products.
+    const sampleNote = d.sampleBadge === true
+      ? `<div style="font-size:8px;color:#9aa0a6;font-style:italic;text-align:center;margin-top:3px">Sample — actual products appear at print time</div>`
+      : '';
+    const rows = items.map(it => renderProductRow(it, sz, szm, ls)).join('') + sampleNote;
     return `<div style="padding:3px 0">${header}${inset ? `<div style="${inset}">${rows}</div>` : rows}</div>`;
   }
 

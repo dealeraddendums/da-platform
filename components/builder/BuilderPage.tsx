@@ -6,6 +6,7 @@ import {
   PAPERS, LAYOUT, LAYOUT_INFOSHEET, WIDGET_LABELS, UNIQUE_WIDGETS,
   PALETTE_HIDDEN_IN_ADDENDUM, PALETTE_HIDDEN_IN_INFOSHEET,
   DEFS, DEFAULT_CUSTOM_WIDGETS, snapV, makeWidget, getPaperDims,
+  SAMPLE_SUGGESTED_ITEMS,
 } from './constants';
 import { renderW } from './widgetRenderer';
 import RichTextEditor from '@/components/RichTextEditor';
@@ -1901,10 +1902,22 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                         onPointerDown={e => startResize(e, w.id, dir)}
                       />
                     ))}
-                    {/* Content */}
+                    {/* Content. Suggested Products: real items exist only at
+                        print time, so authoring injects SAMPLE items at render
+                        time only — w.d and the saved template stay untouched,
+                        and the PDF path (which always overwrites d.items from
+                        real options, never sets sampleBadge) can't pick them
+                        up. Lets authors see true content volume/overflow while
+                        tuning box size + the label/products font pickers. */}
                     <div
                       style={{ width: '100%', height: '100%', overflow: 'visible' }}
-                      dangerouslySetInnerHTML={{ __html: renderW(w.type, w.d, fontScale) }}
+                      dangerouslySetInnerHTML={{ __html: renderW(
+                        w.type,
+                        w.type === 'suggested_options' && (!Array.isArray(w.d.items) || (w.d.items as unknown[]).length === 0)
+                          ? { ...w.d, items: SAMPLE_SUGGESTED_ITEMS, sampleBadge: true }
+                          : w.d,
+                        fontScale,
+                      ) }}
                     />
                   </div>
                 );
