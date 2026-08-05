@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import ProductAuthoringFields from "@/components/ProductAuthoringFields";
-import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
-import FuelRuleSelect from "@/components/FuelRuleSelect";
+import ProductRulesFields, { BLANK_RULES, type ProductRulesValue } from "@/components/ProductRulesFields";
 import type { GroupOptionRow } from "@/lib/db";
 
 type FormState = {
@@ -14,18 +13,10 @@ type FormState = {
   locked: boolean;              // true (default) = dealer cannot remove on a vehicle
   applies_to: "all" | "rules" | "none";
   ad_types: string[];           // ["New","Used","CPO"]
-  models: string;
-  models_not: boolean;
-  trims: string;
-  trims_not: boolean;
-  makes: string;
-  makes_not: boolean;
-  fuel: string;
-  fuel_not: boolean;
   separator_above: boolean;
   separator_below: boolean;
   spaces: number;
-};
+} & ProductRulesValue;
 
 const BLANK: FormState = {
   option_name: "",
@@ -35,14 +26,7 @@ const BLANK: FormState = {
   locked: true,
   applies_to: "all",
   ad_types: ["New", "Used", "CPO"],
-  models: "",
-  models_not: false,
-  trims: "",
-  trims_not: false,
-  makes: "",
-  makes_not: false,
-  fuel: "",
-  fuel_not: false,
+  ...BLANK_RULES,
   separator_above: false,
   separator_below: false,
   spaces: 0,
@@ -64,8 +48,17 @@ function rowToForm(r: GroupOptionRow): FormState {
     trims_not: r.trims_not ?? false,
     makes: r.makes ?? "",
     makes_not: r.makes_not ?? false,
+    body_styles: r.body_styles ?? "",
     fuel: r.fuel ?? "",
     fuel_not: r.fuel_not ?? false,
+    year_condition: r.year_condition ?? 0,
+    year_value: r.year_value != null ? String(r.year_value) : "",
+    miles_condition: r.miles_condition ?? 0,
+    miles_value: r.miles_value != null ? String(r.miles_value) : "",
+    msrp_condition: r.msrp_condition ?? 0,
+    msrp1: r.msrp1 != null ? String(r.msrp1) : "",
+    msrp2: r.msrp2 != null ? String(r.msrp2) : "",
+    show_models_only: r.show_models_only ?? false,
     separator_above: r.separator_above ?? false,
     separator_below: r.separator_below ?? false,
     spaces: r.spaces ?? 0,
@@ -156,8 +149,19 @@ export default function CorporateProductModal({
       trims_not: form.trims_not,
       makes: form.makes.trim(),
       makes_not: form.makes_not,
+      body_styles: form.body_styles.trim(),
       fuel: form.fuel.trim(),
       fuel_not: form.fuel_not,
+      // Numeric rule values: number-or-null (null clears — the API's pickRich
+      // accepts both). Same string->int conversion as the dealer modal's save.
+      year_condition: form.year_condition,
+      year_value: form.year_value ? parseInt(form.year_value) : null,
+      miles_condition: form.miles_condition,
+      miles_value: form.miles_value ? parseInt(form.miles_value) : null,
+      msrp_condition: form.msrp_condition,
+      msrp1: form.msrp1 ? parseInt(form.msrp1) : null,
+      msrp2: form.msrp2 ? parseInt(form.msrp2) : null,
+      show_models_only: form.show_models_only,
       separator_above: form.separator_above,
       separator_below: form.separator_below,
       spaces: form.spaces,
@@ -279,28 +283,16 @@ export default function CorporateProductModal({
             </div>
           </div>
 
+          {/* Rules — the SAME shared block as the dealer Configure Product
+              modal (components/ProductRulesFields): Make/Model/Trim with
+              IN/NOT-IN, Bodystyle, Fuel, Year, Mileage, MSRP, show-models-only.
+              The engine (options-engine matchesRulesRow) evaluates the full
+              set identically for group_options. */}
           {form.applies_to === "rules" && (
-            <div style={{ marginBottom: 14 }}>
-              <MakeModelTrimSelect
-                make={form.makes}
-                model={form.models}
-                trim={form.trims}
-                onChange={({ make, model, trim }) => {
-                  setForm(prev => ({ ...prev, makes: make, models: model, trims: trim }));
-                }}
-                makeRight={<NotPill on={form.makes_not} onClick={() => f("makes_not", !form.makes_not)} />}
-                modelRight={<NotPill on={form.models_not} onClick={() => f("models_not", !form.models_not)} />}
-                trimRight={<NotPill on={form.trims_not} onClick={() => f("trims_not", !form.trims_not)} />}
-              />
-              <div style={{ marginTop: 12 }}>
-                <FuelRuleSelect
-                  value={form.fuel}
-                  onChange={v => f("fuel", v)}
-                  not={form.fuel_not}
-                  onNotChange={v => f("fuel_not", v)}
-                />
-              </div>
-            </div>
+            <ProductRulesFields
+              value={form}
+              onChange={(patch) => setForm(prev => ({ ...prev, ...patch }))}
+            />
           )}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
@@ -338,19 +330,5 @@ export default function CorporateProductModal({
         </div>
       </div>
     </div>
-  );
-}
-
-function NotPill({ on, onClick }: { on: boolean; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick}
-      style={{
-        height: 36, padding: "0 12px", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer",
-        border: `1px solid ${on ? "#c62828" : "#e0e0e0"}`,
-        background: on ? "#ffebee" : "#fff",
-        color: on ? "#c62828" : "#78828c", whiteSpace: "nowrap",
-      }}>
-      {on ? "NOT IN" : "IN"}
-    </button>
   );
 }

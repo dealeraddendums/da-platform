@@ -5,8 +5,7 @@ import { formatOptionPrice } from "@/lib/option-price";
 import type { AddendumLibraryRow } from "@/lib/db";
 import { RichName } from "@/lib/product-name";
 import ProductAuthoringFields from "@/components/ProductAuthoringFields";
-import MakeModelTrimSelect from "@/components/MakeModelTrimSelect";
-import FuelRuleSelect from "@/components/FuelRuleSelect";
+import ProductRulesFields from "@/components/ProductRulesFields";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -135,75 +134,6 @@ const btnGhost: React.CSSProperties = {
   border: "1px solid #e0e0e0", borderRadius: 4, cursor: "pointer", fontSize: 13,
 };
 
-// ── TagInput ───────────────────────────────────────────────────────────────────
-
-function TagInput({ value, onChange, placeholder = "Type and press Enter…" }: {
-  value: string; onChange: (v: string) => void; placeholder?: string;
-}) {
-  const [input, setInput] = useState("");
-  const tags = value ? value.split(",").map(s => s.trim()).filter(Boolean) : [];
-
-  function add() {
-    const trimmed = input.trim();
-    if (!trimmed) return;
-    const next = [...tags.filter(t => t !== trimmed), trimmed].join(",");
-    onChange(next);
-    setInput("");
-  }
-
-  function remove(tag: string) {
-    onChange(tags.filter(t => t !== tag).join(","));
-  }
-
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 6 }}>
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }}
-          placeholder={placeholder}
-          style={{ ...inp, flex: 1 }}
-        />
-        <button type="button" onClick={add} style={{ ...btnGhost, padding: "7px 12px" }}>+</button>
-      </div>
-      {tags.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
-          {tags.map(t => (
-            <span key={t} style={{ background: "#e3f2fd", color: "#1565c0", fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 12, display: "flex", alignItems: "center", gap: 4 }}>
-              {t}
-              <button type="button" onClick={() => remove(t)} style={{ background: "none", border: "none", cursor: "pointer", color: "#1565c0", fontSize: 13, padding: 0, lineHeight: 1 }}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── InNotIn ────────────────────────────────────────────────────────────────────
-
-function InNotIn({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: "1px solid #e0e0e0", width: "fit-content" }}>
-      {[false, true].map(v => (
-        <button
-          key={String(v)}
-          type="button"
-          onClick={() => onChange(v)}
-          style={{
-            padding: "5px 12px", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700,
-            background: value === v ? "#1976d2" : "#fff",
-            color: value === v ? "#fff" : "#55595c",
-          }}
-        >
-          {v ? "NOT IN" : "IN"}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // ── Option form ────────────────────────────────────────────────────────────────
 
 function OptionForm({
@@ -309,103 +239,14 @@ function OptionForm({
         </div>
       ))}
 
-      {/* Rules section — only shown when "Assign with Rules" */}
+      {/* Rules section — only shown when "Assign with Rules". Shared with the
+          group Corporate Product modal (components/ProductRulesFields) so the
+          two rule UIs can't drift. */}
       {appliesTo === "rules" && (
-        <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: "14px 16px", marginBottom: 14, background: "#fafafa" }}>
-          <MakeModelTrimSelect
-            make={form.makes}
-            model={form.models}
-            trim={form.trims}
-            onChange={({ make, model, trim }) => {
-              f("makes", make);
-              f("models", model);
-              f("trims", trim);
-            }}
-            makeRight={<InNotIn value={form.makes_not} onChange={v => f("makes_not", v)} />}
-            modelRight={<InNotIn value={form.models_not} onChange={v => f("models_not", v)} />}
-            trimRight={<InNotIn value={form.trims_not} onChange={v => f("trims_not", v)} />}
-          />
-
-          <div style={{ marginTop: 14 }}>
-            {row("Bodystyle", (
-              <TagInput value={form.body_styles} onChange={v => f("body_styles", v)} placeholder="All bodystyles" />
-            ))}
-          </div>
-
-          <div style={{ marginTop: 14 }}>
-            <FuelRuleSelect
-              value={form.fuel}
-              onChange={v => f("fuel", v)}
-              not={form.fuel_not}
-              onNotChange={v => f("fuel_not", v)}
-            />
-          </div>
-
-          {row("Year", (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <select value={form.year_condition} onChange={e => f("year_condition", parseInt(e.target.value))}
-                style={{ ...inp, width: 130, flex: "none" }}>
-                <option value={0}>All years</option>
-                <option value={1}>Equal to</option>
-                <option value={2}>Before</option>
-                <option value={3}>After</option>
-              </select>
-              {form.year_condition !== 0 && (
-                <input type="number" value={form.year_value} onChange={e => f("year_value", e.target.value)}
-                  style={{ ...inp, width: 100, flex: "none" }} placeholder="e.g. 2020" min={1990} max={2030} />
-              )}
-            </div>
-          ))}
-
-          {row("Mileage", (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <select value={form.miles_condition} onChange={e => f("miles_condition", parseInt(e.target.value))}
-                style={{ ...inp, width: 130, flex: "none" }}>
-                <option value={0}>All mileage</option>
-                <option value={1}>Under</option>
-                <option value={2}>Over</option>
-              </select>
-              {form.miles_condition !== 0 && (
-                <input type="number" value={form.miles_value} onChange={e => f("miles_value", e.target.value)}
-                  style={{ ...inp, width: 120, flex: "none" }} placeholder="miles" min={0} />
-              )}
-            </div>
-          ))}
-
-          {row("MSRP", (
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <select value={form.msrp_condition} onChange={e => f("msrp_condition", parseInt(e.target.value))}
-                style={{ ...inp, width: 130, flex: "none" }}>
-                <option value={0}>All prices</option>
-                <option value={1}>Under</option>
-                <option value={2}>Over</option>
-                <option value={3}>Between</option>
-              </select>
-              {form.msrp_condition !== 0 && (
-                <input type="number" value={form.msrp1} onChange={e => f("msrp1", e.target.value)}
-                  style={{ ...inp, width: 120, flex: "none" }} placeholder="$" min={0} />
-              )}
-              {form.msrp_condition === 3 && (
-                <>
-                  <span style={{ fontSize: 12, color: "#78828c" }}>and</span>
-                  <input type="number" value={form.msrp2} onChange={e => f("msrp2", e.target.value)}
-                    style={{ ...inp, width: 120, flex: "none" }} placeholder="$" min={0} />
-                </>
-              )}
-            </div>
-          ))}
-
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#333" }}>
-            <input type="checkbox" checked={form.show_models_only}
-              onChange={e => f("show_models_only", e.target.checked)}
-              style={{ width: 14, height: 14 }} />
-            Show only for specified models
-          </label>
-
-          <p style={{ fontSize: 11, color: "#78828c", marginTop: 10, marginBottom: 0 }}>
-            Leave any field empty to match all values for that field.
-          </p>
-        </div>
+        <ProductRulesFields
+          value={form}
+          onChange={(patch) => setForm(prev => ({ ...prev, ...patch }))}
+        />
       )}
 
       {/* Always-visible bottom options */}
