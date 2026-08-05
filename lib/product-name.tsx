@@ -46,6 +46,17 @@ const NAME_STYLE_PROP_LIST = [
   "font-style",
   "text-decoration",
   "background-color",     // for highlighter-style spans
+  // Authored image sizing ("width:150px;height:auto" on a logo <img>). Without
+  // these the sanitizer stripped the author's size and logos printed at
+  // NATURAL resolution — a 1000px LLumar logo blowing out the Required
+  // Products row on real stickers. Values are still length-checked and
+  // url()/expression-rejected by filterStyleAttribute; purely cosmetic props.
+  // (RichName table cells are unaffected — applyImgConstraint replaces the
+  // style attribute wholesale there.)
+  "width",
+  "height",
+  "max-width",
+  "max-height",
 ];
 const NAME_STYLE_PROPS = new Set(NAME_STYLE_PROP_LIST);
 const DESCRIPTION_STYLE_PROPS = new Set([
