@@ -275,9 +275,17 @@ function computeFields(
   const woPositives = positives.filter((o) => !isAddedMarkup(o.name) && !isCustomExcluded(o.name));
   const woTotal = woPositives.reduce((s, o) => s + o.price, 0);
 
+  // Sanity guard (2026-08-05): with no base price there is no meaningful
+  // GRAND_TOTAL or SELLING_PRICE — options-only math produced NEGATIVE grand
+  // totals on unpriced vehicles (GRAND_TOTAL = -8000 when the row was just a
+  // discount; Tuttle Tustin / Lincoln Irvine spot check). A BLANK cell tells
+  // the provider "no value"; a negative or options-only number is wrong data.
+  // Option/discount/markup/WO columns still emit — they're price-independent.
+  const hasBase = msrp > 0;
+
   return {
     TOTAL_ADDS: money(totalAdds),
-    SELLING_PRICE: money(msrp - discounts),
+    SELLING_PRICE: hasBase ? money(msrp - discounts) : "",
     OPTION_LIST: options.map((o) => o.name).join("\n"),
     OPTION_LIST_COMMA: options.map((o) => o.name).join(", "),
     OPTION_PRICE: money(totalAdds),
@@ -290,7 +298,7 @@ function computeFields(
     OP_PRICE_WO_DISCOUNT_MARKUP: money(woTotal),
     OPTIONS_WO_DISCOUNT_MARKUP: woPositives.map((o) => o.name).join(", "),
     ADDED_MARKUP_TEXT: markups.map((o) => o.name).join(", "),
-    GRAND_TOTAL: money(msrp + totalAdds - discounts),
+    GRAND_TOTAL: hasBase ? money(msrp + totalAdds - discounts) : "",
   };
 }
 
