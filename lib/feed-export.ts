@@ -421,12 +421,12 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
 
   const { data: feedDealers } = await admin
     .from("feed_company_dealers")
-    .select("dealer_uuid, feed_dealer_id, dealers(id, dealer_id, name, group_id)")
+    .select("dealer_uuid, feed_dealer_id, dealers(id, dealer_id, name, group_id, migration_status)")
     .eq("feed_company_id", feedId) as {
       data: Array<{
         dealer_uuid: string;
         feed_dealer_id: string;
-        dealers: { id: string; dealer_id: string; name: string; group_id: string | null } | null;
+        dealers: { id: string; dealer_id: string; name: string; group_id: string | null; migration_status: string | null } | null;
       }> | null;
     };
 
@@ -594,20 +594,36 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
         ...freshLib.map((l: any) => ({ name: String(l.option_name), price: parseOptionPriceValue(l.item_price), rawPrice: String(l.item_price ?? "") })),
       ];
 
-      // No saved/group products for this vehicle. Two fallback sources, in
-      // PRECEDENCE ORDER (this order matters — getting it backwards zeroed 72
-      // legacy Tuttle rows on 2026-07-31):
-      //   1. addendum_data — AUTHORITATIVE for unmigrated dealers whose real
-      //      products live there (the live widget/PDF render exactly this). A
-      //      legacy dealer often ALSO has a stale/NC-priced library that would
-      //      rule-match, so the seed must NOT pre-empt addendum_data.
-      //   2. library seed (autoMatchedLibraryRows) — the editor's "matched"
-      //      preview, for 5.0-native/synced NEVER-saved vehicles that have no
-      //      addendum_data at all (the original bug: they exported zeros).
-      if (effective.length === 0) {
-        const legacy = addendumByVin.get(String(dv.vin ?? "").trim().toUpperCase()) ?? [];
+      // Legacy addendum_data items MERGE with the 5.0 rows for UNMIGRATED
+      // dealers (2026-08-06, Tuttle Commercial FC470000 proof case): the old
+      // either/or fallback fired only when the 5.0 pipeline yielded NOTHING,
+      // so one leftover 5.0 row (a pipe-priced Doc Fee) suppressed the entire
+      // legacy addendum — the MARATHON body vanished from the export while the
+      // vehicle page's Legacy section promised it "appears in feeds".
+      //
+      // Merge rules:
+      //   • 5.0 rows FIRST, then legacy items whose name doesn't match any 5.0
+      //     row (case-insensitive, entity-decoded) — intentional 5.0 edits stay
+      //     authoritative on name collisions.
+      //   • Vehicle with ONLY legacy items ⇒ merge with empty 5.0 set = the old
+      //     fallback output, unchanged.
+      //   • Migrated dealers: NO merge, ever — their behavior is exactly the
+      //     old either/or (5.0 rows, with the empty-set fallbacks below).
+      //   • The pipe gate below applies to the merged set (pipe items from
+      //     EITHER source stay out of the export).
+      // The library seed (autoMatchedLibraryRows — never-saved 5.0 vehicles)
+      // still only fires when BOTH sources are empty; addendum_data keeps
+      // precedence over it (the 2026-07-31 lesson: the seed must not pre-empt
+      // authoritative legacy data).
+      const mergeLegacy = dealer.migration_status !== "migrated";
+      const legacy = addendumByVin.get(String(dv.vin ?? "").trim().toUpperCase()) ?? [];
+      const dedupeKey = (n: string) => decodeEntities(String(n)).trim().toLowerCase();
+      if (mergeLegacy && legacy.length > 0) {
+        const names50 = new Set(effective.map((o) => dedupeKey(o.name)));
+        effective = [...effective, ...legacy.filter((l) => !names50.has(dedupeKey(l.name)))];
+      } else if (effective.length === 0) {
         if (legacy.length > 0) {
-          effective = legacy;
+          effective = legacy; // migrated-dealer fallback — unchanged behavior
         } else if (saved.length === 0) {
           effective = autoMatchedLibraryRows(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
