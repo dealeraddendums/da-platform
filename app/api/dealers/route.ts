@@ -156,9 +156,14 @@ function sanitizeName(name: string | null | undefined): string {
 async function getPrintCounts(admin: ReturnType<typeof createAdminSupabaseClient>, dealerIds: string[]) {
   if (dealerIds.length === 0) return { lifetime: {} as Record<string, number>, recent: {} as Record<string, number> };
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  // ADDENDUM prints only — 4.0's LAST30 (the 5/4 split's other side) counts
+  // addendums exclusively (buyer guide/infosheet are separate flags there),
+  // so both sides of the split and the dealer Dashboard share one definition:
+  // distinct vehicles with an addendum printed. (Trial caps/HubSpot keep the
+  // all-doc-types printedVehicleCount policy.)
   const [lifetimeRes, recentRes] = await Promise.all([
-    admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).limit(50000),
-    admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).gte("created_at", thirtyDaysAgo).limit(10000),
+    admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).eq("document_type", "addendum").limit(50000),
+    admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).eq("document_type", "addendum").gte("created_at", thirtyDaysAgo).limit(10000),
   ]);
   // DISTINCT vehicles per dealer, not rows — a row is logged per vehicle per
   // PDF generation, so reprints inflate row counts (multiprint-qa Issue B).

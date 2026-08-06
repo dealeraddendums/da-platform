@@ -587,19 +587,20 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                     <td className="px-4 py-3 text-sm font-medium" style={{ color: d.last_30_prints === 0 && d.lifetime_prints >= 50 ? "#ffa500" : "var(--text-primary)" }}>
                       {d.last_30_prints.toLocaleString()}
                     </td>
-                    {/* 5/4 split: last-30 prints as {5.0}/{4.0}. 5.0 side =
-                        print_history distinct vehicles (same number as the
-                        Last 30 Days column / dealer Dashboard); 4.0 side =
-                        Aurora-derived dealers.last30. "N/—" for 5.0 dealers
-                        (their 4.0 refresh stops, the stored value is stale);
-                        "0/N" = still printing on 4.0 only. */}
+                    {/* 5/4 split: last-30 ADDENDUM prints as {5.0}/{4.0}.
+                        5.0 side = print_history distinct vehicles (same number
+                        as the Last 30 Days column / dealer Dashboard); 4.0
+                        side = dealers.last30 mirroring Aurora dealer_dim.LAST30
+                        (same number 4.0's own dashboard shows the dealer) —
+                        refreshed nightly for EVERY dealer incl. migrated, since
+                        dual-printing is real (Lehighton: 42 on 5.0 AND 9 on 4.0
+                        in the same window). "0/N" = still on 4.0 only;
+                        "N/0" = fully off 4.0. */}
                     <td className="px-4 py-3 text-sm" style={{ color: "var(--text-primary)", whiteSpace: "nowrap" }}
-                      title="Last-30-day prints: 5.0 / 4.0">
+                      title="Last-30-day addendum prints: 5.0 / 4.0">
                       {d.last_30_prints.toLocaleString()}
                       <span style={{ color: "var(--text-muted)" }}>/</span>
-                      {platformVersion(d) === "5.0"
-                        ? <span style={{ color: "var(--text-muted)" }}>—</span>
-                        : (d.last30_40 ?? 0).toLocaleString()}
+                      {(d.last30_40 ?? 0).toLocaleString()}
                     </td>
                     {role === "super_admin" && (
                       <td className="px-4 py-3 text-center">

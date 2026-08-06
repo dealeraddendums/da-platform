@@ -168,9 +168,9 @@ async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId:
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active")
       .gte("date_added", startOfToday.toISOString()),
-    printedVehicleCount(admin, { dealerId, since: iso30 }),
-    printedVehicleCount(admin, { dealerId, since: iso365 }),
-    printedVehicleCount(admin, { dealerId }),
+    printedVehicleCount(admin, { dealerId, since: iso30, docType: "addendum" }),
+    printedVehicleCount(admin, { dealerId, since: iso365, docType: "addendum" }),
+    printedVehicleCount(admin, { dealerId, docType: "addendum" }),
     // Coverage % numerator only: active vehicles carrying the printed flag
     // (legacy ETL-printed + platform-printed uniformly).
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })

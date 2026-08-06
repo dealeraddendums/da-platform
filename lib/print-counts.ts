@@ -20,6 +20,13 @@ export interface PrintedVehicleCountOpts {
   dealerIds?: string[];
   /** ISO timestamp window start; omit for lifetime. */
   since?: string;
+  /** Restrict to one document type (e.g. "addendum"). The 4.0 platform's
+   *  LAST30 counts ADDENDUM prints only (buyer guide/infosheet live in
+   *  separate flags there), so surfaces comparing 5.0-vs-4.0 activity pass
+   *  "addendum" to count apples-to-apples. Omit = all doc types (trial cap /
+   *  HubSpot policy unchanged). Uses the select path (the RPC has no
+   *  doc-type parameter). */
+  docType?: "addendum" | "infosheet" | "buyer_guide";
 }
 
 /**
@@ -35,7 +42,9 @@ export async function printedVehicleCount(
   admin: Admin,
   opts: PrintedVehicleCountOpts = {},
 ): Promise<number> {
-  const { dealerId, dealerIds, since } = opts;
+  const { dealerId, dealerIds, since, docType } = opts;
+
+  if (docType) return distinctVehicleSelect(admin, { dealerId, dealerIds, since, docType });
 
   const { data, error } = await admin.rpc("printed_vehicle_count", {
     p_dealer_id: dealerId ?? null,
@@ -44,11 +53,18 @@ export async function printedVehicleCount(
   });
   if (!error && typeof data === "number") return data;
   console.error("[print-counts] rpc printed_vehicle_count failed, using fallback:", error?.message);
+  return distinctVehicleSelect(admin, { dealerId, dealerIds, since });
+}
 
+async function distinctVehicleSelect(
+  admin: Admin,
+  { dealerId, dealerIds, since, docType }: PrintedVehicleCountOpts,
+): Promise<number> {
   let q = admin.from("print_history").select("vehicle_id").limit(50000);
   if (dealerId) q = q.eq("dealer_id", dealerId);
   else if (dealerIds) q = q.in("dealer_id", dealerIds);
   if (since) q = q.gte("created_at", since);
+  if (docType) q = q.eq("document_type", docType);
   const { data: rows } = await q;
   const seen = new Set<string>();
   for (const r of rows ?? []) if (r.vehicle_id) seen.add(r.vehicle_id as string);
