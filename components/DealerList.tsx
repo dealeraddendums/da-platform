@@ -16,6 +16,8 @@ type DealerListRow = DealerRow & {
   group_name: string | null;
   lifetime_prints: number;
   last_30_prints: number;
+  /** 4.0-side last-30 prints (dealers.last30, Aurora-derived). Stale for 5.0 dealers — render "—". */
+  last30_40: number;
   hubspot_company_id: number | null;
   has_users: boolean;
   tags: Tag[];
@@ -59,7 +61,7 @@ function churnRisk(d: DealerListRow): "critical" | "low" | "none" {
 
 const PER_PAGE = 25;
 
-type SortCol = "name" | "group_name" | "active" | "account_type" | "lifetime_prints" | "last_30_prints" | "created_at";
+type SortCol = "name" | "group_name" | "active" | "account_type" | "lifetime_prints" | "last_30_prints" | "created_at" | "split_40";
 
 // Display labels for every account_type form we've ever written to the
 // DB: short product-ids, long "Monthly Subscription …" names, bare
@@ -89,28 +91,6 @@ function subscriptionLabel(accountType: string | null): string {
   // so price-tagged migrations resolve to a known label.
   const trimmed = accountType.split(" $")[0].trim();
   return SUBSCRIPTION_LABELS[trimmed] ?? "Free";
-}
-
-const MIN_DATE = new Date("2015-01-01").getTime();
-
-function fmtCreated(legacyId: number | null | undefined, createdAt?: string | null): string {
-  // Legacy migrated dealers carry a Unix-seconds legacy_id from Aurora; that
-  // gives us the original onboard date. Platform-created dealers have
-  // legacy_id = null, so fall back to dealers.created_at for those.
-  if (legacyId && legacyId > 0) {
-    const ms = legacyId * 1000;
-    if (ms >= MIN_DATE && ms <= Date.now()) {
-      const d = new Date(ms);
-      return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
-    }
-  }
-  if (createdAt) {
-    const d = new Date(createdAt);
-    if (!Number.isNaN(d.getTime())) {
-      return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
-    }
-  }
-  return "Very old";
 }
 
 export default function DealerList({ role = "dealer_user" }: { role?: string }) {
@@ -493,7 +473,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                   { label: "Subscription",     col: "account_type" as SortCol },
                   { label: "Lifetime Prints",  col: "lifetime_prints" as SortCol },
                   { label: "Last 30 Days",     col: "last_30_prints" as SortCol },
-                  { label: "Created",          col: "created_at" as SortCol },
+                  { label: "5/4 split",        col: "split_40" as SortCol },
                 ]).map(({ label, col }) => (
                   <th
                     key={col}
@@ -607,8 +587,19 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                     <td className="px-4 py-3 text-sm font-medium" style={{ color: d.last_30_prints === 0 && d.lifetime_prints >= 50 ? "#ffa500" : "var(--text-primary)" }}>
                       {d.last_30_prints.toLocaleString()}
                     </td>
-                    <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
-                      {fmtCreated(d.legacy_id, d.created_at)}
+                    {/* 5/4 split: last-30 prints as {5.0}/{4.0}. 5.0 side =
+                        print_history distinct vehicles (same number as the
+                        Last 30 Days column / dealer Dashboard); 4.0 side =
+                        Aurora-derived dealers.last30. "N/—" for 5.0 dealers
+                        (their 4.0 refresh stops, the stored value is stale);
+                        "0/N" = still printing on 4.0 only. */}
+                    <td className="px-4 py-3 text-sm" style={{ color: "var(--text-primary)", whiteSpace: "nowrap" }}
+                      title="Last-30-day prints: 5.0 / 4.0">
+                      {d.last_30_prints.toLocaleString()}
+                      <span style={{ color: "var(--text-muted)" }}>/</span>
+                      {platformVersion(d) === "5.0"
+                        ? <span style={{ color: "var(--text-muted)" }}>—</span>
+                        : (d.last30_40 ?? 0).toLocaleString()}
                     </td>
                     {role === "super_admin" && (
                       <td className="px-4 py-3 text-center">

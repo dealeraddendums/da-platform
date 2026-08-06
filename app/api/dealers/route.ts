@@ -222,7 +222,7 @@ async function geocodeDealer(
   }
 }
 
-type SortableCol = "name" | "active" | "account_type" | "created_at" | "lifetime_prints" | "last_30_prints" | "group_name";
+type SortableCol = "name" | "active" | "account_type" | "created_at" | "lifetime_prints" | "last_30_prints" | "group_name" | "split_40";
 // Sort the "created" column by the real created_at timestamp. The
 // previous remap to legacy_id was a perf optimisation (sequential int,
 // indexed) that silently broke for platform-created dealers — legacy_id
@@ -231,8 +231,11 @@ type SortableCol = "name" | "active" | "account_type" | "created_at" | "lifetime
 // off the first page. Surfaced as "group dealers missing from the
 // list" because most group dealers were created on the new platform.
 // Both Aurora-migrated and platform-native dealers have created_at.
-const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "created_at"]);
-const DB_SORT_COL_MAP: Partial<Record<SortableCol, string>> = {};
+const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "created_at", "split_40"]);
+// split_40 sorts the FULL set by the 4.0-side count (dealers.last30 is a real
+// DB column) so "who's still on 4.0" floats across pages; the 5.0-count
+// tiebreak is applied per page below.
+const DB_SORT_COL_MAP: Partial<Record<SortableCol, string>> = { split_40: "last30" };
 
 /**
  * GET /api/dealers
@@ -450,13 +453,35 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     group_name: (d.groups as { name: string } | null)?.name ?? null,
     lifetime_prints: lifetime[d.dealer_id as string] ?? 0,
     last_30_prints: recent[d.dealer_id as string] ?? 0,
+    // 4.0-side print activity (Aurora dealer_dim.LAST30 via the nightly
+    // last30-only refresh). 5.0 prints never write to Aurora, so this is a
+    // clean "still printing on 4.0" signal; stale for migrated/native dealers
+    // (their nightly refresh stops) — the UI shows "—" for those.
+    last30_40: (d.last30 as number | null) ?? 0,
     hubspot_company_id: hubspotMap[d.inventory_dealer_id as string] ?? null,
     has_users: dealersWithUsers.has(d.dealer_id as string),
     tags: tagMap[d.id as string] ?? [],
   }));
 
   // In-memory sort for computed/joined columns
-  if (sortCol === "lifetime_prints") {
+  if (sortCol === "split_40") {
+    // Page-level tiebreak on the 5.0 count (DB already ordered the full set by
+    // the 4.0 count / dealers.last30 above).
+    enriched = enriched.sort((a, b) => {
+      const pa = (a.last30_40 as number) - (b.last30_40 as number);
+      if (pa !== 0) return sortDir ? pa : -pa;
+      const sa = a.last_30_prints - b.last_30_prints;
+      return sortDir ? sa : -sa;
+    });
+  } else if (sortCol === "active") {
+    // Status sort must group by PLATFORM too (Active 5.0 vs Active 4.0) — the
+    // badge derives platform at render, so the bare boolean interleaved them.
+    // Page-level exact ordering: active, then 5.0 before 4.0, then name.
+    const isV5 = (d: Record<string, unknown>) =>
+      d.migration_status === "migrated" || String(d.dealer_id ?? "").startsWith("ss_") || String(d.dealer_id ?? "").startsWith("ga_");
+    const key = (d: Record<string, unknown>) => `${d.active ? 1 : 0}-${isV5(d) ? 1 : 0}-${String(d.name ?? "")}`;
+    enriched = enriched.sort((a, b) => sortDir ? key(a).localeCompare(key(b)) : key(b).localeCompare(key(a)));
+  } else if (sortCol === "lifetime_prints") {
     enriched = enriched.sort((a, b) => sortDir ? a.lifetime_prints - b.lifetime_prints : b.lifetime_prints - a.lifetime_prints);
   } else if (sortCol === "last_30_prints") {
     enriched = enriched.sort((a, b) => sortDir ? a.last_30_prints - b.last_30_prints : b.last_30_prints - a.last_30_prints);

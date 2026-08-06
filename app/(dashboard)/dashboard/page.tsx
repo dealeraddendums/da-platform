@@ -136,24 +136,31 @@ function GroupAdminView({
 // Card layout (2026-07-29):
 //   Vehicles — active total + added today
 //   Prints   — printed last 30 days + last 365 days
-//   Coverage — lifetime printed (active) + % of inventory covered
+//   Coverage — lifetime printed + % of current inventory covered
 //   Queued   — mobile print queue, ready to print
-// Print metrics read dealer_vehicles.print_status/print_date so legacy
-// ETL-printed and platform-printed vehicles count uniformly.
+// Print COUNTS read print_history distinct vehicles (printedVehicleCount —
+// the platform-canonical print metric shared with the admin Dealers list,
+// trial caps, and HubSpot) so surfaces agree dealer-by-dealer. The old
+// dealer_vehicles.print_status source undercounted: it only saw currently
+// ACTIVE stock, so every sold-since-printing vehicle silently dropped out
+// (Lehighton Kia read 29/137/151 here vs the admin list's 42/183). The
+// coverage PERCENT still reads active-stock print flags — "how much of the
+// current lot is covered" is inherently an inventory metric.
 async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId: string; bypassGate?: boolean }) {
   const admin = createAdminSupabaseClient();
   const now = new Date();
   const startOfToday = new Date(now);
   startOfToday.setHours(0, 0, 0, 0);
-  const d30 = new Date(now.getTime() - 30 * 86_400_000).toISOString().split("T")[0];
-  const d365 = new Date(now.getTime() - 365 * 86_400_000).toISOString().split("T")[0];
 
+  const iso30 = new Date(now.getTime() - 30 * 86_400_000).toISOString();
+  const iso365 = new Date(now.getTime() - 365 * 86_400_000).toISOString();
   const [
     { count: totalVehiclesCount },
     { count: addedTodayCount },
-    { count: printed30Count },
-    { count: printed365Count },
-    { count: printedLifetimeCount },
+    printed30Count,
+    printed365Count,
+    printedLifetimeCount,
+    { count: printedActiveCount },
     { count: queuedCount },
   ] = await Promise.all([
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
@@ -161,12 +168,11 @@ async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId:
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active")
       .gte("date_added", startOfToday.toISOString()),
-    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId).eq("status", "active")
-      .eq("print_status", 1).gte("print_date", d30),
-    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId).eq("status", "active")
-      .eq("print_status", 1).gte("print_date", d365),
+    printedVehicleCount(admin, { dealerId, since: iso30 }),
+    printedVehicleCount(admin, { dealerId, since: iso365 }),
+    printedVehicleCount(admin, { dealerId }),
+    // Coverage % numerator only: active vehicles carrying the printed flag
+    // (legacy ETL-printed + platform-printed uniformly).
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active")
       .eq("print_status", 1),
@@ -182,7 +188,7 @@ async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId:
   const printed365 = printed365Count ?? 0;
   const lifetimePrinted = printedLifetimeCount ?? 0;
   const queued = queuedCount ?? 0;
-  const coveragePct = totalVehicles > 0 ? Math.round((lifetimePrinted / totalVehicles) * 100) : 0;
+  const coveragePct = totalVehicles > 0 ? Math.round(((printedActiveCount ?? 0) / totalVehicles) * 100) : 0;
   const coverageColor = coveragePct >= 75 ? "#4caf50" : coveragePct >= 50 ? "var(--text-muted)" : "#ffa500";
 
   const dealerStats: { label: string; value: string; note: string; noteColor?: string }[] = [
@@ -200,7 +206,7 @@ async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId:
     {
       label: "Coverage",
       value: lifetimePrinted.toLocaleString(),
-      note: `${coveragePct}% of inventory printed`,
+      note: `${coveragePct}% of current inventory printed`,
       noteColor: coverageColor,
     },
     {
