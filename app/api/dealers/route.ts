@@ -448,22 +448,39 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (COMPUTED_SORT_COLS.has(sortCol)) {
     // 1. Full-dataset sort keys (minimal columns; ~2.1k dealers ≈ tiny).
-    const keyQ = applyFilters(
-      admin.from("dealers").select("id, dealer_id, name, active, migration_status, is_native, last30, groups(name)").limit(5000),
-    );
-    const { data: keyRowsRaw, error: keyErr } = await keyQ;
-    if (keyErr) return NextResponse.json({ error: keyErr.message }, { status: 500 });
+    //    MUST paginate in ≤1000-row pages: PostgREST clamps any requested
+    //    limit to db-max-rows (1000), so a bare .limit(5000) silently
+    //    truncated the key set to the first 1000 default-order rows —
+    //    Lehighton Kia (lifetime #2) vanished from the sorted list entirely.
     type KeyRow = { id: string; dealer_id: string; name: string | null; active: boolean | null; migration_status: string | null; is_native: boolean | null; last30: number | null; groups: { name: string } | null };
-    const keyRows = (keyRowsRaw ?? []) as unknown as KeyRow[];
+    const keyRows: KeyRow[] = [];
+    for (let start = 0; ; start += 1000) {
+      const keyQ = applyFilters(
+        admin.from("dealers").select("id, dealer_id, name, active, migration_status, is_native, last30, groups(name)"),
+      ).range(start, start + 999);
+      const { data: kp, error: keyErr } = await keyQ;
+      if (keyErr) return NextResponse.json({ error: keyErr.message }, { status: 500 });
+      keyRows.push(...((kp ?? []) as unknown as KeyRow[]));
+      if (!kp || kp.length < 1000) break;
+      if (start >= 9000) break; // hard stop far above fleet size
+    }
 
     // 2. Print-count keys (only for the sorts that need them).
     const printMap = new Map<string, number>();
     if (sortCol === "lifetime_prints" || sortCol === "last_30_prints" || sortCol === "split_40") {
       const since = sortCol === "lifetime_prints" ? null : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: counts, error: rpcErr } = await (admin as any).rpc("addendum_print_counts", { p_since: since });
-      if (rpcErr) console.error("[dealers] addendum_print_counts rpc failed — print sort degrades to 0s:", rpcErr.message);
-      for (const r of (counts ?? []) as Array<{ dealer_id: string; vehicles: number }>) printMap.set(r.dealer_id, r.vehicles);
+      // Set-returning RPCs are ALSO clamped to db-max-rows (1000) — paginate
+      // in pages so the map stays complete as 5.0 print adoption grows
+      // (59 printing dealers today, whole fleet eventually).
+      for (let start = 0; ; start += 1000) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: counts, error: rpcErr } = await (admin as any)
+          .rpc("addendum_print_counts", { p_since: since }).range(start, start + 999);
+        if (rpcErr) { console.error("[dealers] addendum_print_counts rpc failed — print sort degrades to 0s:", rpcErr.message); break; }
+        for (const r of (counts ?? []) as Array<{ dealer_id: string; vehicles: number }>) printMap.set(r.dealer_id, r.vehicles);
+        if (!counts || counts.length < 1000) break;
+        if (start >= 9000) break;
+      }
     }
 
     // 3. Sort the whole set. All keys ascending-natural; direction flips below.
