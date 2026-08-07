@@ -6,6 +6,7 @@ import type { AddendumLibraryRow } from "@/lib/db";
 import { RichName } from "@/lib/product-name";
 import ProductAuthoringFields from "@/components/ProductAuthoringFields";
 import ProductRulesFields from "@/components/ProductRulesFields";
+import ProductImportExport from "@/components/ProductImportExport";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -548,6 +549,10 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                 style={{ ...btnGhost, background: "#fff", color: "#333" }}>
                 ⇅ Re-order
               </button>
+              <ProductImportExport
+                endpoint={`/api/addendum-library/sheet?dealer_id=${encodeURIComponent(dealerId)}`}
+                onImported={() => void fetchItems()}
+              />
               <button onClick={openAdd}
                 style={{ ...btnPrimary, background: "#4caf50", border: "none", display: "flex", alignItems: "center", gap: 5 }}>
                 + Add Product

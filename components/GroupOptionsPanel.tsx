@@ -8,6 +8,7 @@ import AssignProductModal from "@/components/AssignProductModal";
 import GroupBillingTab from "@/components/GroupBillingTab";
 import { decodeHtmlEntities } from "@/lib/format";
 import { RichName } from "@/lib/product-name";
+import ProductImportExport from "@/components/ProductImportExport";
 
 type Props = {
   groupId: string;
@@ -637,9 +638,15 @@ function OptionSection({ groupId }: { groupId: string }) {
               Required products are auto-prepended to every dealer addendum in this group. Suggested products are offered to selected dealers via the Assign to Dealers section.
             </p>
           </div>
-          <button className="btn btn-primary" style={{ fontSize: 12, height: 30, padding: "0 12px" }} onClick={() => setShowAddModal(true)}>
-            + Add Corporate Product
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <ProductImportExport
+              endpoint={`/api/group-options/${groupId}/sheet`}
+              onImported={() => void fetchOptions()}
+            />
+            <button className="btn btn-primary" style={{ fontSize: 12, height: 30, padding: "0 12px" }} onClick={() => setShowAddModal(true)}>
+              + Add Corporate Product
+            </button>
+          </div>
         </div>
 
         {error && <div className="px-5 py-2 text-xs" style={{ background: "#ffebee", color: "var(--error)" }}>{error}</div>}
