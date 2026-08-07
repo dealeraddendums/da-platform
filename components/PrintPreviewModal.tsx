@@ -135,10 +135,16 @@ export default function PrintPreviewModal({
               if (pj.askRetailWholesale && !cancelled) { setAskPrompt("prompt"); setGenerating(false); return; }
             }
           } catch { /* probe failure → render with the no-price fallback */ }
-          if (!cancelled) setAskPrompt("done");
+          // NO state change here — the no-prompt path continues in THIS run.
+          // Setting askPrompt('done') mid-run re-fired the effect (deps
+          // [askPrompt]) whose CLEANUP set cancelled=true on this in-flight
+          // run: the PDF result was discarded while the re-run was blocked by
+          // genStartedRef → every addendum preview rendered blank (prod
+          // incident 2026-08-07). The only state-driven re-run is the user's
+          // prompt→done click, where this run has already returned.
         }
         if (askPrompt === "prompt") return; // waiting on the price input
-        if (genStartedRef.current) return;  // already generated (re-run from askPrompt state change)
+        if (genStartedRef.current) return;  // already generated (post-prompt re-run safety)
         genStartedRef.current = true;
 
         const body: Record<string, unknown> = {
