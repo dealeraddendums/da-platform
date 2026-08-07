@@ -39,6 +39,7 @@ export const LAYOUT: Record<string, { x: number; y: number; w: number; h: number
   logo:              { x: 32,  y: 48,  w: 348, h: 118 },
   vehicle:           { x: 40,  y: 168, w: 336, h: 72  },
   msrp:              { x: 40,  y: 248, w: 332, h: 32  },
+  retail_wholesale:  { x: 40,  y: 248, w: 332, h: 52  },
   options:           { x: 40,  y: 280, w: 332, h: 175 },
   suggested_options: { x: 40,  y: 460, w: 332, h: 120 },
   suggested_price:   { x: 40,  y: 584, w: 332, h: 28  },
@@ -85,7 +86,7 @@ export const LAYOUT_INFOSHEET: Record<string, { x: number; y: number; w: number;
 };
 
 export const WIDGET_LABELS: Record<string, string> = {
-  logo: 'Logo', vehicle: 'Vehicle data', msrp: 'MSRP', options: 'Required Products',
+  logo: 'Logo', vehicle: 'Vehicle data', msrp: 'MSRP', retail_wholesale: 'Retail/Wholesale', options: 'Required Products',
   subtotal: 'Subtotal', askbar: 'Asking price', dealer: 'Dealer address',
   headerbar: 'Header bar', customtext: 'Custom text', sigline: 'Signature',
   infobox: 'Infobox', description: 'Description', features: 'Features',
@@ -103,7 +104,7 @@ export const WIDGET_LABELS: Record<string, string> = {
 // the palette lets the dealer drop as many as they want. Disclaimer is also
 // single-instance — a template carries one disclaimer block.
 export const UNIQUE_WIDGETS = [
-  'logo','vehicle','msrp','options','subtotal','askbar','dealer',
+  'logo','vehicle','msrp','retail_wholesale','options','subtotal','askbar','dealer',
   'description','features',
   'suggested_options','suggested_price',
   'disclaimer',
@@ -111,7 +112,7 @@ export const UNIQUE_WIDGETS = [
 ];
 
 export const ADDENDUM_WIDGETS = [
-  'logo','vehicle','msrp','options','subtotal','askbar','dealer',
+  'logo','vehicle','msrp','retail_wholesale','options','subtotal','askbar','dealer',
   'headerbar','customtext','sigline','disclaimer','divider',
   'suggested_options','suggested_price',
   // Dynamic content (replaces the old monolithic Infobox)
@@ -127,7 +128,7 @@ export const INFOSHEET_WIDGETS = [
 export const PALETTE_HIDDEN_IN_ADDENDUM = ['description','features'];
 // Infosheet hides addendum-only price math widgets. bgimage / vehiclephoto are
 // available on infosheets too.
-export const PALETTE_HIDDEN_IN_INFOSHEET = ['msrp','options','subtotal','suggested_options','suggested_price'];
+export const PALETTE_HIDDEN_IN_INFOSHEET = ['msrp','retail_wholesale','options','subtotal','suggested_options','suggested_price'];
 
 export const DEFS: Record<string, Record<string, unknown>> = {
   logo: {
@@ -143,6 +144,11 @@ export const DEFS: Record<string, Record<string, unknown>> = {
     headerFontSize: 1.0,
   },
   msrp: { label: 'Manufacturer Retail Price:', value: '$27,100.00', divider: true, dividerAbove: false, fontSize: 1.0 },
+  // Retail/Wholesale — struck-through MSRP + discounted second line. mode:
+  // 'percent' (MSRP − X%) | 'dollars' (MSRP − $X) | 'ask' (prompt at Print
+  // Now; bulk/mobile fall back to a plain MSRP line). Values injected at
+  // print (pdf-html: live/msrpNum/askPrice); canvas shows samples.
+  retail_wholesale: { label1: 'Retail Price', label2: 'Wholesale to the Public', mode: 'percent', percentOff: 10, dollarsOff: 1000, divider: true, dividerAbove: false, fontSize: 1.0 },
   options: {
     sectionLabel: 'Dealer Installed Products:',
     fontSize: 1.0,

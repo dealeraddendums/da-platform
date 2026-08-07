@@ -23,6 +23,7 @@ const PALETTE_TILES = [
   { type: 'logo',              emoji: '🏷️', label: 'Logo',              hint: 'Dealer brand',          group: 'content' },
   { type: 'vehicle',           emoji: '🚗', label: 'Vehicle data',      hint: 'Stock, VIN, Year…',     group: 'content' },
   { type: 'msrp',              emoji: '💲', label: 'MSRP line',         hint: 'Label + price',         group: 'content', addendum: true },
+  { type: 'retail_wholesale',  emoji: '🔖', label: 'Retail/Wholesale',  hint: 'Struck-through retail + discount', group: 'content', addendum: true },
   { type: 'options',           emoji: '📋', label: 'Required Products',  hint: 'Dealer-installed items', group: 'content', addendum: true },
   { type: 'subtotal',          emoji: 'Σ',  label: 'Subtotal',          hint: 'Required options total', group: 'content', addendum: true },
   { type: 'askbar',            emoji: '$',  label: 'Asking price',      hint: 'MSRP + required',       group: 'content' },
@@ -2567,6 +2568,53 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
         </EpSection>
       )}
 
+      {w.type === 'retail_wholesale' && (
+        <EpSection>
+          <Eps>Retail / Wholesale</Eps>
+          <Fd label="Line 1 label (struck-through retail)"><input value={(d.label1 as string) ?? 'Retail Price'} onChange={e => u('label1', e.target.value)} style={fiStyle} /></Fd>
+          <Fd label="Line 2 label"><input value={(d.label2 as string) ?? 'Wholesale to the Public'} onChange={e => u('label2', e.target.value)} style={fiStyle} /></Fd>
+          <Fd label="Second price">
+            <div style={{ display: 'flex', gap: 6 }}>
+              {([['percent', 'MSRP − %'], ['dollars', 'MSRP − $'], ['ask', 'Ask at print']] as const).map(([v, lbl]) => {
+                const on = ((d.mode as string) || 'percent') === v;
+                return (
+                  <button type="button" key={v} onClick={() => u('mode', v)}
+                    style={{ flex: 1, padding: '6px 0', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600, border: `2px solid ${on ? '#1976d2' : '#e0e0e0'}`, background: on ? '#e3f2fd' : '#fff', color: on ? '#1976d2' : '#55595c' }}>
+                    {lbl}
+                  </button>
+                );
+              })}
+            </div>
+          </Fd>
+          {((d.mode as string) || 'percent') === 'percent' && (
+            <Fd label="Percent off MSRP">
+              <input type="number" min={0} max={100} step={0.5} value={(d.percentOff as number) ?? 10}
+                onChange={e => u('percentOff', Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))} style={{ ...fiStyle, width: 120 }} />
+            </Fd>
+          )}
+          {(d.mode as string) === 'dollars' && (
+            <Fd label="Dollars off MSRP">
+              <input type="number" min={0} value={(d.dollarsOff as number) ?? 1000}
+                onChange={e => u('dollarsOff', Math.max(0, parseInt(e.target.value, 10) || 0))} style={{ ...fiStyle, width: 140 }} />
+            </Fd>
+          )}
+          {(d.mode as string) === 'ask' && (
+            <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 2 }}>
+              Print Now asks for the price before generating. Bulk print and the mobile app can&apos;t prompt — they print a plain retail line (no strikethrough). The entered price is never saved to the vehicle.
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0' }}>
+            <span style={{ fontSize: 11, color: '#55595c' }}>Divider line above</span>
+            <TogSwitch checked={!!d.dividerAbove} onChange={v => u('dividerAbove', v)} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0' }}>
+            <span style={{ fontSize: 11, color: '#55595c' }}>Divider line below</span>
+            <TogSwitch checked={d.divider !== false} onChange={v => u('divider', v)} />
+          </div>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Display-only — does not change subtotal or asking-price math. Second price rounds to the nearest dollar.</div>
+        </EpSection>
+      )}
+
       {w.type === 'options' && (
         <EpSection>
           <Eps>Required Products Table</Eps>
@@ -3071,6 +3119,12 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
         <EpSection>
           <Eps>Font Size</Eps>
           <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
+        </EpSection>
+      )}
+      {w.type === 'retail_wholesale' && (
+        <EpSection>
+          <Eps>Font Size</Eps>
+          <FontStepper label="Font size" fkey="fontSize" base={11} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
       {w.type === 'suggested_options' && (() => {

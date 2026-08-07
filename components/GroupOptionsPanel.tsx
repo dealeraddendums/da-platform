@@ -1190,21 +1190,13 @@ function TemplatesTab({ groupId }: { groupId: string }) {
     setAssignSuccess(false);
     setSetDefaultFor("neither");
 
-    const [assignmentsRes, dealersRes] = await Promise.all([
-      fetch(`/api/groups/${groupId}/template-assignments`),
-      dealers.length === 0 ? fetch(`/api/groups/${groupId}/dealers`) : Promise.resolve(null),
-    ]);
-
-    if (assignmentsRes.ok) {
-      const aj = await assignmentsRes.json() as { data: Array<{ dealer_id: string | null; template_id: string | null }> };
-      const alreadyAssigned = new Set(
-        (aj.data ?? [])
-          .filter((a) => a.template_id === tpl.id && a.dealer_id)
-          .map((a) => a.dealer_id as string)
-      );
-      setSelectedDealers(alreadyAssigned);
-    }
-
+    // The modal ALWAYS opens with nothing selected (2026-08-07, Dealer General
+    // request): it used to pre-check already-assigned dealers, which read as a
+    // stale selection that could silently rewrite prior assignments on submit.
+    // The endpoint only ever touches the SUBMITTED dealer_ids (unassignment is
+    // a separate DELETE), so unchecked dealers keep their assignments/defaults
+    // untouched — the helper text under SELECT DEALERS says exactly that.
+    const dealersRes = dealers.length === 0 ? await fetch(`/api/groups/${groupId}/dealers`) : null;
     if (dealersRes && dealersRes.ok) {
       const json = await dealersRes.json() as { data: DealerBasic[] };
       setDealers(json.data ?? []);
@@ -1402,6 +1394,7 @@ function TemplatesTab({ groupId }: { groupId: string }) {
               <>
                 <div className="mb-1">
                   <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>SELECT DEALERS</span>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>Only the dealers you select below are affected — everyone else keeps their current assignments and defaults.</p>
                 </div>
                 {/* Searchable list (Dealer General has 182 members) — selections
                     persist across filtering; All/None act on the SHOWN rows. */}

@@ -128,6 +128,44 @@ export function renderW(type: string, d: D, fontScale: number): string {
     return `<div style="padding:3px 0">${aboveLine}<div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:${sz}px;font-weight:700;color:#1a1916">${d.label}</span><span style="font-size:${sz}px;font-weight:700;color:#1a1916;font-family:monospace">${d.value}</span></div>${d.divider !== false ? '<div style="height:1px;background:#1a1916;margin-top:3px"></div>' : ''}</div>`;
   }
 
+  if (type === 'retail_wholesale') {
+    // Struck-through retail (vehicle MSRP) over a discounted second line.
+    // PRINT path (pdf-html) always sets d.live=true + d.msrpNum (number|null)
+    // and, for mode 'ask', d.askPrice when the printer entered one. The canvas
+    // never sets d.live, so sample numbers render in authoring ONLY — a real
+    // print with NULL msrp renders NOTHING (no fabricated prices, the 23d09ef
+    // rule). Display-only: contributes to no subtotal/asking math.
+    const sz = Math.round(11 * fs * ((d.fontSize as number) || 1));
+    const live = d.live === true;
+    const msrp = live
+      ? (typeof d.msrpNum === 'number' && Number.isFinite(d.msrpNum) ? d.msrpNum : null)
+      : 10000; // authoring sample
+    if (msrp == null) return ''; // real print, no MSRP → render nothing
+    const mode = (d.mode as string) || 'percent';
+    // Rounding rule: nearest whole dollar (Math.round), both modes.
+    let second: number | null = null;
+    if (mode === 'percent') second = Math.round(msrp * (1 - (Number(d.percentOff) || 0) / 100));
+    else if (mode === 'dollars') second = Math.round(msrp - (Number(d.dollarsOff) || 0));
+    else if (mode === 'ask') {
+      second = live
+        ? (typeof d.askPrice === 'number' && Number.isFinite(d.askPrice) ? Math.round(d.askPrice as number) : null)
+        : 9000; // authoring sample
+    }
+    if (second != null && second < 0) second = 0;
+    const fmt = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
+    const aboveLine = d.dividerAbove ? '<div style="height:1px;background:#1a1916;margin-bottom:3px"></div>' : '';
+    const belowLine = d.divider !== false ? '<div style="height:1px;background:#1a1916;margin-top:3px"></div>' : '';
+    const row = (labelTxt: unknown, valueHtml: string, mt = 0) =>
+      `<div style="display:flex;justify-content:space-between;align-items:baseline${mt ? `;margin-top:${mt}px` : ''}"><span style="font-size:${sz}px;font-weight:700;color:#1a1916">${labelTxt ?? ''}</span><span style="font-size:${sz}px;font-weight:700;color:#1a1916;font-family:monospace">${valueHtml}</span></div>`;
+    // No second price (ask mode, none provided — cancel/skip/bulk/mobile):
+    // plain retail line, NO strikethrough — never a strikethrough without an
+    // alternative price.
+    if (second == null) {
+      return `<div style="padding:3px 0">${aboveLine}${row(d.label1 ?? 'Retail Price', fmt(msrp))}${belowLine}</div>`;
+    }
+    return `<div style="padding:3px 0">${aboveLine}${row(d.label1 ?? 'Retail Price', `<s style="text-decoration:line-through">${fmt(msrp)}</s>`)}${row(d.label2 ?? 'Wholesale to the Public', fmt(second), 2)}${belowLine}</div>`;
+  }
+
   if (type === 'divider') {
     // Horizontal rule. The line is centered vertically inside the widget box;
     // thickness/color/margins come from `d`. fontScale is irrelevant (no text).

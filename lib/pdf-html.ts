@@ -66,7 +66,10 @@ export interface BuildPdfHtmlInput {
   aiDescription?: string | null;
   aiFeatures?: [string, string][] | null;
   dbDescription?: string | null;
-  dbOptionsText?: string | null;
+  dbOptionsText?: string | null;  /** Print-Now-entered price for a Retail/Wholesale widget in 'ask' mode.
+   *  Render-only — never persisted to the vehicle. Absent (bulk/mobile/cancel)
+   *  ⇒ the widget renders a plain retail line with no strikethrough. */
+  retailWholesalePrice?: number | null;
 }
 
 export async function buildPdfHtml({
@@ -86,6 +89,7 @@ export async function buildPdfHtml({
   aiFeatures,
   dbDescription,
   dbOptionsText,
+  retailWholesalePrice,
 }: BuildPdfHtmlInput): Promise<string> {
   // Use the SAME paper geometry as the Builder canvas (components/builder/
   // constants.ts PAPERS) so the PDF .paper width/height exactly matches the
@@ -154,6 +158,14 @@ export async function buildPdfHtml({
     // MSRP / askbar / subtotal: always use live vehicle data, never saved template values.
     if (w.type === 'msrp' && msrpParsed != null) {
       d.value = formatCurrencyAmount(msrpParsed, decimals);
+    }
+    // Retail/Wholesale: real render always sets live + the raw MSRP number
+    // (null included — the renderer then draws NOTHING, never a sample; the
+    // 23d09ef rule). askPrice flows from Print Now's prompt for 'ask' mode.
+    if (w.type === 'retail_wholesale') {
+      d.live = true;
+      d.msrpNum = msrpParsed;
+      if (retailWholesalePrice != null && Number.isFinite(retailWholesalePrice)) d.askPrice = retailWholesalePrice;
     }
     // On a real vehicle render the COMPUTED value always wins — 0 is a
     // legitimate result (e.g. the only option is a |XX| doc-fee that's excluded

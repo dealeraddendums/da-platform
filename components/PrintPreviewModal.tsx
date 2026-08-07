@@ -78,6 +78,14 @@ export default function PrintPreviewModal({
   const [generating, setGenerating] = useState(!preloadedUrl);
   const [progressLabel, setProgressLabel] = useState("Rendering…");
   const [genError, setGenError] = useState<string | null>(null);
+  // Retail/Wholesale 'ask' mode: probe the effective template before rendering;
+  // when it carries an ask-mode widget, collect a price first. null = not yet
+  // probed / no prompt needed; 'prompt' shows the input; a number or "skip"
+  // resolves it. The entered price is render-only (never saved to the vehicle).
+  const [askPrompt, setAskPrompt] = useState<"pending" | "prompt" | "done">("pending");
+  const [askPriceInput, setAskPriceInput] = useState("");
+  const askPriceRef = useRef<number | null>(null);
+  const genStartedRef = useRef(false); // guards duplicate generation across askPrompt re-runs
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const tokenRef = useRef<string | null>(printToken ?? null);
   const confirmedRef = useRef(false);
@@ -112,11 +120,33 @@ export default function PrintPreviewModal({
 
     async function generate() {
       try {
+        // Retail/Wholesale 'ask' probe (addendums only): does the effective
+        // template want a printer-entered price? Same resolution path as the
+        // real render (checkPromptOnly), so the prompt can't drift.
+        if (askPrompt === "pending" && docType === "addendum") {
+          try {
+            const probeRes = await fetch("/api/pdf/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ dealerVehicleId, docType, paperSize: DOC_PAPER[docType], checkPromptOnly: true }),
+            });
+            if (probeRes.ok) {
+              const pj = await probeRes.json() as { askRetailWholesale?: boolean };
+              if (pj.askRetailWholesale && !cancelled) { setAskPrompt("prompt"); setGenerating(false); return; }
+            }
+          } catch { /* probe failure → render with the no-price fallback */ }
+          if (!cancelled) setAskPrompt("done");
+        }
+        if (askPrompt === "prompt") return; // waiting on the price input
+        if (genStartedRef.current) return;  // already generated (re-run from askPrompt state change)
+        genStartedRef.current = true;
+
         const body: Record<string, unknown> = {
           dealerVehicleId,
           docType,
           paperSize: DOC_PAPER[docType],
         };
+        if (askPriceRef.current != null) body.retailWholesalePrice = askPriceRef.current;
 
         // ?async=1 asks the server to enqueue and return { jobId } so
         // the UI can show progress while the PDF service renders.
@@ -160,8 +190,10 @@ export default function PrintPreviewModal({
 
     void generate();
     return () => { cancelled = true; };
+  // Re-runs when the ask-price step resolves (askPrompt 'prompt' → 'done');
+  // genStartedRef prevents a duplicate render on the pending→done transition.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [askPrompt]);
 
   useEffect(() => {
     if (!pdfUrl) return;
@@ -229,6 +261,34 @@ export default function PrintPreviewModal({
 
         {/* Body */}
         <div style={{ flex: 1, minHeight: 0, position: "relative", background: "#f0f0f0" }}>
+          {askPrompt === "prompt" && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "48px 24px" }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#2a2b3c" }}>Enter the wholesale price</div>
+              <div style={{ fontSize: 12, color: "#78828c", textAlign: "center", maxWidth: 360 }}>
+                This template shows a struck-through retail price with your entered price below it. The price is used for this print only — it is not saved to the vehicle.
+              </div>
+              <input
+                type="number" min={0} step={1} autoFocus placeholder="e.g. 32000" value={askPriceInput}
+                onChange={(e) => setAskPriceInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && parseFloat(askPriceInput) > 0) { askPriceRef.current = Math.round(parseFloat(askPriceInput)); setGenerating(true); setAskPrompt("done"); } }}
+                style={{ width: 200, padding: "10px 12px", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 18, fontFamily: "monospace", textAlign: "center", outline: "none" }}
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button"
+                  disabled={!(parseFloat(askPriceInput) > 0)}
+                  onClick={() => { askPriceRef.current = Math.round(parseFloat(askPriceInput)); setGenerating(true); setAskPrompt("done"); }}
+                  style={{ padding: "8px 20px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: parseFloat(askPriceInput) > 0 ? 1 : 0.5 }}>
+                  Continue
+                </button>
+                <button type="button"
+                  onClick={() => { askPriceRef.current = null; setGenerating(true); setAskPrompt("done"); }}
+                  title="Print without a wholesale price — the retail line prints normally (no strikethrough)"
+                  style={{ padding: "8px 20px", background: "#fff", color: "#55595c", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 13, cursor: "pointer" }}>
+                  Skip
+                </button>
+              </div>
+            </div>
+          )}
           {generating && (
             <div style={{
               position: "absolute", inset: 0, display: "flex", flexDirection: "column",

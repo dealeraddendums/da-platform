@@ -41,6 +41,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     fontScale?: number;
     bgUrl?: string;
     docType?: "addendum" | "infosheet" | "buyer_guide";
+    /** Retail/Wholesale 'ask' price from the Print Now prompt (render-only). */
+    retailWholesalePrice?: number;
+    /** True = resolve the effective template and return { askRetailWholesale }
+     *  WITHOUT rendering — PrintPreviewModal probes this to know whether to
+     *  prompt for a price. Reuses the exact template-resolution path so the
+     *  prompt can't drift from what actually renders. */
+    checkPromptOnly?: boolean;
   };
   try {
     body = await req.json();
@@ -753,6 +760,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // ── Render and upload ─────────────────────────────────────────────────────
+    // Prompt probe: PrintPreviewModal asks whether the EFFECTIVE template has
+    // a Retail/Wholesale widget in 'ask' mode before rendering, so it knows
+    // to collect a price. Runs the identical resolution path above and exits
+    // before any rendering work.
+    if (body.checkPromptOnly) {
+      const askRetailWholesale = widgets.some(
+        (w) => w.type === "retail_wholesale" && ((w.d as Record<string, unknown> | undefined)?.mode ?? "percent") === "ask",
+      );
+      return NextResponse.json({ askRetailWholesale });
+    }
+
     const bgUrl = body.bgUrl || savedTemplateBgUrl || customSizeBgUrl || (isInfosheet ? IS_BG_DEFAULT : BG_DEFAULT);
     const S3_LOGO = "https://new-dealer-logos.s3.us-east-1.amazonaws.com/";
     const rawLogo = dealer?.logo_url ?? null;
@@ -760,6 +778,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
       : null;
     const html = await buildPdfHtml({
+      retailWholesalePrice: typeof body.retailWholesalePrice === "number" && Number.isFinite(body.retailWholesalePrice) && body.retailWholesalePrice > 0 ? body.retailWholesalePrice : null,
       widgets,
       paperSize: effectivePaperSizeStr,
       fontScale: effectiveFontScale,
