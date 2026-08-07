@@ -236,11 +236,10 @@ type SortableCol = "name" | "active" | "account_type" | "created_at" | "lifetime
 // off the first page. Surfaced as "group dealers missing from the
 // list" because most group dealers were created on the new platform.
 // Both Aurora-migrated and platform-native dealers have created_at.
-const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "created_at", "split_40"]);
-// split_40 sorts the FULL set by the 4.0-side count (dealers.last30 is a real
-// DB column) so "who's still on 4.0" floats across pages; the 5.0-count
-// tiebreak is applied per page below.
-const DB_SORT_COL_MAP: Partial<Record<SortableCol, string>> = { split_40: "last30" };
+// Plain DB-column sorts; everything else goes through the full-dataset
+// computed-key path in the GET handler.
+const DB_SORT_COLS = new Set<SortableCol>(["name", "account_type", "created_at"]);
+const DB_SORT_COL_MAP: Partial<Record<SortableCol, string>> = {};
 
 /**
  * GET /api/dealers
@@ -410,32 +409,115 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (!tagUuids.length) return NextResponse.json({ data: [], total: 0, page, per_page: perPage });
   }
 
-  // Build main query — DB sort for indexed columns only
-  let query = admin.from("dealers").select("*, groups(name)", { count: "exact" });
-  if (tagUuids) query = query.in("id", tagUuids);
-  if (q) {
-    // Free-text also matches tag names → fold in dealers carrying a matching tag.
-    const tagMatchIds = await dealerIdsMatchingTagName(admin, q);
-    const base = `name.ilike.${ilikePattern(q)},dealer_id.ilike.${ilikePattern(q)},city.ilike.${ilikePattern(q)},primary_contact.ilike.${ilikePattern(q)}`;
-    query = query.or(tagMatchIds.length ? `${base},id.in.(${tagMatchIds.join(",")})` : base);
-  }
-  if (active === "true") query = query.eq("active", true);
-  else if (active === "false") query = query.eq("active", false);
-  if (createdSinceIso) query = query.gte("created_at", createdSinceIso);
+  // Build main query. Two sort strategies:
+  //   • DB columns (name/account_type/created_at) — plain .order() + .range().
+  //   • COMPUTED columns (group name via join, Status incl. platform, print
+  //     counts, 5/4 split) — a lightweight FULL-DATASET key query with the
+  //     same filters, sorted here, then the page's rows fetched by id. The
+  //     old approach sorted only the fetched page, so on pages where the key
+  //     barely varied the arrows toggled with no visible reorder at all
+  //     (2026-08-07 repro: Group ↓ vs ↑ identical). Print-count keys come
+  //     from the addendum_print_counts RPC (migration 139) — one GROUP BY,
+  //     not per-page print_history pulls.
+  const applyFilters = <T,>(qb: T): T => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let b = qb as any;
+    if (tagUuids) b = b.in("id", tagUuids);
+    if (q) {
+      const base = `name.ilike.${ilikePattern(q)},dealer_id.ilike.${ilikePattern(q)},city.ilike.${ilikePattern(q)},primary_contact.ilike.${ilikePattern(q)}`;
+      b = b.or(qTagMatchIds.length ? `${base},id.in.(${qTagMatchIds.join(",")})` : base);
+    }
+    if (active === "true") b = b.eq("active", true);
+    else if (active === "false") b = b.eq("active", false);
+    if (createdSinceIso) b = b.gte("created_at", createdSinceIso);
+    if (groupIdParam) b = b.eq("group_id", groupIdParam);
+    return b as T;
+  };
+  // Free-text also matches tag names → fold in dealers carrying a matching tag.
+  const qTagMatchIds = q ? await dealerIdsMatchingTagName(admin, q) : [];
   // Honor ?group_id= for super_admin (used by GroupDealerList under a
   // super_admin group-ghost session — real group_admin callers are
   // scoped earlier in this handler by claims.group_id).
   const groupIdParam = searchParams.get("group_id");
-  if (groupIdParam) query = query.eq("group_id", groupIdParam);
 
-  // Apply DB-level ordering; "created_at" sorts by legacy_id (sequential int)
-  const dbSortCol = DB_SORT_COLS.has(sortCol)
-    ? (DB_SORT_COL_MAP[sortCol] ?? sortCol)
-    : "legacy_id";
-  query = query.order(dbSortCol, { ascending: sortDir, nullsFirst: false }).range(from, from + perPage - 1);
+  const COMPUTED_SORT_COLS = new Set<SortableCol>(["group_name", "active", "lifetime_prints", "last_30_prints", "split_40"]);
 
-  const { data, error: dbError, count } = await query;
-  if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let data: any[] | null = null;
+  let count: number | null = null;
+
+  if (COMPUTED_SORT_COLS.has(sortCol)) {
+    // 1. Full-dataset sort keys (minimal columns; ~2.1k dealers ≈ tiny).
+    const keyQ = applyFilters(
+      admin.from("dealers").select("id, dealer_id, name, active, migration_status, is_native, last30, groups(name)").limit(5000),
+    );
+    const { data: keyRowsRaw, error: keyErr } = await keyQ;
+    if (keyErr) return NextResponse.json({ error: keyErr.message }, { status: 500 });
+    type KeyRow = { id: string; dealer_id: string; name: string | null; active: boolean | null; migration_status: string | null; is_native: boolean | null; last30: number | null; groups: { name: string } | null };
+    const keyRows = (keyRowsRaw ?? []) as unknown as KeyRow[];
+
+    // 2. Print-count keys (only for the sorts that need them).
+    const printMap = new Map<string, number>();
+    if (sortCol === "lifetime_prints" || sortCol === "last_30_prints" || sortCol === "split_40") {
+      const since = sortCol === "lifetime_prints" ? null : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: counts, error: rpcErr } = await (admin as any).rpc("addendum_print_counts", { p_since: since });
+      if (rpcErr) console.error("[dealers] addendum_print_counts rpc failed — print sort degrades to 0s:", rpcErr.message);
+      for (const r of (counts ?? []) as Array<{ dealer_id: string; vehicles: number }>) printMap.set(r.dealer_id, r.vehicles);
+    }
+
+    // 3. Sort the whole set. All keys ascending-natural; direction flips below.
+    const isV5 = (r: KeyRow) => r.is_native === true || r.migration_status === "migrated"
+      || (r.dealer_id ?? "").startsWith("ss_") || (r.dealer_id ?? "").startsWith("ga_");
+    const cmp = (a: KeyRow, b: KeyRow): number => {
+      switch (sortCol) {
+        case "group_name": {
+          const c = (a.groups?.name ?? "").localeCompare(b.groups?.name ?? "");
+          return c !== 0 ? c : (a.name ?? "").localeCompare(b.name ?? "");
+        }
+        case "active": {
+          const c = Number(a.active === true) - Number(b.active === true);
+          if (c !== 0) return c;
+          const p = Number(isV5(a)) - Number(isV5(b));
+          return p !== 0 ? p : (a.name ?? "").localeCompare(b.name ?? "");
+        }
+        case "lifetime_prints":
+        case "last_30_prints":
+          return (printMap.get(a.dealer_id) ?? 0) - (printMap.get(b.dealer_id) ?? 0);
+        case "split_40": {
+          const c = (a.last30 ?? 0) - (b.last30 ?? 0);
+          return c !== 0 ? c : (printMap.get(a.dealer_id) ?? 0) - (printMap.get(b.dealer_id) ?? 0);
+        }
+        default:
+          return 0;
+      }
+    };
+    keyRows.sort((a, b) => (sortDir ? cmp(a, b) : -cmp(a, b)));
+    count = keyRows.length;
+
+    // 4. Fetch the page's full rows and restore the sorted order.
+    const pageIds = keyRows.slice(from, from + perPage).map((r) => r.id);
+    if (pageIds.length === 0) {
+      data = [];
+    } else {
+      const { data: pageRows, error: pageErr } = await admin
+        .from("dealers").select("*, groups(name)").in("id", pageIds);
+      if (pageErr) return NextResponse.json({ error: pageErr.message }, { status: 500 });
+      const orderIdx = new Map(pageIds.map((id, i) => [id, i]));
+      data = (pageRows ?? []).sort((a, b) => (orderIdx.get(a.id as string) ?? 0) - (orderIdx.get(b.id as string) ?? 0));
+    }
+  } else {
+    // DB-column sort: order + paginate in the database.
+    // ("created_at" note: legacy dealers' created_at is their ETL insert date.)
+    let query = applyFilters(admin.from("dealers").select("*, groups(name)", { count: "exact" }));
+    // Unknown/garbage sort params fall back to the default ordering column.
+    const dbSortCol = DB_SORT_COLS.has(sortCol) ? (DB_SORT_COL_MAP[sortCol] ?? sortCol) : "legacy_id";
+    query = query.order(dbSortCol, { ascending: sortDir, nullsFirst: false }).range(from, from + perPage - 1);
+    const res = await query;
+    if (res.error) return NextResponse.json({ error: res.error.message }, { status: 500 });
+    data = res.data;
+    count = res.count;
+  }
 
   const dealerIds = (data ?? []).map((d: Record<string, unknown>) => d.dealer_id as string);
   const dealerUuids = (data ?? []).map((d: Record<string, unknown>) => d.id as string);
@@ -452,51 +534,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   ]);
   const dealersWithUsers = new Set((profileRows as { dealer_id: string }[]).map((p) => p.dealer_id));
 
-  let enriched = (data ?? []).map((d: Record<string, unknown>) => ({
+  const enriched = (data ?? []).map((d: Record<string, unknown>) => ({
     ...d,
     name: sanitizeName(d.name as string),
     group_name: (d.groups as { name: string } | null)?.name ?? null,
     lifetime_prints: lifetime[d.dealer_id as string] ?? 0,
     last_30_prints: recent[d.dealer_id as string] ?? 0,
-    // 4.0-side print activity (Aurora dealer_dim.LAST30 via the nightly
-    // last30-only refresh). 5.0 prints never write to Aurora, so this is a
-    // clean "still printing on 4.0" signal; stale for migrated/native dealers
-    // (their nightly refresh stops) — the UI shows "—" for those.
+    // 4.0-side print activity (Aurora dealer_dim.LAST30, refreshed nightly for
+    // every dealer incl. migrated since 9200df6 — dual-printing is real).
     last30_40: (d.last30 as number | null) ?? 0,
     hubspot_company_id: hubspotMap[d.inventory_dealer_id as string] ?? null,
     has_users: dealersWithUsers.has(d.dealer_id as string),
     tags: tagMap[d.id as string] ?? [],
   }));
-
-  // In-memory sort for computed/joined columns
-  if (sortCol === "split_40") {
-    // Page-level tiebreak on the 5.0 count (DB already ordered the full set by
-    // the 4.0 count / dealers.last30 above).
-    enriched = enriched.sort((a, b) => {
-      const pa = (a.last30_40 as number) - (b.last30_40 as number);
-      if (pa !== 0) return sortDir ? pa : -pa;
-      const sa = a.last_30_prints - b.last_30_prints;
-      return sortDir ? sa : -sa;
-    });
-  } else if (sortCol === "active") {
-    // Status sort must group by PLATFORM too (Active 5.0 vs Active 4.0) — the
-    // badge derives platform at render, so the bare boolean interleaved them.
-    // Page-level exact ordering: active, then 5.0 before 4.0, then name.
-    const isV5 = (d: Record<string, unknown>) =>
-      d.migration_status === "migrated" || String(d.dealer_id ?? "").startsWith("ss_") || String(d.dealer_id ?? "").startsWith("ga_");
-    const key = (d: Record<string, unknown>) => `${d.active ? 1 : 0}-${isV5(d) ? 1 : 0}-${String(d.name ?? "")}`;
-    enriched = enriched.sort((a, b) => sortDir ? key(a).localeCompare(key(b)) : key(b).localeCompare(key(a)));
-  } else if (sortCol === "lifetime_prints") {
-    enriched = enriched.sort((a, b) => sortDir ? a.lifetime_prints - b.lifetime_prints : b.lifetime_prints - a.lifetime_prints);
-  } else if (sortCol === "last_30_prints") {
-    enriched = enriched.sort((a, b) => sortDir ? a.last_30_prints - b.last_30_prints : b.last_30_prints - a.last_30_prints);
-  } else if (sortCol === "group_name") {
-    enriched = enriched.sort((a, b) => {
-      const ga = a.group_name ?? "";
-      const gb = b.group_name ?? "";
-      return sortDir ? ga.localeCompare(gb) : gb.localeCompare(ga);
-    });
-  }
 
   return NextResponse.json({ data: enriched, total: count ?? 0, page, per_page: perPage });
 }
