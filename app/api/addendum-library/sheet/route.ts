@@ -106,7 +106,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (e) { results.failed++; results.errors.push(`row ${p.rowNum}: ${e.message}`); } else results.updated++;
     } else {
       const adTypes = (p.payload.ad_types as string[]) ?? ["New", "Used"];
-      const adType = adTypes.length === 1 ? adTypes[0] : "Both";
+      // Legacy ad_type column CHECK allows only New/Used/Both — CPO-only (and
+      // any mixed set) stores 'Both', matching the modal (ad_types is the real
+      // filter; ad_type is a legacy display shadow).
+      const adType = adTypes.length === 1 && (adTypes[0] === "New" || adTypes[0] === "Used") ? adTypes[0] : "Both";
       const { required: req_, item_price, ...rest } = p.payload as Record<string, unknown>;
       const { error: e } = await admin.from("addendum_library").insert({
         dealer_id: dealerId,
