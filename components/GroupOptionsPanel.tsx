@@ -9,6 +9,7 @@ import GroupBillingTab from "@/components/GroupBillingTab";
 import { decodeHtmlEntities } from "@/lib/format";
 import { RichName } from "@/lib/product-name";
 import ProductImportExport from "@/components/ProductImportExport";
+import DealerCheckList from "@/components/DealerCheckList";
 
 type Props = {
   groupId: string;
@@ -1210,13 +1211,6 @@ function TemplatesTab({ groupId }: { groupId: string }) {
     }
   }
 
-  function toggleDealer(id: string) {
-    setSelectedDealers((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
 
   async function submitAssign() {
     if (!assigningTpl || selectedDealers.size === 0) return;
@@ -1406,22 +1400,13 @@ function TemplatesTab({ groupId }: { groupId: string }) {
               <div className="text-sm text-center py-4" style={{ color: "#2e7d32" }}>Assigned successfully!</div>
             ) : (
               <>
-                <div className="flex items-center justify-between mb-3">
+                <div className="mb-1">
                   <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>SELECT DEALERS</span>
-                  <div className="flex gap-2">
-                    <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => setSelectedDealers(new Set(dealers.map((d) => d.id)))}>All</button>
-                    <button className="text-xs" style={{ color: "var(--text-muted)" }} onClick={() => setSelectedDealers(new Set())}>None</button>
-                  </div>
                 </div>
-                <div className="space-y-1 mb-4">
-                  {dealers.length === 0 ? (
-                    <p className="text-xs" style={{ color: "var(--text-muted)" }}>No dealers in this group.</p>
-                  ) : dealers.map((d) => (
-                    <label key={d.id} className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer" style={{ background: selectedDealers.has(d.id) ? "#e3f2fd" : "transparent" }}>
-                      <input type="checkbox" checked={selectedDealers.has(d.id)} onChange={() => toggleDealer(d.id)} />
-                      <span className="text-sm" style={{ color: "var(--text-primary)" }}>{decodeHtmlEntities(d.name)}</span>
-                    </label>
-                  ))}
+                {/* Searchable list (Dealer General has 182 members) — selections
+                    persist across filtering; All/None act on the SHOWN rows. */}
+                <div className="mb-4">
+                  <DealerCheckList dealers={dealers} selected={selectedDealers} onChange={setSelectedDealers} />
                 </div>
                 <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
                   <p className="text-xs font-semibold mb-2" style={{ color: "var(--text-muted)" }}>DEALER ACCESS</p>

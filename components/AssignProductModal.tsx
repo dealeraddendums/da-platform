@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { GroupOptionRow } from "@/lib/db";
 import { decodeHtmlEntities } from "@/lib/format";
+import DealerCheckList from "@/components/DealerCheckList";
 
 type DealerBasic = { id: string; name: string; city?: string | null; state?: string | null };
 
@@ -71,13 +72,6 @@ export default function AssignProductModal({ groupId, product, onClose, onSaved 
     return () => { cancelled = true; };
   }, [groupId, product.id]);
 
-  function toggle(id: string) {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
 
   async function save() {
     setError(null);
@@ -181,33 +175,15 @@ export default function AssignProductModal({ groupId, product, onClose, onSaved 
             </div>
           ) : (
             <>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <span style={{ fontSize: 11, color: "#78828c", fontWeight: 600 }}>{selected.size} of {dealers.length} selected</span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button type="button" style={{ background: "none", border: "none", color: "#1976d2", fontSize: 11, cursor: "pointer" }}
-                    onClick={() => setSelected(new Set(dealers.map(d => d.id)))}>Select all</button>
-                  <button type="button" style={{ background: "none", border: "none", color: "#78828c", fontSize: 11, cursor: "pointer" }}
-                    onClick={() => setSelected(new Set())}>Clear</button>
+              {/* Shared searchable list (DealerCheckList) — selections persist
+                  across filtering; All/None act on the SHOWN rows only. */}
+              {loading ? (
+                <p style={{ padding: 16, fontSize: 12, color: "#78828c", textAlign: "center" }}>Loading dealers…</p>
+              ) : (
+                <div style={{ border: "1px solid #e0e0e0", borderRadius: 4, background: "#fff", padding: 10 }}>
+                  <DealerCheckList dealers={dealers} selected={selected} onChange={setSelected} accent="#7b1fa2" />
                 </div>
-              </div>
-              <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid #e0e0e0", borderRadius: 4, background: "#fff" }}>
-                {loading ? (
-                  <p style={{ padding: 16, fontSize: 12, color: "#78828c", textAlign: "center" }}>Loading dealers…</p>
-                ) : dealers.length === 0 ? (
-                  <p style={{ padding: 16, fontSize: 12, color: "#78828c", textAlign: "center" }}>No dealers in this group yet.</p>
-                ) : dealers.map(d => {
-                  const location = [d.city, d.state].filter(Boolean).join(", ");
-                  return (
-                    <label key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", cursor: "pointer", borderBottom: "1px solid #f0f0f0" }}>
-                      <input type="checkbox" checked={selected.has(d.id)} onChange={() => toggle(d.id)} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, color: "#333", fontWeight: 500 }}>{decodeHtmlEntities(d.name)}</div>
-                        {location && <div style={{ fontSize: 11, color: "#78828c", marginTop: 1 }}>{location}</div>}
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
+              )}
               <p style={{ fontSize: 11, color: "#78828c", marginTop: 8 }}>
                 New dealers added to the group after this save will NOT inherit this product. Re-open this modal to assign them.
               </p>
