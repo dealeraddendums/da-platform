@@ -156,8 +156,13 @@ export async function buildPdfHtml({
     }
 
     // MSRP / askbar / subtotal: always use live vehicle data, never saved template values.
-    if (w.type === 'msrp' && msrpParsed != null) {
-      d.value = formatCurrencyAmount(msrpParsed, decimals);
+    // MSRP marks live and clears the value when the vehicle has no price —
+    // live + no value ⇒ the renderer draws NOTHING. Before this, a NULL-msrp
+    // vehicle kept the widget's baked Builder SAMPLE (e.g. $27,100) on real
+    // prints — a fabricated price on a real sticker (flagged 2026-07-22).
+    if (w.type === 'msrp' && vehicle) {
+      d.live = true;
+      d.value = msrpParsed != null ? formatCurrencyAmount(msrpParsed, decimals) : null;
     }
     // Retail/Wholesale: real render always sets live + the raw MSRP number
     // (null included — the renderer then draws NOTHING, never a sample; the

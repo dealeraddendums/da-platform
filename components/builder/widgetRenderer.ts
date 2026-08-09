@@ -123,6 +123,11 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   if (type === 'msrp') {
+    // Real print (pdf-html sets d.live) with no MSRP → render nothing: the
+    // baked d.value is the Builder authoring SAMPLE and must never appear on
+    // a real sticker (23d09ef rule). Canvas never sets live, so samples still
+    // render while authoring.
+    if (d.live === true && (d.value == null || d.value === '')) return '';
     const sz = Math.round(11 * fs * ((d.fontSize as number) || 1));
     const aboveLine = d.dividerAbove ? '<div style="height:1px;background:#1a1916;margin-bottom:3px"></div>' : '';
     return `<div style="padding:3px 0">${aboveLine}<div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:${sz}px;font-weight:700;color:#1a1916">${d.label}</span><span style="font-size:${sz}px;font-weight:700;color:#1a1916;font-family:monospace">${d.value}</span></div>${d.divider !== false ? '<div style="height:1px;background:#1a1916;margin-top:3px"></div>' : ''}</div>`;
