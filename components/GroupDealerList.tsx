@@ -50,7 +50,8 @@ const SUBSCRIPTION_OPTIONS: { id: "sub-manual" | "sub-auto-web" | "sub-auto-dms"
 type BillingTarget = "dealer" | "group";
 
 type NewDealerFields = {
-  name: string; address: string; city: string; state: string; zip: string;
+  name: string; inventory_dealer_id: string;
+  address: string; city: string; state: string; zip: string;
   phone: string; primary_contact: string; primary_contact_email: string;
   account_type: "sub-manual" | "sub-auto-web" | "sub-auto-dms";
   subscription_billed_to: BillingTarget;
@@ -59,7 +60,8 @@ type NewDealerFields = {
 
 function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => void; onCancel: () => void }) {
   const [fields, setFields] = useState<NewDealerFields>({
-    name: "", address: "", city: "", state: "", zip: "",
+    name: "", inventory_dealer_id: "",
+    address: "", city: "", state: "", zip: "",
     phone: "", primary_contact: "", primary_contact_email: "",
     account_type: "sub-manual",
     subscription_billed_to: "dealer",
@@ -86,6 +88,10 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: fields.name.trim(),
+        // Optional: the provider-assigned inventory id when already known.
+        // Blank ⇒ the server mints an interim ga_ id (renamed later via the
+        // profile-card id-change cascade once the provider assigns one).
+        dealer_id: fields.inventory_dealer_id.trim() || undefined,
         address: fields.address.trim() || null,
         city: fields.city.trim() || null,
         state: fields.state.toUpperCase() || null,
@@ -111,6 +117,13 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={labelStyle}>Dealer Name *</label>
             <input style={inputStyle} value={fields.name} onChange={set("name")} placeholder="ABC Motors" required />
+          </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle}>Inventory Dealer ID (optional)</label>
+            <input style={inputStyle} value={fields.inventory_dealer_id} onChange={set("inventory_dealer_id")} placeholder="Leave blank if not assigned yet — an interim ID is generated" />
+            <p style={{ fontSize: 11, color: "#8a8f94", margin: "4px 0 0" }}>
+              The ID your inventory feed provider assigned. If they haven&apos;t yet, leave this blank — it can be set later.
+            </p>
           </div>
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={labelStyle}>Address</label>

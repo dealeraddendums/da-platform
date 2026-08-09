@@ -18,6 +18,14 @@ export type JwtClaims = {
   /** UUID of the dealer being ghosted; null otherwise. */
   ghost_dealer_uuid: string | null;
   /**
+   * UUID of the GROUP being ghosted (groups.id); null otherwise. Group ghost
+   * deliberately does NOT set is_ghost — every existing is_ghost consumer
+   * means "operating in a DEALER context" (pairs it with claims.dealer_id),
+   * and group ghost historically left those untouched. Routes that need
+   * group-ghost awareness read this field explicitly.
+   */
+  ghost_group_uuid: string | null;
+  /**
    * Tag ids that scope a `group_user` (regional manager): they may only see /
    * manage in-group dealers carrying one of these tags. Empty ⇒ no dealers.
    * Always `[]` for other roles.
@@ -185,6 +193,7 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
   // Ghost mode: super_admin operates in dealer context without a real session swap
   let isGhost = false;
   let ghostDealerUuid: string | null = null;
+  let ghostGroupUuid: string | null = null;
   if (role === "super_admin") {
     try {
       const cookieStore = cookies();
@@ -201,6 +210,10 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
           dealerId = ghostCtx.dealer_text_id;
           isGhost = true;
           ghostDealerUuid = ghostCtx.dealer_id ?? null;
+        } else if (ghostCtx?.group_id) {
+          // Group ghost: surface the group UUID only (is_ghost stays false —
+          // see the JwtClaims field comment).
+          ghostGroupUuid = ghostCtx.group_id;
         }
       }
     } catch {
@@ -218,6 +231,7 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
     active_dealer_id: activeDealerUuid,
     is_ghost: isGhost,
     ghost_dealer_uuid: ghostDealerUuid,
+    ghost_group_uuid: ghostGroupUuid,
     scope_tag_ids: scopeTagIds,
   };
 }

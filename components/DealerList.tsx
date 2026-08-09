@@ -736,7 +736,9 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
   const [toast, setToast] = useState<string | null>(null);
   const [fields, setFields] = useState({
     name: "",
-    dealer_id: String(Date.now()),
+    // Blank ⇒ the server mints an interim ga_ id (was a Date.now() prefill,
+    // which minted bare-numeric ids that read like real inventory ids).
+    dealer_id: "",
     account_type: "sub-manual",
     account_purpose: "real",
     franchise: "",
@@ -765,8 +767,8 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
   const emailBlocked = emailCheckBlocksSubmit(contactEmailStatus, usernameStatus);
 
   async function submit(sendNotify: boolean) {
-    if (!fields.name.trim() || !fields.dealer_id.trim()) {
-      setError("Dealer Name and Dealer ID are required.");
+    if (!fields.name.trim()) {
+      setError("Dealer Name is required.");
       return;
     }
     if (fields.username.trim() && fields.password !== fields.confirm_password) {
@@ -778,7 +780,7 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
     setError(null);
 
     const body = {
-      dealer_id: fields.dealer_id.trim(),
+      dealer_id: fields.dealer_id.trim() || undefined,
       name: fields.name.trim(),
       account_type: fields.account_type,
       // super_admin only; server forces 'real' for any other role.
@@ -842,9 +844,9 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
             <input className="input" required value={fields.name} onChange={set("name")} placeholder="ABC Motors" />
           </div>
           <div>
-            <label className="label">Dealer ID *</label>
-            <input className="input" required value={fields.dealer_id} onChange={set("dealer_id")} placeholder="e.g. DA-12345" />
-            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Supplier-assigned inventory dealer ID</p>
+            <label className="label">Dealer ID</label>
+            <input className="input" value={fields.dealer_id} onChange={set("dealer_id")} placeholder="Optional — blank generates an interim ID" />
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Supplier-assigned inventory dealer ID. Leave blank if not assigned yet; it can be set later from the dealer profile.</p>
           </div>
           <div>
             <label className="label">Account Type</label>

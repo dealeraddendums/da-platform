@@ -596,21 +596,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { name, username, password, sendNotify, ...rest } = body;
+  // dealer_id is pulled out of ...rest explicitly: insertPayload spreads rest
+  // AFTER the computed dealer_id, so leaving it in rest would let the raw body
+  // value silently override the computed/validated one (latent since the
+  // group_admin ga_ branch shipped — dealer_id and inventory_dealer_id could
+  // diverge at birth).
+  const { name, username, password, sendNotify, dealer_id: bodyDealerId, ...rest } = body;
   if (!name?.trim()) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
   const internalId = Date.now().toString();
-  // group_admin: auto-generate dealer_id and force their group_id
-  const dealer_id = claims.role === "group_admin"
-    ? `ga_${internalId}`
-    : (body.dealer_id?.trim() ?? "");
-  if (claims.role === "super_admin" && !dealer_id) {
-    return NextResponse.json({ error: "dealer_id is required" }, { status: 400 });
+  // dealer_id: use the caller-supplied inventory id when given (any role —
+  // the group form's optional "Inventory Dealer ID" field lands here too),
+  // else mint the interim `ga_` id. The feed provider usually assigns the
+  // real inventory id AFTER the account exists, so an id can't be required
+  // at creation; the profile-card id-change flow cascades the rename later.
+  // (Pre-fix, super_admin 400'd on a blank id — which dead-ended the group
+  // Create Dealer form whenever a super_admin ran it in GROUP GHOST mode,
+  // since ghost keeps super_admin claims and that form has no id field.)
+  const suppliedId = bodyDealerId?.trim() ?? "";
+  if (suppliedId && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(suppliedId)) {
+    return NextResponse.json(
+      { error: "dealer_id may only contain letters, numbers, _ . - (max 64 chars)" },
+      { status: 400 }
+    );
   }
+  const dealer_id = suppliedId || `ga_${internalId}`;
   if (claims.role === "group_admin") {
     rest.group_id = claims.group_id;
+  } else if (claims.ghost_group_uuid && rest.group_id == null) {
+    // super_admin ghosting a group: the new dealer belongs to that group.
+    rest.group_id = claims.ghost_group_uuid;
   }
 
   // Account-purpose classifier (migration 096): super_admin chooses
