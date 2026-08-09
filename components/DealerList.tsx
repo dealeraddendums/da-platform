@@ -897,6 +897,12 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
             <label className="label">Contact Email</label>
             <input className="input" type="email" value={fields.primary_contact_email} onChange={set("primary_contact_email")} placeholder="jane@dealer.com" />
             <EmailAvailability status={contactEmailStatus} />
+            {/* Soft nudge only — quick email-less creates stay allowed. */}
+            {!fields.primary_contact_email.trim() && (
+              <p className="text-xs mt-1" style={{ color: "#b45309" }}>
+                No contact email — billing setup and migration invites need one. You can add it later on the dealer profile.
+              </p>
+            )}
           </div>
         </div>
 

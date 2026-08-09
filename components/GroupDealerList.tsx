@@ -158,6 +158,12 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
             <label style={labelStyle}>Contact Email</label>
             <input style={inputStyle} type="email" value={fields.primary_contact_email} onChange={set("primary_contact_email")} placeholder="jane@dealer.com" />
             <EmailAvailability status={contactEmailStatus} />
+            {/* Soft nudge only — quick email-less creates stay allowed. */}
+            {!fields.primary_contact_email.trim() && (
+              <p style={{ fontSize: 11, color: "#b45309", margin: "4px 0 0" }}>
+                No contact email — billing setup and migration invites need one. You can add it later on the dealer profile.
+              </p>
+            )}
           </div>
 
           {/* Subscription + billing routing — all three required for group-added dealers. */}
