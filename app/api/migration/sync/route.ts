@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
+import {
+  applySyncEnrichment,
+  newEnrichmentContext,
+  summarizeEnrichment,
+  type EnrichmentReport,
+  type EtlDealerEnrichment,
+} from "@/lib/migration-sync-enrichment";
 
 export const dynamic = "force-dynamic";
 // Scoped syncs run full Aurora scans on the ETL box — allow a few minutes.
@@ -15,6 +22,8 @@ type EtlDealerResult = {
   status: "synced" | "refused" | "not_found";
   reason?: string;
   post?: { has_settings: boolean; options: number; logo_url_set: boolean };
+  /** read-only Aurora + FreshBooks billing facts (2026-08-09 ETL build) */
+  enrichment?: EtlDealerEnrichment;
 };
 type EtlSyncResponse = {
   ok: boolean;
@@ -57,15 +66,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Database types (same convention as the other /api/migration routes).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminSupabaseClient() as any;
+  // account_type / inventory_provider are captured PRE-sync so the enrichment
+  // report can show old → new after the ETL refreshes them from Aurora.
   const { data: dealers, error: readErr } = await admin
     .from("dealers")
-    .select("id, dealer_id, inventory_dealer_id, name, migration_status")
+    .select("id, dealer_id, inventory_dealer_id, name, migration_status, account_type, inventory_provider")
     .in("id", dealerIds);
   if (readErr) return NextResponse.json({ error: readErr.message }, { status: 500 });
   if (!dealers || dealers.length === 0) return NextResponse.json({ error: "No matching dealers." }, { status: 404 });
 
-  const byInventoryId = new Map<string, { id: string; dealer_id: string; migration_status: string | null }>();
-  for (const d of dealers as { id: string; dealer_id: string; inventory_dealer_id: string | null; migration_status: string | null }[]) {
+  type DealerRow = { id: string; dealer_id: string; inventory_dealer_id: string | null; migration_status: string | null; account_type: string | null; inventory_provider: string | null };
+  const byInventoryId = new Map<string, DealerRow>();
+  for (const d of dealers as DealerRow[]) {
     byInventoryId.set((d.inventory_dealer_id ?? d.dealer_id).trim(), d);
   }
 
@@ -114,22 +126,56 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .select("id");
     if (stageErr) console.error("[migration/sync] pending promote failed:", stageErr.message);
 
-    for (const uuid of syncedUuids) {
+    void staged;
+  }
+
+  // Billing/config enrichment per synced dealer (2026-08-09): provider mapping,
+  // subscription continuity report, da-billing contact + plan + next-invoice
+  // continuity from the ETL's Aurora/FreshBooks facts. Failures here degrade
+  // to per-step statuses — they never fail the sync.
+  const enrichmentCtx = newEnrichmentContext();
+  const reportsByInvId = new Map<string, EnrichmentReport>();
+  for (const d of etl.dealers) {
+    if (d.status !== "synced") continue;
+    const row = byInventoryId.get(d.inventory_dealer_id);
+    if (!row) continue;
+    try {
+      const report = await applySyncEnrichment(
+        admin,
+        row.id,
+        { account_type: row.account_type, inventory_provider: row.inventory_provider },
+        d.enrichment,
+        enrichmentCtx,
+      );
+      reportsByInvId.set(d.inventory_dealer_id, report);
       fireWrite(admin.from("migration_log").insert({
-        dealer_id: uuid,
+        dealer_id: row.id,
         event: "synced",
         performed_by: claims.sub,
-        notes: "manual Aurora sync via Migration Console (dealer record, settings, products, logo)",
+        notes: `manual Aurora sync via Migration Console (dealer record, settings, products, logo)\nenrichment — ${summarizeEnrichment(report)}`,
+      }), "migration_log synced");
+    } catch (e) {
+      console.error(`[migration/sync] enrichment failed for ${d.inventory_dealer_id}:`, e instanceof Error ? e.message : e);
+      fireWrite(admin.from("migration_log").insert({
+        dealer_id: row.id,
+        event: "synced",
+        performed_by: claims.sub,
+        notes: `manual Aurora sync via Migration Console (dealer record, settings, products, logo)\nenrichment failed: ${e instanceof Error ? e.message : String(e)}`,
       }), "migration_log synced");
     }
-    void staged;
   }
 
   return NextResponse.json({
     ok: etl.ok,
     durationMs: etl.durationMs,
     synced_at: new Date().toISOString(),
-    dealers: etl.dealers,
+    dealers: etl.dealers.map((d) => {
+      // Strip the raw ETL facts from the browser payload (contains billing
+      // linkage ids); the console gets the applied per-step report instead.
+      const { enrichment, ...rest } = d;
+      void enrichment;
+      return { ...rest, enrichment_report: reportsByInvId.get(d.inventory_dealer_id) ?? null };
+    }),
     jobs: etl.jobs,
   });
 }

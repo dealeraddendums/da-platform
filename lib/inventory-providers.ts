@@ -68,3 +68,55 @@ export function isDmsProvider(provider: string | null | undefined): boolean {
   if (!provider) return false;
   return DMS_SET.has(provider.trim().toLowerCase());
 }
+
+// ── 4.0 Feed Source → canonical provider normalization (2026-08-09) ─────────
+//
+// Aurora dealer_dim.FEED_SOURCE is free text; the console Sync maps it onto
+// dealers.inventory_provider. Matching collapses to lowercase alphanumerics
+// ("Dealer Track" / "dealer.com" / "V-Auto" all resolve), plus an alias table
+// for the recurring legacy spellings observed in the fleet. Values that don't
+// resolve are returned verbatim with known=false so the sync can flag rather
+// than drop them.
+
+const ALL_PROVIDERS: readonly string[] = [...DMS_PROVIDERS, ...OTHER_PROVIDERS];
+
+const collapse = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const CANONICAL_BY_KEY = new Map<string, string>(ALL_PROVIDERS.map(p => [collapse(p), p]));
+
+// Legacy FEED_SOURCE spellings → canonical name (keys are collapsed).
+const FEED_SOURCE_ALIASES: Record<string, string> = {
+  dealercom: "DealerDotCom", // 4.0 writes "dealer.com"
+  reynoldsreynolds: "Reynolds",
+  adventdms: "Advent",
+  pbssystems: "PBS",
+  nexteppenet: "Nexteppe",
+  nextsteppe: "Nexteppe",
+  vauot: "Vauto", // recurring fleet typo
+  autouplink: "Autouplink",
+};
+
+// Free-text prefixes that carry trailing commentary ("Vauto- Every hour
+// update", "Dealer socket Inventory Plus"). Checked after exact/alias lookup.
+const PROVIDER_PREFIXES: ReadonlyArray<[string, string]> = [
+  ["vauto", "Vauto"],
+  ["dealersocket", "DealerSocket"],
+];
+
+/**
+ * Map a 4.0 Feed Source value onto the canonical Inventory Provider list.
+ * known=false → no canonical match; `provider` is the raw value (trimmed)
+ * so the sync copies it verbatim and flags it instead of dropping it.
+ */
+export function normalizeInventoryProvider(raw: string | null | undefined): { provider: string; known: boolean } | null {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return null;
+  const key = collapse(trimmed);
+  if (!key) return null;
+  const exact = CANONICAL_BY_KEY.get(key) ?? FEED_SOURCE_ALIASES[key];
+  if (exact) return { provider: exact, known: true };
+  for (const [prefix, canonical] of PROVIDER_PREFIXES) {
+    if (key.startsWith(prefix)) return { provider: canonical, known: true };
+  }
+  return { provider: trimmed, known: false };
+}

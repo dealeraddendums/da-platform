@@ -118,6 +118,8 @@ export interface BillingCustomerDetail extends BillingCustomerResponse {
   zip?: string | null;
   country?: string | null;
   isGroup?: boolean | null;
+  /** 'setup' (staged, invoices held) | 'active' (live). */
+  billingState?: string | null;
 }
 
 export async function getCustomer(customerId: string): Promise<BillingCustomerDetail | null> {
@@ -204,6 +206,59 @@ export async function updateCustomer(
     return (parsed.customer ?? parsed) as BillingCustomerDetail;
   } catch (err) {
     throw new BillingError(res.status, `updateCustomer parse: ${(err as Error).message}`, text);
+  }
+}
+
+// ── Additional invoice recipients (da-billing `customer_email:` rows) ───────
+// da-billing sends invoices to customer.email (primary) PLUS every
+// customer_email row with receiveInvoices=true && !isPrimary. There is no
+// server-side upsert — POST 400s on duplicates — so callers list-then-add.
+
+export interface BillingCustomerEmail {
+  id: string;
+  customerId: string;
+  email: string;
+  label?: string;
+  isPrimary?: boolean;
+  receiveInvoices?: boolean;
+}
+
+/** GET /customers/:id/emails — the customer's additional invoice recipients. */
+export async function listCustomerEmails(customerId: string): Promise<BillingCustomerEmail[]> {
+  const res = await fetch(`${BASE}/customers/${encodeURIComponent(customerId)}/emails`, {
+    headers: authHeaders(),
+  });
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `listCustomerEmails ${res.status}`, text);
+  try {
+    const parsed = JSON.parse(text) as { emails?: BillingCustomerEmail[] };
+    return parsed.emails ?? [];
+  } catch (err) {
+    throw new BillingError(res.status, `listCustomerEmails parse: ${(err as Error).message}`, text);
+  }
+}
+
+/** POST /customers/:id/emails — add an additional invoice recipient.
+ *  da-billing 400s on a duplicate (case-insensitive); callers should check
+ *  listCustomerEmails first for idempotent flows. */
+export async function addCustomerEmail(
+  customerId: string,
+  email: string,
+  label?: string,
+): Promise<BillingCustomerEmail> {
+  const res = await fetch(`${BASE}/customers/${encodeURIComponent(customerId)}/emails`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ email, label: label ?? "Billing contact", receiveInvoices: true }),
+  });
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `addCustomerEmail ${res.status}`, text);
+  try {
+    const parsed = JSON.parse(text) as { email?: BillingCustomerEmail };
+    if (!parsed.email) throw new Error("missing email in response");
+    return parsed.email;
+  } catch (err) {
+    throw new BillingError(res.status, `addCustomerEmail parse: ${(err as Error).message}`, text);
   }
 }
 
@@ -330,6 +385,8 @@ export interface BillingTemplate {
   products: BillingProduct[];
   nextInvoiceDate?: string;
   scheduleInterval?: "monthly" | "yearly";
+  /** Recurring-billing gate (false = paused / setup staging). */
+  active?: boolean;
 }
 
 export interface BillingTemplateResponse {
@@ -351,7 +408,7 @@ export async function getTemplate(customerId: string): Promise<BillingTemplate |
   try {
     const parsed = JSON.parse(text) as {
       template:
-        | (BillingTemplateResponse["template"] & { nextInvoiceDate?: string; scheduleInterval?: "monthly" | "yearly" })
+        | (BillingTemplateResponse["template"] & { nextInvoiceDate?: string; scheduleInterval?: "monthly" | "yearly"; active?: boolean })
         | null;
     };
     if (!parsed.template) return null;
@@ -360,6 +417,7 @@ export async function getTemplate(customerId: string): Promise<BillingTemplate |
       products: parsed.template.products ?? [],
       nextInvoiceDate: parsed.template.nextInvoiceDate,
       scheduleInterval: parsed.template.scheduleInterval,
+      active: parsed.template.active,
     };
   } catch (err) {
     throw new BillingError(res.status, `getTemplate parse: ${(err as Error).message}`, text);

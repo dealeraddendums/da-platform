@@ -32,6 +32,28 @@ interface Row {
   synced: boolean;
   lastSyncedAt: string | null;
 }
+// Per-step billing/config enrichment report returned by /api/migration/sync
+// (mirrors lib/migration-sync-enrichment.ts EnrichmentReport).
+interface EnrichmentStep { status: string; detail?: string; warning?: boolean }
+interface EnrichmentReport {
+  billedTo: "dealer" | "group";
+  customerId: string | null;
+  provider: EnrichmentStep;
+  subscription: EnrichmentStep;
+  planCheck: EnrichmentStep;
+  contacts: EnrichmentStep;
+  nextInvoice: EnrichmentStep;
+}
+function enrichmentAlertLines(rep: EnrichmentReport): string[] {
+  const fmt = (label: string, s: EnrichmentStep) => `${s.warning ? "⚠ " : ""}${label}: ${s.detail ?? s.status}`;
+  return [
+    fmt("Inventory provider", rep.provider),
+    fmt("Subscription (4.0 → 5.0)", rep.subscription),
+    fmt(`Billing plan (${rep.billedTo}-billed)`, rep.planCheck),
+    fmt("Billing contacts", rep.contacts),
+    fmt("Next invoice date", rep.nextInvoice),
+  ];
+}
 interface Wave { waveId: string; sentAt: string | null; sent: number; migrated: number; pending: number; }
 interface Operator { id: string; name: string; }
 interface Summary { total: number; ready: number; eligible: number; billingStaged: number; templateConfirmed: number; readyPool: number; settingsMissing: number; logoMissing: number; zeroInventory: number; freshbooksStopPending: number; unassigned: number; }
@@ -187,17 +209,17 @@ export default function MigrationConsole() {
     } else {
       if (!confirm(`Sync ${row.name}? This pulls their current Platform 4.0 data (products, logo, settings) into 5.0. Nothing will overwrite them afterwards.`)) return false;
     }
-    return syncDealerNoConfirm(row);
+    return (await syncDealerNoConfirm(row)).ok;
   }
 
-  async function syncDealerNoConfirm(row: Row): Promise<boolean> {
+  async function syncDealerNoConfirm(row: Row, opts?: { quiet?: boolean }): Promise<{ ok: boolean; report: EnrichmentReport | null }> {
     setStagingId(row.id);
     try {
       const res = await fetch("/api/migration/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealer_ids: [row.id] }) });
-      const j = await res.json() as { error?: string; synced_at?: string; dealers?: Array<{ status: string; reason?: string }> };
-      if (!res.ok) { alert(j.error ?? "Sync failed"); return false; }
+      const j = await res.json() as { error?: string; synced_at?: string; dealers?: Array<{ status: string; reason?: string; enrichment_report?: EnrichmentReport | null }> };
+      if (!res.ok) { alert(j.error ?? "Sync failed"); return { ok: false, report: null }; }
       const d0 = j.dealers?.[0];
-      if (d0 && d0.status !== "synced") { alert(`${row.name}: ${d0.reason ?? d0.status}`); return false; }
+      if (d0 && d0.status !== "synced") { alert(`${row.name}: ${d0.reason ?? d0.status}`); return { ok: false, report: null }; }
       setData((d) => d && {
         ...d,
         rows: d.rows.map((r) => r.id === row.id
@@ -210,8 +232,12 @@ export default function MigrationConsole() {
             }
           : r),
       });
-      return true;
-    } catch { alert("Sync failed"); return false; } finally { setStagingId(null); }
+      const report = d0?.enrichment_report ?? null;
+      if (!opts?.quiet && report) {
+        alert(`${row.name} synced.\n\nBilling/config enrichment:\n${enrichmentAlertLines(report).join("\n")}`);
+      }
+      return { ok: true, report };
+    } catch { alert("Sync failed"); return { ok: false, report: null }; } finally { setStagingId(null); }
   }
 
   // Sync every non-migrated dealer in a group, sequentially (the ETL box
@@ -224,9 +250,23 @@ export default function MigrationConsole() {
     if (!confirm(`Sync all ${members.length} dealer${members.length === 1 ? "" : "s"} in ${groupName ?? "this group"} from Platform 4.0?${warn}`)) return;
     setSyncingGroup(groupId);
     try {
+      const warnings: string[] = [];
+      let syncedCount = 0;
       for (const m of members) {
-        const ok = await syncDealerNoConfirm(m);
+        const { ok, report } = await syncDealerNoConfirm(m, { quiet: true });
         if (!ok) break; // the failed dealer already alerted; stop the run
+        syncedCount++;
+        if (report) {
+          for (const line of enrichmentAlertLines(report)) {
+            if (line.startsWith("⚠")) warnings.push(`${m.name} — ${line.slice(2)}`);
+          }
+        }
+      }
+      if (syncedCount > 0) {
+        alert(
+          `${groupName ?? "Group"}: ${syncedCount} dealer${syncedCount === 1 ? "" : "s"} synced.` +
+          (warnings.length ? `\n\nEnrichment warnings:\n${warnings.join("\n")}` : "\n\nNo enrichment warnings.")
+        );
       }
       await load();
     } finally { setSyncingGroup(null); }
