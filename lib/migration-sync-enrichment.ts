@@ -73,6 +73,11 @@ export interface EtlDealerEnrichment {
     dealer_group: string | null;
     group_name: string | null;
     primary_contact_email: string | null;
+    /** Aurora BILLING_ID (da-billing customer UUID for FreshBooks-era dealers)
+     *  — Supabase's dealers.billing_id is immutable-on-update and can be
+     *  stale/NULL, so the live Aurora value is a resolution candidate. */
+    billing_id: string | null;
+    group_billing_id: string | null;
   } | null;
   fb_token: "ok" | "expired" | "missing" | "error";
   dealer_fb: EtlFbEntity | null;
@@ -259,7 +264,11 @@ export async function applySyncEnrichment(
         .select("billing_customer_id, billing_id")
         .eq("id", dealer.group_id)
         .maybeSingle()) as { data: { billing_customer_id: string | null; billing_id?: string | null } | null };
-      customerId = await firstExistingCustomer(ctx, [grp?.billing_customer_id, grp?.billing_id]);
+      customerId = await firstExistingCustomer(ctx, [
+        grp?.billing_customer_id,
+        grp?.billing_id,
+        enrichment?.aurora?.group_billing_id,
+      ]);
     }
   } else {
     // Legacy dealers are often linked only via billing_id (the FreshBooks-era
@@ -268,6 +277,7 @@ export async function applySyncEnrichment(
     customerId = await firstExistingCustomer(ctx, [
       dealer.billing_customer_id,
       dealer.billing_id,
+      enrichment?.aurora?.billing_id,
       dealer.internal_id,
     ]);
   }
