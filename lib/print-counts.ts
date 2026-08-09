@@ -60,13 +60,71 @@ async function distinctVehicleSelect(
   admin: Admin,
   { dealerId, dealerIds, since, docType }: PrintedVehicleCountOpts,
 ): Promise<number> {
-  let q = admin.from("print_history").select("vehicle_id").limit(50000);
-  if (dealerId) q = q.eq("dealer_id", dealerId);
-  else if (dealerIds) q = q.in("dealer_id", dealerIds);
-  if (since) q = q.gte("created_at", since);
-  if (docType) q = q.eq("document_type", docType);
-  const { data: rows } = await q;
+  return (await printHistoryVehicleIds(admin, { dealerId, dealerIds, since, docType })).size;
+}
+
+// PostgREST clamps every select to max-rows (1000) regardless of .limit(), so
+// full-set reads must page with .range() — a single .limit(50000) silently
+// truncated busy dealers' windows (a reprint-heavy store logs >1000 history
+// rows in 365 days).
+async function printHistoryVehicleIds(
+  admin: Admin,
+  { dealerId, dealerIds, since, docType }: PrintedVehicleCountOpts,
+): Promise<Set<string>> {
   const seen = new Set<string>();
-  for (const r of rows ?? []) if (r.vehicle_id) seen.add(r.vehicle_id as string);
-  return seen.size;
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    let q = admin.from("print_history").select("vehicle_id").range(from, from + PAGE - 1);
+    if (dealerId) q = q.eq("dealer_id", dealerId);
+    else if (dealerIds) q = q.in("dealer_id", dealerIds);
+    if (since) q = q.gte("created_at", since);
+    if (docType) q = q.eq("document_type", docType);
+    const { data: rows } = await q;
+    for (const r of rows ?? []) if (r.vehicle_id) seen.add(r.vehicle_id as string);
+    if (!rows || rows.length < PAGE) break;
+  }
+  return seen;
+}
+
+/**
+ * Distinct vehicles printed in a window across BOTH platforms' records —
+ * the dealer-Dashboard "Prints" metric for stores at any migration stage:
+ *
+ *   print_history (addendum)          — every 5.0-recorded print, INCLUDING
+ *                                       sold-since-printing vehicles (the
+ *                                       Lehighton lesson: active-stock flags
+ *                                       alone undercount).
+ *   ∪ dealer_vehicles print flags     — ETL Job-6-synced 4.0 prints for
+ *                                       unmigrated/mid-migration dealers
+ *                                       (print_history has nothing for them).
+ *
+ * Never double-counts: a 5.0 print writes print_history AND sets the flag on
+ * the SAME dealer_vehicles row, so the union collapses by vehicle id. For
+ * migrated dealers Job 6 is excluded, so no 4.0 contamination sneaks in. The
+ * flag side matches Aurora LAST30's empirically-determined semantics
+ * (PRINT_STATUS=1 + PRINT_DATE window, ANY inventory status).
+ */
+export async function printedVehicleUnionCount(
+  admin: Admin,
+  { dealerId, since }: { dealerId: string; since?: string },
+): Promise<number> {
+  const [historyIds, flagIds] = await Promise.all([
+    printHistoryVehicleIds(admin, { dealerId, since, docType: "addendum" }),
+    (async () => {
+      const seen = new Set<string>();
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        let q = admin.from("dealer_vehicles").select("id")
+          .eq("dealer_id", dealerId).eq("print_status", 1)
+          .range(from, from + PAGE - 1);
+        if (since) q = q.gte("print_date", since.slice(0, 10));
+        const { data: rows } = await q;
+        for (const r of rows ?? []) if (r.id) seen.add(r.id as string);
+        if (!rows || rows.length < PAGE) break;
+      }
+      return seen;
+    })(),
+  ]);
+  flagIds.forEach((id) => historyIds.add(id));
+  return historyIds.size;
 }

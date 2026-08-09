@@ -6,7 +6,7 @@ import { resolveSessionProfile } from "@/lib/profile-session";
 import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import { canPrintForDealer } from "@/lib/print-eligibility";
-import { printedVehicleCount } from "@/lib/print-counts";
+import { printedVehicleCount, printedVehicleUnionCount } from "@/lib/print-counts";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import { PageHeader } from "@/components/PageHeader";
 import ActivitySection from "@/components/dashboard/ActivitySection";
@@ -133,19 +133,28 @@ function GroupAdminView({
 // mode (bypassGate — no print-eligibility gate). Stats + inventory, scoped to
 // the dealer's text id.
 //
-// Card layout (2026-07-29):
+// Card layout (2026-07-29; sources fixed 2026-08-09):
 //   Vehicles — active total + added today
 //   Prints   — printed last 30 days + last 365 days
-//   Coverage — lifetime printed + % of current inventory covered
+//   Coverage — printed among CURRENT inventory + the matching %
 //   Queued   — mobile print queue, ready to print
-// Print COUNTS read print_history distinct vehicles (printedVehicleCount —
-// the platform-canonical print metric shared with the admin Dealers list,
-// trial caps, and HubSpot) so surfaces agree dealer-by-dealer. The old
-// dealer_vehicles.print_status source undercounted: it only saw currently
-// ACTIVE stock, so every sold-since-printing vehicle silently dropped out
-// (Lehighton Kia read 29/137/151 here vs the admin list's 42/183). The
-// coverage PERCENT still reads active-stock print flags — "how much of the
-// current lot is covered" is inherently an inventory metric.
+//
+// Prints reads printedVehicleUnionCount — print_history (addendum, the
+// platform-canonical 5.0 metric shared with the admin Dealers list) UNIONED
+// with dealer_vehicles print flags by vehicle id. Why the union, not either
+// source alone:
+//   • print_history alone showed 0 for mid-migration dealers (Honda of
+//     Superstition Springs: 4.0 prints arrive only as ETL Job-6 flags).
+//   • dealer_vehicles flags alone dropped sold-since-printing vehicles for
+//     5.0-printing dealers (Lehighton Kia read 29 here vs the admin list's
+//     42 — the 2026-08-06 incident).
+// A 5.0 print writes both stores against the same vehicle row, so the union
+// can never double-count; migrated dealers are excluded from Job 6, so their
+// numbers stay identical to the admin list's print_history count.
+//
+// Coverage's big number and % now read the SAME query (active stock with the
+// printed flag / active total) — they can no longer contradict each other
+// (the old big number read lifetime print_history: 0-vs-44% at Honda).
 async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId: string; bypassGate?: boolean }) {
   const admin = createAdminSupabaseClient();
   const now = new Date();
@@ -159,7 +168,6 @@ async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId:
     { count: addedTodayCount },
     printed30Count,
     printed365Count,
-    printedLifetimeCount,
     { count: printedActiveCount },
     { count: queuedCount },
   ] = await Promise.all([
@@ -168,11 +176,10 @@ async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId:
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active")
       .gte("date_added", startOfToday.toISOString()),
-    printedVehicleCount(admin, { dealerId, since: iso30, docType: "addendum" }),
-    printedVehicleCount(admin, { dealerId, since: iso365, docType: "addendum" }),
-    printedVehicleCount(admin, { dealerId, docType: "addendum" }),
-    // Coverage % numerator only: active vehicles carrying the printed flag
-    // (legacy ETL-printed + platform-printed uniformly).
+    printedVehicleUnionCount(admin, { dealerId, since: iso30 }),
+    printedVehicleUnionCount(admin, { dealerId, since: iso365 }),
+    // Coverage — big number AND % numerator: active vehicles carrying the
+    // printed flag (legacy ETL-printed + platform-printed uniformly).
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active")
       .eq("print_status", 1),
@@ -186,9 +193,9 @@ async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId:
   const addedToday = addedTodayCount ?? 0;
   const printed30 = printed30Count ?? 0;
   const printed365 = printed365Count ?? 0;
-  const lifetimePrinted = printedLifetimeCount ?? 0;
+  const printedActive = printedActiveCount ?? 0;
   const queued = queuedCount ?? 0;
-  const coveragePct = totalVehicles > 0 ? Math.round(((printedActiveCount ?? 0) / totalVehicles) * 100) : 0;
+  const coveragePct = totalVehicles > 0 ? Math.round((printedActive / totalVehicles) * 100) : 0;
   const coverageColor = coveragePct >= 75 ? "#4caf50" : coveragePct >= 50 ? "var(--text-muted)" : "#ffa500";
 
   const dealerStats: { label: string; value: string; note: string; noteColor?: string }[] = [
@@ -205,7 +212,7 @@ async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId:
     },
     {
       label: "Coverage",
-      value: lifetimePrinted.toLocaleString(),
+      value: printedActive.toLocaleString(),
       note: `${coveragePct}% of current inventory printed`,
       noteColor: coverageColor,
     },
