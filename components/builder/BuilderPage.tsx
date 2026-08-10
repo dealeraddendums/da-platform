@@ -3115,12 +3115,31 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <FontStepper label="Font size" fkey="fontSize" base={11} d={d} fontScale={fontScale} af={af} />
         </EpSection>
       )}
-      {w.type === 'options' && (
-        <EpSection>
-          <Eps>Font Size</Eps>
-          <FontStepper label="Font size" fkey="fontSize" base={10.5} d={d} fontScale={fontScale} af={af} />
-        </EpSection>
-      )}
+      {w.type === 'options' && (() => {
+        // Split pickers (2026-08-10, mirrors suggested_options 2026-08-04):
+        // Section Label vs Products. Both seed from the legacy single
+        // fontSize so an old template's steppers show — and adjust from —
+        // the value it actually renders with; the first click writes the new
+        // key (renderer falls back until then, so nothing shifts until the
+        // user changes it).
+        const legacyMult = (d.fontSize as number) || 1.0;
+        const dSeeded = {
+          ...d,
+          labelFontSize: (d.labelFontSize as number) ?? legacyMult,
+          productsFontSize: (d.productsFontSize as number) ?? legacyMult,
+        };
+        const afSeeded = (key: string, delta: number) => {
+          const cur = (d[key] as number) ?? legacyMult;
+          u(key, Math.round(Math.max(0.5, Math.min(3.0, cur + delta)) * 10) / 10);
+        };
+        return (
+          <EpSection>
+            <Eps>Font Size</Eps>
+            <FontStepper label="Section label font size" fkey="labelFontSize" base={10.5} d={dSeeded} fontScale={fontScale} af={afSeeded} />
+            <FontStepper label="Products font size" fkey="productsFontSize" base={10.5} d={dSeeded} fontScale={fontScale} af={afSeeded} />
+          </EpSection>
+        );
+      })()}
       {w.type === 'retail_wholesale' && (
         <EpSection>
           <Eps>Font Size</Eps>

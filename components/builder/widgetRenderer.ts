@@ -208,12 +208,23 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   if (type === 'options') {
-    const sz = Math.round(10 * fs * ((d.fontSize as number) || 1));
-    const szm = Math.round(9 * fs * ((d.fontSize as number) || 1));
+    // Split font sizes (2026-08-10): same pattern as suggested_options —
+    // labelFontSize scales the section label, productsFontSize the item
+    // rows/descriptions. Both fall back to the legacy single fontSize so
+    // every saved template renders byte-identically until a stepper is used.
+    // NOTE: the section label deliberately does NOT auto-hide when empty —
+    // Required Products only has the plain-text label variant, and the
+    // suggested_options gating discipline keeps plain-text label divs even
+    // when empty (removing one shifts ground-truthed layouts by its margin;
+    // only the boxed header variant, which this widget doesn't have, hides).
+    const legacyMult = (d.fontSize as number) || 1;
+    const labelSz = Math.round(10 * fs * ((d.labelFontSize as number) || legacyMult));
+    const sz = Math.round(10 * fs * ((d.productsFontSize as number) || legacyMult));
+    const szm = Math.round(9 * fs * ((d.productsFontSize as number) || legacyMult));
     const ls = (d.lineSpacing as number) || 1.2;
     type OptItem = { name: string; desc: string; price: string; separator_above?: boolean; separator_below?: boolean; spaces?: number };
     const items = (d.items as OptItem[]) || [];
-    return `<div style="padding:3px 0"><div style="font-size:${sz}px;color:#555;margin-bottom:4px">${rich(d.sectionLabel)}</div>${items.map(it =>
+    return `<div style="padding:3px 0"><div style="font-size:${labelSz}px;color:#555;margin-bottom:4px">${rich(d.sectionLabel)}</div>${items.map(it =>
       renderProductRow(it, sz, szm, ls)
     ).join('')}</div>`;
   }
