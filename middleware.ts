@@ -243,7 +243,9 @@ export async function middleware(request: NextRequest) {
     data: { session },
   } = await supabase.auth.getSession();
 
-  const isAuthRoute = pathname === "/login" || pathname === "/signup";
+  // /welcome is the 4.0-lockout landing page — public like /login, and a
+  // visitor who already has a 5.0 session skips it straight to the dashboard.
+  const isAuthRoute = pathname === "/login" || pathname === "/signup" || pathname === "/welcome";
   const isResetRoute = pathname === "/reset-password";
   const isApiAuth = pathname.startsWith("/api/auth/");
   const isProtected =
