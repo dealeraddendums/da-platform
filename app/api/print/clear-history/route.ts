@@ -103,12 +103,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .in("vehicle_id", ids);
     if (phErr) return NextResponse.json({ error: phErr.message || "Failed to clear print history" }, { status: 500 });
 
-    // canonical print fields on dealer_vehicles (selected ids only)
-    const { error: dvResetErr } = await admin
+    // canonical print fields on dealer_vehicles (selected ids only).
+    // print_cleared_at (migration 140) records the deliberate clear so ETL
+    // Job 6 doesn't re-mark the vehicle from Aurora that night unless 4.0
+    // shows a NEWER print. Tolerant of the column not existing yet (retry
+    // without it) so the clear itself never breaks pre-migration.
+    const resetFields = { print_status: 0, print_info: 0, print_guide: 0, print_date: null, print_user: null };
+    let { error: dvResetErr } = await admin
       .from("dealer_vehicles")
-      .update({ print_status: 0, print_info: 0, print_guide: 0, print_date: null, print_user: null })
+      .update({ ...resetFields, print_cleared_at: new Date().toISOString() })
       .eq("dealer_id", dealerSlug)
       .in("id", ids);
+    if (dvResetErr && /print_cleared_at/.test(dvResetErr.message)) {
+      console.warn("[print/clear-history] print_cleared_at column missing (apply migration 140) — clearing without the Job-6 guard stamp");
+      ({ error: dvResetErr } = await admin
+        .from("dealer_vehicles")
+        .update(resetFields)
+        .eq("dealer_id", dealerSlug)
+        .in("id", ids));
+    }
     if (dvResetErr) console.error("[print/clear-history] dealer_vehicles reset failed:", dvResetErr.message);
 
     // addendum_data (needs dealer UUID for FK)
@@ -139,7 +152,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       method: "manual",
       changed_by: claims.sub,
     }));
-    await admin.from("vehicle_audit_log").insert(logRows);
+    const { error: auditErr } = await admin.from("vehicle_audit_log").insert(logRows);
+    // Pre-migration-140 the action CHECK rejected 'print_history_cleared' —
+    // surface instead of swallowing (the clear itself already succeeded).
+    if (auditErr) console.error("[print/clear-history] audit insert failed:", auditErr.message);
   }
 
   return NextResponse.json({ cleared_vehicles: vehicleIds.length });

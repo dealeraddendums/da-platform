@@ -81,11 +81,23 @@ export async function POST(
   // Reset canonical print fields on dealer_vehicles — dashboard counts, the
   // print-status filter, and the Create Document button states read from these.
   // Scope directly by dealer + active status (no id list needed → no URL limit).
-  const { error: dvResetErr } = await admin
+  // print_cleared_at (migration 140) records the deliberate clear so ETL Job 6
+  // doesn't re-mark from Aurora that night unless 4.0 shows a NEWER print;
+  // tolerant of the column not existing yet (retry without it).
+  const resetFields = { print_status: 0, print_info: 0, print_guide: 0, print_date: null, print_user: null };
+  let { error: dvResetErr } = await admin
     .from("dealer_vehicles")
-    .update({ print_status: 0, print_info: 0, print_guide: 0, print_date: null, print_user: null })
+    .update({ ...resetFields, print_cleared_at: new Date().toISOString() })
     .eq("dealer_id", dealerId)
     .eq("status", "active");
+  if (dvResetErr && /print_cleared_at/.test(dvResetErr.message)) {
+    console.warn("[clear-print-history] print_cleared_at column missing (apply migration 140) — clearing without the Job-6 guard stamp");
+    ({ error: dvResetErr } = await admin
+      .from("dealer_vehicles")
+      .update(resetFields)
+      .eq("dealer_id", dealerId)
+      .eq("status", "active"));
+  }
   if (dvResetErr) console.error("[clear-print-history] dealer_vehicles reset failed:", dvResetErr.message);
 
   // Delete addendum_data for active vehicles — needs dealer UUID for FK. Chunked.
@@ -128,7 +140,10 @@ export async function POST(
       method: "manual",
       changed_by: claims.sub,
     }));
-    await admin.from("vehicle_audit_log").insert(logRows);
+    const { error: auditErr } = await admin.from("vehicle_audit_log").insert(logRows);
+    // Pre-migration-140 the action CHECK rejected 'print_history_cleared' —
+    // surface instead of swallowing (the clear itself already succeeded).
+    if (auditErr) console.error("[clear-print-history] audit insert failed:", auditErr.message);
   }
 
   return NextResponse.json({ cleared_vehicles: activeIds.length });

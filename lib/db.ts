@@ -1121,6 +1121,7 @@ export type DealerVehicleRow = {
   print_info: number | null;
   print_queue: number | null;
   print_queue_at: string | null;   // migration 123 — when queued (mobile Print Later)
+  print_cleared_at: string | null; // migration 140 — deliberate Clear Print History stamp (Job 6 guard)
   print_queue_by: string | null;   // migration 123 — who queued it
   print_user: string | null;
   print_flag: number | null;
@@ -1178,6 +1179,7 @@ export type DealerVehicleInsert = {
   print_info?: number | null;
   print_queue?: number | null;
   print_queue_at?: string | null;  // migration 123
+  print_cleared_at?: string | null; // migration 140
   print_queue_by?: string | null;  // migration 123
   print_user?: string | null;
   print_flag?: number | null;
