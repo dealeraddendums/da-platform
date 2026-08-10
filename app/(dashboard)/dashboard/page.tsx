@@ -7,6 +7,7 @@ import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import { canPrintForDealer } from "@/lib/print-eligibility";
 import { printedVehicleCount, printedVehicleUnionCount } from "@/lib/print-counts";
+import { accountTier } from "@/lib/account-tiers";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import { PageHeader } from "@/components/PageHeader";
 import ActivitySection from "@/components/dashboard/ActivitySection";
@@ -38,6 +39,7 @@ function SuperAdminView({
   hour,
   payingCount,
   trialCount,
+  freeCount,
   vehicleTotal,
   vehiclePrinted,
   addendumMonth,
@@ -47,6 +49,7 @@ function SuperAdminView({
   hour: number;
   payingCount: number;
   trialCount: number;
+  freeCount: number;
   vehicleTotal: number;
   vehiclePrinted: number;
   addendumMonth: number;
@@ -69,7 +72,7 @@ function SuperAdminView({
         <div className="card p-4">
           <p style={STAT_LABEL}>Trial Dealers</p>
           <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>{trialCount.toLocaleString()}</p>
-          <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Free / trial accounts</p>
+          <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{freeCount.toLocaleString()} Free accounts not included</p>
         </div>
         <div className="card p-4">
           <p style={STAT_LABEL}>Vehicles in System</p>
@@ -106,7 +109,7 @@ function GroupAdminView({
 }) {
   const cards = [
     { label: "Paid Dealers",        value: paidCount.toLocaleString(),     note: "Active subscriptions" },
-    { label: "Trial Dealers",        value: trialCount.toLocaleString(),    note: "Free / trial accounts" },
+    { label: "Trial Dealers",        value: trialCount.toLocaleString(),    note: "Trial accounts" },
     { label: "Dealers",              value: dealerCount.toLocaleString(),   note: "In your group" },
     { label: "Addendums This Month", value: addendumMonth.toLocaleString(), note: "Printed this month" },
   ];
@@ -329,20 +332,31 @@ export default async function DashboardPage() {
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const PAID_TYPES = ["Automatic Web", "Automatic DMS", "Manual", "Standard", "Automatic Web $135"];
+    // Tier counts are computed in JS from the full dealer read below via the
+    // canonical accountTier() (lib/account-tiers.ts) — the old negated-IN
+    // queries counted every non-paid account_type as "trial" (448 = 323 Free
+    // + 112 Trial + 13 paying dealers on priced variants / plan codes).
+    const fetchAllDealers = async () => {
+      const rows: Record<string, unknown>[] = [];
+      // .limit() is clamped to 1,000 by PostgREST — page with .range() or the
+      // map (and any count derived from this read) silently truncates.
+      for (let from = 0; ; from += 1000) {
+        const { data } = await admin.from("dealers")
+          .select("id, dealer_id, name, account_type, active, lat, lng, address, city, state, zip")
+          .order("id")
+          .range(from, from + 999);
+        rows.push(...((data ?? []) as Record<string, unknown>[]));
+        if (!data || data.length < 1000) break;
+      }
+      return rows;
+    };
 
     const [
-      { count: payingCount },
-      { count: trialCount },
       { count: vehicleTotal },
       { count: vehiclePrinted },
       addendumMonth,
-      { data: dealerRows },
+      dealerRows,
     ] = await Promise.all([
-      admin.from("dealers").select("*", { count: "exact", head: true })
-        .eq("active", true).in("account_type", PAID_TYPES),
-      admin.from("dealers").select("*", { count: "exact", head: true })
-        .eq("active", true).not("account_type", "in", `(${PAID_TYPES.map(t => `"${t}"`).join(",")})`),
       admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
         .neq("status", "inactive"),
       admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
@@ -350,8 +364,17 @@ export default async function DashboardPage() {
       // DISTINCT vehicles printed this month, not print_history rows
       // (multiprint-qa Issue B — reprints inflate row counts).
       printedVehicleCount(admin, { since: startOfMonth.toISOString() }),
-      admin.from("dealers").select("id, dealer_id, name, account_type, lat, lng, address, city, state, zip").limit(5000),
+      fetchAllDealers(),
     ]);
+
+    let payingCount = 0, trialCount = 0, freeCount = 0;
+    for (const d of dealerRows) {
+      if (d.active !== true) continue;
+      const tier = accountTier(d.account_type as string | null);
+      if (tier === "paid") payingCount++;
+      else if (tier === "trial") trialCount++;
+      else freeCount++;
+    }
 
     const dealers: DealerMapPoint[] = (dealerRows ?? []).map((d) => ({
       id: d.id as string,
@@ -370,8 +393,9 @@ export default async function DashboardPage() {
       <SuperAdminView
         name={profile?.full_name ?? null}
         hour={new Date().getHours()}
-        payingCount={payingCount ?? 0}
-        trialCount={trialCount ?? 0}
+        payingCount={payingCount}
+        trialCount={trialCount}
+        freeCount={freeCount}
         vehicleTotal={vehicleTotal ?? 0}
         vehiclePrinted={vehiclePrinted ?? 0}
         addendumMonth={addendumMonth ?? 0}
@@ -399,26 +423,18 @@ export default async function DashboardPage() {
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const PAID_TYPES = [
-      "Monthly Subscription Manual", "Monthly Subscription Automatic Web", "Monthly Subscription Automatic DMS",
-      "Manual", "Automatic Web", "Automatic DMS", "Standard", "Automatic Web $135",
-    ];
-    const paidFilter = `(${PAID_TYPES.map(t => `"${t}"`).join(",")})`;
-
-    // Phase 1: parallel counts + dealer rows for map
-    const [
-      { count: paidCount },
-      { count: trialCount },
-      { data: groupDealerRows },
-    ] = await Promise.all([
-      admin.from("dealers").select("*", { count: "exact", head: true })
-        .eq("group_id", groupId).eq("active", true).in("account_type", PAID_TYPES),
-      admin.from("dealers").select("*", { count: "exact", head: true })
-        .eq("group_id", groupId).eq("active", true).not("account_type", "in", paidFilter),
-      admin.from("dealers")
-        .select("id, dealer_id, name, account_type, lat, lng, address, city, state, zip")
-        .eq("group_id", groupId),
-    ]);
+    // Phase 1: dealer rows (tier counts derived via canonical accountTier —
+    // the old negated-IN query counted Free accounts as trials).
+    const { data: groupDealerRows } = await admin.from("dealers")
+      .select("id, dealer_id, name, account_type, active, lat, lng, address, city, state, zip")
+      .eq("group_id", groupId);
+    let paidCount = 0, trialCount = 0;
+    for (const d of groupDealerRows ?? []) {
+      if (d.active !== true) continue;
+      const tier = accountTier(d.account_type as string | null);
+      if (tier === "paid") paidCount++;
+      else if (tier === "trial") trialCount++;
+    }
 
     const textDealerIds = (groupDealerRows ?? []).map(d => d.dealer_id as string);
     const dealerCount = textDealerIds.length;
@@ -448,8 +464,8 @@ export default async function DashboardPage() {
 
     return (
       <GroupAdminView
-        paidCount={paidCount ?? 0}
-        trialCount={trialCount ?? 0}
+        paidCount={paidCount}
+        trialCount={trialCount}
         dealerCount={dealerCount}
         addendumMonth={addendumMonth}
         dealers={mapDealers}

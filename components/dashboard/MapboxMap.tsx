@@ -17,18 +17,12 @@ export type DealerMapPoint = {
   zip: string | null;
 };
 
-// Paid = active subscription; Free/Trial/null = trial
-// Actual DB values (confirmed from production data):
-const PAID_TYPES = new Set([
-  "Automatic Web",
-  "Automatic DMS",
-  "Manual",
-  "Standard",
-  "Automatic Web $135",
-]);
+import { isPaidAccountType } from "@/lib/account-tiers";
 
+// Paid vs trial/free classification lives in lib/account-tiers.ts (canonical —
+// shared with both dashboard branches; handles priced variants + plan codes).
 export function isPaidDealer(accountType: string | null | undefined): boolean {
-  return !!accountType && PAID_TYPES.has(accountType);
+  return isPaidAccountType(accountType);
 }
 
 type Props = {

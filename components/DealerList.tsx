@@ -712,15 +712,20 @@ const AUTO_MAKES = [
   "Porsche","Ram","Rolls-Royce","Subaru","Tesla","Toyota","Volkswagen","Volvo","Other",
 ];
 
-// Values are the da-billing product IDs (sub-manual / sub-auto-web /
-// sub-auto-dms) so account_type is consistent with the productId stored
-// on da-billing template line items. Trial is platform-only — descriptors
-// return null for it, which makes the template-create step a no-op.
+// Values are the platform-canonical account_type LABELS ("Manual" /
+// "Automatic Web" / "Automatic DMS") — the same dialect the ETL, HubSpot
+// sync, migrate-dealer, and tier classification all speak. This form
+// previously stored da-billing product IDs (sub-manual / sub-auto-web),
+// which subscriptionDescriptorFor() resolves fine for billing provisioning
+// but which misclassified those dealers as "trial" on the dashboard and
+// diverged from every other account_type writer (normalized 2026-08-10).
+// Trial is platform-only — descriptors return null for it, which makes the
+// template-create step a no-op.
 const ACCOUNT_TYPES: { label: string; value: string }[] = [
   { label: "Trial",                                  value: "Trial" },
-  { label: "Monthly Subscription Manual",            value: "sub-manual" },
-  { label: "Monthly Subscription Automatic Web",     value: "sub-auto-web" },
-  { label: "Monthly Subscription Automatic DMS",     value: "sub-auto-dms" },
+  { label: "Monthly Subscription Manual",            value: "Manual" },
+  { label: "Monthly Subscription Automatic Web",     value: "Automatic Web" },
+  { label: "Monthly Subscription Automatic DMS",     value: "Automatic DMS" },
 ];
 
 type NewDealerFormProps = {
@@ -739,7 +744,7 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
     // Blank ⇒ the server mints an interim ga_ id (was a Date.now() prefill,
     // which minted bare-numeric ids that read like real inventory ids).
     dealer_id: "",
-    account_type: "sub-manual",
+    account_type: "Manual",
     account_purpose: "real",
     franchise: "",
     dealer_group: "",
