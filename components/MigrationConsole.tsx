@@ -400,7 +400,17 @@ export default function MigrationConsole() {
       else if (assignFilter === "unassigned") rows = rows.filter((r) => !r.assignedTo);
       else if (assignFilter) rows = rows.filter((r) => r.assignedTo === assignFilter);
     }
-    if (statusFilter) rows = rows.filter((r) => r.inviteStatus === statusFilter);
+    if (statusFilter) {
+      rows = rows.filter((r) => r.inviteStatus === statusFilter);
+    } else if (!fbPending && !search.trim()) {
+      // Default view ("All — except migrated", 2026-08-10): completed dealers
+      // — including 5.0 natives, which carry inviteStatus 'migrated' — would
+      // drown the working set as migrations reach the hundreds. They stay
+      // reachable three ways: the explicit Migrated status option, the FB
+      // stop pending queue (migrated AND needing action), and typed search
+      // (searching implies intent, so it looks at everything).
+      rows = rows.filter((r) => r.inviteStatus !== "migrated");
+    }
     if (group) rows = rows.filter((r) => r.groupName === group);
     if (state) rows = rows.filter((r) => r.state === state);
     if (search.trim()) {
@@ -607,7 +617,15 @@ export default function MigrationConsole() {
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <span style={{ fontWeight: 700, color: NAVY, fontSize: 13 }}>▦ {groupName ?? "Group"}</span>
             <span style={{ fontSize: 12, color: "#78828c" }}>
-              {members.length} dealer{members.length === 1 ? "" : "s"}{shownCount !== members.length ? ` · ${shownCount} shown` : ""}
+              {members.length} dealer{members.length === 1 ? "" : "s"}
+              {(() => {
+                // Counts come from the FULL member list (fullGroupMembers), so
+                // rows hidden by the default except-migrated filter can't skew
+                // them — this hint just makes the hidden set explicit.
+                const migratedN = members.filter((m) => m.inviteStatus === "migrated").length;
+                return migratedN > 0 ? ` · ${migratedN} migrated` : "";
+              })()}
+              {shownCount !== members.length ? ` · ${shownCount} shown` : ""}
             </span>
             <span style={{ fontSize: 12, color: allMine ? "#2e7d32" : "#55595c" }}>
               {allMine ? "owned by you" : `owner: ${ownerParts.join(", ")}`}
@@ -742,7 +760,7 @@ export default function MigrationConsole() {
           {operators.filter((o) => o.id !== me).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ height: 34, padding: "0 8px", border: "1px solid #cccccc", borderRadius: 6, fontSize: 13 }}>
-          <option value="">All statuses</option>
+          <option value="">All — except migrated</option>
           <option value="not-invited">Not invited</option>
           <option value="invited">Invited</option>
           <option value="stalled">Stalled</option>
