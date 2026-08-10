@@ -212,14 +212,20 @@ export default function MigrationConsole() {
     return (await syncDealerNoConfirm(row)).ok;
   }
 
-  async function syncDealerNoConfirm(row: Row, opts?: { quiet?: boolean }): Promise<{ ok: boolean; report: EnrichmentReport | null }> {
+  async function syncDealerNoConfirm(row: Row, opts?: { quiet?: boolean }): Promise<{ ok: boolean; refused?: string; report: EnrichmentReport | null }> {
     setStagingId(row.id);
     try {
       const res = await fetch("/api/migration/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealer_ids: [row.id] }) });
       const j = await res.json() as { error?: string; synced_at?: string; dealers?: Array<{ status: string; reason?: string; enrichment_report?: EnrichmentReport | null }> };
       if (!res.ok) { alert(j.error ?? "Sync failed"); return { ok: false, report: null }; }
       const d0 = j.dealers?.[0];
-      if (d0 && d0.status !== "synced") { alert(`${row.name}: ${d0.reason ?? d0.status}`); return { ok: false, report: null }; }
+      if (d0 && d0.status !== "synced") {
+        // Per-dealer refusal (migrated / etl_locked / 4.0 trial / …). In a
+        // group run the caller collects these and continues; solo it alerts.
+        const reason = d0.reason ?? d0.status;
+        if (!opts?.quiet) alert(`${row.name}: ${reason}`);
+        return { ok: false, refused: reason, report: null };
+      }
       setData((d) => d && {
         ...d,
         rows: d.rows.map((r) => r.id === row.id
@@ -251,10 +257,17 @@ export default function MigrationConsole() {
     setSyncingGroup(groupId);
     try {
       const warnings: string[] = [];
+      const refusals: string[] = [];
       let syncedCount = 0;
       for (const m of members) {
-        const { ok, report } = await syncDealerNoConfirm(m, { quiet: true });
-        if (!ok) break; // the failed dealer already alerted; stop the run
+        const { ok, refused, report } = await syncDealerNoConfirm(m, { quiet: true });
+        if (!ok) {
+          // A per-dealer REFUSAL (e.g. a 4.0 trial, an etl_locked member) is
+          // expected in mixed groups — record it and keep syncing the rest.
+          // A hard failure (transport / ETL box error) already alerted; stop.
+          if (refused) { refusals.push(`${m.name} — ${refused}`); continue; }
+          break;
+        }
         syncedCount++;
         if (report) {
           for (const line of enrichmentAlertLines(report)) {
@@ -262,10 +275,11 @@ export default function MigrationConsole() {
           }
         }
       }
-      if (syncedCount > 0) {
+      if (syncedCount > 0 || refusals.length > 0) {
         alert(
           `${groupName ?? "Group"}: ${syncedCount} dealer${syncedCount === 1 ? "" : "s"} synced.` +
-          (warnings.length ? `\n\nEnrichment warnings:\n${warnings.join("\n")}` : "\n\nNo enrichment warnings.")
+          (refusals.length ? `\n\nSkipped (refused):\n${refusals.join("\n")}` : "") +
+          (warnings.length ? `\n\nEnrichment warnings:\n${warnings.join("\n")}` : (syncedCount > 0 ? "\n\nNo enrichment warnings." : ""))
         );
       }
       await load();
