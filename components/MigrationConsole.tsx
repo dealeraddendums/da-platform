@@ -30,6 +30,7 @@ interface Row {
   assignedTo: string | null;
   migrationStatus: string | null;
   synced: boolean;
+  etlLocked?: boolean;
   lastSyncedAt: string | null;
 }
 // Per-step billing/config enrichment report returned by /api/migration/sync
@@ -249,8 +250,13 @@ export default function MigrationConsole() {
   // Sync every non-migrated dealer in a group, sequentially (the ETL box
   // mutexes concurrent syncs; one at a time also gives per-row progress).
   async function syncGroup(groupId: string, groupName: string | null) {
-    const members = (data?.rows ?? []).filter((r) => r.groupId === groupId && r.inviteStatus !== "migrated");
-    if (members.length === 0) return;
+    const allMembers = (data?.rows ?? []).filter((r) => r.groupId === groupId && r.inviteStatus !== "migrated");
+    const lockedSkipped = allMembers.filter((m) => m.etlLocked).length;
+    const members = allMembers.filter((m) => !m.etlLocked);
+    if (members.length === 0) {
+      if (lockedSkipped > 0) alert(`${groupName ?? "Group"}: nothing to sync — all ${lockedSkipped} member${lockedSkipped === 1 ? " is" : "s are"} ETL-locked (5.0 config is hand-managed).`);
+      return;
+    }
     const resynced = members.filter((m) => m.lastSyncedAt).length;
     const warn = resynced > 0 ? ` ${resynced} of them were already synced — their V5.0 logo, products, and settings will be overwritten with current 4.0 data.` : "";
     if (!confirm(`Sync all ${members.length} dealer${members.length === 1 ? "" : "s"} in ${groupName ?? "this group"} from Platform 4.0?${warn}`)) return;
@@ -278,6 +284,7 @@ export default function MigrationConsole() {
       if (syncedCount > 0 || refusals.length > 0) {
         alert(
           `${groupName ?? "Group"}: ${syncedCount} dealer${syncedCount === 1 ? "" : "s"} synced.` +
+          (lockedSkipped > 0 ? `\n${lockedSkipped} skipped — locked (5.0 config hand-managed).` : "") +
           (refusals.length ? `\n\nSkipped (refused):\n${refusals.join("\n")}` : "") +
           (warnings.length ? `\n\nEnrichment warnings:\n${warnings.join("\n")}` : (syncedCount > 0 ? "\n\nNo enrichment warnings." : ""))
         );
@@ -556,22 +563,33 @@ export default function MigrationConsole() {
               {resendingId === r.id ? "…" : "resend"}
             </button>
           )}
-          {r.synced && (
-            <span title={r.lastSyncedAt
-              ? `Synced from Platform 4.0 on ${new Date(r.lastSyncedAt).toLocaleDateString()} — products, logo, and settings pulled; nothing overwrites them now`
-              : "Prepared before the sync model (staged) — counts as synced"}
-              style={{ background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" }}>
-              ✓ Synced{r.lastSyncedAt ? ` ${new Date(r.lastSyncedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
+          {r.etlLocked ? (
+            /* etl_locked: 5.0 config is the hand-managed truth — nothing to
+               sync (the ETL refuses these by design), so no dead sync link. */
+            <span title="ETL-locked: 5.0 config is hand-managed; Aurora sync is deliberately disabled. Satisfies the Synced gate — there is nothing to pull."
+              style={{ background: "#ede7f6", color: "#5e35b1", border: "1px solid #d1c4e9", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" }}>
+              🔒 Frozen — counts as synced
             </span>
-          )}
-          {r.inviteStatus !== "migrated" && (
-            <button type="button" onClick={() => void syncDealer(r)} disabled={stagingId === r.id || syncingGroup !== null}
-              title={r.lastSyncedAt
-                ? "Re-sync — overwrites this dealer's V5.0 logo, products, and settings with current Platform 4.0 data"
-                : "Sync — pulls this dealer's current Platform 4.0 data (products, logo, settings) into 5.0"}
-              style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
-              {stagingId === r.id ? "syncing…" : r.lastSyncedAt ? "re-sync" : "sync"}
-            </button>
+          ) : (
+            <>
+              {r.synced && (
+                <span title={r.lastSyncedAt
+                  ? `Synced from Platform 4.0 on ${new Date(r.lastSyncedAt).toLocaleDateString()} — products, logo, and settings pulled; nothing overwrites them now`
+                  : "Prepared before the sync model (staged) — counts as synced"}
+                  style={{ background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" }}>
+                  ✓ Synced{r.lastSyncedAt ? ` ${new Date(r.lastSyncedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
+                </span>
+              )}
+              {r.inviteStatus !== "migrated" && (
+                <button type="button" onClick={() => void syncDealer(r)} disabled={stagingId === r.id || syncingGroup !== null}
+                  title={r.lastSyncedAt
+                    ? "Re-sync — overwrites this dealer's V5.0 logo, products, and settings with current Platform 4.0 data"
+                    : "Sync — pulls this dealer's current Platform 4.0 data (products, logo, settings) into 5.0"}
+                  style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+                  {stagingId === r.id ? "syncing…" : r.lastSyncedAt ? "re-sync" : "sync"}
+                </button>
+              )}
+            </>
           )}
         </div>
         {/* FreshBooks tracking is a 4.0->5.0 migration concept — natives never had FreshBooks. */}

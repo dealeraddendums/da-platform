@@ -49,6 +49,8 @@ export interface ReadinessDealer {
   invited_at: string | null;
   /** Manual Aurora sync stamp (migration 130) — set by POST /api/migration/sync. */
   last_synced_at?: string | null;
+  /** Deliberate Aurora-sync freeze — 5.0 config is hand-managed. */
+  etl_locked?: boolean | null;
   // core ETL fields used by the etl-complete check
   address: string | null;
   city: string | null;
@@ -82,8 +84,14 @@ export interface ReadinessRow {
    *  the manual Sync action (last_synced_at set), or the dealer was staged
    *  ('pending') before the sync model — both mean "prepared, nothing will
    *  overwrite them". The nightly ETL no longer refreshes config, so an
-   *  unsynced dealer may carry stale settings/products — sync before invite. */
+   *  unsynced dealer may carry stale settings/products — sync before invite.
+   *  etl_locked dealers (own flag or group's) COUNT AS SYNCED (2026-08-10):
+   *  the lock exists because their 5.0 config is hand-managed truth — there
+   *  is nothing to sync, and the ETL refuses them anyway. */
   synced: boolean;
+  /** Deliberate Aurora-sync freeze (dealer flag or group cascade) — console
+   *  shows a 🔒 chip instead of the sync link. */
+  etlLocked: boolean;
   ready: boolean;              // synced && billingStaged && templateConfirmed && eligible
   // ── WARNINGS (informational only — never block `ready`) ──────────────────
   settingsMissing: boolean;    // no dealer_settings row (migration creates one — Step 5)
@@ -149,6 +157,7 @@ export function computeReadiness(
   ctx: {
     groupName: string | null;
     groupBillingCustomerId: string | null;
+    groupEtlLocked?: boolean;
     hasSettings: boolean;
     hasOptions: boolean;
     hasDealerAdmin: boolean;
@@ -226,7 +235,12 @@ export function computeReadiness(
   // beyond before the sync model (staged, invited, migrating) — those were
   // prepared under the old flow and must not lose readiness retroactively.
   const templateConfirmed = !!d.template_confirmed;
+  // etl_locked (own or group) satisfies the Synced gate: the freeze exists
+  // because the dealer's 5.0 config is already the hand-managed truth —
+  // there is nothing to pull from Aurora (the ETL refuses them by design).
+  const etlLocked = d.etl_locked === true || ctx.groupEtlLocked === true;
   const synced = !!d.last_synced_at
+    || etlLocked
     || d.migration_status === 'pending'
     || d.migration_status === 'invited'
     || d.migration_status === 'migrating';
@@ -236,7 +250,7 @@ export function computeReadiness(
 
   return {
     id: d.id, dealer_id: d.dealer_id, name: d.name, groupId: d.group_id ?? null, groupName: ctx.groupName, state: d.state,
-    billingStaged, billingReason, billingApplicable, templateConfirmed, eligible, eligibleReason, synced, ready,
+    billingStaged, billingReason, billingApplicable, templateConfirmed, eligible, eligibleReason, synced, etlLocked, ready,
     settingsMissing, logoMissing, zeroInventory, warnings,
     inviteStatus, invitedAt: d.invited_at ?? null, waveId: ctx.invitation?.wave_id ?? null,
     inviteRecipients: ctx.inviteRecipients ?? [],

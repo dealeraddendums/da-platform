@@ -31,7 +31,7 @@ async function fetchAll<T>(admin: Admin, table: string, columns: string, filter?
 
 const DEALER_COLS =
   "id, dealer_id, name, state, group_id, account_purpose, is_test, migration_status, invited_at, active, account_type, " +
-  "subscription_billed_to, billing_customer_id, logo_url, primary_contact_email, address, city, zip, inventory_dealer_id, last_synced_at, is_native";
+  "subscription_billed_to, billing_customer_id, logo_url, primary_contact_email, address, city, zip, inventory_dealer_id, last_synced_at, is_native, etl_locked";
 const DEALER_COLS_WITH_FLAGS = DEALER_COLS + ", migration_complex, template_confirmed";
 
 export interface ReadinessResult {
@@ -70,7 +70,7 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
     }
   }
 
-  const groups = await fetchAll<{ id: string; name: string | null; billing_customer_id: string | null }>(admin, "groups", "id, name, billing_customer_id");
+  const groups = await fetchAll<{ id: string; name: string | null; billing_customer_id: string | null; etl_locked: boolean | null }>(admin, "groups", "id, name, billing_customer_id, etl_locked");
   const groupById = new Map(groups.map((g) => [g.id, g]));
 
   // Warning + contact signals (batched, whole-table — all small).
@@ -128,6 +128,7 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
     return computeReadiness(d, {
       groupName: group?.name ?? null,
       groupBillingCustomerId: group?.billing_customer_id ?? null,
+      groupEtlLocked: group?.etl_locked === true,
       hasSettings: hasSettings.has(d.dealer_id),
       hasOptions: hasOptions.has(d.dealer_id),
       hasDealerAdmin: hasDealerAdmin.has(d.dealer_id),
