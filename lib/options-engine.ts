@@ -416,6 +416,28 @@ export type LockedOption = {
   separator_above?: boolean;
   separator_below?: boolean;
   spaces?: number;
+  // ── Rule columns (migration 053), carried through for READ-ONLY display
+  // (the Products-page rules tooltip / lib/rule-summary.ts). The rules were
+  // already APPLIED above when vehicle context was passed; admin list views
+  // get no vehicle, so they need the raw fields to describe each row.
+  applies_to?: string | null;
+  ad_types?: string[] | null;
+  makes?: string | null;
+  makes_not?: boolean | null;
+  models?: string | null;
+  models_not?: boolean | null;
+  trims?: string | null;
+  trims_not?: boolean | null;
+  body_styles?: string | null;
+  fuel?: string | null;
+  fuel_not?: boolean | null;
+  year_condition?: number | null;
+  year_value?: number | null;
+  miles_condition?: number | null;
+  miles_value?: number | null;
+  msrp_condition?: number | null;
+  msrp1?: number | null;
+  msrp2?: number | null;
 };
 
 /**
@@ -537,6 +559,26 @@ export async function getGroupOptionsForDealer(
         separator_above: r.separator_above === true,
         separator_below: r.separator_below === true,
         spaces: typeof r.spaces === "number" ? r.spaces : 0,
+        // Rule columns for read-only display (rules tooltip). Additive —
+        // print-merge consumers read specific fields and ignore these.
+        applies_to: r.applies_to ?? null,
+        ad_types: r.ad_types ?? null,
+        makes: r.makes ?? null,
+        makes_not: r.makes_not ?? null,
+        models: r.models ?? null,
+        models_not: r.models_not ?? null,
+        trims: r.trims ?? null,
+        trims_not: r.trims_not ?? null,
+        body_styles: r.body_styles ?? null,
+        fuel: r.fuel ?? null,
+        fuel_not: r.fuel_not ?? null,
+        year_condition: r.year_condition ?? null,
+        year_value: r.year_value ?? null,
+        miles_condition: r.miles_condition ?? null,
+        miles_value: r.miles_value ?? null,
+        msrp_condition: r.msrp_condition ?? null,
+        msrp1: r.msrp1 ?? null,
+        msrp2: r.msrp2 ?? null,
       };
     });
 }
