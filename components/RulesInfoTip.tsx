@@ -4,26 +4,49 @@
 // read-only popover summarizing the row's vehicle rules via the shared
 // lib/rule-summary.ts (same semantics as the matching engine — same-named
 // products that differ only by rules become distinguishable at a glance).
-// Keyboard accessible (focus/blur/Escape); tap-to-toggle for tablets; flips
-// to the left of the icon when it would clip the right viewport edge.
+//
+// The popover renders in a PORTAL with viewport-fixed positioning: the product
+// tables live inside rounded cards with overflow:hidden + overflowX:auto
+// wrappers, which clipped an in-flow popover on the last rows (Allan's
+// screenshots). Fixed+portal is immune to ancestor overflow; it flips left
+// near the right edge and above the icon near the bottom edge, and dismisses
+// on scroll so it can't drift from its anchor. Keyboard accessible
+// (focus/blur/Escape); tap-to-toggle for tablets.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { summarizeRules, NO_RULES_TEXT, type RuleSummaryRow } from "@/lib/rule-summary";
 
+const TIP_WIDTH = 260;
+const TIP_EST_HEIGHT = 160; // generous estimate for the flip decision
+
 export default function RulesInfoTip({ row }: { row: RuleSummaryRow }) {
-  const [open, setOpen] = useState(false);
-  const [alignRight, setAlignRight] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; up: boolean } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
 
   const phrases = summarizeRules(row);
 
   const show = () => {
     const rect = btnRef.current?.getBoundingClientRect();
-    // Flip when a ~280px popover would clip the right edge of the viewport.
-    setAlignRight(!!rect && rect.left + 280 > window.innerWidth - 16);
-    setOpen(true);
+    if (!rect) return;
+    const left = Math.min(rect.left, window.innerWidth - TIP_WIDTH - 16);
+    const up = rect.bottom + 6 + TIP_EST_HEIGHT > window.innerHeight - 8;
+    setPos({ top: up ? rect.top - 6 : rect.bottom + 6, left: Math.max(8, left), up });
   };
-  const hide = () => setOpen(false);
+  const hide = () => setPos(null);
+
+  // Fixed positioning is viewport-anchored — dismiss on any scroll/resize so
+  // the popover can't detach from its icon.
+  useEffect(() => {
+    if (!pos) return;
+    const onMove = () => hide();
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
+  }, [pos]);
 
   return (
     <span
@@ -35,10 +58,10 @@ export default function RulesInfoTip({ row }: { row: RuleSummaryRow }) {
         ref={btnRef}
         type="button"
         aria-label="Product rules"
-        aria-expanded={open}
+        aria-expanded={!!pos}
         onFocus={show}
         onBlur={hide}
-        onClick={(e) => { e.stopPropagation(); open ? hide() : show(); }}
+        onClick={(e) => { e.stopPropagation(); pos ? hide() : show(); }}
         onKeyDown={(e) => { if (e.key === "Escape") hide(); }}
         style={{
           display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -50,16 +73,19 @@ export default function RulesInfoTip({ row }: { row: RuleSummaryRow }) {
       >
         i
       </button>
-      {open && (
+      {pos && typeof document !== "undefined" && createPortal(
         <div
           role="tooltip"
           style={{
-            position: "absolute", top: "calc(100% + 6px)",
-            ...(alignRight ? { right: 0 } : { left: 0 }),
-            zIndex: 60, width: 260,
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            transform: pos.up ? "translateY(-100%)" : undefined,
+            zIndex: 1000, width: TIP_WIDTH,
             background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6,
             padding: "10px 12px", textAlign: "left",
             boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+            pointerEvents: "none",
           }}
         >
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "#78828c", marginBottom: 6 }}>
@@ -74,7 +100,8 @@ export default function RulesInfoTip({ row }: { row: RuleSummaryRow }) {
               ))}
             </ul>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </span>
   );
