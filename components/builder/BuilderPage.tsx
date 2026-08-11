@@ -1311,6 +1311,66 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     }
   }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, paperSize, showToast, loadedTemplateId, loadedTemplateLocked, loadedTemplateSource, savedTemplates, dealerId, vehicle?.dealer_id, starterMode, starterTemplateId]);
 
+  // ── Copy template (Open Template modal action, 2026-08-10) ─────────
+  // Full duplicate of the source's row (widget JSON + doc type + applies-to;
+  // paper size / fontScale / background live inside template_json) as a NEW
+  // independent template: never a default, never assigned to dealers — the
+  // operator Loads and tweaks it. Name = "{source} (copy)" / "(copy N)";
+  // the group POST's v2-suffix guard stays as a race backstop. A fresh copy
+  // is always a CREATE (eef9e5a create-vs-PATCH semantics). Not offered on
+  // Starter Layout rows ("Start from" is the copy-into-canvas there) or on
+  // group-sourced rows in DEALER context (copying would clone a
+  // group-managed layout past its lock — the assign modal governs that).
+  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const copyTemplate = useCallback(async (t: SavedTemplate) => {
+    setCopyingId(t.id);
+    try {
+      // Fetch the source fresh (no-store — modal list rows can be slim) via
+      // the same read path loadTemplate uses for this context.
+      const srcUrl = groupId ? `/api/group-templates/${groupId}/${t.id}` : `/api/templates/${t.id}`;
+      const r = await fetch(srcUrl, { cache: 'no-store' });
+      if (!r.ok) { showToast('Copy failed — could not load the source template'); return; }
+      const src = (await r.json()).data as {
+        name?: string; document_type?: string; vehicle_types?: string[];
+        template_json?: Record<string, unknown>; is_locked?: boolean;
+      } | null;
+      if (!src?.template_json || Object.keys(src.template_json).length === 0) {
+        showToast('This template has no saved layout to copy.');
+        return;
+      }
+      const names = new Set(savedTemplates.map(x => (x.name ?? '').trim()));
+      let name = `${t.name} (copy)`;
+      for (let n = 2; names.has(name); n++) name = `${t.name} (copy ${n})`;
+      const eid = dealerId ?? vehicle?.dealer_id ?? null;
+      const dstUrl = groupId
+        ? `/api/group-templates/${groupId}`
+        : `/api/templates${eid ? `?dealer_id=${encodeURIComponent(eid)}` : ''}`;
+      const res = await fetch(dstUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          document_type: src.document_type ?? t.document_type,
+          vehicle_types: src.vehicle_types ?? t.vehicle_types ?? [],
+          template_json: src.template_json,
+          // Group copies keep the source's lock state (a full duplicate);
+          // dealer templates have no lock concept.
+          ...(groupId ? { is_locked: src.is_locked ?? false } : {}),
+        }),
+      });
+      const j = await res.json().catch(() => ({} as { data?: SavedTemplate; error?: string }));
+      if (!res.ok) { showToast((j as { error?: string }).error || 'Copy failed'); return; }
+      const created = (j as { data?: SavedTemplate }).data;
+      // Refresh the modal list in place — created rows sort newest-first.
+      if (created) setSavedTemplates(prev => [created, ...prev]);
+      showToast(`Copied to "${created?.name ?? name}"`);
+    } catch {
+      showToast('Copy failed');
+    } finally {
+      setCopyingId(null);
+    }
+  }, [groupId, dealerId, vehicle, savedTemplates, showToast]);
+
   // ── Load templates list ────────────────────────────────────────────
   const openTemplates = useCallback(async () => {
     // Starter mode lists platform starters; no per-dealer defaults.
@@ -2258,6 +2318,17 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                   ) : (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                       <button onClick={() => loadTemplate(t.id)} style={{ padding: '5px 12px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Load</button>
+                      {/* Copy — native rows only: dealer templates in dealer mode,
+                          group templates in group mode. Group-sourced rows in the
+                          dealer modal are managed by the group (assign modal owns
+                          "dealer can edit" copies); starter rows have Start from. */}
+                      {!starterMode && t.source !== 'group' && (
+                        <button onClick={() => void copyTemplate(t)} disabled={copyingId === t.id}
+                          title="Duplicate this template as an independent copy"
+                          style={{ padding: '5px 10px', background: '#fff', color: '#1976d2', border: '1px solid #1976d2', borderRadius: 4, fontSize: 12, cursor: copyingId === t.id ? 'default' : 'pointer', fontFamily: 'inherit', opacity: copyingId === t.id ? 0.6 : 1, flexShrink: 0 }}>
+                          {copyingId === t.id ? 'Copying…' : 'Copy'}
+                        </button>
+                      )}
                       {isGroupLocked ? (
                         // Locked group templates: dealer never deletes — group admin manages.
                         <span title="Locked group template — managed by your group admin" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 4, border: '1px solid #e0e0e0', background: '#f5f6f7', cursor: 'not-allowed', color: '#ccc', flexShrink: 0 }}>
