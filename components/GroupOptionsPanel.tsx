@@ -10,6 +10,7 @@ import { decodeHtmlEntities } from "@/lib/format";
 import { RichName } from "@/lib/product-name";
 import ProductImportExport from "@/components/ProductImportExport";
 import DealerCheckList from "@/components/DealerCheckList";
+import RulesInfoTip from "@/components/RulesInfoTip";
 
 type Props = {
   groupId: string;
@@ -677,7 +678,10 @@ function OptionSection({ groupId }: { groupId: string }) {
                     <td className="px-4 py-2.5">
                       {/* Rich-text names (colored spans, logo <img>) render sanitized
                           — same pipeline as the dealer products table. */}
-                      <RichName name={opt.option_name} showLabel style={{ color: "var(--text-primary)" }} />
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <RichName name={opt.option_name} showLabel style={{ color: "var(--text-primary)" }} />
+                        <RulesInfoTip row={opt} />
+                      </span>
                     </td>
                     <td className="px-4 py-2.5" style={{ width: 120 }}>
                       <span style={{ color: "var(--text-secondary)" }}>{opt.option_price}</span>

@@ -7,6 +7,7 @@ import { RichName } from "@/lib/product-name";
 import ProductAuthoringFields from "@/components/ProductAuthoringFields";
 import ProductRulesFields from "@/components/ProductRulesFields";
 import ProductImportExport from "@/components/ProductImportExport";
+import RulesInfoTip from "@/components/RulesInfoTip";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -328,7 +329,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
     description: string | null;
     sort_order: number;
     required: boolean;
-  };
+  } & import("@/lib/rule-summary").RuleSummaryRow;
   const [corporate, setCorporate] = useState<CorporateProduct[]>([]);
 
   useEffect(() => {
@@ -601,6 +602,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                         <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 10, background: "#e3f2fd", color: "#0d47a1", border: "1px solid #bbdefb" }}>
                           Group
                         </span>
+                        <RulesInfoTip row={c} />
                       </div>
                     </td>
                     <td style={{ ...td, color: "#78828c", fontSize: 12 }}>
@@ -707,7 +709,10 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                         </td>
                       )}
                       <td style={td}>
-                        <RichName name={item.option_name} imgMaxH={24} showLabel style={{ fontWeight: 600, color: "#333", fontSize: 13 }} />
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <RichName name={item.option_name} imgMaxH={24} showLabel style={{ fontWeight: 600, color: "#333", fontSize: 13 }} />
+                          <RulesInfoTip row={item} />
+                        </span>
                       </td>
                       <td style={td}>
                         <span style={{ color: "#78828c", fontSize: 12 }}>
