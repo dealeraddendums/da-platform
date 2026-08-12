@@ -84,13 +84,27 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
   }
 
   const admin = createAdminSupabaseClient();
+  // Default sort_order = APPEND (max+10) so a new product lands at the bottom
+  // of the group's curated print order instead of jumping to the top
+  // (sort_order 0) after a reorder pass.
+  let defaultSort = 0;
+  {
+    const { data: maxRow } = await admin
+      .from("group_options")
+      .select("sort_order")
+      .eq("group_id", params.groupId)
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ sort_order: number | null }>();
+    defaultSort = (maxRow?.sort_order ?? -10) + 10;
+  }
   const { data, error: dbErr } = await admin
     .from("group_options")
     .insert({
       group_id: params.groupId,
       option_name: optionName,
       option_price: typeof body.option_price === "string" ? body.option_price.trim() : "NC",
-      sort_order: typeof body.sort_order === "number" ? body.sort_order : 0,
+      sort_order: typeof body.sort_order === "number" ? body.sort_order : defaultSort,
       is_suggested: typeof body.is_suggested === "boolean" ? body.is_suggested : false,
       ...pickRich(body),
     })

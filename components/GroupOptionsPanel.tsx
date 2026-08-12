@@ -565,6 +565,15 @@ function OptionSection({ groupId }: { groupId: string }) {
   const [modalProduct, setModalProduct] = useState<GroupOptionRow | null>(null);
   const [assignProduct, setAssignProduct] = useState<GroupOptionRow | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  // Re-order mode (2026-08-12) — same drag pattern as the dealer Products
+  // page. Persisted sort_order is AUTHORITATIVE at print time: the pdf/options
+  // merges prepend corporate products in this sequence for every member
+  // dealer, no reassignment needed.
+  const [reorderMode, setReorderMode] = useState(false);
+  const [reorderItems, setReorderItems] = useState<GroupOptionRow[]>([]);
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
 
   const fetchOptions = useCallback(async () => {
     setLoading(true);
@@ -617,6 +626,39 @@ function OptionSection({ groupId }: { groupId: string }) {
     }
   }
 
+  function enterReorder() {
+    setReorderItems([...options]);
+    setReorderMode(true);
+  }
+  function cancelReorder() {
+    setReorderMode(false);
+    setDraggedIdx(null);
+    setDragOverIdx(null);
+  }
+  async function saveOrder() {
+    setSavingOrder(true);
+    try {
+      const res = await fetch(`/api/group-options/${groupId}/reorder`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order: reorderItems.map((r) => r.id) }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({} as { error?: string }));
+        setError(j.error ?? "Failed to save order");
+        return;
+      }
+      setReorderMode(false);
+      setDraggedIdx(null);
+      setDragOverIdx(null);
+      await fetchOptions();
+    } finally {
+      setSavingOrder(false);
+    }
+  }
+
+  const displayOptions = reorderMode ? reorderItems : options;
+
   const typePill = (suggested: boolean) => (
     <span
       className="text-xs font-semibold px-2 py-0.5 rounded-full"
@@ -641,13 +683,31 @@ function OptionSection({ groupId }: { groupId: string }) {
             </p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <ProductImportExport
-              endpoint={`/api/group-options/${groupId}/sheet`}
-              onImported={() => void fetchOptions()}
-            />
-            <button className="btn btn-primary" style={{ fontSize: 12, height: 30, padding: "0 12px" }} onClick={() => setShowAddModal(true)}>
-              + Add Corporate Product
-            </button>
+            {reorderMode ? (
+              <>
+                <span className="text-xs" style={{ color: "var(--text-muted)" }}>Drag rows into print order</span>
+                <button className="text-xs" style={{ height: 30, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 6, background: "#fff", cursor: "pointer" }} onClick={cancelReorder} disabled={savingOrder}>Cancel</button>
+                <button className="btn btn-primary" style={{ fontSize: 12, height: 30, padding: "0 12px" }} onClick={() => void saveOrder()} disabled={savingOrder}>
+                  {savingOrder ? "Saving…" : "Save Order"}
+                </button>
+              </>
+            ) : (
+              <>
+                {options.length > 1 && (
+                  <button className="text-xs" style={{ height: 30, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 6, background: "#fff", cursor: "pointer" }} onClick={enterReorder}
+                    title="Drag products into the order they should print on every member dealer's addendum">
+                    ⇅ Re-order
+                  </button>
+                )}
+                <ProductImportExport
+                  endpoint={`/api/group-options/${groupId}/sheet`}
+                  onImported={() => void fetchOptions()}
+                />
+                <button className="btn btn-primary" style={{ fontSize: 12, height: 30, padding: "0 12px" }} onClick={() => setShowAddModal(true)}>
+                  + Add Corporate Product
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -663,18 +723,38 @@ function OptionSection({ groupId }: { groupId: string }) {
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
+                {reorderMode && <th style={{ width: 36 }} />}
                 {["Product", "Price", "Type", "Locked", "Active", ""].map((h) => (
                   <th key={h} className="px-4 py-2 text-left font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {options.map((opt, i) => {
+              {displayOptions.map((opt, i) => {
                 const suggested = opt.is_suggested ?? false;
                 const allDealers = opt.assign_all_dealers !== false;
                 const count = assignmentCounts[opt.id] ?? 0;
+                const isDragging = draggedIdx === i;
+                const isDragOver = dragOverIdx === i;
                 return (
-                  <tr key={opt.id} style={{ borderBottom: i < options.length - 1 ? "1px solid var(--border)" : "none", opacity: opt.active ? 1 : 0.5 }}>
+                  <tr key={opt.id}
+                    draggable={reorderMode}
+                    onDragStart={() => setDraggedIdx(i)}
+                    onDragOver={(e) => { if (reorderMode) { e.preventDefault(); setDragOverIdx(i); } }}
+                    onDrop={() => {
+                      if (draggedIdx === null || draggedIdx === i) return;
+                      const next = [...reorderItems];
+                      const [moved] = next.splice(draggedIdx, 1);
+                      next.splice(i, 0, moved);
+                      setReorderItems(next);
+                      setDraggedIdx(null);
+                      setDragOverIdx(null);
+                    }}
+                    onDragEnd={() => { setDraggedIdx(null); setDragOverIdx(null); }}
+                    style={{ borderBottom: i < displayOptions.length - 1 ? "1px solid var(--border)" : "none", opacity: isDragging ? 0.6 : opt.active ? 1 : 0.5, background: isDragOver ? "#e3f2fd" : isDragging ? "#fffde7" : undefined, cursor: reorderMode ? "grab" : "default" }}>
+                    {reorderMode && (
+                      <td style={{ padding: "8px 8px", textAlign: "center", color: "#bbb", fontSize: 18 }}>⠿</td>
+                    )}
                     <td className="px-4 py-2.5">
                       {/* Rich-text names (colored spans, logo <img>) render sanitized
                           — same pipeline as the dealer products table. */}
