@@ -896,6 +896,58 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // GROUP new-document bootstrap (2026-08-12): a fresh group-mode Builder
+  // (?group=, no templateId) silently upgrades the hardcoded mount seed to the
+  // SuperAdmin-curated blank-default starter — the SAME complete base a new
+  // dealer doc gets, widgets AND its baked-in background. (The mount seed's
+  // hardcoded set + BG_DEFAULT remains the fallback when no starter exists.)
+  // Stays an UNSAVED new document: loadedTemplateId null, group save target.
+  useEffect(() => {
+    if (templateId || starterMode) return;
+    if (!groupId || dealerId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const sListRes = await fetch('/api/starter-templates');
+        if (cancelled || !sListRes.ok) return;
+        const sListJson = await sListRes.json() as { data?: Array<{ id: string; is_blank_default?: boolean }> };
+        const blankRow = (sListJson.data ?? []).find(s => s.is_blank_default);
+        if (cancelled || !blankRow) return;
+        const sRes = await fetch(`/api/starter-templates/${blankRow.id}`);
+        if (cancelled || !sRes.ok) return;
+        const sPayload = await sRes.json();
+        const sTmpl = sPayload?.data as { template_json?: Record<string, unknown> } | null;
+        const sTj = (sTmpl?.template_json ?? {}) as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: string };
+        if (!sTj.widgets || Object.keys(sTj.widgets).length === 0) return;
+        // Don't clobber work: bail if the operator already touched the canvas.
+        if (isDirtyRef.current) return;
+        const ps = sTj.paperSize ?? 'standard';
+        const { w: pw, h: ph } = getPaperDims(ps, customSizesRef.current);
+        let ws = sTj.widgets;
+        let n = sTj.nid ?? 1;
+        ws = convertLegacyInfoboxes(ws);
+        [ws, n] = ensureAskbar(ws, n, ps);
+        ws = clampWidgets(ws, pw, ph);
+        if (cancelled) return;
+        setWidgets(ws); widgetsRef.current = ws;
+        setNid(n);
+        if (sTj.bgUrl) setBgUrl(sTj.bgUrl);
+        setFontScale(typeof sTj.fontScale === 'number' ? sTj.fontScale : 1.0);
+        setPaperSize(ps); paperSizeRef.current = ps;
+        setLoadedTemplateId(null);
+        setLoadedTemplateLocked(false);
+        setLoadedTemplateSource(null);
+        setSelId(null);
+        setTemplateName('New Template');
+        setHistory([JSON.stringify({ widgets: ws, nid: n })]);
+        setHistIdx(0);
+        isDirtyRef.current = false;
+      } catch { /* silent — the hardcoded mount seed stays */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Load template if templateId provided. When groupId is set we fetch from the
   // group-templates route so super_admin / group_admin can edit shared templates;
   // otherwise the dealer-templates route is used.

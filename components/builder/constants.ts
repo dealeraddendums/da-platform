@@ -19,7 +19,13 @@ export const SAMPLE_SUGGESTED_ITEMS = [
   { name: 'Key Replacement', desc: '<ul><li>Key/fob replacement coverage and locksmith assistance for the term selected.</li><li>Substitute transportation reimbursement during covered repairs.</li></ul>', price: '$429.00' },
 ];
 
-export const BG_DEFAULT = 'https://new-addendum-backgrounds.s3.us-east-1.amazonaws.com/01_Addendum_Default.png';
+// Default addendum background = the SAME asset the SuperAdmin blank-default
+// starter bakes in (2026-08-12). The previous 01_Addendum_Default.png object
+// no longer exists in the bucket (403) — it rendered as a broken frame on the
+// canvas and as a silently-missing background in PDF fallbacks. Ten legacy
+// templates still store the dead URL; deliberately NOT repointed (their
+// layouts were authored on a white canvas — ground-truth rule).
+export const BG_DEFAULT = 'https://new-addendum-backgrounds.s3.us-east-1.amazonaws.com/1782499385214_Standard_Medium.png';
 export const IS_BG_DEFAULT = 'https://new-infosheet-backgrounds.s3.us-east-1.amazonaws.com/BaseTemplate.png';
 export const IB_DEFAULT = 'https://new-infobox-images.s3.us-east-1.amazonaws.com/EPA_Infobox_Default.png';
 // Vehicle Photo fallback — shown whenever ChromeData has no image for the
