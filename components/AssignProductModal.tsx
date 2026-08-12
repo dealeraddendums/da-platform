@@ -33,12 +33,20 @@ const lbl: React.CSSProperties = {
  *      (dealer_editable=false, the locked path). New dealers added to the
  *      group later do NOT inherit; admin must reopen and tick them.
  *
- * The two states are mutually exclusive at the data layer: switching from
- * Select Dealers to All Dealers wipes the per-dealer rows; switching back
- * writes a fresh set from whatever checkboxes are ticked at Save.
+ *   3. None (2026-08-12) — sets assign_all_dealers = false and wipes every
+ *      per-dealer row: the product stays in the corporate library ("available
+ *      but not ready to deploy") and appears on NO dealer's addendum until
+ *      it's assigned. The print engine already treats assign_all=false with
+ *      zero assignment rows as "nowhere" — this makes that state a
+ *      first-class choice instead of an unreachable one.
+ *
+ * The states are mutually exclusive at the data layer: switching from
+ * Select Dealers to All Dealers (or None) wipes the per-dealer rows;
+ * switching back writes a fresh set from whatever checkboxes are ticked
+ * at Save.
  */
 export default function AssignProductModal({ groupId, product, onClose, onSaved }: Props) {
-  const [scope, setScope] = useState<"all" | "select">(product.assign_all_dealers ? "all" : "select");
+  const [scope, setScope] = useState<"all" | "select" | "none">(product.assign_all_dealers ? "all" : "select");
   const [dealers, setDealers] = useState<DealerBasic[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -62,6 +70,9 @@ export default function AssignProductModal({ groupId, product, onClose, onSaved 
           .filter(a => a.option_id === product.id)
           .map(a => a.dealer_id);
         setSelected(new Set(mine));
+        // assign_all=false with zero rows IS the "None / not deployed" state —
+        // reflect it rather than opening on an empty Select list.
+        if (!product.assign_all_dealers && mine.length === 0) setScope("none");
       } catch {
         if (!cancelled) setError("Failed to load dealers");
       } finally {
@@ -81,7 +92,8 @@ export default function AssignProductModal({ groupId, product, onClose, onSaved 
     }
     setSaving(true);
     try {
-      // 1) Persist the scope flag on the product itself.
+      // 1) Persist the scope flag on the product itself ("none" = select-scope
+      //    with zero rows, so assign_all_dealers=false).
       const patchRes = await fetch(`/api/group-options/${groupId}/${product.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -94,9 +106,10 @@ export default function AssignProductModal({ groupId, product, onClose, onSaved 
       //    accidentally double-count if scope flips back later.
       //    Select Dealers → DELETE rows for unchecked dealers and POST for
       //    checked ones. The POST endpoint upserts by (dealer_id, option_id).
-      if (scope === "all") {
-        // Pull current assignment rows and DELETE each. The DELETE endpoint
-        // expects body: { option_id, dealer_id }.
+      if (scope === "all" || scope === "none") {
+        // Pull current assignment rows and DELETE each ("all" needs no rows;
+        // "none" means deployed nowhere). The DELETE endpoint expects
+        // body: { option_id, dealer_id }.
         const cur = await (await fetch(`/api/groups/${groupId}/option-assignments`)).json() as { data?: { option_id: string; dealer_id: string }[] };
         const mine = (cur.data ?? []).filter(a => a.option_id === product.id);
         await Promise.all(mine.map(a => fetch(`/api/groups/${groupId}/option-assignments`, {
@@ -104,7 +117,7 @@ export default function AssignProductModal({ groupId, product, onClose, onSaved 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ option_id: product.id, dealer_id: a.dealer_id }),
         })));
-        onSaved({ assign_all_dealers: true, dealer_count: 0 });
+        onSaved({ assign_all_dealers: scope === "all", dealer_count: 0 });
       } else {
         const cur = await (await fetch(`/api/groups/${groupId}/option-assignments`)).json() as { data?: { option_id: string; dealer_id: string }[] };
         const mine = new Set((cur.data ?? []).filter(a => a.option_id === product.id).map(a => a.dealer_id));
@@ -153,6 +166,7 @@ export default function AssignProductModal({ groupId, product, onClose, onSaved 
             {[
               { v: "all" as const,    label: "All Dealers in Group" },
               { v: "select" as const, label: "Select Dealers" },
+              { v: "none" as const,   label: "None" },
             ].map(opt => {
               const on = scope === opt.v;
               return (
@@ -172,6 +186,10 @@ export default function AssignProductModal({ groupId, product, onClose, onSaved 
           {scope === "all" ? (
             <div style={{ padding: 14, background: "#f1f8e9", border: "1px solid #c5e1a5", borderRadius: 6, fontSize: 13, color: "#33691e" }}>
               This product will appear on the addendum of every current and future member dealer in this group. New dealers added later inherit it automatically.
+            </div>
+          ) : scope === "none" ? (
+            <div style={{ padding: 14, background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 6, fontSize: 13, color: "#8a6d00" }}>
+              Available, not deployed — this product stays in the corporate library but appears on <strong>no</strong> dealer&rsquo;s addendum until you assign it. Any current dealer assignments will be removed on save.
             </div>
           ) : (
             <>
