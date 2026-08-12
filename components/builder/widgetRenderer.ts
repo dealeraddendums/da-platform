@@ -1,6 +1,7 @@
 import { IB_DEFAULT, VEHICLE_PHOTO_COMING_SOON } from './constants';
 import { sanitizeProductHtml, sanitizeProductDescription } from '@/lib/product-name';
 import { watermarkUrl } from '@/lib/watermarks';
+import { code128Svg } from '@/lib/code128';
 
 type D = Record<string, unknown>;
 
@@ -485,17 +486,23 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   if (type === 'barcode') {
-    const vin = (d.vin as string) || '5TFDYS3F11MX956768';
-    const seed = vin.split('').map(c => c.charCodeAt(0));
-    let bars = '';
-    for (let i = 0; i < 3; i++) bars += '<div style="display:inline-block;width:2px;height:52px;background:#000;margin-right:1px;vertical-align:top"></div>';
-    seed.forEach(v => {
-      const n = 1 + (v % 2), w2 = 2 + (v % 3), s = 1 + ((v * 7) % 2);
-      bars += `<div style="display:inline-block;width:${n}px;height:52px;background:#000;margin-right:${s}px;vertical-align:top"></div>`;
-      bars += `<div style="display:inline-block;width:${w2}px;height:52px;background:#000;margin-right:${s}px;vertical-align:top"></div>`;
-    });
-    for (let i = 0; i < 4; i++) bars += '<div style="display:inline-block;width:2px;height:52px;background:#000;margin-right:1px;vertical-align:top"></div>';
-    return `<div style="text-align:center;padding:4px 2px;background:#fff;height:100%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center"><div style="line-height:0;padding:4px 6px;background:#fff;overflow:hidden">${bars}</div><div style="font-size:10px;font-family:monospace;margin-top:4px;letter-spacing:1px;color:#000">*${vin}*</div></div>`;
+    // Genuine Code 128 (2026-08-12) — the old renderer drew decorative divs
+    // from char-code arithmetic (no real symbology, never scannable) with a
+    // Code-39-style *VIN* caption. Now: real Code 128B as inline SVG from
+    // lib/code128 (self-contained in the PDF — no fonts, no external
+    // requests), raw VIN as the human-readable line (no asterisks). Same
+    // container flex layout so the widget box and ground-truthed positions
+    // don't shift; the SVG stretches into the space the fake bars occupied.
+    const vin = ((d.vin as string) || '5TFDYS3F11MX956768').trim().toUpperCase();
+    let svg: string;
+    try {
+      svg = code128Svg(vin);
+    } catch {
+      // Unencodable input (non-ASCII garbage in a manual VIN) — show the
+      // text rather than a broken symbol.
+      svg = '';
+    }
+    return `<div style="text-align:center;padding:4px 2px;background:#fff;height:100%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center"><div style="flex:1 1 auto;min-height:0;padding:2px 4px;background:#fff">${svg}</div><div style="font-size:10px;font-family:monospace;margin-top:4px;letter-spacing:1px;color:#000;flex:0 0 auto">${vin}</div></div>`;
   }
 
   if (type === 'qrcode') {
