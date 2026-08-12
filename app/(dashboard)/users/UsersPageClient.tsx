@@ -39,6 +39,9 @@ type UserRow = {
   invited_at?: string | null;
   created_at: string;
   hubspot_contact_id: number | null;
+  /** "group" = a group_user scoped to this dealer, appended read-only to the
+   *  dealer-scoped view (2026-08-12) — managed at the group level. */
+  source?: "dealer" | "group";
 };
 
 type DealerOption = { dealer_id: string; name: string };
@@ -1144,6 +1147,13 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
                 <td className="px-4 py-2.5 font-medium" style={{ color: "var(--text-primary)" }}>
                   <div className="flex items-center gap-1.5">
                     {u.full_name || <span style={{ color: "var(--text-muted)" }}>—</span>}
+                    {u.source === "group" && (
+                      <span
+                        title={u.group_name ? `Group-level access via ${u.group_name} — managed on the group's Users tab` : "Group-level access — managed on the group's Users tab"}
+                        style={{ fontSize: 10, fontWeight: 700, background: "#fff3e0", color: "#e65100", border: "1px solid #ffcc80", padding: "1px 6px", borderRadius: 3, whiteSpace: "nowrap" }}>
+                        Group
+                      </span>
+                    )}
                     {u.force_password_reset && (
                       <span style={{ fontSize: 10, fontWeight: 700, background: "#fff8e1", color: "#f57f17", padding: "1px 5px", borderRadius: 3 }}>reset</span>
                     )}
@@ -1174,6 +1184,11 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
                   )}
                 </td>
                 <td className="px-4 py-2.5">
+                  {u.source === "group" ? (
+                    <div className="flex justify-end">
+                      <span className="text-xs" style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>Managed at group level</span>
+                    </div>
+                  ) : (
                   <div className="flex items-center gap-1 justify-end">
                     {canSendInvite && (
                       <button
@@ -1224,6 +1239,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
                       </svg>
                     </button>
                   </div>
+                  )}
                 </td>
               </tr>
             ))}

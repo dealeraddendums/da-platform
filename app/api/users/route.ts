@@ -90,14 +90,63 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const lastSignIn = await lastSignInByEmail();
 
-    const users = rows.map(p => ({
+    const users: Array<Record<string, unknown>> = rows.map(p => ({
       ...p,
       group_id:           null,
       dealer_name:        null,
       group_name:         null,
+      source:             "dealer",
       last_sign_in_at:    lastSignIn.get((p.email ?? "").toLowerCase()) ?? null,
       hubspot_contact_id: null,
     }));
+
+    // Group-scoped users (2026-08-12): group_users whose scope covers this
+    // dealer appear read-only, so the dealer-level view shows who has
+    // group-granted access. Appended on the final page only (dealer staff
+    // lists are one page in practice); resolved via this dealer's dealer_tags
+    // → user_tags — covers named tags AND direct-dealer system tags alike.
+    const isLastPage = rows.length < limit;
+    if (isLastPage && (!roleFilter || roleFilter === "group_user")) {
+      const { data: dealerRow } = await admin
+        .from("dealers").select("id, group_id").eq("dealer_id", dealer_id)
+        .maybeSingle<{ id: string; group_id: string | null }>();
+      if (dealerRow?.group_id) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const adminAny = admin as any;
+        const { data: dts } = await adminAny
+          .from("dealer_tags").select("tag_id").eq("dealer_id", dealerRow.id);
+        const tagIds = ((dts ?? []) as Array<{ tag_id: string }>).map(r => r.tag_id);
+        if (tagIds.length) {
+          const { data: uts } = await adminAny
+            .from("user_tags").select("user_id").in("tag_id", tagIds);
+          const userIds = Array.from(new Set(((uts ?? []) as Array<{ user_id: string }>).map(r => r.user_id)));
+          if (userIds.length) {
+            let gq = admin
+              .from("profiles")
+              .select("id, email, full_name, role, dealer_id, active, force_password_reset, last_login, created_at")
+              .in("id", userIds)
+              .eq("role", "group_user")
+              .eq("group_id", dealerRow.group_id);
+            if (search) gq = gq.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+            const { data: gu } = await gq;
+            const { data: groupRow } = await admin
+              .from("groups").select("name").eq("id", dealerRow.group_id).maybeSingle<{ name: string }>();
+            const nativeEmails = new Set(rows.map(p => (p.email ?? "").toLowerCase()));
+            for (const g of (gu ?? []).filter(g => !nativeEmails.has((g.email ?? "").toLowerCase()))) {
+              users.push({
+                ...g,
+                group_id:           dealerRow.group_id,
+                dealer_name:        null,
+                group_name:         groupRow?.name ?? null,
+                source:             "group",
+                last_sign_in_at:    lastSignIn.get((g.email ?? "").toLowerCase()) ?? null,
+                hubspot_contact_id: null,
+              });
+            }
+          }
+        }
+      }
+    }
 
     return NextResponse.json({ users, total: count ?? 0 });
   }

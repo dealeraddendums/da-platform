@@ -66,20 +66,94 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
   const lastSignIn = await lastSignInByEmail();
   const enriched = (data ?? []).map(r => ({
     ...r,
+    source: "dealer" as const,
     last_sign_in_at: lastSignIn.get((r.email ?? "").toLowerCase()) ?? null,
   }));
 
-  // Pending invitations for this dealer (invitations.dealer_id is the UUID).
+  // ── Group-scoped users (2026-08-12): group_users of this dealer's group
+  // whose scope includes THIS dealer, shown read-only for transparency.
+  // Reverse scope resolution: both named tags AND direct-dealer system tags
+  // (migration 142) live in dealer_tags, so "this dealer's tags → user_tags
+  // carrying any of them → group_user profiles of the same group" resolves
+  // the canonical scope regardless of how it was authored.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: pending } = await (admin as any)
+  const adminAny = admin as any;
+  type GroupScopedRow = {
+    id: string; email: string; full_name: string | null; role: string;
+    active: boolean; last_login: string | null; created_at: string;
+  };
+  let groupScoped: Array<GroupScopedRow & { source: "group"; group_name: string | null; last_sign_in_at: string | null }> = [];
+  let dealerTagIds: string[] = [];
+  let groupName: string | null = null;
+  if (dealerRow.group_id) {
+    const { data: dts } = await adminAny
+      .from("dealer_tags").select("tag_id").eq("dealer_id", dealerRow.id);
+    dealerTagIds = ((dts ?? []) as Array<{ tag_id: string }>).map(r => r.tag_id);
+    const { data: groupRow } = await admin
+      .from("groups").select("name").eq("id", dealerRow.group_id).maybeSingle<{ name: string }>();
+    groupName = groupRow?.name ?? null;
+    if (dealerTagIds.length) {
+      const { data: uts } = await adminAny
+        .from("user_tags").select("user_id").in("tag_id", dealerTagIds);
+      const userIds = Array.from(new Set(((uts ?? []) as Array<{ user_id: string }>).map(r => r.user_id)));
+      if (userIds.length) {
+        const { data: gu } = await admin
+          .from("profiles")
+          .select("id, email, full_name, role, active, last_login, created_at")
+          .in("id", userIds)
+          .eq("role", "group_user")
+          .eq("group_id", dealerRow.group_id);
+        // Don't double-count someone who is also a native dealer user — the
+        // native row (editable) wins.
+        const nativeEmails = new Set(enriched.map(r => (r.email ?? "").toLowerCase()));
+        groupScoped = ((gu ?? []) as GroupScopedRow[])
+          .filter(g => !nativeEmails.has((g.email ?? "").toLowerCase()))
+          .map(g => ({
+            ...g,
+            source: "group" as const,
+            group_name: groupName,
+            last_sign_in_at: lastSignIn.get((g.email ?? "").toLowerCase()) ?? null,
+          }))
+          .sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? ""));
+      }
+    }
+  }
+
+  // Pending invitations for this dealer (invitations.dealer_id is the UUID).
+  const { data: pending } = await adminAny
     .from("invitations")
     .select("id, email, first_name, last_name, role, created_at, expires_at")
-    .eq("dealer_id", dealerRow.id)
     .is("accepted_at", null)
     .gt("expires_at", new Date().toISOString())
+    .eq("dealer_id", dealerRow.id)
     .order("created_at", { ascending: false });
+  const pendingRows = ((pending ?? []) as Array<Record<string, unknown>>)
+    .map(p => ({ ...p, source: "dealer" as const }));
 
-  return NextResponse.json({ data: enriched, pendingInvitations: pending ?? [] });
+  // Pending GROUP invitations that would grant access to this dealer: a
+  // group_user invite whose carried scope (direct dealer picks and/or tags)
+  // covers this dealer. Read-only here — resend/revoke live on the group tab.
+  if (dealerRow.group_id) {
+    const { data: ginvs } = await adminAny
+      .from("invitations")
+      .select("id, email, first_name, last_name, role, created_at, expires_at, scope_tag_ids, scope_dealer_ids")
+      .eq("group_id", dealerRow.group_id)
+      .eq("role", "group_user")
+      .is("accepted_at", null)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false });
+    const tagSet = new Set(dealerTagIds);
+    for (const inv of (ginvs ?? []) as Array<{ scope_tag_ids?: string[] | null; scope_dealer_ids?: string[] | null } & Record<string, unknown>>) {
+      const covers =
+        (inv.scope_dealer_ids ?? []).includes(dealerRow.id) ||
+        (inv.scope_tag_ids ?? []).some(t => tagSet.has(t));
+      if (!covers) continue;
+      const { scope_tag_ids: _t, scope_dealer_ids: _d, ...rest } = inv;
+      pendingRows.push({ ...rest, source: "group" as const, group_name: groupName } as never);
+    }
+  }
+
+  return NextResponse.json({ data: [...enriched, ...groupScoped], pendingInvitations: pendingRows });
 }
 
 /**

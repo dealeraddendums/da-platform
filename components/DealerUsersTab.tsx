@@ -17,6 +17,10 @@ type DealerUserProfile = {
   last_login: string | null;
   last_sign_in_at: string | null;
   created_at: string;
+  /** "group" = a group_user scoped to this dealer — read-only here (managed
+   *  at the group level); "dealer"/undefined = native dealer user. */
+  source?: "dealer" | "group";
+  group_name?: string | null;
 };
 
 type PendingInvite = {
@@ -27,7 +31,25 @@ type PendingInvite = {
   role: string;
   created_at: string;
   expires_at: string;
+  /** "group" = a pending group_user invitation whose scope covers this
+   *  dealer — read-only here (resend/revoke live on the group Users tab). */
+  source?: "dealer" | "group";
+  group_name?: string | null;
 };
+
+/** Orange chip marking group-granted access (same treatment as the
+ *  corporate-products "Group" badge). */
+function GroupBadge({ groupName }: { groupName?: string | null }) {
+  return (
+    <span
+      className="text-xs px-2 py-0.5 rounded"
+      title={groupName ? `Group-level access via ${groupName} — managed on the group's Users tab` : "Group-level access — managed on the group's Users tab"}
+      style={{ background: "#fff3e0", color: "#e65100", border: "1px solid #ffcc80", fontWeight: 600, marginLeft: 6, whiteSpace: "nowrap" }}
+    >
+      Group
+    </span>
+  );
+}
 
 type ViewerRole = "super_admin" | "group_admin" | "dealer_admin" | string;
 
@@ -41,6 +63,8 @@ function roleLabel(role: string): string {
   if (role === "dealer_admin")      return "Dealer Admin";
   if (role === "dealer_user")       return "Dealer User";
   if (role === "dealer_restricted") return "Dealer Restricted";
+  if (role === "group_user")        return "Group User";
+  if (role === "group_admin")       return "Group Admin";
   return role;
 }
 
@@ -343,12 +367,15 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
             <div key={inv.id} className="px-5 py-2.5 flex items-center justify-between" style={{ borderTop: "1px solid var(--border)" }}>
               <div className="text-sm">
                 <span style={{ fontWeight: 500, color: "var(--text-primary)" }}>{inv.first_name} {inv.last_name}</span>
+                {inv.source === "group" && <GroupBadge groupName={inv.group_name} />}
                 <span style={{ color: "var(--text-muted)" }}> · {inv.email} · {roleLabel(inv.role)}</span>
                 <div className="text-xs" style={{ color: "var(--text-muted)" }}>
                   Sent {new Date(inv.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · awaiting acceptance
                 </div>
               </div>
-              {canInvite && (
+              {inv.source === "group" ? (
+                <span className="text-xs" style={{ color: "var(--text-muted)" }}>Managed at group level</span>
+              ) : canInvite && (
                 <div className="flex gap-3 items-center">
                   <button className="btn btn-secondary text-xs" style={{ height: 28, padding: "0 10px" }} onClick={() => void resendInvite(inv)}>Resend</button>
                   <button className="text-xs" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--error)", fontWeight: 600 }} onClick={() => void revokeInvite(inv)}>Revoke</button>
@@ -376,7 +403,8 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
           </thead>
           <tbody>
             {users.map((u, i) => {
-              const isEditing = canEdit && editingId === u.id;
+              const isGroupRow = u.source === "group";
+              const isEditing = canEdit && !isGroupRow && editingId === u.id;
               return (
                 <tr key={u.id} style={{ borderBottom: i < users.length - 1 ? "1px solid var(--border)" : "none", opacity: u.active ? 1 : 0.55 }}>
                   <td className="px-4 py-2.5 font-medium">
@@ -384,7 +412,10 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
                       <input className="input text-sm" style={{ height: 28, width: 140 }} value={editName}
                         onChange={(e) => setEditName(e.target.value)} />
                     ) : (
-                      <span style={{ color: "var(--text-primary)" }}>{u.full_name || "—"}</span>
+                      <>
+                        <span style={{ color: "var(--text-primary)" }}>{u.full_name || "—"}</span>
+                        {isGroupRow && <GroupBadge groupName={u.group_name} />}
+                      </>
                     )}
                   </td>
                   <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text-secondary)" }}>{u.email}</td>
@@ -437,6 +468,8 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
                         </button>
                         <button className="text-xs" style={{ color: "var(--text-muted)" }} onClick={() => setEditingId(null)}>Cancel</button>
                       </>
+                    ) : isGroupRow ? (
+                      <span className="text-xs" style={{ color: "var(--text-muted)" }}>Managed at group level</span>
                     ) : (
                       <div className="flex items-center justify-end gap-3">
                         {canEdit && (
