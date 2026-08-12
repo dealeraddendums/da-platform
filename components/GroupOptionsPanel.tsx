@@ -113,6 +113,26 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
   const [error, setError] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
   const [invFields, setInvFields] = useState({ firstName: "", lastName: "", email: "", role: "group_user" });
+  // Invite-time Store Tags (2026-08-12, migration 141): picked here, carried
+  // on the invitation, applied as user_tags at acceptance. Group User only.
+  const [invTagIds, setInvTagIds] = useState<string[]>([]);
+  const [invTagAvail, setInvTagAvail] = useState<Array<{ id: string; name: string; color: string | null }>>([]);
+  const [invTagPreview, setInvTagPreview] = useState<{ count: number; dealers: Array<{ id: string; name: string }> } | null>(null);
+  useEffect(() => {
+    if (!showInvite || invFields.role !== "group_user") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/groups/${groupId}/tag-scope${invTagIds.length ? `?tag_ids=${invTagIds.join(",")}` : ""}`);
+        if (!r.ok || cancelled) return;
+        const j = await r.json() as { available?: Array<{ id: string; name: string; color: string | null }>; resolved?: { count: number; dealers: Array<{ id: string; name: string }> } };
+        setInvTagAvail(j.available ?? []);
+        setInvTagPreview(j.resolved ?? { count: 0, dealers: [] });
+      } catch { /* picker just stays empty */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showInvite, invFields.role, invTagIds.join(","), groupId]);
   const [inviting, setInviting] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
   const [invToast, setInvToast] = useState<{ kind: "success" | "warning"; msg: string } | null>(null);
@@ -153,7 +173,7 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
     const res = await fetch(`/api/groups/${groupId}/users`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(invFields),
+      body: JSON.stringify({ ...invFields, ...(invFields.role === "group_user" ? { tag_ids: invTagIds } : {}) }),
     });
     if (res.ok) {
       const json = await res.json() as { emailSent?: boolean; warning?: string };
@@ -161,6 +181,7 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
         ? { kind: "warning", msg: json.warning ?? `Invitation created for ${sentTo}, but the email could not be delivered.` }
         : { kind: "success", msg: `Invitation sent to ${sentTo}.` });
       setInvFields({ firstName: "", lastName: "", email: "", role: "group_user" });
+      setInvTagIds([]);
       setShowInvite(false);
       void fetchUsers(); // surface the new pending invitation
     } else {
@@ -355,6 +376,43 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
               <option value="group_admin">Group Admin</option>
             </select>
           </div>
+          {invFields.role === "group_user" && (
+            <div>
+              <label className="label">Store Tags</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                {invTagIds.map((id) => {
+                  const t = invTagAvail.find((a) => a.id === id);
+                  return (
+                    <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, padding: "3px 8px", borderRadius: 12, background: t?.color ? `${t.color}22` : "#e3f2fd", color: "#1565c0", border: "1px solid #bbdefb" }}>
+                      {t?.name ?? id}
+                      <button type="button" onClick={() => setInvTagIds((prev) => prev.filter((x) => x !== id))}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "#1565c0", padding: 0, lineHeight: 1 }}>×</button>
+                    </span>
+                  );
+                })}
+                <select className="input text-xs" style={{ height: 26, width: 180 }} value=""
+                  onChange={(e) => { const v = e.target.value; if (v) setInvTagIds((prev) => prev.includes(v) ? prev : [...prev, v]); }}>
+                  <option value="">+ Add tag…</option>
+                  {invTagAvail.filter((a) => !invTagIds.includes(a.id)).map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+              {invTagIds.length === 0 ? (
+                <p className="text-xs" style={{ color: "#b06a00" }}>
+                  ⚠ This user will see no dealers until store tags are assigned. You can send now and tag later.
+                </p>
+              ) : (
+                <p className="text-xs" style={{ color: (invTagPreview?.count ?? 0) === 0 ? "#c62828" : "#2e7d32" }}
+                  title={(invTagPreview?.dealers ?? []).map((d) => d.name).join(", ")}>
+                  Will see {invTagPreview?.count ?? 0} dealer{(invTagPreview?.count ?? 0) === 1 ? "" : "s"} — tags apply automatically when they accept.
+                </p>
+              )}
+              <p className="text-xs" style={{ color: "var(--text-muted)", marginTop: 2 }}>
+                Tags are created on dealer/group profiles; this assigns existing ones.
+              </p>
+            </div>
+          )}
           <div className="flex gap-2">
             <button type="submit" className="btn btn-primary text-xs" style={{ height: 32 }} disabled={inviting}>
               {inviting ? "Sending…" : "Send Invitation"}

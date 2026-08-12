@@ -69,7 +69,11 @@ export async function GET(
 /**
  * POST /api/groups/[id]/users
  * Invite a new group user (group_admin or group_user).
- * Body: { firstName, lastName, email, role }
+ * Body: { firstName, lastName, email, role, tag_ids? }
+ * tag_ids (group_user invites only, 2026-08-12): store-tag scope assigned at
+ * invite time — carried on invitations.scope_tag_ids (migration 141) and
+ * applied as user_tags rows by /api/invite/accept, so the Regional Manager
+ * lands with their stores already scoped.
  * Creates an invitation record and sends an email.
  */
 export async function POST(
@@ -86,12 +90,15 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { firstName?: string; lastName?: string; email?: string; role?: string };
+  let body: { firstName?: string; lastName?: string; email?: string; role?: string; tag_ids?: string[] };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
   const { firstName, lastName, email, role } = body;
+  const tagIds = role === "group_user" && Array.isArray(body.tag_ids)
+    ? body.tag_ids.filter((t): t is string => typeof t === "string" && t.length > 0)
+    : [];
   if (!firstName?.trim()) return NextResponse.json({ error: "First name required" }, { status: 400 });
   if (!lastName?.trim())  return NextResponse.json({ error: "Last name required" }, { status: 400 });
   if (!email?.trim())     return NextResponse.json({ error: "Email required" }, { status: 400 });
@@ -129,6 +136,27 @@ export async function POST(
     }, { status: 409 });
   }
 
+  // Invite-time tag scope: every tag must be IN USE on this group's dealers
+  // (same restriction as PUT /api/users/[id]/tags for group_admin callers) —
+  // a foreign/unused tag id is refused rather than silently scoping the
+  // manager to dealers outside this group.
+  if (tagIds.length) {
+    const { data: groupDealers } = await admin
+      .from("dealers").select("id").eq("group_id", params.id);
+    const dealerIds = (groupDealers ?? []).map((d) => d.id as string);
+    const usable = new Set<string>();
+    if (dealerIds.length) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: dts } = await (admin as any)
+        .from("dealer_tags").select("tag_id").in("dealer_id", dealerIds).in("tag_id", tagIds);
+      for (const r of (dts ?? []) as Array<{ tag_id: string }>) usable.add(r.tag_id);
+    }
+    const foreign = tagIds.filter((t) => !usable.has(t));
+    if (foreign.length) {
+      return NextResponse.json({ error: "One or more store tags are not in use on this group's dealers" }, { status: 400 });
+    }
+  }
+
   // One-time setup code — emailed in plaintext, stored only as a hash. The
   // invitation is consumed only when the invitee submits this code, so a
   // link-scanner pre-fetching the URL can't consume it.
@@ -151,6 +179,8 @@ export async function POST(
       expires_at: expiresAt,
       setup_code_hash: hashSetupCode(setupCode),
       setup_code_expires_at: expiresAt,
+      // Applied as user_tags by /api/invite/accept (migration 141).
+      scope_tag_ids: tagIds.length ? tagIds : null,
     }, { onConflict: "email,group_id", ignoreDuplicates: false })
     .select("token")
     .single() as { data: { token: string } | null; error: { message: string } | null };

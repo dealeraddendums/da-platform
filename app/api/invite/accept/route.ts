@@ -48,7 +48,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: inv } = await (admin as any)
     .from("invitations")
-    .select("id, email, first_name, last_name, role, dealer_id, group_id, expires_at, accepted_at, setup_code_hash, setup_code_expires_at")
+    .select("id, email, first_name, last_name, role, dealer_id, group_id, expires_at, accepted_at, setup_code_hash, setup_code_expires_at, scope_tag_ids, invited_by")
     .eq("token", token)
     .maybeSingle() as { data: {
       id: string; email: string; first_name: string; last_name: string;
@@ -136,6 +136,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (profileErr) {
     console.error("[invite/accept] profile upsert failed:", profileErr.message);
     return NextResponse.json({ error: "Failed to create profile" }, { status: 500 });
+  }
+
+  // Invite-time store tags (2026-08-12, migration 141): a group_user
+  // invitation can carry the tag scope picked in the invite form — apply it
+  // now so the Regional Manager sees their stores on first sign-in, no
+  // separate assignment step. Failures are logged, never block acceptance.
+  const invExtra = inv as { scope_tag_ids?: string[] | null; invited_by?: string | null };
+  const scopeTagIds = invExtra.scope_tag_ids ?? null;
+  if (inv.role === "group_user" && Array.isArray(scopeTagIds) && scopeTagIds.length) {
+    try {
+      // user_tags/admin_audit aren't in the generated Database types (same
+      // convention as the tags route) — cast through any.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const adminAny = admin as any;
+      await adminAny.from("user_tags").delete().eq("user_id", userId);
+      const { error: tagErr } = await adminAny
+        .from("user_tags")
+        .insert(scopeTagIds.map((tag_id: string) => ({ user_id: userId, tag_id, created_by: invExtra.invited_by ?? null })));
+      if (tagErr) console.error("[invite/accept] user_tags insert failed:", tagErr.message);
+      else {
+        await adminAny.from("admin_audit").insert({
+          admin_user_id: invExtra.invited_by ?? userId,
+          action: "user_scope_tags_set",
+          metadata: { user_id: userId, tag_ids: scopeTagIds, count: scopeTagIds.length, source: "invite_acceptance" },
+        });
+      }
+    } catch (e) {
+      console.error("[invite/accept] invite-time tag apply failed:", e instanceof Error ? e.message : e);
+    }
   }
 
   // Phase 14a — HubSpot Contact upsert. Fire-and-forget.
