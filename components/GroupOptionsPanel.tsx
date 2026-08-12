@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Fragment, useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { GroupOptionRow, GroupDisclaimerRow, GroupTemplateRow } from "@/lib/db";
 import CorporateProductModal from "@/components/CorporateProductModal";
@@ -11,6 +11,7 @@ import { RichName } from "@/lib/product-name";
 import ProductImportExport from "@/components/ProductImportExport";
 import DealerCheckList from "@/components/DealerCheckList";
 import RulesInfoTip from "@/components/RulesInfoTip";
+import StoreTagsEditor from "@/components/StoreTagsEditor";
 
 type Props = {
   groupId: string;
@@ -407,7 +408,8 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
             {users.map((u, i) => {
               const isEditing = editingId === u.id;
               return (
-                <tr key={u.id} style={{ borderBottom: i < users.length - 1 ? "1px solid var(--border)" : "none", opacity: u.active ? 1 : 0.55 }}>
+                <Fragment key={u.id}>
+                <tr style={{ borderBottom: i < users.length - 1 ? "1px solid var(--border)" : "none", opacity: u.active ? 1 : 0.55 }}>
                   <td className="px-4 py-2.5 font-medium">
                     {isEditing ? (
                       <input className="input text-sm" style={{ height: 28, width: 140 }} value={editName}
@@ -484,6 +486,21 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
                     )}
                   </td>
                 </tr>
+                {/* Store Tags editor (Phase 3 slice UI, 2026-08-12): shown while
+                    editing a group_user (Regional Manager). Same shared
+                    StoreTagsEditor as the admin Users page — group-scoped tag
+                    picker + live "Sees N dealers" preview; the routes authorize
+                    group_admin for own-group group_users (be0693d). Saves
+                    immediately (independent of the row's Save button). */}
+                {isEditing && u.role === "group_user" && (
+                  <tr>
+                    <td colSpan={6} style={{ padding: "10px 16px 14px", background: "#f8f9ff", borderBottom: "1px solid var(--border)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "#78828c", marginBottom: 6 }}>Store Tags</div>
+                      <StoreTagsEditor userId={u.id} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
           </tbody>
