@@ -137,7 +137,14 @@ export function matchesRulesRow(row: RulesRow, vehicle: VehicleRow): boolean {
     if (row.miles_condition === 2 && vehicleMiles < row.miles_value) return false;
   }
 
-  const vehicleMsrp = vehicle.MSRP ? parseFloat(vehicle.MSRP) : null;
+  // MSRP 0 / unparseable = UNPRICED, same as null (2026-08-12, null-MSRP
+  // LYRIQ incident): a missing price must never gate a product in or out.
+  // With vehicleMsrp null the msrp clause below is skipped entirely (treated
+  // as passing) and the product's OTHER rules decide. Note the flip side:
+  // complementary price-pair products ("under $50k" / "over $50k" variants)
+  // BOTH match an unpriced vehicle by design.
+  const msrpNum = vehicle.MSRP ? parseFloat(vehicle.MSRP) : NaN;
+  const vehicleMsrp = Number.isFinite(msrpNum) && msrpNum > 0 ? msrpNum : null;
   if ((row.msrp_condition ?? 0) !== 0 && vehicleMsrp != null) {
     if (row.msrp_condition === 1 && row.msrp1 != null && vehicleMsrp > row.msrp1) return false;
     if (row.msrp_condition === 2 && row.msrp1 != null && vehicleMsrp < row.msrp1) return false;
