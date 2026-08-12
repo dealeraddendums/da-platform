@@ -695,15 +695,13 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     // bgimage replaces the old monolithic 'infobox' slot — new templates get
     // the EPA/DOT Fuel Economy image pre-placed (DEFS.bgimage sets imgUrl).
     //
-    // A new GROUP-template document (?group= context → groupId set, no
-    // templateId) opens on a TRULY BLANK canvas: the standard pre-placed layout
-    // is the right default for a new DEALER doc but wrong for group-template
-    // authoring. Editing an EXISTING group template (templateId set) is loaded
-    // by the template-load effect below and is unaffected.
-    const groupNewDoc = Boolean(groupId) && !dealerId && !templateId;
-    const order = groupNewDoc
-      ? []
-      : ['logo','vehicle','msrp','options','subtotal','askbar','dealer','bgimage'];
+    // A new GROUP-template document (?group= context) seeds the SAME standard
+    // layout a new dealer doc gets (Allan decision 2026-08-12, reversing
+    // e080d62's open-blank behavior): the base widget set is a ready starting
+    // point; a truly-empty canvas stays available as the explicit "Blank"
+    // choice in the "+ New" picker. Editing an EXISTING group template
+    // (templateId set) is loaded by the template-load effect below.
+    const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','bgimage'];
     let nextNid = 1;
     let ws: Record<string, Widget> = {};
     order.forEach(type => {
@@ -1531,8 +1529,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   }, [vehicle, groupId, dealerId]);
 
   // Truly-blank canvas (empty widgets). Distinct from applyBlankCanvas, which
-  // — despite the name — seeds the standard widget set. Used for new
-  // group-template documents where that standard layout isn't wanted.
+  // — despite the name — seeds the standard widget set. Backs the explicit
+  // "Blank" choice in the group-mode "+ New" picker (since 2026-08-12 the
+  // group DEFAULT is the standard layout; empty is opt-in).
   const applyEmptyCanvas = useCallback(() => {
     const ws: Record<string, Widget> = {};
     widgetsRef.current = ws;
@@ -1612,8 +1611,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   }, [showToast, vehicle, applyBlankCanvas, groupId, dealerId]);
 
   // "+ New" handler. super_admin starter-mode → new blank STARTER (unchanged).
-  // Dealer/group → offer Blank + platform starters; zero starters falls straight
-  // through to Blank.
+  // Dealer → Blank(=standard) + platform starters; group → Standard Layout
+  // (default) + truly-empty Blank + starters. Group always shows the picker.
   const newTemplate = useCallback(async () => {
     if (isDirtyRef.current) {
       if (!window.confirm('Start a new document?\n\nUnsaved changes will be lost.')) return;
@@ -1633,19 +1632,19 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         all = j.data ?? [];
       }
     } catch { /* ignore — fall through to Blank */ }
-    // The blank-default backs the dedicated "Blank" button (loaded from the DB,
-    // hardcode fallback); it's not listed among the other starters. In group
-    // mode "Blank" always means the truly-empty canvas instead.
+    // The blank-default starter backs the "Standard Layout" default (loaded
+    // from the DB, hardcode fallback); it's not listed among the other
+    // starters. Group mode additionally offers a truly-empty "Blank" choice.
     const blank = all.find(s => s.is_blank_default);
     const blankId = blank?.id ?? null;
     setBlankStarterId(blankId);
     // Builder doc types only — buyer's guides are a separate (PDF) flow and the
     // dealer templates API rejects them on save.
     const others = all.filter(s => !s.is_blank_default && (s.doc_type === 'addendum' || s.doc_type === 'infosheet'));
-    if (others.length === 0) {
-      // Only Blank available — load it straight away.
-      if (groupMode) { applyEmptyCanvas(); showToast('New document'); }
-      else if (blankId) await loadStarterAsNew(blankId);
+    if (others.length === 0 && !groupMode) {
+      // Dealer mode with no starters — load the standard layout straight away.
+      // Group mode always shows the picker (Standard vs Blank is a real choice).
+      if (blankId) await loadStarterAsNew(blankId);
       else { applyBlankCanvas(); showToast('New document'); }
       return;
     }
@@ -2122,10 +2121,24 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
             <div style={{ fontSize: 12, color: '#78828c', marginBottom: 12 }}>
               Start from a blank canvas or a platform starter layout. Picking a starter creates a new, editable document you save as your own.
             </div>
+            {groupId && !dealerId && (
+              // Group mode default (Allan decision 2026-08-12, reverses the
+              // open-blank behavior): the base/standard layout leads the list,
+              // highlighted as the default starting point.
+              <button
+                onClick={() => { if (blankStarterId) { void loadStarterAsNew(blankStarterId); } else { applyBlankCanvas(); setShowNewPicker(false); showToast('New document'); } }}
+                style={{ width: '100%', textAlign: 'left', padding: '12px 14px', marginBottom: 8, border: '2px solid #1976d2', borderRadius: 6, background: '#f5f9ff', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: '#2a2b3c' }}>Standard Layout</div>
+                  <div style={{ fontSize: 12, color: '#78828c', marginTop: 2 }}>A ready starting point with the standard widgets (logo, vehicle, options, totals…).</div>
+                </div>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#1565c0', textTransform: 'uppercase', letterSpacing: '.04em', flexShrink: 0 }}>Default</span>
+              </button>
+            )}
             <button
               onClick={() => {
-                // Group mode: Blank = the truly-empty canvas (group authoring
-                // starts empty — e080d62), never the standard dealer layout.
+                // Group mode: Blank = the truly-empty canvas, the explicit
+                // start-from-nothing choice (the DEFAULT is Standard Layout).
                 if (groupId && !dealerId) { applyEmptyCanvas(); setShowNewPicker(false); showToast('New document'); }
                 else if (blankStarterId) { void loadStarterAsNew(blankStarterId); }
                 else { applyBlankCanvas(); setShowNewPicker(false); showToast('New document'); }
@@ -2133,21 +2146,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
               style={{ width: '100%', textAlign: 'left', padding: '12px 14px', marginBottom: 8, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 14, color: '#2a2b3c' }}>Blank</div>
-                <div style={{ fontSize: 12, color: '#78828c', marginTop: 2 }}>{groupId && !dealerId ? 'Truly empty canvas.' : 'Empty canvas with the default widgets.'}</div>
+                <div style={{ fontSize: 12, color: '#78828c', marginTop: 2 }}>{groupId && !dealerId ? 'Empty canvas — add widgets yourself.' : 'Empty canvas with the default widgets.'}</div>
               </div>
             </button>
-            {groupId && !dealerId && (
-              // Group mode splits what the dealer "Blank" bundles: Blank above is
-              // truly empty; this loads the base/standard layout as seed content.
-              <button
-                onClick={() => { if (blankStarterId) { void loadStarterAsNew(blankStarterId); } else { applyBlankCanvas(); setShowNewPicker(false); showToast('New document'); } }}
-                style={{ width: '100%', textAlign: 'left', padding: '12px 14px', marginBottom: 8, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 14, color: '#2a2b3c' }}>Standard Layout</div>
-                  <div style={{ fontSize: 12, color: '#78828c', marginTop: 2 }}>The platform&rsquo;s base widget set (logo, vehicle, options, totals…).</div>
-                </div>
-              </button>
-            )}
             <div style={{ fontSize: 11, fontWeight: 700, color: '#78828c', textTransform: 'uppercase', letterSpacing: '.05em', margin: '14px 0 6px' }}>Starter Layouts</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {starterPickerList.map(s => (
