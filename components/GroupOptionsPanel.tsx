@@ -113,9 +113,14 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
   const [error, setError] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
   const [invFields, setInvFields] = useState({ firstName: "", lastName: "", email: "", role: "group_user" });
-  // Invite-time Store Tags (2026-08-12, migration 141): picked here, carried
-  // on the invitation, applied as user_tags at acceptance. Group User only.
+  // Invite-time store scope (2026-08-12, migrations 141+142): the primary
+  // control is a direct DEALER picker (checkboxes — no tag pre-building);
+  // named tags remain an optional add-on. Carried on the invitation
+  // (scope_dealer_ids + scope_tag_ids), applied at acceptance. Group User only.
   const [invTagIds, setInvTagIds] = useState<string[]>([]);
+  const [invDealerIds, setInvDealerIds] = useState<Set<string>>(new Set());
+  const [invRoster, setInvRoster] = useState<Array<{ id: string; name: string }>>([]);
+  const [invShowTags, setInvShowTags] = useState(false);
   const [invTagAvail, setInvTagAvail] = useState<Array<{ id: string; name: string; color: string | null }>>([]);
   const [invTagPreview, setInvTagPreview] = useState<{ count: number; dealers: Array<{ id: string; name: string }> } | null>(null);
   useEffect(() => {
@@ -123,16 +128,18 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch(`/api/groups/${groupId}/tag-scope${invTagIds.length ? `?tag_ids=${invTagIds.join(",")}` : ""}`);
+        const dealerParam = Array.from(invDealerIds).join(",");
+        const r = await fetch(`/api/groups/${groupId}/tag-scope?tag_ids=${invTagIds.join(",")}&dealer_ids=${dealerParam}`);
         if (!r.ok || cancelled) return;
-        const j = await r.json() as { available?: Array<{ id: string; name: string; color: string | null }>; resolved?: { count: number; dealers: Array<{ id: string; name: string }> } };
+        const j = await r.json() as { available?: Array<{ id: string; name: string; color: string | null }>; group_dealers?: Array<{ id: string; name: string }>; resolved?: { count: number; dealers: Array<{ id: string; name: string }> } };
         setInvTagAvail(j.available ?? []);
+        setInvRoster(j.group_dealers ?? []);
         setInvTagPreview(j.resolved ?? { count: 0, dealers: [] });
       } catch { /* picker just stays empty */ }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showInvite, invFields.role, invTagIds.join(","), groupId]);
+  }, [showInvite, invFields.role, invTagIds.join(","), Array.from(invDealerIds).sort().join(","), groupId]);
   const [inviting, setInviting] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
   const [invToast, setInvToast] = useState<{ kind: "success" | "warning"; msg: string } | null>(null);
@@ -173,7 +180,12 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
     const res = await fetch(`/api/groups/${groupId}/users`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...invFields, ...(invFields.role === "group_user" ? { tag_ids: invTagIds } : {}) }),
+      body: JSON.stringify({
+        ...invFields,
+        ...(invFields.role === "group_user"
+          ? { tag_ids: invTagIds, scope_dealer_ids: Array.from(invDealerIds) }
+          : {}),
+      }),
     });
     if (res.ok) {
       const json = await res.json() as { emailSent?: boolean; warning?: string };
@@ -182,6 +194,8 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
         : { kind: "success", msg: `Invitation sent to ${sentTo}.` });
       setInvFields({ firstName: "", lastName: "", email: "", role: "group_user" });
       setInvTagIds([]);
+      setInvDealerIds(new Set());
+      setInvShowTags(false);
       setShowInvite(false);
       void fetchUsers(); // surface the new pending invitation
     } else {
@@ -378,39 +392,53 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
           </div>
           {invFields.role === "group_user" && (
             <div>
-              <label className="label">Store Tags</label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
-                {invTagIds.map((id) => {
-                  const t = invTagAvail.find((a) => a.id === id);
-                  return (
-                    <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, padding: "3px 8px", borderRadius: 12, background: t?.color ? `${t.color}22` : "#e3f2fd", color: "#1565c0", border: "1px solid #bbdefb" }}>
-                      {t?.name ?? id}
-                      <button type="button" onClick={() => setInvTagIds((prev) => prev.filter((x) => x !== id))}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: "#1565c0", padding: 0, lineHeight: 1 }}>×</button>
-                    </span>
-                  );
-                })}
-                <select className="input text-xs" style={{ height: 26, width: 180 }} value=""
-                  onChange={(e) => { const v = e.target.value; if (v) setInvTagIds((prev) => prev.includes(v) ? prev : [...prev, v]); }}>
-                  <option value="">+ Add tag…</option>
-                  {invTagAvail.filter((a) => !invTagIds.includes(a.id)).map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-              </div>
-              {invTagIds.length === 0 ? (
+              <label className="label">Stores this user can see</label>
+              {invRoster.length === 0 ? (
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>Loading stores…</p>
+              ) : (
+                <div style={{ border: "1px solid #e0e0e0", borderRadius: 4, background: "#fff", padding: 10, marginBottom: 6 }}>
+                  <DealerCheckList dealers={invRoster} selected={invDealerIds} onChange={setInvDealerIds} />
+                </div>
+              )}
+              {/* Optional named tags — reusable groupings; hidden behind a link until wanted. */}
+              {!invShowTags && invTagIds.length === 0 ? (
+                invTagAvail.length > 0 && (
+                  <button type="button" onClick={() => setInvShowTags(true)}
+                    style={{ background: "none", border: "none", color: "#1976d2", cursor: "pointer", fontSize: 12, padding: 0, marginBottom: 6 }}>
+                    + Also scope by a store tag (optional)
+                  </button>
+                )
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                  {invTagIds.map((id) => {
+                    const t = invTagAvail.find((a) => a.id === id);
+                    return (
+                      <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, padding: "3px 8px", borderRadius: 12, background: "#e3f2fd", color: "#1565c0", border: "1px solid #bbdefb" }}>
+                        {t?.name ?? id}
+                        <button type="button" onClick={() => setInvTagIds((prev) => prev.filter((x) => x !== id))}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "#1565c0", padding: 0, lineHeight: 1 }}>×</button>
+                      </span>
+                    );
+                  })}
+                  <select className="input text-xs" style={{ height: 26, width: 200 }} value=""
+                    onChange={(e) => { const v = e.target.value; if (v) setInvTagIds((prev) => prev.includes(v) ? prev : [...prev, v]); }}>
+                    <option value="">+ Add store tag (adds its stores)…</option>
+                    {invTagAvail.filter((a) => !invTagIds.includes(a.id)).map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {invDealerIds.size === 0 && invTagIds.length === 0 ? (
                 <p className="text-xs" style={{ color: "#b06a00" }}>
-                  ⚠ This user will see no dealers until store tags are assigned. You can send now and tag later.
+                  ⚠ This user will see no dealers until stores are selected. You can send now and assign later.
                 </p>
               ) : (
                 <p className="text-xs" style={{ color: (invTagPreview?.count ?? 0) === 0 ? "#c62828" : "#2e7d32" }}
                   title={(invTagPreview?.dealers ?? []).map((d) => d.name).join(", ")}>
-                  Will see {invTagPreview?.count ?? 0} dealer{(invTagPreview?.count ?? 0) === 1 ? "" : "s"} — tags apply automatically when they accept.
+                  Will see {invTagPreview?.count ?? 0} dealer{(invTagPreview?.count ?? 0) === 1 ? "" : "s"} — applied automatically when they accept.
                 </p>
               )}
-              <p className="text-xs" style={{ color: "var(--text-muted)", marginTop: 2 }}>
-                Tags are created on dealer/group profiles; this assigns existing ones.
-              </p>
             </div>
           )}
           <div className="flex gap-2">

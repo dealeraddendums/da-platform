@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { authorizeStoreTagsAccess } from "@/lib/user-authz";
+import { getUserDirectScope } from "@/lib/tags";
 
 type Params = { params: { id: string } };
 
@@ -53,36 +54,58 @@ export async function GET(req: NextRequest, { params }: Params): Promise<NextRes
     }
   }
 
-  // Available tags = the tags in use on this group's dealers.
+  // Available NAMED tags = the non-system tags in use on this group's dealers.
+  // Hidden per-user system scope tags (migration 142) are excluded — they're
+  // driven by the direct dealer picker, never the tag dropdown.
   const availableTagIds = Array.from(dtByTag.keys());
   let available: Array<{ id: string; name: string; color: string | null }> = [];
   if (availableTagIds.length) {
     const { data: tagRows } = await admin
-      .from("tags").select("id, name, color").in("id", availableTagIds);
+      .from("tags").select("id, name, color").in("id", availableTagIds).eq("system", false);
     available = (tagRows ?? [])
       .map((t: any) => ({ id: t.id, name: t.name, color: t.color ?? null }))
       .sort((a: any, b: any) => a.name.localeCompare(b.name));
   }
 
-  // Which tag_ids to resolve: query param if present, else the user's saved tags.
-  const param = req.nextUrl.searchParams.get("tag_ids");
-  let tagIds: string[];
-  if (param !== null) {
-    tagIds = param.split(",").map((s) => s.trim()).filter(Boolean);
+  // The user's DIRECT dealer selection (their system tag's in-group dealers).
+  const direct = await getUserDirectScope(admin, params.id);
+  const directDealerIds = (direct?.dealerIds ?? []).filter((d) => groupDealerIds.has(d));
+
+  // What to resolve: query params if present (live preview while editing),
+  // else the user's saved state (user_tags — which already includes the
+  // system tag, so the saved resolution needs no special casing).
+  const tagParam = req.nextUrl.searchParams.get("tag_ids");
+  const dealerParam = req.nextUrl.searchParams.get("dealer_ids");
+  const seen = new Set<string>();
+  if (tagParam !== null || dealerParam !== null) {
+    const tagIds = (tagParam ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    for (const tid of tagIds) {
+      const ds = dtByTag.get(tid);
+      if (ds) Array.from(ds).forEach((did) => { if (groupDealerIds.has(did)) seen.add(did); });
+    }
+    (dealerParam ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+      .forEach((did) => { if (groupDealerIds.has(did)) seen.add(did); });
   } else {
     const { data: ut } = await admin.from("user_tags").select("tag_id").eq("user_id", params.id);
-    tagIds = (ut ?? []).map((r: any) => r.tag_id as string);
-  }
-
-  // Resolve group ∩ tags: in-group dealers carrying any selected tag.
-  const seen = new Set<string>();
-  for (const tid of tagIds) {
-    const ds = dtByTag.get(tid);
-    if (ds) Array.from(ds).forEach((did) => { if (groupDealerIds.has(did)) seen.add(did); });
+    for (const r of (ut ?? []) as Array<{ tag_id: string }>) {
+      const ds = dtByTag.get(r.tag_id);
+      if (ds) Array.from(ds).forEach((did) => { if (groupDealerIds.has(did)) seen.add(did); });
+    }
   }
   const dealers = Array.from(seen)
     .map((id) => ({ id, name: nameById.get(id) ?? id }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  return NextResponse.json({ group_id: groupId, available, resolved: { count: dealers.length, dealers } });
+  // Full member roster for the direct dealer picker.
+  const group_dealers = (groupDealers ?? [])
+    .map((d: any) => ({ id: d.id as string, name: d.name as string }))
+    .sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name));
+
+  return NextResponse.json({
+    group_id: groupId,
+    available,
+    group_dealers,
+    direct_dealer_ids: directDealerIds,
+    resolved: { count: dealers.length, dealers },
+  });
 }

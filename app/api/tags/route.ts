@@ -18,7 +18,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient() as any;
   const q = (req.nextUrl.searchParams.get("q") ?? "").trim();
 
-  let query = admin.from("tags").select("id, name, color").order("name");
+  // system=true tags are hidden per-user scope tags (migration 142) — never
+  // listed in pickers/filters.
+  let query = admin.from("tags").select("id, name, color").eq("system", false).order("name");
   if (q) query = query.ilike("name", `%${q}%`);
   const { data: tags, error: dbErr } = await query;
   if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
@@ -80,6 +82,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const name = (body.name ?? "").trim();
   if (!name) return NextResponse.json({ error: "name is required" }, { status: 400 });
+  // "__scope:" is reserved for hidden per-user system tags (migration 142).
+  if (name.toLowerCase().startsWith("__scope:")) {
+    return NextResponse.json({ error: "That tag name is reserved" }, { status: 400 });
+  }
 
   const admin = createAdminSupabaseClient() as any;
 

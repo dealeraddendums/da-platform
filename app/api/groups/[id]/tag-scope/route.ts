@@ -50,30 +50,42 @@ export async function GET(req: NextRequest, { params }: Params): Promise<NextRes
     }
   }
 
+  // Named tags only — hidden per-user system scope tags (migration 142) are
+  // never offered in the invite picker.
   const availableTagIds = Array.from(dtByTag.keys());
   let available: Array<{ id: string; name: string; color: string | null }> = [];
   if (availableTagIds.length) {
     const { data: tagRows } = await admin
-      .from("tags").select("id, name, color").in("id", availableTagIds);
+      .from("tags").select("id, name, color").in("id", availableTagIds).eq("system", false);
     available = ((tagRows ?? []) as Array<{ id: string; name: string; color: string | null }>)
       .map((t) => ({ id: t.id, name: t.name, color: t.color ?? null }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  // Resolved scope for the REQUESTED tag set: dealers in the group carrying
-  // ANY of the tags (same union semantics as getJwtClaims scope resolution).
+  // Resolved scope for the REQUESTED selection: dealers in the group carrying
+  // ANY of the tags (same union semantics as getJwtClaims scope resolution),
+  // plus any DIRECTLY picked dealers (?dealer_ids=, migration 142).
   const resolvedIds = new Set<string>();
   for (const t of tagIds) {
     const set = dtByTag.get(t);
     if (set) set.forEach((d) => resolvedIds.add(d));
   }
+  (req.nextUrl.searchParams.get("dealer_ids") ?? "")
+    .split(",").map((s) => s.trim()).filter(Boolean)
+    .forEach((d) => { if (nameById.has(d)) resolvedIds.add(d); });
   const dealers = Array.from(resolvedIds)
     .map((id) => ({ id, name: nameById.get(id) ?? id }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  // Full member roster for the invite form's direct dealer picker.
+  const group_dealers = (groupDealers ?? [])
+    .map((d: { id: string; name: string }) => ({ id: d.id, name: d.name }))
+    .sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name));
+
   return NextResponse.json({
     group_id: params.id,
     available,
+    group_dealers,
     resolved: { count: dealers.length, dealers },
   });
 }

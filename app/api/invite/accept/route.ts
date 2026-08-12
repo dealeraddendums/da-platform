@@ -5,6 +5,7 @@ import { fireProfileSync } from "@/lib/sync-hubspot";
 import { verifySetupCode } from "@/lib/invite-code";
 import { getAuthUserIdByEmail } from "@/lib/last-sign-in";
 import { rateLimit } from "@/lib/rate-limit";
+import { setUserDirectScope } from "@/lib/tags";
 
 /**
  * POST /api/invite/accept
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: inv } = await (admin as any)
     .from("invitations")
-    .select("id, email, first_name, last_name, role, dealer_id, group_id, expires_at, accepted_at, setup_code_hash, setup_code_expires_at, scope_tag_ids, invited_by")
+    .select("id, email, first_name, last_name, role, dealer_id, group_id, expires_at, accepted_at, setup_code_hash, setup_code_expires_at, scope_tag_ids, scope_dealer_ids, invited_by")
     .eq("token", token)
     .maybeSingle() as { data: {
       id: string; email: string; first_name: string; last_name: string;
@@ -142,28 +143,43 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // invitation can carry the tag scope picked in the invite form — apply it
   // now so the Regional Manager sees their stores on first sign-in, no
   // separate assignment step. Failures are logged, never block acceptance.
-  const invExtra = inv as { scope_tag_ids?: string[] | null; invited_by?: string | null };
+  const invExtra = inv as { scope_tag_ids?: string[] | null; scope_dealer_ids?: string[] | null; invited_by?: string | null };
   const scopeTagIds = invExtra.scope_tag_ids ?? null;
-  if (inv.role === "group_user" && Array.isArray(scopeTagIds) && scopeTagIds.length) {
+  const scopeDealerIds = invExtra.scope_dealer_ids ?? null;
+  if (inv.role === "group_user" && ((scopeTagIds?.length ?? 0) > 0 || (scopeDealerIds?.length ?? 0) > 0)) {
     try {
       // user_tags/admin_audit aren't in the generated Database types (same
       // convention as the tags route) — cast through any.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const adminAny = admin as any;
       await adminAny.from("user_tags").delete().eq("user_id", userId);
-      const { error: tagErr } = await adminAny
-        .from("user_tags")
-        .insert(scopeTagIds.map((tag_id: string) => ({ user_id: userId, tag_id, created_by: invExtra.invited_by ?? null })));
-      if (tagErr) console.error("[invite/accept] user_tags insert failed:", tagErr.message);
-      else {
-        await adminAny.from("admin_audit").insert({
-          admin_user_id: invExtra.invited_by ?? userId,
-          action: "user_scope_tags_set",
-          metadata: { user_id: userId, tag_ids: scopeTagIds, count: scopeTagIds.length, source: "invite_acceptance" },
-        });
+      if (scopeTagIds?.length) {
+        const { error: tagErr } = await adminAny
+          .from("user_tags")
+          .insert(scopeTagIds.map((tag_id: string) => ({ user_id: userId, tag_id, created_by: invExtra.invited_by ?? null })));
+        if (tagErr) console.error("[invite/accept] user_tags insert failed:", tagErr.message);
       }
+      // Direct dealer selection (migration 142) → the user's hidden system
+      // tag + dealer_tags + user_tags link, all in one reconcile.
+      if (scopeDealerIds?.length && inv.group_id) {
+        const scopeErr = await setUserDirectScope(admin, {
+          userId, groupId: inv.group_id, dealerIds: scopeDealerIds,
+          actorId: invExtra.invited_by ?? null,
+        });
+        if (scopeErr) console.error("[invite/accept] direct dealer scope failed:", scopeErr);
+      }
+      await adminAny.from("admin_audit").insert({
+        admin_user_id: invExtra.invited_by ?? userId,
+        action: "user_scope_tags_set",
+        metadata: {
+          user_id: userId,
+          tag_ids: scopeTagIds ?? [], count: scopeTagIds?.length ?? 0,
+          dealer_ids: scopeDealerIds ?? [], dealer_count: scopeDealerIds?.length ?? 0,
+          source: "invite_acceptance",
+        },
+      });
     } catch (e) {
-      console.error("[invite/accept] invite-time tag apply failed:", e instanceof Error ? e.message : e);
+      console.error("[invite/accept] invite-time scope apply failed:", e instanceof Error ? e.message : e);
     }
   }
 

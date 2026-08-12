@@ -73,14 +73,35 @@ export async function PUT(req: NextRequest, { params }: Params): Promise<NextRes
   }
   const tagIds = Array.from(new Set(body.tag_ids.filter((x): x is string => typeof x === "string")));
 
-  // Replace: clear then insert the new set. Admin client (RLS bypass).
-  const { error: delErr } = await admin.from("dealer_tags").delete().eq("dealer_id", dealerUuid);
+  // Never accept hidden system scope tags through this surface (migration 142)
+  // — they're managed exclusively by the group_user scope editor.
+  let namedTagIds = tagIds;
+  if (namedTagIds.length) {
+    const { data: sysRows } = await admin
+      .from("tags").select("id").in("id", namedTagIds).eq("system", true);
+    const sysIds = new Set(((sysRows ?? []) as Array<{ id: string }>).map((r) => r.id));
+    namedTagIds = namedTagIds.filter((t) => !sysIds.has(t));
+  }
+
+  // Replace the dealer's NAMED tags only. System scope-tag rows are invisible
+  // to the profile picker, so a blanket delete here would silently destroy
+  // group_user direct-dealer scopes — preserve them.
+  const { data: keepRows } = await admin
+    .from("dealer_tags")
+    .select("tag_id, tags!inner(system)")
+    .eq("dealer_id", dealerUuid)
+    .eq("tags.system", true);
+  const keepIds = ((keepRows ?? []) as Array<{ tag_id: string }>).map((r) => r.tag_id);
+
+  let del = admin.from("dealer_tags").delete().eq("dealer_id", dealerUuid);
+  if (keepIds.length) del = del.not("tag_id", "in", `(${keepIds.join(",")})`);
+  const { error: delErr } = await del;
   if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 });
 
-  if (tagIds.length) {
+  if (namedTagIds.length) {
     const { error: insErr } = await admin
       .from("dealer_tags")
-      .insert(tagIds.map((tag_id) => ({ dealer_id: dealerUuid, tag_id, created_by: claims.sub })));
+      .insert(namedTagIds.map((tag_id) => ({ dealer_id: dealerUuid, tag_id, created_by: claims.sub })));
     if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
   }
 

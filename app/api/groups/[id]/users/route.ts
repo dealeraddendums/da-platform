@@ -90,7 +90,7 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { firstName?: string; lastName?: string; email?: string; role?: string; tag_ids?: string[] };
+  let body: { firstName?: string; lastName?: string; email?: string; role?: string; tag_ids?: string[]; scope_dealer_ids?: string[] };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -98,6 +98,9 @@ export async function POST(
   const { firstName, lastName, email, role } = body;
   const tagIds = role === "group_user" && Array.isArray(body.tag_ids)
     ? body.tag_ids.filter((t): t is string => typeof t === "string" && t.length > 0)
+    : [];
+  const scopeDealerIds = role === "group_user" && Array.isArray(body.scope_dealer_ids)
+    ? Array.from(new Set(body.scope_dealer_ids.filter((t): t is string => typeof t === "string" && t.length > 0)))
     : [];
   if (!firstName?.trim()) return NextResponse.json({ error: "First name required" }, { status: 400 });
   if (!lastName?.trim())  return NextResponse.json({ error: "Last name required" }, { status: 400 });
@@ -157,6 +160,18 @@ export async function POST(
     }
   }
 
+  // Invite-time DIRECT dealer scope (migration 142): every picked dealer must
+  // be a member of this group. Materialized as the user's hidden system tag
+  // by /api/invite/accept.
+  if (scopeDealerIds.length) {
+    const { data: members } = await admin
+      .from("dealers").select("id").eq("group_id", params.id).in("id", scopeDealerIds);
+    const memberIds = new Set((members ?? []).map((d) => d.id as string));
+    if (scopeDealerIds.some((d) => !memberIds.has(d))) {
+      return NextResponse.json({ error: "One or more selected dealers are not in this group" }, { status: 400 });
+    }
+  }
+
   // One-time setup code — emailed in plaintext, stored only as a hash. The
   // invitation is consumed only when the invitee submits this code, so a
   // link-scanner pre-fetching the URL can't consume it.
@@ -181,6 +196,8 @@ export async function POST(
       setup_code_expires_at: expiresAt,
       // Applied as user_tags by /api/invite/accept (migration 141).
       scope_tag_ids: tagIds.length ? tagIds : null,
+      // Direct dealer selection → hidden system tag at acceptance (migration 142).
+      scope_dealer_ids: scopeDealerIds.length ? scopeDealerIds : null,
     }, { onConflict: "email,group_id", ignoreDuplicates: false })
     .select("token")
     .single() as { data: { token: string } | null; error: { message: string } | null };
