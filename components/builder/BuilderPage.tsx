@@ -2743,7 +2743,28 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
         <EpSection>
           <Eps>Required Products Table</Eps>
           <Fd label="Section label"><input value={(d.sectionLabel as string) || ''} onChange={e => u('sectionLabel', e.target.value)} style={fiStyle} /></Fd>
-          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Shows dealer-installed Required options only. Option names and prices are set per vehicle in the addendum editor.</div>
+          {/* Section-label style parity with Suggested Products (2026-08-13):
+              a background color turns the label into the same bold header box;
+              "None" keeps the classic plain gray label — the default for every
+              existing template (no saved options widget carries bgColor). */}
+          <Fd label="Label Background">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <button type="button" onClick={() => { u('bgColor', ''); }}
+                title="Plain label (no header box)"
+                style={{ height: 22, padding: '0 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: 'pointer', border: `1.5px solid ${!(d.bgColor as string) ? '#1976d2' : '#e0e0e0'}`, background: !(d.bgColor as string) ? '#e3f2fd' : '#fff', color: !(d.bgColor as string) ? '#1976d2' : '#55595c' }}>
+                None
+              </button>
+              <ColorSwatches value={(d.bgColor as string) || ''} onChange={v => u('bgColor', v)} />
+            </div>
+          </Fd>
+          {Boolean(d.bgColor) && (
+            <Fd label="Text Color">
+              <ColorSwatches value={(d.textColor as string) || '#ffffff'} onChange={v => u('textColor', v)} />
+            </Fd>
+          )}
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>
+            {d.bgColor ? 'The section label sits bold on the colored box — same treatment as the Suggested Products header.' : 'Shows dealer-installed Required options only. Option names and prices are set per vehicle in the addendum editor.'}
+          </div>
         </EpSection>
       )}
 

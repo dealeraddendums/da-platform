@@ -213,11 +213,16 @@ export function renderW(type: string, d: D, fontScale: number): string {
     // labelFontSize scales the section label, productsFontSize the item
     // rows/descriptions. Both fall back to the legacy single fontSize so
     // every saved template renders byte-identically until a stepper is used.
-    // NOTE: the section label deliberately does NOT auto-hide when empty —
-    // Required Products only has the plain-text label variant, and the
-    // suggested_options gating discipline keeps plain-text label divs even
-    // when empty (removing one shifts ground-truthed layouts by its margin;
-    // only the boxed header variant, which this widget doesn't have, hides).
+    //
+    // Section-label parity with suggested_options (2026-08-13): bgColor set ⇒
+    // boxed bold header (label on the colored box, textColor default white,
+    // empty label auto-hides the box, content inset 8px) — the exact
+    // suggested_options logic. NO saved options widget carries bgColor
+    // (DEFS.options never seeded one), so every existing template stays on
+    // the plain-text `color:#555` header, byte-identical. The plain variant
+    // keeps its (invisible) div when the label is empty — removing it would
+    // shift ground-truthed layouts by its margin; only the boxed variant
+    // auto-hides.
     const legacyMult = (d.fontSize as number) || 1;
     const labelSz = Math.round(10 * fs * ((d.labelFontSize as number) || legacyMult));
     const sz = Math.round(10 * fs * ((d.productsFontSize as number) || legacyMult));
@@ -225,9 +230,16 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const ls = (d.lineSpacing as number) || 1.2;
     type OptItem = { name: string; desc: string; price: string; separator_above?: boolean; separator_below?: boolean; spaces?: number };
     const items = (d.items as OptItem[]) || [];
-    return `<div style="padding:3px 0"><div style="font-size:${labelSz}px;color:#555;margin-bottom:4px">${rich(d.sectionLabel)}</div>${items.map(it =>
-      renderProductRow(it, sz, szm, ls)
-    ).join('')}</div>`;
+    const bg = (d.bgColor as string) || '';
+    const tc = (d.textColor as string) || '#ffffff';
+    const labelRich = rich(d.sectionLabel);
+    const hasLabel = !!labelRich.replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/g, ' ').trim();
+    const header = bg
+      ? (hasLabel ? `<div style="background:${bg};color:${tc};font-size:${labelSz}px;font-weight:700;padding:4px 8px;box-sizing:border-box;margin-bottom:4px">${labelRich}</div>` : '')
+      : `<div style="font-size:${labelSz}px;color:#555;margin-bottom:4px">${labelRich}</div>`;
+    const inset = bg ? 'padding:0 8px;box-sizing:border-box' : '';
+    const rows = items.map(it => renderProductRow(it, sz, szm, ls)).join('');
+    return `<div style="padding:3px 0">${header}${inset ? `<div style="${inset}">${rows}</div>` : rows}</div>`;
   }
 
   if (type === 'suggested_options') {
