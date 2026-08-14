@@ -69,6 +69,16 @@ function renderProductRow(
   return `${spacerAbove}${sepAbove}${row}${sepBelow}`;
 }
 
+/** Canvas-only footnote under a real-product preview (BuilderPage sets
+ *  d.previewBadge/previewOmitted at RENDER TIME only — never persisted, never
+ *  set by the PDF path, so it cannot appear on prints). */
+function previewNote(d: D, shown: number): string {
+  if (d.previewBadge !== true) return '';
+  const omitted = Number(d.previewOmitted) || 0;
+  const capNote = omitted > 0 ? ` Showing first ${shown} of ${shown + omitted}.` : '';
+  return `<div style="font-size:8px;color:#9aa0a6;font-style:italic;text-align:center;margin-top:3px">Preview: your products — the printed set varies per vehicle by your product rules.${capNote}</div>`;
+}
+
 export function renderW(type: string, d: D, fontScale: number): string {
   const fs = fontScale;
 
@@ -238,7 +248,10 @@ export function renderW(type: string, d: D, fontScale: number): string {
       ? (hasLabel ? `<div style="background:${bg};color:${tc};font-size:${labelSz}px;font-weight:700;padding:4px 8px;box-sizing:border-box;margin-bottom:4px">${labelRich}</div>` : '')
       : `<div style="font-size:${labelSz}px;color:#555;margin-bottom:4px">${labelRich}</div>`;
     const inset = bg ? 'padding:0 8px;box-sizing:border-box' : '';
-    const rows = items.map(it => renderProductRow(it, sz, szm, ls)).join('');
+    // Canvas authoring mode (BuilderPage injects the scope's REAL products +
+    // this flag at render time — never persisted, never set on the PDF path,
+    // which always overwrites d.items from the vehicle's matched set).
+    const rows = items.map(it => renderProductRow(it, sz, szm, ls)).join('') + previewNote(d, items.length);
     return `<div style="padding:3px 0">${header}${inset ? `<div style="${inset}">${rows}</div>` : rows}</div>`;
   }
 
@@ -277,13 +290,14 @@ export function renderW(type: string, d: D, fontScale: number): string {
     if (items.length === 0) {
       return `<div style="padding:3px 0">${header}<div style="font-size:${szm}px;color:#bbb;font-style:italic;${inset || 'padding:0'}">Suggested products will appear here at print time.</div></div>`;
     }
-    // Canvas authoring mode (BuilderPage injects sample items + this flag at
-    // render time — never persisted, never set on the PDF path): label the
-    // list so nobody mistakes samples for a dealer's real products.
+    // Canvas authoring mode (BuilderPage injects items + one of these flags at
+    // render time — never persisted, never set on the PDF path): sampleBadge =
+    // generic fallback samples (dealer/group has no products yet), previewBadge
+    // = the scope's REAL products.
     const sampleNote = d.sampleBadge === true
       ? `<div style="font-size:8px;color:#9aa0a6;font-style:italic;text-align:center;margin-top:3px">Sample — actual products appear at print time</div>`
       : '';
-    const rows = items.map(it => renderProductRow(it, sz, szm, ls)).join('') + sampleNote;
+    const rows = items.map(it => renderProductRow(it, sz, szm, ls)).join('') + sampleNote + previewNote(d, items.length);
     return `<div style="padding:3px 0">${header}${inset ? `<div style="${inset}">${rows}</div>` : rows}</div>`;
   }
 

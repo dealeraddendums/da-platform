@@ -757,6 +757,64 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Real-product canvas preview (extends the 66d3334 sample injection): fetch
+  // the scope's ACTUAL products once on load — group mode → the group's
+  // Corporate Products; dealer mode → dealer library + auto-applied corporate
+  // (mirrors the print merge, corporate first). Injected into renderW's
+  // ARGUMENT only (previewRenderD below) — never written to w.d / saved
+  // template JSON, so the 23d09ef leak guards hold. Server caps each section
+  // (cap field) so a dealer with dozens keeps a usable canvas. Platform
+  // starter authoring has no dealer/group scope → keeps the generic samples.
+  type PreviewProductItem = { name: string; desc: string; price: string; separator_above: boolean; separator_below: boolean; spaces: number };
+  type PreviewProducts = { required: PreviewProductItem[]; suggested: PreviewProductItem[]; requiredTotal: number; suggestedTotal: number; cap: number };
+  const [previewProducts, setPreviewProducts] = useState<PreviewProducts | null>(null);
+  useEffect(() => {
+    if (starterMode) { setPreviewProducts(null); return; }
+    const scopeQs = groupId && !dealerId
+      ? `group_id=${encodeURIComponent(groupId)}`
+      : (dealerId ?? vehicle?.dealer_id)
+        ? `dealer_id=${encodeURIComponent((dealerId ?? vehicle?.dealer_id) as string)}`
+        : null;
+    if (!scopeQs) { setPreviewProducts(null); return; }
+    let cancelled = false;
+    fetch(`/api/builder/preview-products?${scopeQs}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then((j: PreviewProducts | null) => {
+        if (cancelled || !j) return;
+        setPreviewProducts(j);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId, dealerId, starterMode]);
+
+  /** Render-argument override for the two product widgets: real products when
+   *  the scope has them, generic samples otherwise. Never touches w.d. */
+  const previewRenderD = (w: Widget): Widget['d'] => {
+    if (w.type === 'options' && previewProducts && previewProducts.required.length > 0) {
+      return {
+        ...w.d,
+        items: previewProducts.required,
+        previewBadge: true,
+        previewOmitted: Math.max(0, previewProducts.requiredTotal - previewProducts.required.length),
+      };
+    }
+    if (w.type === 'suggested_options') {
+      if (previewProducts && previewProducts.suggested.length > 0) {
+        return {
+          ...w.d,
+          items: previewProducts.suggested,
+          previewBadge: true,
+          previewOmitted: Math.max(0, previewProducts.suggestedTotal - previewProducts.suggested.length),
+        };
+      }
+      if (!Array.isArray(w.d.items) || (w.d.items as unknown[]).length === 0) {
+        return { ...w.d, items: SAMPLE_SUGGESTED_ITEMS, sampleBadge: true };
+      }
+    }
+    return w.d;
+  };
+
   // Auto-load: on the blank /builder route, open the dealer's most recently
   // updated saved template so returning visits resume work-in-progress
   // instead of dropping the user on an empty canvas. Skipped when:
@@ -2037,22 +2095,19 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                         onPointerDown={e => startResize(e, w.id, dir)}
                       />
                     ))}
-                    {/* Content. Suggested Products: real items exist only at
-                        print time, so authoring injects SAMPLE items at render
-                        time only — w.d and the saved template stay untouched,
-                        and the PDF path (which always overwrites d.items from
-                        real options, never sets sampleBadge) can't pick them
-                        up. Lets authors see true content volume/overflow while
-                        tuning box size + the label/products font pickers. */}
+                    {/* Content. Required/Suggested Products: real per-vehicle
+                        items exist only at print time, so authoring injects the
+                        SCOPE'S ACTUAL products (dealer library + auto-applied
+                        corporate, or the group's corporate set) at render time
+                        only — falling back to generic samples when the scope
+                        has none. w.d and the saved template stay untouched, and
+                        the PDF path (which always overwrites d.items from real
+                        options, never sets sampleBadge/previewBadge) can't pick
+                        them up. Lets authors see true content volume/overflow
+                        while tuning box size + the label/products font pickers. */}
                     <div
                       style={{ width: '100%', height: '100%', overflow: 'visible' }}
-                      dangerouslySetInnerHTML={{ __html: renderW(
-                        w.type,
-                        w.type === 'suggested_options' && (!Array.isArray(w.d.items) || (w.d.items as unknown[]).length === 0)
-                          ? { ...w.d, items: SAMPLE_SUGGESTED_ITEMS, sampleBadge: true }
-                          : w.d,
-                        fontScale,
-                      ) }}
+                      dangerouslySetInnerHTML={{ __html: renderW(w.type, previewRenderD(w), fontScale) }}
                     />
                   </div>
                 );
