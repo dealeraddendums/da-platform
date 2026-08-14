@@ -356,14 +356,14 @@ async function alertDedupSkip(args: {
  * Failures log to hubspot_sync_errors (objectType "contact") and never block
  * or mask the company sync.
  */
-async function syncDealerPrimaryContact(
+export async function syncDealerPrimaryContact(
   admin: ReturnType<typeof createAdminSupabaseClient>,
   dealer: DealerForHubspot,
   companyHubspotId: string,
-): Promise<void> {
+): Promise<{ contactId: string; created: boolean } | { skipped: "no-email" } | { failed: true }> {
   const email = (dealer.primary_contact_email ?? "").trim().toLowerCase();
   // No email → nothing to match or create; company sync is unaffected.
-  if (!email || !email.includes("@")) return;
+  if (!email || !email.includes("@")) return { skipped: "no-email" };
 
   const fullName = (dealer.primary_contact ?? "").trim();
   const [firstname, ...rest] = fullName.split(/\s+/);
@@ -372,7 +372,7 @@ async function syncDealerPrimaryContact(
   const payload: Record<string, unknown> = { email, firstname, lastname, dealer: dealer.dealer_id };
   let contactId: string | null = null;
   try {
-    const { hubspotId } = await upsertObject({
+    const { hubspotId, created } = await upsertObject({
       object: "contacts",
       // Always-applied props: identity only (email is the search key, so this
       // is a no-op on adopts). Person details are create-only — see above.
@@ -395,8 +395,10 @@ async function syncDealerPrimaryContact(
     }
 
     await associateContactToCompany(hubspotId, companyHubspotId);
+    return { contactId: hubspotId, created };
   } catch (err) {
     void logError("contact", dealer.id, "update", err, { ...payload, association: contactId ? `contact ${contactId} -> company ${companyHubspotId}` : null }, contactId);
+    return { failed: true };
   }
 }
 
