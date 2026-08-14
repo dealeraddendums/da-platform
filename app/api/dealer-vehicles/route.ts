@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import type { DealerVehicleInsert, VehicleAuditLogInsert } from "@/lib/db";
+import type { DealerVehicleInsert, DealerVehicleRow, VehicleAuditLogInsert } from "@/lib/db";
 
 const PER_PAGE_DEFAULT = 15;
 const PER_PAGE_MAX = 9999;
@@ -175,6 +175,81 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   };
 
   const admin = createAdminSupabaseClient();
+
+  // Same-VIN dedupe/reactivation: a scanned VIN that already has a row for
+  // this dealer must never mint a duplicate. An active twin is returned as-is
+  // (idempotent add); an inactive twin (feed marked it sold/off-lot) is
+  // reactivated in place so print history and options stay attached.
+  if (insert.vin) {
+    const { data: twins } = await admin
+      .from("dealer_vehicles")
+      .select("*")
+      .eq("dealer_id", dealerId)
+      .eq("vin", insert.vin)
+      .order("date_added", { ascending: false });
+
+    const active = (twins ?? []).find((t) => t.status === "active");
+    if (active) {
+      return NextResponse.json(active, { status: 200 });
+    }
+
+    const inactive = (twins ?? [])[0];
+    if (inactive) {
+      // Refresh only caller-supplied identity/pricing fields; print_* columns
+      // and date_added are never touched.
+      const update: Partial<Omit<DealerVehicleRow, "date_added" | "id" | "dealer_id">> = {
+        status: "active",
+        updated_at: new Date().toISOString(),
+      };
+      for (const key of [
+        "stock_number", "year", "make", "model", "trim", "body_style",
+        "exterior_color", "interior_color", "engine", "transmission",
+        "drivetrain", "fuel", "msrp", "cmpg", "hmpg", "condition",
+        "decode_source",
+      ] as const) {
+        const v = (insert as Record<string, unknown>)[key];
+        if (v !== null && v !== undefined) (update as Record<string, unknown>)[key] = v;
+      }
+      if (body.mileage !== undefined && body.mileage !== null) update.mileage = insert.mileage;
+
+      let { data: revived, error: updErr } = await admin
+        .from("dealer_vehicles")
+        .update(update)
+        .eq("id", inactive.id)
+        .select()
+        .single();
+      if (updErr?.code === "23505") {
+        // Caller's stock # collides with another row — keep the original.
+        delete update.stock_number;
+        const retry = await admin
+          .from("dealer_vehicles")
+          .update(update)
+          .eq("id", inactive.id)
+          .select()
+          .single();
+        revived = retry.data;
+        updErr = retry.error;
+      }
+      if (updErr || !revived) {
+        return NextResponse.json({ error: updErr?.message ?? "Reactivation failed" }, { status: 500 });
+      }
+
+      const { error: reviveAuditErr } = await admin.from("vehicle_audit_log").insert({
+        dealer_id: dealerId,
+        vehicle_id: revived.id,
+        stock_number: revived.stock_number,
+        action: "edit",
+        method: (body.decode_source as string | undefined) === "manual" ? "manual" : "vin_decoder",
+        changed_by: claims.sub,
+        changed_by_email: claims.email,
+        changes: { status: { old: inactive.status, new: "active" } },
+      } satisfies VehicleAuditLogInsert);
+      if (reviveAuditErr) console.error("[dealer-vehicles POST] reactivation audit insert failed:", reviveAuditErr.message, reviveAuditErr.code);
+
+      return NextResponse.json(revived, { status: 200 });
+    }
+  }
+
   const { data, error: dbErr } = await admin
     .from("dealer_vehicles")
     .insert(insert)
