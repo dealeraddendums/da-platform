@@ -56,6 +56,7 @@ interface DealerForHubspot {
   billing_zip: string | null;
   billing_to: string | null;
   hubspot_company_id: string | null;
+  hubspot_primary_contact_id: string | null; // migration 143 — primary-contact Contact
   created_at: string | null;
   downgraded_at: string | null;          // set on paying→Free, cleared on re-upgrade
   trial_ends_at: string | null;          // migration 126 — extend-trial override
@@ -332,6 +333,73 @@ async function alertDedupSkip(args: {
  * Three-stage match: (1) row already has hubspot_company_id → PATCH;
  * (2) search by platformid → PATCH + store id; (3) create.
  */
+/**
+ * Upsert the HubSpot CONTACT for a dealer's PRIMARY CONTACT and associate it
+ * to the dealer's Company (2026-08-14). Runs on every dealer sync (create,
+ * edit, trial, migrate — all paths funnel through syncDealerToHubspot), so
+ * the CRM always has a reachable person, not just the Company. Previously
+ * Contacts were minted only at /api/invite/accept.
+ *
+ * Matching is ALWAYS by email (existingHubspotId: null), never by the stored
+ * id: a primary contact is often SHARED across a group's dealers (the
+ * AutoNation pattern — one person on many rooftops), and the contact-edit
+ * path swaps PEOPLE — a PATCH-by-stored-id would rewrite the shared
+ * Contact's email/name and corrupt every other dealer's contact. Adopt
+ * semantics: name/phone/company ride as createOnlyProperties, so adopting an
+ * existing Contact (e.g. one minted by invite-accept, which owns richer
+ * profile data) never clobbers it; only a brand-new Contact is fully
+ * populated. The association is HubSpot's v4 DEFAULT contact↔company
+ * association, keyed on (contact id, company id, default type) — a PUT is
+ * idempotent, so re-syncs and shared contacts across many companies never
+ * duplicate associations, they just add the one company link if missing.
+ *
+ * Failures log to hubspot_sync_errors (objectType "contact") and never block
+ * or mask the company sync.
+ */
+async function syncDealerPrimaryContact(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  dealer: DealerForHubspot,
+  companyHubspotId: string,
+): Promise<void> {
+  const email = (dealer.primary_contact_email ?? "").trim().toLowerCase();
+  // No email → nothing to match or create; company sync is unaffected.
+  if (!email || !email.includes("@")) return;
+
+  const fullName = (dealer.primary_contact ?? "").trim();
+  const [firstname, ...rest] = fullName.split(/\s+/);
+  const lastname = rest.join(" ");
+
+  const payload: Record<string, unknown> = { email, firstname, lastname, dealer: dealer.dealer_id };
+  let contactId: string | null = null;
+  try {
+    const { hubspotId } = await upsertObject({
+      object: "contacts",
+      // Always-applied props: identity only (email is the search key, so this
+      // is a no-op on adopts). Person details are create-only — see above.
+      properties: { email },
+      createOnlyProperties: {
+        firstname: firstname || null,
+        lastname: lastname || null,
+        phone: dealer.phone,
+        company: dealer.name,
+      },
+      existingHubspotId: null, // deliberate — match by email, never stored id
+      searchProperty: "email",
+      searchValue: email,
+    });
+    contactId = hubspotId;
+
+    if (hubspotId !== dealer.hubspot_primary_contact_id) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any).from("dealers").update({ hubspot_primary_contact_id: hubspotId }).eq("id", dealer.id);
+    }
+
+    await associateContactToCompany(hubspotId, companyHubspotId);
+  } catch (err) {
+    void logError("contact", dealer.id, "update", err, { ...payload, association: contactId ? `contact ${contactId} -> company ${companyHubspotId}` : null }, contactId);
+  }
+}
+
 export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?: string | null }): Promise<void> {
   if (!hubspotConfigured()) return;
   const admin = createAdminSupabaseClient();
@@ -343,7 +411,7 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: dealer } = await (admin as any)
       .from("dealers")
-      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, feed_authorized_name, feed_authorized_email, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, created_at, downgraded_at, trial_ends_at, trial_prints_cap")
+      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, feed_authorized_name, feed_authorized_email, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, hubspot_primary_contact_id, created_at, downgraded_at, trial_ends_at, trial_prints_cap")
       .eq("id", dealerId)
       .maybeSingle() as { data: DealerForHubspot | null };
     if (!dealer) return;
@@ -406,6 +474,11 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
     if (created || hubspotId !== dealer.hubspot_company_id) {
       await admin.from("dealers").update({ hubspot_company_id: hubspotId }).eq("id", dealerId);
     }
+
+    // Primary-contact Contact upsert + company association (2026-08-14) —
+    // own try/catch + error row so a contact hiccup never masks a company
+    // sync success. Uses the company id from THIS upsert (freshest).
+    await syncDealerPrimaryContact(admin, dealer, hubspotId);
   } catch (err) {
     if (err instanceof DedupSkipError) {
       void logError("company", dealerId, "dedup-skip", err, { ...payload, unlinkedOriginalId: err.unlinkedOriginalId, matchedOn: err.matchedOn }, err.unlinkedOriginalId);
