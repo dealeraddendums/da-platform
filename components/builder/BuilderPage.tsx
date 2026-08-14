@@ -365,6 +365,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // toolbar action to decide whether to prompt before discarding work. Stored
   // in a ref so flipping it doesn't trigger re-renders.
   const isDirtyRef = useRef(false);
+  // Set the moment any user-intended canvas state lands (template load, edit
+  // link, starter pick, new doc, save). The async group standard-layout
+  // bootstrap (82db942/3f1a3dc) re-checks this right before applying so a
+  // late-landing seed can never clobber a loaded template's tracking state.
+  const seedSupersededRef = useRef(false);
 
   // Refs for drag
   const paperRef = useRef<HTMLDivElement>(null);
@@ -919,8 +924,11 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         const sTmpl = sPayload?.data as { template_json?: Record<string, unknown> } | null;
         const sTj = (sTmpl?.template_json ?? {}) as { widgets?: Record<string, Widget>; nid?: number; bgUrl?: string; fontScale?: number; paperSize?: string };
         if (!sTj.widgets || Object.keys(sTj.widgets).length === 0) return;
-        // Don't clobber work: bail if the operator already touched the canvas.
-        if (isDirtyRef.current) return;
+        // Don't clobber work: bail if the operator already touched the canvas
+        // OR any deliberate load/new/save landed while we were fetching —
+        // nulling loadedTemplateId after a template Load would flip the next
+        // Save from PATCH to POST and mint a "{name} v2" duplicate.
+        if (isDirtyRef.current || seedSupersededRef.current) return;
         const ps = sTj.paperSize ?? 'standard';
         const { w: pw, h: ph } = getPaperDims(ps, customSizesRef.current);
         let ws = sTj.widgets;
@@ -990,6 +998,16 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         if (json?.paperSize) setPaperSize(json.paperSize);
         setTemplateName((data.name as string) || 'Template');
         setLoadedTemplateId(editId);
+        // Derive scope from the load PATH, exactly like loadTemplate: loaded via
+        // the group endpoint ⇒ 'group'. This effect historically NEVER set
+        // loadedTemplateSource, so a group template opened via the Templates-tab
+        // Edit link re-saved as a POST (source null failed the PATCH guard) and
+        // the server's collision backstop minted "{name} v2" — the "New AN 2 v2"
+        // regression (2026-08-14). Sync the group-save toggle too.
+        const viaGroup = !starterMode && !!groupId;
+        setLoadedTemplateSource(viaGroup ? 'group' : 'dealer');
+        if (!starterMode) setSaveAsGroupTemplate(viaGroup);
+        seedSupersededRef.current = true;
         setLoadedTemplateLocked(data.source === 'group' && data.is_locked !== false);
         if (starterMode) {
           const dt = data.doc_type as string | undefined;
@@ -1201,6 +1219,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
 
   // ── Save template ──────────────────────────────────────────────────
   const saveTemplate = useCallback(async (asCopy: boolean = false) => {
+    seedSupersededRef.current = true;
     // Platform-starter mode: save to /api/starter-templates (name + doc_type +
     // paper + layout). No dealer/group context, no vehicle-type defaults.
     if (starterMode) {
@@ -1473,6 +1492,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   }, [dealerId, vehicle?.dealer_id, groupId, starterMode]);
 
   const loadTemplate = useCallback(async (id: string) => {
+    seedSupersededRef.current = true;
     try {
       // Match the read path used by openTemplates — starter templates in
       // starter mode, group_templates when scoped to a group, dealer otherwise.
@@ -1541,6 +1561,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // callers handle those). Shared by the "+ New" picker's Blank option and the
   // direct fallthrough paths.
   const applyBlankCanvas = useCallback(() => {
+    seedSupersededRef.current = true;
     const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','bgimage'];
     let nextNid = 1;
     let ws: Record<string, Widget> = {};
@@ -1585,6 +1606,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // "Blank" choice in the group-mode "+ New" picker (since 2026-08-12 the
   // group DEFAULT is the standard layout; empty is opt-in).
   const applyEmptyCanvas = useCallback(() => {
+    seedSupersededRef.current = true;
     const ws: Record<string, Widget> = {};
     widgetsRef.current = ws;
     setWidgets(ws);
@@ -1609,6 +1631,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // later Save creates the dealer's OWN template (POST /api/templates). The
   // starter row is never mutated. Mirrors loadTemplate's template_json handling.
   const loadStarterAsNew = useCallback(async (starterId: string) => {
+    seedSupersededRef.current = true;
     try {
       const r = await fetch(`/api/starter-templates/${starterId}`);
       if (!r.ok) { showToast('Failed to load starter layout'); return; }
