@@ -288,7 +288,10 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
     setDecoding(false);
 
     if (!res.ok) {
-      setDecodeError("VIN not found — please enter vehicle details manually");
+      // Surface the server's actual error — a blanket "VIN not found" here
+      // masked a 403 for weeks (admin-role gate, removed 2026-08-14) and sent
+      // the diagnosis down the wrong path.
+      setDecodeError(json.error ?? "VIN lookup failed — please enter vehicle details manually");
       setDecodeAttempted(true);
       return;
     }
@@ -310,7 +313,9 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
       fuel: normalizeFuel(json.fuel_type) ?? f.fuel,
       cmpg: json.cmpg ?? f.cmpg,
       hmpg: json.hmpg ?? f.hmpg,
-      condition: json.year === currentYear ? "New" : "Used",
+      // >= — next-model-year vehicles (e.g. a 2027 decoded in 2026) are New;
+      // strict equality was marking them Used.
+      condition: json.year != null && json.year >= currentYear ? "New" : "Used",
     }));
 
     // Auto-populate AI content if enabled

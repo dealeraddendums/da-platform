@@ -4,20 +4,18 @@ import { decodeVin } from "@/lib/vin-decoder";
 
 /**
  * GET /api/vehicles/decode?vin=
- * Decodes a VIN using the full fallback chain.
- * Restricted to dealer_admin and dealer_user — admin roles are excluded.
+ * Decodes a VIN using the full fallback chain. Any authenticated role
+ * (2026-08-14): the original admin-role 403 broke the white-glove flow —
+ * a GHOSTED super_admin keeps super_admin claims, so Allan operating a
+ * dealer's Add Vehicle modal got 403 on every VIN, which the modal rendered
+ * as "VIN not found" (the 2027 S-Class incident — the decoder itself,
+ * including the live-vPIC fallback, was working the whole time). Decode is
+ * read-only public NHTSA data; there is nothing to protect from admins.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
-
-  // Per spec: super_admin and group_admin cannot use the dealer-facing decoder
-  if (claims.role === "super_admin" || claims.role === "group_admin") {
-    return NextResponse.json(
-      { error: "VIN decode is not available for admin roles" },
-      { status: 403 }
-    );
-  }
+  void claims;
 
   const vin = (req.nextUrl.searchParams.get("vin") ?? "").trim().toUpperCase();
   if (!vin) {
