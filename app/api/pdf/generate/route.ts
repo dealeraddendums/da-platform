@@ -98,16 +98,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // dealer.dealer_id is the text ID used by group options / disclaimers
     const textDealerId = dealer?.dealer_id ?? "";
 
-    // ── Dealer QR URL template ────────────────────────────────────────────────
+    // ── Dealer QR URL template + price-display preference ────────────────────
+    // Read from the PRINTING dealer's settings (dv.dealer_id) so group
+    // templates honor each member dealer's own choices, like logo injection.
     let dealerQrTemplate: string | null = null;
+    let alwaysShowCents = false;
     try {
       const { data: dealerQrSettings } = await admin
         .from("dealer_settings")
-        .select("qr_url_template")
+        .select("qr_url_template, always_show_cents")
         .eq("dealer_id", dv.dealer_id)
-        .maybeSingle<{ qr_url_template: string | null }>();
+        .maybeSingle<{ qr_url_template: string | null; always_show_cents: boolean | null }>();
       dealerQrTemplate = dealerQrSettings?.qr_url_template ?? null;
-    } catch { /* column may not exist until migration 034 is applied */ }
+      alwaysShowCents = dealerQrSettings?.always_show_cents === true;
+    } catch { /* columns may not exist until migrations 034/144 are applied */ }
 
     // ── Options from Supabase ─────────────────────────────────────────────────
     // Check per-vehicle UUID first; fall back to legacy '0' sentinel
@@ -795,6 +799,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       aiFeatures: (aiContent?.features as [string, string][] | undefined) ?? null,
       dbDescription: vehicleData.DESCRIPTION ?? null,
       dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
+      alwaysShowCents,
     });
 
     const s3Key = buildPdfKey({

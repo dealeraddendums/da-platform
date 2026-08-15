@@ -70,6 +70,10 @@ export interface BuildPdfHtmlInput {
    *  Render-only — never persisted to the vehicle. Absent (bulk/mobile/cancel)
    *  ⇒ the widget renders a plain retail line with no strikethrough. */
   retailWholesalePrice?: number | null;
+  /** Printing dealer's dealer_settings.always_show_cents (migration 144):
+   *  true forces two decimals on every numeric money label; false/absent
+   *  keeps the priceSetUsesDecimals whole-set rule (current behavior). */
+  alwaysShowCents?: boolean;
 }
 
 export async function buildPdfHtml({
@@ -90,6 +94,7 @@ export async function buildPdfHtml({
   dbDescription,
   dbOptionsText,
   retailWholesalePrice,
+  alwaysShowCents,
 }: BuildPdfHtmlInput): Promise<string> {
   // Use the SAME paper geometry as the Builder canvas (components/builder/
   // constants.ts PAPERS) so the PDF .paper width/height exactly matches the
@@ -111,6 +116,8 @@ export async function buildPdfHtml({
   // suffix everywhere. As soon as one price has cents, render every price
   // with two decimals so the columns line up. The set must include each
   // product row, the subtotal, MSRP, asking price, and suggested price.
+  // The printing dealer's "Always show cents" toggle (migration 144) forces
+  // two decimals regardless of the set — display-only, totals math unchanged.
   const msrpParsed = (() => {
     const v = vehicle?.MSRP != null ? parseFloat(vehicle.MSRP) : null;
     return v != null && Number.isFinite(v) ? v : null;
@@ -120,7 +127,7 @@ export async function buildPdfHtml({
   const allOptionsTotal = allOptions.reduce((s, o) => s + parseOptionPriceValue(o.option_price), 0);
   const askingTotal = (msrpParsed ?? 0) + requiredTotal;
   const suggestedTotal = (msrpParsed ?? 0) + allOptionsTotal;
-  const decimals = priceSetUsesDecimals([
+  const decimals = alwaysShowCents === true || priceSetUsesDecimals([
     msrpParsed,
     requiredTotal,
     askingTotal,
@@ -171,6 +178,10 @@ export async function buildPdfHtml({
       d.live = true;
       d.msrpNum = msrpParsed;
       if (retailWholesalePrice != null && Number.isFinite(retailWholesalePrice)) d.askPrice = retailWholesalePrice;
+      // This widget formats its numbers inside the renderer (whole-dollar
+      // rounding), so the cents toggle rides in via d — print-time only, the
+      // canvas never sets it (authoring render unchanged).
+      d.alwaysShowCents = alwaysShowCents === true;
     }
     // On a real vehicle render the COMPUTED value always wins — 0 is a
     // legitimate result (e.g. the only option is a |XX| doc-fee that's excluded

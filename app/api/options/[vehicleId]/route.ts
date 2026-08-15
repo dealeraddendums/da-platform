@@ -315,10 +315,25 @@ export async function GET(
     const admin = createAdminSupabaseClient();
     const effectiveDealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
 
+    // Dealer price-display preference (migration 144) — piggybacked here so the
+    // AddendumEditor preview can match print without needing /api/settings
+    // (dealer_user is Forbidden there). Display-only.
+    let alwaysShowCents = false;
+    if (effectiveDealerId) {
+      try {
+        const { data: ds } = await admin
+          .from("dealer_settings")
+          .select("always_show_cents")
+          .eq("dealer_id", effectiveDealerId)
+          .maybeSingle<{ always_show_cents: boolean | null }>();
+        alwaysShowCents = ds?.always_show_cents === true;
+      } catch { /* column absent until migration 144 */ }
+    }
+
     // ── Manual vehicle path (UUID or legacy '0') ─────────────────────────────
     if (isManual(vid)) {
       if (!effectiveDealerId) {
-        return NextResponse.json({ data: [], groupOptions: [], source: "empty" });
+        return NextResponse.json({ data: [], groupOptions: [], source: "empty", alwaysShowCents });
       }
 
       const vehicleForRules = await loadVehicleForRules(admin, vid);
@@ -345,7 +360,7 @@ export async function GET(
       if (saved && saved.length > 0) {
         const lib = await loadDealerLibrary(admin, effectiveDealerId);
         const hydrated = hydrateSavedAgainstLibrary(lib, saved, vehicleForRules);
-        return NextResponse.json({ data: hydrated, groupOptions, source: "saved", legacyAddendum: legacyMinus(hydrated.map((h) => h.option_name)) });
+        return NextResponse.json({ data: hydrated, groupOptions, source: "saved", alwaysShowCents, legacyAddendum: legacyMinus(hydrated.map((h) => h.option_name)) });
       }
 
       // If UUID and nothing found, also check legacy '0' sentinel as fallback
@@ -360,7 +375,7 @@ export async function GET(
         if (legacySaved && legacySaved.length > 0) {
           const lib = await loadDealerLibrary(admin, effectiveDealerId);
           const hydrated = hydrateSavedAgainstLibrary(lib, legacySaved, vehicleForRules);
-          return NextResponse.json({ data: hydrated, groupOptions, source: "saved", legacyAddendum: legacyMinus(hydrated.map((h) => h.option_name)) });
+          return NextResponse.json({ data: hydrated, groupOptions, source: "saved", alwaysShowCents, legacyAddendum: legacyMinus(hydrated.map((h) => h.option_name)) });
         }
       }
 
@@ -377,13 +392,13 @@ export async function GET(
 
       const matched = autoMatchedLibraryRows(library ?? [], vehicleForRules);
 
-      return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false, legacyAddendum: legacyMinus(matched.map((m) => m.option_name)) });
+      return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false, alwaysShowCents, legacyAddendum: legacyMinus(matched.map((m) => m.option_name)) });
     }
 
     // ── Non-UUID, non-"0" vehicleId: not supported ──────────────────────────────
     // Fall back to dealer context from JWT — return empty options
     if (!effectiveDealerId) {
-      return NextResponse.json({ data: [], groupOptions: [], source: "empty" });
+      return NextResponse.json({ data: [], groupOptions: [], source: "empty", alwaysShowCents });
     }
 
     const vehicleForRulesFallback = await loadVehicleForRules(admin, vid);
@@ -400,7 +415,7 @@ export async function GET(
     if (saved && saved.length > 0) {
       const lib = await loadDealerLibrary(admin, effectiveDealerId);
       const hydrated = hydrateSavedAgainstLibrary(lib, saved, vehicleForRulesFallback);
-      return NextResponse.json({ data: hydrated, groupOptions, source: "saved" });
+      return NextResponse.json({ data: hydrated, groupOptions, source: "saved", alwaysShowCents });
     }
 
     // No saved options — seed from the dealer's addendum_library (shared helper).
@@ -414,7 +429,7 @@ export async function GET(
 
     const matched = autoMatchedLibraryRows(library ?? [], vehicleForRulesFallback);
 
-    return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false });
+    return NextResponse.json({ data: matched, groupOptions, source: "matched", saved: false, alwaysShowCents });
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";

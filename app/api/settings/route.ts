@@ -23,6 +23,7 @@ const DEFAULTS = {
   default_buyersguide_used: null,
   default_buyersguide_cpo: null,
   qr_url_template: null,
+  always_show_cents: false,
 };
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -87,6 +88,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     ...("default_buyersguide_cpo" in body && { default_buyersguide_cpo: body.default_buyersguide_cpo ?? null }),
     ...("buyers_guide_defaults" in body && { buyers_guide_defaults: body.buyers_guide_defaults ?? null }),
     ...("qr_url_template" in body && { qr_url_template: body.qr_url_template ?? null }),
+    ...(body.always_show_cents !== undefined && { always_show_cents: body.always_show_cents === true }),
   };
 
   const admin = createAdminSupabaseClient();

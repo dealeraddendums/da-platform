@@ -275,7 +275,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               "default_addendum_new", "default_addendum_used", "default_addendum_cpo",
               "default_infosheet_new", "default_infosheet_used", "default_infosheet_cpo",
               "default_buyersguide_new", "default_buyersguide_used", "default_buyersguide_cpo",
-              "qr_url_template", "ai_content_default",
+              "qr_url_template", "ai_content_default", "always_show_cents",
             ].join(", "))
             .eq("dealer_id", dv.dealer_id)
             .maybeSingle<DealerSettingsRow>();
@@ -907,6 +907,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           aiFeatures: (aiContent?.features as [string, string][] | undefined) ?? null,
           dbDescription: vehicleData.DESCRIPTION ?? null,
           dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
+          alwaysShowCents: (dealerSettings as Record<string, unknown> | null)?.always_show_cents === true,
         });
         const s3Key = buildPdfKey({
           internalId: dealer?.internal_id ?? null,

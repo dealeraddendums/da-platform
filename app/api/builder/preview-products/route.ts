@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { AddendumLibraryRow, GroupOptionRow } from "@/lib/db";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { getGroupOptionsForDealer } from "@/lib/options-engine";
-import { formatOptionPrice } from "@/lib/option-price";
+import { formatOptionPrice, parseOptionPriceValue, priceSetUsesDecimals } from "@/lib/option-price";
 
 // Builder-canvas product preview (extends the 66d3334 sample injection with
 // REAL data). Returns the scope's actual products pre-mapped to the exact
@@ -71,6 +71,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
 
     const rows = (data ?? []) as GroupOptionRow[];
+    // Group scope has no dealer_settings — use the whole-set decimals rule
+    // (pdf-html parity: cents everywhere iff any price has cents).
+    const decimals = priceSetUsesDecimals(rows.map(r => parseOptionPriceValue(r.option_price)));
     const split = splitAndMap(
       rows,
       // migration 053 `required` column; pre-backfill rows fall back to the
@@ -79,7 +82,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       r => ({
         name: r.option_name,
         desc: r.description ?? "",
-        price: formatOptionPrice(r.option_price),
+        price: formatOptionPrice(r.option_price, decimals),
         separator_above: r.separator_above === true,
         separator_below: r.separator_below === true,
         spaces: typeof r.spaces === "number" ? r.spaces : 0,
@@ -93,7 +96,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!authz.ok) return authz.response;
   const dealerId = authz.dealerId;
 
-  const [{ data: libData, error: libErr }, corp] = await Promise.all([
+  const [{ data: libData, error: libErr }, corp, dealerSettings] = await Promise.all([
     admin
       .from("addendum_library")
       .select("*")
@@ -104,6 +107,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Vehicle-less call = the dealer's assignment-scoped corporate superset
     // (rules filters only apply with a vehicle — exactly what we want here).
     getGroupOptionsForDealer(dealerId).catch(() => []),
+    admin
+      .from("dealer_settings")
+      .select("always_show_cents")
+      .eq("dealer_id", dealerId)
+      .maybeSingle<{ always_show_cents: boolean | null }>()
+      .then(r => r.data, () => null),
   ]);
   if (libErr) return NextResponse.json({ error: libErr.message }, { status: 500 });
 
@@ -139,13 +148,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     })),
   ];
 
+  // Decimals parity with print: the dealer's "Always show cents" toggle
+  // (migration 144) forces cents; otherwise the whole-set rule decides.
+  const decimals = dealerSettings?.always_show_cents === true
+    || priceSetUsesDecimals(merged.map(r => parseOptionPriceValue(r.priceRaw)));
   const split = splitAndMap(
     merged,
     r => r.required,
     r => ({
       name: r.name,
       desc: r.desc,
-      price: formatOptionPrice(r.priceRaw),
+      price: formatOptionPrice(r.priceRaw, decimals),
       separator_above: r.separator_above,
       separator_below: r.separator_below,
       spaces: r.spaces,

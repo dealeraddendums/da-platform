@@ -69,6 +69,9 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
   const [groupOptions, setGroupOptions] = useState<GroupOption[]>([]);
   // Read-only legacy 4.0 addendum_data items (unmigrated dealers) — display only.
   const [legacyAddendum, setLegacyAddendum] = useState<Array<{ item_name: string; item_price: string }>>([]);
+  // Dealer's "Always show cents" (migration 144), piggybacked on the options
+  // GET so the editor's price preview matches print for every role.
+  const [alwaysShowCents, setAlwaysShowCents] = useState(false);
   const [source, setSource] = useState<string>("loading");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -122,11 +125,12 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
     setError(null);
     try {
       const res = await fetch(`/api/options/${vehicleId}`);
-      const json = await res.json() as { data: (VehicleOptionRow | MatchedOption)[]; groupOptions?: GroupOption[]; source: string; legacyAddendum?: Array<{ item_name: string; item_price: string }> };
+      const json = await res.json() as { data: (VehicleOptionRow | MatchedOption)[]; groupOptions?: GroupOption[]; source: string; legacyAddendum?: Array<{ item_name: string; item_price: string }>; alwaysShowCents?: boolean };
       if (!res.ok) throw new Error((json as { error?: string }).error ?? "Failed to load");
       setOptions(json.data ?? []);
       setGroupOptions(json.groupOptions ?? []);
       setLegacyAddendum(json.legacyAddendum ?? []);
+      setAlwaysShowCents(json.alwaysShowCents === true);
       setSource(json.source);
       setDirty(json.source === "matched"); // matched defaults need a save
     } catch (e) {
@@ -369,7 +373,8 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
   // Shared decimals policy — match pdf-html.ts so the UI stays WYSIWYG.
   // If any price (product, subtotal, MSRP, asking, suggested) has cents,
   // render every label with two decimals; otherwise drop them everywhere.
-  const decimals = priceSetUsesDecimals([
+  // The dealer's "Always show cents" toggle forces two decimals (mig 144).
+  const decimals = alwaysShowCents || priceSetUsesDecimals([
     msrp,
     reqTotal,
     sugTotal,

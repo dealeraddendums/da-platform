@@ -168,7 +168,12 @@ export function renderW(type: string, d: D, fontScale: number): string {
         : 9000; // authoring sample
     }
     if (second != null && second < 0) second = 0;
-    const fmt = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
+    // Values stay whole-dollar rounded; the dealer's "Always show cents"
+    // toggle (d.alwaysShowCents, set by pdf-html at print time only) just
+    // appends .00 so this widget matches the rest of the sticker.
+    const fmt = (n: number) => '$' + Math.round(n).toLocaleString('en-US', d.alwaysShowCents === true
+      ? { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+      : undefined);
     const aboveLine = d.dividerAbove ? '<div style="height:1px;background:#1a1916;margin-bottom:3px"></div>' : '';
     const belowLine = d.divider !== false ? '<div style="height:1px;background:#1a1916;margin-top:3px"></div>' : '';
     const row = (labelTxt: unknown, valueHtml: string, mt = 0) =>

@@ -556,6 +556,10 @@ export type DealerSettingsRow = {
   default_buyersguide_cpo: string | null;
   buyers_guide_defaults: BuyersGuideDefaults | null;
   qr_url_template: string | null;
+  /** Print Settings "Always show cents" (migration 144): true → every numeric
+   *  money label on the addendum renders two decimals; false → whole-dollar
+   *  addendums drop ".00" (the priceSetUsesDecimals rule). Display-only. */
+  always_show_cents: boolean;
   updated_at: string;
 };
 
@@ -580,6 +584,7 @@ type DealerSettingsInsert = {
   default_buyersguide_cpo?: string | null;
   buyers_guide_defaults?: BuyersGuideDefaults | null;
   qr_url_template?: string | null;
+  always_show_cents?: boolean;
 };
 
 export type DealerSettingsUpdate = {
@@ -602,6 +607,7 @@ export type DealerSettingsUpdate = {
   default_buyersguide_cpo?: string | null;
   buyers_guide_defaults?: BuyersGuideDefaults | null;
   qr_url_template?: string | null;
+  always_show_cents?: boolean;
   updated_at?: string;
 };
 
