@@ -57,9 +57,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         <ul style="color:#55595c;font-size:14px;line-height:1.6;">
           <li>Paying accounts (current): <strong>${report.totals.payingAccounts}</strong></li>
           <li>Trial accounts, independent (current): <strong>${report.totals.trialAccounts}</strong></li>
-          <li>Trials started: <strong>${report.trials.started}</strong></li>
-          <li>Converted: <strong>${report.trials.convertedIndependent}</strong> (${report.trials.conversionRate}%)</li>
-          <li>Lost trials: <strong>${report.trials.lost}</strong></li>
+          <li>Trials started: <strong>${report.trials.started}</strong> — cohort: ${report.trials.cohort.converted} converted (${report.trials.conversionRate}%), ${report.trials.cohort.lost} lost, ${report.trials.cohort.stillActive} still in trial</li>
+          <li>Period activity: <strong>${report.trials.activity.trialConversions}</strong> trial conversions · ${report.trials.activity.migrations} migrations went live · ${report.trials.activity.lost} trials lost</li>
           <li>Group dealers added: <strong>${report.groupDealersAdded}</strong></li>
           <li>Cancellations: <strong>${report.cancellations.total}</strong> (${report.cancellations.independent} independent · ${report.cancellations.group} group)</li>
           <li>Current MRR run-rate: <strong>${report.revenue.available ? `$${report.revenue.currentMrr.toLocaleString("en-US", { minimumFractionDigits: 2 })}` : "—"}</strong></li>

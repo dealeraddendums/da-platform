@@ -341,8 +341,12 @@ export default async function DashboardPage() {
       // .limit() is clamped to 1,000 by PostgREST — page with .range() or the
       // map (and any count derived from this read) silently truncates.
       for (let from = 0; ; from += 1000) {
+        // Test accounts excluded so the stat cards agree with the BI page
+        // (which has always excluded is_test) — they diverged by exactly the
+        // test dealers (e.g. 1,575 vs 1,570 paying, 2026-08-15 audit).
         const { data } = await admin.from("dealers")
           .select("id, dealer_id, name, account_type, active, lat, lng, address, city, state, zip")
+          .not("is_test", "is", true)
           .order("id")
           .range(from, from + 999);
         rows.push(...((data ?? []) as Record<string, unknown>[]));

@@ -28,18 +28,34 @@ export interface BiReport {
     /** Independent dealers created in-period that started as a trial — counts
      *  those that have since converted/downgraded too (matches the doc). */
     started: number;
-    /** Conversion EVENTS in-period (converted_at in window). */
-    converted: number;
-    convertedIndependent: number;
-    /** convertedIndependent / started, %, 1dp. 0 when started === 0. */
+    /** COHORT conversion rate: cohort.converted / started, %, 1dp — ≤100 by
+     *  construction. 0 when started === 0. Provisional while cohort members
+     *  are still trialing. (Never activity-over-cohort — the old 180% bug.) */
     conversionRate: number;
-    /** Lost-trial EVENTS in-period (day-cap expiry, never converted/cancelled). */
-    lost: number;
-    lostIndependent: number;
-    lostGroup: number;
     /** Cohort breakdown of the trials STARTED in-period — reconciles exactly:
-     *  started === converted + lost + stillActive. */
+     *  started === converted + lost + stillActive. Lost honors trial_ends_at
+     *  extensions and counts downgraded/self-closed trials. */
     cohort: { started: number; converted: number; lost: number; stillActive: number };
+    /** PERIOD ACTIVITY (raw counts, any cohort — never a rate):
+     *  trialConversions   = independent NATIVE trials that went paid in-period
+     *                       (converted_at in window; is_native excludes 4.0→5.0
+     *                       migration cutovers, which also stamp converted_at).
+     *  trialConversionsGroup = ss_-born dealers now group-attached that
+     *                       converted (anomaly watch; expected 0 — group
+     *                       accounts do not start as trials).
+     *  migrations         = the remaining converted_at events: 4.0→5.0
+     *                       migration go-lives, NOT trial wins.
+     *  lost*              = trial windows that closed in-period without
+     *                       converting (30-day cap, honoring trial_ends_at
+     *                       extensions; expiry clamped to now). */
+    activity: {
+      trialConversions: number;
+      trialConversionsGroup: number;
+      migrations: number;
+      lost: number;
+      lostIndependent: number;
+      lostGroup: number;
+    };
   };
   acquisition: { source: string; count: number }[];
   groupDealersAdded: number;
@@ -65,17 +81,20 @@ export interface BiReport {
 
 type DealerLite = {
   id: string;
+  dealer_id: string | null;
   group_id: string | null;
   account_type: string | null;
+  is_native: boolean | null;
   created_at: string | null;
   converted_at: string | null;
   downgraded_at: string | null;
   inactivated_at: string | null;
+  trial_ends_at: string | null;
   acquisition: Record<string, unknown> | null;
 };
 
 const DEALER_COLS =
-  "id, group_id, account_type, created_at, converted_at, downgraded_at, inactivated_at, acquisition";
+  "id, dealer_id, group_id, account_type, is_native, created_at, converted_at, downgraded_at, inactivated_at, trial_ends_at, acquisition";
 
 /** Paginate a dealers query past PostgREST's 1000-row cap. Every dealer query
  *  excludes test accounts — `is_test IS NOT TRUE` (matches false OR null) — so
@@ -99,19 +118,55 @@ async function fetchDealers(
   return out;
 }
 
-/** Bucket a dealer's acquisition jsonb into a human label (doc metric 4). */
+/** Bucket a dealer's acquisition jsonb into a human label (doc metric 4).
+ *  Normalizes obvious duplicates so the table reads as one row per real
+ *  channel: gclid ⇒ "Google Ads" (paid); utm_source/referrer variants of the
+ *  same engine collapse ("google" + "www.google.com" ⇒ "Google"); a referrer
+ *  from our own site is not an acquisition source ⇒ "Direct / Unknown". */
+function normalizeSourceName(raw: string): string {
+  const s = raw.trim().toLowerCase().replace(/^www\./, "");
+  if (!s) return "Direct / Unknown";
+  if (s.includes("dealeraddendums")) return "Direct / Unknown"; // our own site
+  if (s === "google" || s.includes("google.")) return "Google";
+  if (s === "bing" || s.includes("bing.")) return "Bing";
+  if (s === "duckduckgo" || s.includes("duckduckgo.")) return "DuckDuckGo";
+  if (s === "yahoo" || s.includes("yahoo.")) return "Yahoo";
+  if (s === "fb" || s === "facebook" || s.includes("facebook.")) return "Facebook";
+  if (s.includes("linkedin")) return "LinkedIn";
+  // Title-case single-word utm sources; hosts pass through as-is.
+  return s.includes(".") ? s : s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function acquisitionBucket(acq: Record<string, unknown> | null): string {
   if (!acq || typeof acq !== "object") return "Direct / Unknown";
   const gclid = acq.gclid;
   if (typeof gclid === "string" && gclid.trim()) return "Google Ads";
   const utmSource = acq.utm_source;
-  if (typeof utmSource === "string" && utmSource.trim()) return utmSource.trim().toLowerCase();
+  if (typeof utmSource === "string" && utmSource.trim()) return normalizeSourceName(utmSource);
   const referrer = acq.referrer;
   if (typeof referrer === "string" && referrer.trim()) {
-    try { return new URL(referrer).host || "Direct / Unknown"; }
-    catch { return referrer.trim(); }
+    try { return normalizeSourceName(new URL(referrer).host); }
+    catch { return normalizeSourceName(referrer); }
   }
   return "Direct / Unknown";
+}
+
+/** Trial-window expiry: operator extension (trial_ends_at) wins, else
+ *  created_at + 30 days. The datable "lost" axis; the 30-print cap has no
+ *  stored event date and is intentionally not used for dating losses. */
+function trialExpiryMs(d: DealerLite, nowMs: number): number {
+  if (d.trial_ends_at) return new Date(d.trial_ends_at).getTime();
+  return (d.created_at ? new Date(d.created_at).getTime() : nowMs) + TRIAL_DAYS_CAP * DAY_MS;
+}
+
+/** Started-as-a-trial predicate for dealers CREATED in a window. A live trial
+ *  account_type is the direct signal; for dealers that have since moved on,
+ *  converted_at/downgraded_at count ONLY on is_native rows — non-native
+ *  (Aurora-origin) dealers get converted_at stamped by 4.0→5.0 MIGRATION
+ *  flows and were never 5.0 trials. */
+function startedAsTrial(d: DealerLite): boolean {
+  if (isTrialAccountType(d.account_type)) return true;
+  return d.is_native === true && (d.converted_at != null || d.downgraded_at != null);
 }
 
 export async function buildBiReport(from: string, to: string): Promise<BiReport> {
@@ -133,18 +188,18 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (q as any).is("group_id", null).gte("created_at", startIso).lt("created_at", endExclusiveIso),
   );
-  const startedRows = independentCreated.filter(
-    (d) => isTrialAccountType(d.account_type) || d.converted_at != null || d.downgraded_at != null,
-  );
+  const startedRows = independentCreated.filter(startedAsTrial);
   const started = startedRows.length;
 
   // Cohort breakdown of the started set (reconciles exactly). Day-cap is the
-  // datable axis; print-cap is approximate and intentionally not used here.
+  // datable axis (trial_ends_at extensions honored); print-cap is approximate
+  // and intentionally not used here. A downgraded/self-closed trial is LOST,
+  // not still-active, regardless of its expiry date.
   let cohortConverted = 0, cohortLost = 0, cohortActive = 0;
   for (const d of startedRows) {
     if (d.converted_at) { cohortConverted++; continue; }
-    const createdMs = d.created_at ? new Date(d.created_at).getTime() : nowMs;
-    if (nowMs - createdMs > TRIAL_DAYS_CAP * DAY_MS) cohortLost++; else cohortActive++;
+    if (d.downgraded_at) { cohortLost++; continue; }
+    if (trialExpiryMs(d, nowMs) <= nowMs) cohortLost++; else cohortActive++;
   }
 
   // Acquisition breakdown over the started cohort.
@@ -157,31 +212,42 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
     .map(([source, count]) => ({ source, count }))
     .sort((a, b) => b.count - a.count);
 
-  // ── A2. Conversions (event: converted_at in-period) ──────────────────────
+  // ── A2. Conversion EVENTS in-period (converted_at in window), classified ──
+  // converted_at is stamped by TWO flows: the trial→paid upgrade AND the
+  // 4.0→5.0 migration go-live (lib/migrate-dealer.ts). Counting them together
+  // was the page's central lie ("Trials Won 20" when 19 were migrations). The
+  // discriminator: only is_native dealers can be 5.0 trials — non-native
+  // (Aurora-origin) rows with converted_at are migrations by construction.
   const convertedRows = await fetchDealers(admin, (q) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (q as any).gte("converted_at", startIso).lt("converted_at", endExclusiveIso),
   );
-  const converted = convertedRows.length;
-  const convertedIndependent = convertedRows.filter((d) => d.group_id == null).length;
-  const conversionRate = started > 0 ? Math.round((convertedIndependent / started) * 1000) / 10 : 0;
+  const trialConversions = convertedRows.filter((d) => d.group_id == null && d.is_native === true).length;
+  const trialConversionsGroup = convertedRows.filter(
+    (d) => d.group_id != null && (d.dealer_id ?? "").startsWith("ss_"),
+  ).length;
+  const migrations = convertedRows.length - trialConversions - trialConversionsGroup;
 
-  // ── A3. Lost trials (event: 30-day cap closed in-period, never converted) ─
-  // account_type trial (the only safe SQL account_type test) AND converted_at
-  // NULL AND downgraded_at NULL AND (created_at + cap) in window. created_at
-  // window is therefore [start - cap, end - cap). Split independent vs group.
-  const capMs = TRIAL_DAYS_CAP * DAY_MS;
-  const lostWindowStartIso = new Date(startMs - capMs).toISOString();
-  const lostWindowEndIso = new Date(endExclusiveMs - capMs).toISOString();
-  const lostRows = (
-    await fetchDealers(admin, (q) =>
-      (q as any) // eslint-disable-line @typescript-eslint/no-explicit-any
-        .is("converted_at", null)
-        .is("downgraded_at", null)
-        .gte("created_at", lostWindowStartIso)
-        .lt("created_at", lostWindowEndIso),
-    )
-  ).filter((d) => isTrialAccountType(d.account_type));
+  // The conversion RATE is cohort-based (of the trials STARTED in-period, how
+  // many converted) — ≤100% by construction. NEVER activity ÷ cohort.
+  const conversionRate = started > 0 ? Math.round((cohortConverted / started) * 1000) / 10 : 0;
+
+  // ── A3. Lost-trial EVENTS in-period: the trial window CLOSED in-window ────
+  // (expiry = trial_ends_at override, else created_at + 30d) without ever
+  // converting or self-closing, and only if the expiry has actually passed
+  // (clamped at now). Fetch candidates by the never-converted/never-closed
+  // predicate and date the expiry in memory — trial_ends_at extensions can't
+  // be windowed on created_at in SQL.
+  const lostCandidates = await fetchDealers(admin, (q) =>
+    (q as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+      .is("converted_at", null)
+      .is("downgraded_at", null),
+  );
+  const lostRows = lostCandidates.filter((d) => {
+    if (!isTrialAccountType(d.account_type)) return false;
+    const expiry = trialExpiryMs(d, nowMs);
+    return expiry >= startMs && expiry < endExclusiveMs && expiry <= nowMs;
+  });
   const lost = lostRows.length;
   const lostIndependent = lostRows.filter((d) => d.group_id == null).length;
   const lostGroup = lost - lostIndependent;
@@ -268,12 +334,20 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
     .map((r) => r.billing_customer_id)
     .filter((x): x is string => Boolean(x));
 
+  // The revenue trend is a FIXED last-12-months window regardless of the date
+  // picker — a single-month range rendered a one-point "chart". MRR rides on
+  // the same call (it's point-in-time, not range-dependent).
   let revenue: BiReport["revenue"];
   if (!billingConfigured()) {
     revenue = { available: false, series: [], currentMrr: 0, error: "Billing API not configured" };
   } else {
     try {
-      const gb = await getGrossBillable(from, to, excludeCustomerIds);
+      const nowD = new Date();
+      const fmt = (d: Date) =>
+        `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+      const seriesFrom = fmt(new Date(Date.UTC(nowD.getUTCFullYear(), nowD.getUTCMonth() - 11, 1)));
+      const seriesTo = fmt(nowD);
+      const gb = await getGrossBillable(seriesFrom, seriesTo, excludeCustomerIds);
       revenue = { available: true, series: gb.series, currentMrr: gb.currentMrr };
     } catch (err) {
       revenue = { available: false, series: [], currentMrr: 0, error: err instanceof Error ? err.message : String(err) };
@@ -286,13 +360,16 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
     totals: { payingAccounts, trialAccounts },
     trials: {
       started,
-      converted,
-      convertedIndependent,
       conversionRate,
-      lost,
-      lostIndependent,
-      lostGroup,
       cohort: { started, converted: cohortConverted, lost: cohortLost, stillActive: cohortActive },
+      activity: {
+        trialConversions,
+        trialConversionsGroup,
+        migrations,
+        lost,
+        lostIndependent,
+        lostGroup,
+      },
     },
     acquisition,
     groupDealersAdded,
@@ -318,8 +395,14 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
 export interface PeriodSummaryRow {
   label: string;
   newTrials: number;
+  /** Independent NATIVE trial → paid conversions (same rule as the funnel's
+   *  activity.trialConversions — migrations are NOT trials won). */
   trialsWon: number;
   trialsLost: number;
+  /** 4.0→5.0 migration go-lives (converted_at events that are not trial
+   *  conversions). Informational — already-paying customers changing
+   *  platforms, so deliberately NOT part of newPaying/growth. */
+  migrationsLive: number;
   groupAdded: number;
   manualAdded: number;
   downgradedFree: number;
@@ -370,7 +453,7 @@ export async function buildPeriodSummary(): Promise<PeriodSummary> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (admin
       .from("dealers")
-      .select("id, dealer_id, group_id, account_type, created_at, converted_at, downgraded_at, active") as any)
+      .select("id, dealer_id, group_id, account_type, is_native, created_at, converted_at, downgraded_at, trial_ends_at, active") as any)
       .not("is_test", "is", true)
       .range(from, from + PAGE - 1);
     if (error) throw error;
@@ -382,7 +465,6 @@ export async function buildPeriodSummary(): Promise<PeriodSummary> {
   // Denominator: current active paying book (same rule as totals.payingAccounts).
   const totalPaying = rows.filter((d) => d.active === true && isPaidAccountType(d.account_type)).length;
 
-  const capMs = TRIAL_DAYS_CAP * DAY_MS;
   const inWin = (iso: string | null, fromMs: number, toMs: number) => {
     if (!iso) return false;
     const t = new Date(iso).getTime();
@@ -394,26 +476,28 @@ export async function buildPeriodSummary(): Promise<PeriodSummary> {
     const fromMs = from.getTime();
     const toMs = to.getTime();
 
-    let newTrials = 0, trialsWon = 0, trialsLost = 0, groupAdded = 0, manualAdded = 0, downgradedFree = 0;
+    let newTrials = 0, trialsWon = 0, trialsLost = 0, migrationsLive = 0, groupAdded = 0, manualAdded = 0, downgradedFree = 0;
     for (const d of rows) {
       const createdIn = inWin(d.created_at, fromMs, toMs);
       const independent = d.group_id == null;
 
-      // Started as a trial (doc predicate: trial now, or later converted/downgraded)
-      if (createdIn && independent
-        && (isTrialAccountType(d.account_type) || d.converted_at != null || d.downgraded_at != null)) newTrials++;
+      // Started as a trial — SAME predicate as the funnel (startedAsTrial):
+      // migration-stamped converted_at on non-native rows must not count.
+      if (createdIn && independent && startedAsTrial(d)) newTrials++;
 
-      // Conversion EVENTS (converted_at is the transition timestamp — the
-      // prompt's billing_cutover_at is the migration-billing marker, not this).
-      if (inWin(d.converted_at, fromMs, toMs)) trialsWon++;
+      // Conversion EVENTS, classified with the funnel's discriminator:
+      // independent native = trial won; everything else = migration go-live.
+      if (inWin(d.converted_at, fromMs, toMs)) {
+        if (independent && d.is_native === true) trialsWon++;
+        else migrationsLive++;
+      }
 
       // Lost-trial EVENTS: still a trial, never converted/cancelled, and the
-      // 30-day cap expired inside the window. Clamped at now — windows that
-      // extend into the future (current quarter) must not count expiries that
-      // haven't happened yet (the trial could still convert), and without the
-      // clamp the quarters wouldn't reconcile with YTD.
+      // trial window (trial_ends_at override, else created+30d) closed inside
+      // the window. Clamped at now — future expiries could still convert, and
+      // without the clamp the quarters wouldn't reconcile with YTD.
       if (isTrialAccountType(d.account_type) && !d.converted_at && !d.downgraded_at && d.created_at) {
-        const expiryMs = new Date(d.created_at).getTime() + capMs;
+        const expiryMs = trialExpiryMs(d, nowMs);
         if (expiryMs >= fromMs && expiryMs < toMs && expiryMs <= nowMs) trialsLost++;
       }
 
@@ -428,12 +512,14 @@ export async function buildPeriodSummary(): Promise<PeriodSummary> {
       if (inWin(d.downgraded_at, fromMs, toMs)) downgradedFree++;
     }
 
+    // Migrations are already-paying 4.0 customers changing platforms —
+    // deliberately excluded from newPaying and growth.
     const newPaying = trialsWon + groupAdded + manualAdded;
     const growthPct = totalPaying > 0
       ? Math.round(((newPaying - downgradedFree) / totalPaying) * 1000) / 10
       : null;
 
-    return { label, newTrials, trialsWon, trialsLost, groupAdded, manualAdded, downgradedFree, newPaying, growthPct };
+    return { label, newTrials, trialsWon, trialsLost, migrationsLive, groupAdded, manualAdded, downgradedFree, newPaying, growthPct };
   });
 
   return { periods, totalPaying, generatedAt: new Date().toISOString() };

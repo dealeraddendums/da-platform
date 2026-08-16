@@ -140,16 +140,23 @@ export function buildBiReportHtml(report: BiReport): string {
     <span style="margin-left:14px;">Trial accounts (independent) <strong>${report.totals.trialAccounts}</strong></span>
   </div>
 
-  <h2>Acquisition &amp; trial funnel (independent)</h2>
+  <h2>Trial funnel — this period&rsquo;s cohort (independent)</h2>
   <div class="grid3">
     ${card("Trials started", String(report.trials.started), "independent, created in period")}
-    ${card("Converted to paying", String(report.trials.convertedIndependent), `${report.trials.conversionRate}% rate · ${report.trials.converted} total incl. group`)}
-    ${card("Lost trials", String(report.trials.lost), `${report.trials.lostIndependent} independent · ${report.trials.lostGroup} group · day-cap`)}
+    ${card("Cohort conversion rate", `${report.trials.conversionRate}%`, `${report.trials.cohort.converted} of ${report.trials.cohort.started} converted${report.trials.cohort.stillActive > 0 ? ` · provisional — ${report.trials.cohort.stillActive} still in trial` : ""}`)}
+    ${card("Cohort lost", String(report.trials.cohort.lost), "expired or closed without converting")}
   </div>
   <div style="font-size:11px;color:${MUTED};margin-top:8px;">
-    Cohort reconciliation (trials started this period): ${report.trials.cohort.started} started =
+    Cohort reconciliation: ${report.trials.cohort.started} started =
     ${report.trials.cohort.converted} converted + ${report.trials.cohort.lost} lost +
-    ${report.trials.cohort.stillActive} still active.
+    ${report.trials.cohort.stillActive} still active. Rate is cohort-based (converted ÷ started).
+  </div>
+
+  <h2>Period activity (any cohort — raw counts, not rates)</h2>
+  <div class="grid3">
+    ${card("Trials converted in period", String(report.trials.activity.trialConversions), report.trials.activity.trialConversionsGroup > 0 ? `+${report.trials.activity.trialConversionsGroup} group-attached (anomaly)` : "independent trials that went paid")}
+    ${card("Migrations went live", String(report.trials.activity.migrations), "4.0 → 5.0 cutovers — not trial wins")}
+    ${card("Trials lost in period", String(report.trials.activity.lost), `${report.trials.activity.lostIndependent} independent · ${report.trials.activity.lostGroup} group · 30-day window closed`)}
   </div>
 
   <h2>Accounts added &amp; churn</h2>

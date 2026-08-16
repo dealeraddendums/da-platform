@@ -9,9 +9,12 @@ type BiReport = {
   generatedAt: string;
   totals: { payingAccounts: number; trialAccounts: number };
   trials: {
-    started: number; converted: number; convertedIndependent: number; conversionRate: number;
-    lost: number; lostIndependent: number; lostGroup: number;
+    started: number; conversionRate: number;
     cohort: { started: number; converted: number; lost: number; stillActive: number };
+    activity: {
+      trialConversions: number; trialConversionsGroup: number; migrations: number;
+      lost: number; lostIndependent: number; lostGroup: number;
+    };
   };
   acquisition: { source: string; count: number }[];
   groupDealersAdded: number;
@@ -26,7 +29,7 @@ type BiReport = {
 // Mirror of lib/bi.ts PeriodSummary.
 type PeriodSummaryRow = {
   label: string; newTrials: number; trialsWon: number; trialsLost: number;
-  groupAdded: number; manualAdded: number; downgradedFree: number;
+  migrationsLive: number; groupAdded: number; manualAdded: number; downgradedFree: number;
   newPaying: number; growthPct: number | null;
 };
 type PeriodSummary = { periods: PeriodSummaryRow[]; totalPaying: number; generatedAt: string };
@@ -36,14 +39,22 @@ const BLUE = "#1976d2";
 const BORDER = "#e0e0e0";
 const MUTED = "#78828c";
 
+const fmtDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** Default range: the CURRENT calendar month, To = today (honest partial-month
+ *  rather than a future end date). "Previous month" stays one click away. */
+function currentCalendarMonth(): { from: string; to: string } {
+  const now = new Date();
+  return { from: fmtDate(new Date(now.getFullYear(), now.getMonth(), 1)), to: fmtDate(now) };
+}
+
 function prevCalendarMonth(): { from: string; to: string } {
   const now = new Date();
   const firstOfThis = new Date(now.getFullYear(), now.getMonth(), 1);
   const lastOfPrev = new Date(firstOfThis.getTime() - 86400000);
   const firstOfPrev = new Date(lastOfPrev.getFullYear(), lastOfPrev.getMonth(), 1);
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  return { from: fmt(firstOfPrev), to: fmt(lastOfPrev) };
+  return { from: fmtDate(firstOfPrev), to: fmtDate(lastOfPrev) };
 }
 
 function money(n: number): string {
@@ -106,7 +117,7 @@ function TrendChart({ series }: { series: { month: string; grossBilled: number }
 // buildBiReport() as the read endpoint — so PDF == Excel == on-screen, and the
 // is_test / excludeCustomerIds exclusions are inherited automatically.
 export default function BiClient({ defaultRecipient }: { defaultRecipient: string }) {
-  const initial = prevCalendarMonth();
+  const initial = currentCalendarMonth();
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [report, setReport] = useState<BiReport | null>(null);
@@ -248,6 +259,9 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
         <button style={btnPrimary} onClick={() => void load(from, to)} disabled={loading}>
           {loading ? "Loading…" : "Apply"}
         </button>
+        <button style={btnGhost} onClick={() => { const p = currentCalendarMonth(); setFrom(p.from); setTo(p.to); void load(p.from, p.to); }}>
+          This month
+        </button>
         <button style={btnGhost} onClick={() => { const p = prevCalendarMonth(); setFrom(p.from); setTo(p.to); void load(p.from, p.to); }}>
           Previous month
         </button>
@@ -261,22 +275,37 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
         <div style={{ color: MUTED, fontSize: 14 }}>{loading ? "Loading report…" : "No data."}</div>
       ) : (
         <>
-          <div style={{ ...cardStyle, marginBottom: 16, display: "flex", gap: 28, fontSize: 13, color: NAVY }}>
-            <div><span style={{ color: MUTED }}>Current book (all-time): </span><strong>Paying accounts {report.totals.payingAccounts}</strong></div>
-            <div><strong>Trial accounts (independent) {report.totals.trialAccounts}</strong></div>
+          <div style={{ ...cardStyle, marginBottom: 16, display: "flex", gap: 28, fontSize: 13, color: NAVY, flexWrap: "wrap" }}>
+            <div><span style={{ color: MUTED }}>Current book (point-in-time): </span><strong>Paying accounts {report.totals.payingAccounts}</strong> <span style={{ color: MUTED }}>(active, test-excluded — matches the Dashboard)</span></div>
+            <div><strong>Trial accounts {report.totals.trialAccounts}</strong> <span style={{ color: MUTED }}>(independent only — group dealers never trial)</span></div>
           </div>
 
-          {/* Section A */}
-          <SectionTitle>Acquisition &amp; trial funnel (independent)</SectionTitle>
+          {/* Section A — cohort (the rate) vs period activity (raw counts) */}
+          <SectionTitle>Trial funnel — this period&rsquo;s cohort (independent)</SectionTitle>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
             <Card label="Trials started" value={String(report.trials.started)} sub="independent, created in period" />
-            <Card label="Converted to paying" value={String(report.trials.convertedIndependent)} sub={`${report.trials.conversionRate}% conversion rate · ${report.trials.converted} total incl. group`} />
-            <Card label="Lost trials" value={String(report.trials.lost)} sub={`${report.trials.lostIndependent} independent · ${report.trials.lostGroup} group · day-cap`} />
+            <Card
+              label="Cohort conversion rate"
+              value={`${report.trials.conversionRate}%`}
+              sub={`${report.trials.cohort.converted} of ${report.trials.cohort.started} converted${report.trials.cohort.stillActive > 0 ? ` · provisional — ${report.trials.cohort.stillActive} still in trial` : ""}`}
+            />
+            <Card label="Cohort lost" value={String(report.trials.cohort.lost)} sub="expired or closed without converting" />
           </div>
           <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
-            Cohort reconciliation (trials started this period): {report.trials.cohort.started} started ={" "}
+            Cohort reconciliation: {report.trials.cohort.started} started ={" "}
             {report.trials.cohort.converted} converted + {report.trials.cohort.lost} lost +{" "}
-            {report.trials.cohort.stillActive} still active.
+            {report.trials.cohort.stillActive} still active. The rate is cohort-based (converted ÷ started) and can never exceed 100%.
+          </div>
+
+          <SectionTitle>Period activity (any cohort — raw counts, not rates)</SectionTitle>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            <Card
+              label="Trials converted in period"
+              value={String(report.trials.activity.trialConversions)}
+              sub={`independent trials that went paid${report.trials.activity.trialConversionsGroup > 0 ? ` · +${report.trials.activity.trialConversionsGroup} group-attached (anomaly)` : ""}`}
+            />
+            <Card label="Migrations went live" value={String(report.trials.activity.migrations)} sub="4.0 → 5.0 cutovers — already-paying customers, not trial wins" />
+            <Card label="Trials lost in period" value={String(report.trials.activity.lost)} sub={`${report.trials.activity.lostIndependent} independent · ${report.trials.activity.lostGroup} group · 30-day window closed (extensions honored)`} />
           </div>
 
           {/* Acquisition table */}
@@ -328,6 +357,10 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
             Reconciliation: <strong>{report.cancellations.withoutReason}</strong> of {report.cancellations.total} cancellation{report.cancellations.total === 1 ? "" : "s"} have no closure row this period
             {report.cancellations.withoutReason > 0 ? " (counted under “Not specified” / missing)." : "."}
           </div>
+          <div style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>
+            Note: lost trials ≠ cancellations. A lost trial never paid us — its trial window simply closed. A cancellation is a
+            downgrade event (downgraded_at) — typically a paying account going Free. &ldquo;0 cancellations&rdquo; alongside lost trials is not a contradiction.
+          </div>
 
           {/* Section C */}
           <SectionTitle>Revenue</SectionTitle>
@@ -336,9 +369,16 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
               {report.revenue.available
                 ? <TrendChart series={report.revenue.series} />
                 : <div style={{ color: MUTED, fontSize: 13 }}>Gross-billable unavailable: {report.revenue.error}</div>}
-              <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>Gross billable (invoiced totals/month, post-discount)</div>
+              <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>
+                da-billing invoiced totals per month (post-discount) — fixed last-12-months trend, independent of the date picker.
+                Only dealers billed through da-billing appear here; the unmigrated fleet still bills via FreshBooks.
+              </div>
             </div>
-            <Card label="Current MRR run-rate" value={report.revenue.available ? money(report.revenue.currentMrr) : "—"} />
+            <Card
+              label="Current MRR run-rate (da-billing)"
+              value={report.revenue.available ? money(report.revenue.currentMrr) : "—"}
+              sub="live-billing, non-paused templates only — recurring subscription lines, post-discount"
+            />
           </div>
 
           {/* Period Summary — fixed windows, independent of the date picker */}
@@ -348,14 +388,14 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
           {/* Definitions */}
           <SectionTitle>Definitions</SectionTitle>
           <div style={{ fontSize: 11, color: MUTED, lineHeight: 1.7, maxWidth: 900 }}>
-            <strong>Trial</strong> = account_type Trial/NULL; <strong>Independent</strong> = no group.{" "}
-            <strong>Converted</strong> = became paid (dated by converted_at).{" "}
-            <strong>Lost trial</strong> = past the 30-day/30-print allowance without converting (day-cap shown; print-cap approximate).{" "}
-            <strong>Cancellation</strong> = previously-paid dealer with downgraded_at in period.{" "}
-            Acquisition source present only for self-serve signups post-migration-087 (else Direct/Unknown).{" "}
-            Reasons present only where an account_closures row exists (admin downgrades default to &ldquo;Admin downgrade&rdquo;).{" "}
-            <strong>Gross billable</strong> = invoiced totals/month (post-discount) from da-billing.{" "}
-            Period = previous calendar month by default. Generated {new Date(report.generatedAt).toLocaleString("en-US")}.
+            <strong>Trial</strong> = account_type Trial/NULL; <strong>Independent</strong> = no group (group accounts never start as trials and are excluded from the funnel).{" "}
+            <strong>Trial conversion</strong> = an independent 5.0-native trial that went paid (converted_at); <strong>Migration</strong> = a 4.0 customer&rsquo;s 5.0 go-live (also stamps converted_at, never counted as a trial win).{" "}
+            <strong>Conversion rate</strong> = cohort-based: of trials started in the period, share converted (≤100%; provisional while cohort members still trial).{" "}
+            <strong>Lost trial</strong> = trial window closed without converting — 30 days from signup, honoring operator extensions (trial_ends_at); the 30-print cap has no event date and isn&rsquo;t used for dating.{" "}
+            <strong>Cancellation</strong> = downgrade event (downgraded_at in period) — distinct from lost trials, which never paid.{" "}
+            Acquisition source present only for self-serve signups post-migration-087 (else Direct/Unknown); google/bing/own-site referrer variants are normalized into single buckets.{" "}
+            <strong>Gross billable</strong> = da-billing invoiced totals/month (post-discount); <strong>MRR run-rate</strong> = recurring subscription lines of live-billing, non-paused da-billing templates (setup-mode, paused, and archived customers excluded).{" "}
+            Default period = current calendar month to date. Generated {new Date(report.generatedAt).toLocaleString("en-US")}.
           </div>
         </>
       )}
@@ -371,6 +411,7 @@ function PeriodSummaryGrid({ summary, error }: { summary: PeriodSummary | null; 
     { label: "New Trials",          key: "newTrials" },
     { label: "Trials Won",          key: "trialsWon" },
     { label: "Trials Lost",         key: "trialsLost" },
+    { label: "Migrations Live",     key: "migrationsLive" },
     { label: "Group Dealers Added", key: "groupAdded" },
     { label: "Manually Added",      key: "manualAdded" },
     { label: "Downgraded to Free",  key: "downgradedFree" },
@@ -436,7 +477,8 @@ function PeriodSummaryGrid({ summary, error }: { summary: PeriodSummary | null; 
         </tbody>
       </table>
       <div style={{ padding: "8px 12px", fontSize: 11, color: MUTED, borderTop: `1px solid ${BORDER}` }}>
-        Growth % = (New Paying − Downgraded) ÷ current paying base ({summary.totalPaying.toLocaleString("en-US")}).
+        New Paying = Trials Won + Group Dealers Added + Manually Added. Growth % = (New Paying − Downgraded) ÷ current paying base ({summary.totalPaying.toLocaleString("en-US")} — same active, test-excluded count as the header and the Dashboard).
+        Migrations Live are already-paying 4.0 customers going live on 5.0 — informational, excluded from New Paying and Growth.
         Weeks start Monday; quarters are calendar {new Date(summary.generatedAt).getFullYear()}. Fixed windows — the date picker above does not affect this grid.
       </div>
     </div>
