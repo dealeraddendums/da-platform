@@ -247,7 +247,16 @@ async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId:
 
 // ── page ──────────────────────────────────────────────────────────────────────
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams?: { notice?: string } }) {
+  // Brief banner for redirects that need to explain themselves (e.g. the
+  // /builder guard sends group-controlled dealer roles here with
+  // ?notice=group-templates).
+  const noticeBanner = searchParams?.notice === "group-templates" ? (
+    <div style={{ marginBottom: 16, padding: "10px 14px", background: "#fff8e1", border: "1px solid #ffe082", color: "#7a5c00", borderRadius: 6, fontSize: 13 }}>
+      Your templates are managed by your group.
+    </div>
+  ) : null;
+
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect("/login");
@@ -493,5 +502,5 @@ export default async function DashboardPage() {
   // dealer_vehicles.print_status/print_date so legacy ETL-printed and
   // platform-printed vehicles count uniformly). Shared with the group_admin
   // active-dealer branch above.
-  return <DealerDashboardView dealerId={dealerId} />;
+  return <>{noticeBanner}<DealerDashboardView dealerId={dealerId} /></>;
 }

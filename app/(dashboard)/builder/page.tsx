@@ -33,7 +33,7 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
       .eq("dealer_id", profile.dealer_id)
       .maybeSingle<{ group_id: string | null; group_controls_templates: boolean | null }>();
     if (dealerLock?.group_controls_templates && dealerLock?.group_id) {
-      redirect("/dashboard");
+      redirect("/dashboard?notice=group-templates");
     }
   }
 

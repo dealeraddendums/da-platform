@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { resolveDealerForRequest } from "@/lib/dealer-authz";
+import { resolveDealerForRequest, templateWriteLockGuard } from "@/lib/dealer-authz";
 
 /**
  * GET /api/templates?dealer_id=xxx
@@ -108,6 +108,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const resolved = await resolveDealerForRequest(claims, req.nextUrl.searchParams.get("dealer_id"));
   if (!resolved.ok) return resolved.response;
   const { dealerId } = resolved;
+
+  // Group-controlled templates: dealer roles may not create (incl. Copy —
+  // a copy is a fresh POST). group_admin/group_user/super_admin pass.
+  const lock = await templateWriteLockGuard(claims, dealerId);
+  if (lock) return lock;
 
   let body: { name?: string; document_type?: string; vehicle_types?: string[]; template_json?: Record<string, unknown> };
   try {

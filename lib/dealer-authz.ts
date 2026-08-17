@@ -138,3 +138,36 @@ export async function resolveDealerForRequest(
   if (!explicitDealerId) return badRequest();
   return authorizeDealerAction(claims, explicitDealerId);
 }
+
+/**
+ * Group-controlled-templates endpoint guard (defense in depth for the
+ * c747ee1 UI lockdown — same authz-hole class as 2277b77/cae70d5: a hidden
+ * button is not a gate). When a dealer's templates are group-controlled
+ * (dealers.group_controls_templates = true AND the dealer is actually in a
+ * group), template WRITES by the dealer's own roles (dealer_admin /
+ * dealer_user / dealer_restricted) are rejected with a clean 403.
+ * group_admin, group_user, and super_admin pass — they own the templates
+ * (including via Switch to Dealer, where claims.role stays group-level).
+ * Returns the 403 response to send, or null when the write may proceed.
+ */
+export async function templateWriteLockGuard(
+  claims: JwtClaims,
+  dealerTextId: string | null | undefined,
+): Promise<NextResponse | null> {
+  const role = claims.role;
+  if (role !== "dealer_admin" && role !== "dealer_user" && role !== "dealer_restricted") return null;
+  if (!dealerTextId) return null;
+  const admin = createAdminSupabaseClient();
+  const { data } = await admin
+    .from("dealers")
+    .select("group_id, group_controls_templates")
+    .eq("dealer_id", dealerTextId)
+    .maybeSingle<{ group_id: string | null; group_controls_templates: boolean | null }>();
+  if (data?.group_controls_templates && data?.group_id) {
+    return NextResponse.json(
+      { error: "Your templates are managed by your group." },
+      { status: 403 },
+    );
+  }
+  return null;
+}

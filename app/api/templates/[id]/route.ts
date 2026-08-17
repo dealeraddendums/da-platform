@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { templateWriteLockGuard } from "@/lib/dealer-authz";
 import type { JwtClaims } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { TemplateUpdate } from "@/lib/db";
@@ -134,6 +135,11 @@ export async function PATCH(
   const checked = await fetchAndAuthorize(claims, params.id);
   if ("authError" in checked) return checked.authError;
 
+  // Group-controlled templates: dealer roles may not edit (keyed off the
+  // template's own dealer; group roles/super_admin pass).
+  const patchLock = await templateWriteLockGuard(claims, checked.dealerId);
+  if (patchLock) return patchLock;
+
   let body: { name?: string; document_type?: string; vehicle_types?: string[]; template_json?: Record<string, unknown>; is_active?: boolean };
   try {
     body = await req.json();
@@ -186,6 +192,10 @@ export async function DELETE(
   const checked = await fetchAndAuthorize(claims, params.id);
   if ("authError" in checked) return checked.authError;
   const { dealerId } = checked;
+
+  // Group-controlled templates: dealer roles may not delete.
+  const delLock = await templateWriteLockGuard(claims, dealerId);
+  if (delLock) return delLock;
 
   const admin = createAdminSupabaseClient();
 
