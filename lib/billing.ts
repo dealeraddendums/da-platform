@@ -624,11 +624,49 @@ export async function fetchInvoiceHtml(invoiceId: string): Promise<string> {
 
 // ── Billing status (past-due print lock) ────────────────────────────────────
 
+export interface BillingExtensionState {
+  active: boolean;
+  protectedUntil: string | null;
+  lastRequestedAt: string | null;
+  nextEligibleAt: string | null;
+  canRequest: boolean;
+}
+
 export interface BillingStatus {
   past_due: boolean;
   outstanding_balance: number;
   oldest_overdue_date: string | null;
   overdue_days: number;
+  /** Self-service 10-day extension state (2026-08-17). Absent from older
+   *  da-billing builds — treat undefined as "feature unavailable". */
+  extension?: BillingExtensionState;
+}
+
+export interface ExtensionRequestResult {
+  granted: boolean;
+  reason?: "no_balance" | "throttled";
+  protectedUntil?: string;
+  nextEligibleAt?: string;
+}
+
+/**
+ * POST /customers/{id}/request-extension — auto-granted one-time 10-day
+ * past-due grace (one per rolling 90 days, enforced by da-billing). Grace
+ * window only: no invoice/Stripe/amount side effects.
+ */
+export async function requestBillingExtension(customerId: string, requestedBy: string | null): Promise<ExtensionRequestResult> {
+  const res = await fetch(`${BASE}/customers/${encodeURIComponent(customerId)}/request-extension`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ requestedBy }),
+  });
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `requestExtension ${res.status}`, text);
+  try {
+    return JSON.parse(text) as ExtensionRequestResult;
+  } catch (err) {
+    throw new BillingError(res.status, `requestExtension parse: ${(err as Error).message}`, text);
+  }
 }
 
 /**

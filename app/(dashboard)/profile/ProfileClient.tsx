@@ -1624,6 +1624,8 @@ interface BillingMeData {
   subscriptionTier?: string | null;
   canManage?: boolean;
   groupPastDue?: boolean;
+  extension?: { active: boolean; protectedUntil: string | null; lastRequestedAt: string | null; nextEligibleAt: string | null; canRequest: boolean } | null;
+  extensionRequestAllowed?: boolean;
   notes?: string;
 }
 
@@ -1641,6 +1643,76 @@ const feedInputStyle: React.CSSProperties = { width: "100%", padding: "7px 10px"
 function money(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   return `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtDateLong(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
+
+/** Self-service one-time 10-day billing extension (one per rolling 90 days).
+ *  Grace-window only — moves the past-due print lock, never invoice amounts.
+ *  Shown for the RESPONSIBLE PAYER: self-billed dealers act on their own
+ *  customer; group-billed stores can only ask their group admin (a grant on
+ *  the group customer would lift every member store's lock). */
+function ExtensionCard({ data, onGranted }: { data: BillingMeData; onGranted: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const ext = data.extension;
+  if (!ext) return null;
+  const groupBilled = data.billedBy === "group";
+  const allowed = data.extensionRequestAllowed === true;
+  const hasBalance = groupBilled ? (ext.canRequest || data.groupPastDue === true) : data.outstandingAmount > 0;
+
+  async function request() {
+    setBusy(true); setMsg(null);
+    try {
+      const res = await fetch("/api/billing/request-extension", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const j = await res.json().catch(() => ({})) as { granted?: boolean; reason?: string; protectedUntil?: string; nextEligibleAt?: string; error?: string };
+      if (!res.ok) { setMsg(j.error ?? "Request failed"); return; }
+      if (j.granted) { onGranted(); return; }
+      if (j.reason === "throttled") setMsg(`You've already used an extension in the last 90 days. Next available ${fmtDateLong(j.nextEligibleAt)}.`);
+      else if (j.reason === "no_balance") setMsg("No outstanding balance — nothing to extend.");
+      else setMsg("Request failed");
+    } catch { setMsg("Request failed"); } finally { setBusy(false); }
+  }
+
+  if (ext.active) {
+    return (
+      <div style={{ padding: "12px 16px", background: "#e8f5e9", border: "1px solid #c8e6c9", color: "#2e7d32", borderRadius: 6, fontSize: 13, lineHeight: 1.6 }}>
+        <strong>Extension active</strong> — your payment due date is extended to <strong>{fmtDateLong(ext.protectedUntil)}</strong>.
+        Your account can print during this period. You can request another extension after {fmtDateLong(ext.nextEligibleAt)}.
+      </div>
+    );
+  }
+  if (!hasBalance) return null;
+  if (groupBilled && !allowed) {
+    return (
+      <div style={{ padding: "12px 16px", background: "#f7f8fa", border: "1px solid #e0e0e0", color: "#555", borderRadius: 6, fontSize: 13 }}>
+        Billing is managed by your group — contact your group admin to request an extension.
+      </div>
+    );
+  }
+  if (!allowed) return null;
+  if (!ext.canRequest) {
+    return (
+      <div style={{ padding: "12px 16px", background: "#f7f8fa", border: "1px solid #e0e0e0", color: "#555", borderRadius: 6, fontSize: 13 }}>
+        You&rsquo;ve already used an extension in the last 90 days. Next available {fmtDateLong(ext.nextEligibleAt)}.
+      </div>
+    );
+  }
+  return (
+    <div style={{ padding: "12px 16px", background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 6, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ color: "#7a5c00", lineHeight: 1.5 }}>
+        Need a little more time on your balance{groupBilled ? " (applies to your whole group)" : ""}? You can request a one-time 10-day extension — available once every 90 days.
+      </div>
+      <button onClick={() => void request()} disabled={busy}
+        style={{ padding: "8px 14px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer", fontFamily: "inherit", opacity: busy ? 0.6 : 1, whiteSpace: "nowrap" }}>
+        {busy ? "Requesting…" : "Request a one-time 10-day extension"}
+      </button>
+      {msg && <div style={{ flexBasis: "100%", color: "#c62828" }}>{msg}</div>}
+    </div>
+  );
 }
 
 function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
@@ -1747,11 +1819,17 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
     const tier = data.subscriptionTier ?? "Subscription";
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {toast && (
+          <div style={{ padding: "10px 14px", background: toast.startsWith("✓") ? "#e8f5e9" : "#ffebee", border: `1px solid ${toast.startsWith("✓") ? "#c8e6c9" : "#ffcdd2"}`, color: toast.startsWith("✓") ? "#2e7d32" : "#c62828", borderRadius: 6, fontSize: 13 }}>
+            {toast}
+          </div>
+        )}
         {data.groupPastDue && (
           <div style={{ padding: "10px 14px", background: "#ffebee", border: "1px solid #ffcdd2", color: "#c62828", borderRadius: 6, fontSize: 13 }}>
             Your group has a past-due balance — printing is paused. Contact your group administrator.
           </div>
         )}
+        <ExtensionCard data={data} onGranted={() => { setToast("✓ Extension granted — printing is restored for 10 days."); void refresh(); }} />
         <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: 24, background: "#fff" }}>
           <div style={{ fontWeight: 600, fontSize: 16, color: "#2a2b3c", marginBottom: 8 }}>
             Subscription: {tier}
@@ -2050,6 +2128,9 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
           </div>
         )}
       </div>
+
+      {/* ── One-time 10-day extension (self-service) ─────────────────────── */}
+      <ExtensionCard data={data} onGranted={() => { setToast("✓ Extension granted — printing is restored for 10 days."); void refresh(); }} />
 
       {/* ── Outstanding Invoices ─────────────────────────────────────────── */}
       {outstandingInvoices.length > 0 && (

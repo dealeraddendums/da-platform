@@ -103,7 +103,7 @@ export type CanPrintReason = "trial_expired" | "free_downgraded" | "past_due";
 export const PAST_DUE_MESSAGE_GROUP =
   "Printing is paused. To restore it, please contact your Group Administrator.";
 export const PAST_DUE_MESSAGE_SELF =
-  "Printing is temporarily disabled due to a past-due invoice.";
+  "Printing is temporarily disabled due to a past-due invoice. You may be able to request a one-time 10-day extension in My Profile → Billing.";
 
 export interface CanPrintResult {
   ok: boolean;

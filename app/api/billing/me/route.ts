@@ -11,6 +11,7 @@ import {
   getBillingStatus,
   type BillingPriceEntry,
   type BillingInvoice,
+  type BillingExtensionState,
 } from "@/lib/billing";
 import { isOverAllowance, TRIAL_DAYS_CAP, TRIAL_PRINTS_CAP } from "@/lib/print-eligibility";
 import { printedVehicleCount } from "@/lib/print-counts";
@@ -56,6 +57,14 @@ interface BillingMeResponse {
   /** Group-billed only: the group's da-billing customer is past due → printing
    *  is paused. Same read the print lock uses; fail-open (false) on any error. */
   groupPastDue?: boolean;
+  /** Self-service 10-day extension state for the RESPONSIBLE PAYER's customer
+   *  (self-billed → own; group-billed → the group's). Null when da-billing is
+   *  unreachable / no customer resolves. */
+  extension?: BillingExtensionState | null;
+  /** Whether THIS caller's role may request the extension: self-billed →
+   *  dealer_admin+; group-billed → group_admin/super_admin only (a grant on
+   *  the group customer lifts the lock for every member store). */
+  extensionRequestAllowed?: boolean;
   notes?: string;
 }
 
@@ -183,6 +192,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (dealer.subscription_billed_to === "group") {
     let groupName: string | null = null;
     let groupPastDue = false;
+    let extension: BillingExtensionState | null = null;
     if (dealer.group_id) {
       const { data: g } = await admin
         .from("groups")
@@ -196,6 +206,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         try {
           const status = await getBillingStatus(g.billing_customer_id);
           groupPastDue = status?.past_due === true;
+          extension = status?.extension ?? null;
         } catch {
           /* fail open — never block the summary on a da-billing hiccup */
         }
@@ -218,6 +229,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       subscriptionTier: subscriptionTierLabel(dealer.account_type),
       canManage: false,
       groupPastDue,
+      extension,
+      // Group-billed: only group_admin/super_admin may extend — the grant
+      // lands on the GROUP customer and lifts every member store's lock.
+      extensionRequestAllowed: claims.role === "group_admin" || claims.role === "super_admin",
     };
     return NextResponse.json(payload);
   }
@@ -261,7 +276,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(payload);
   }
 
-  const [template, pricing, invoiceResult] = await Promise.all([
+  const [template, pricing, invoiceResult, billingStatus] = await Promise.all([
     getTemplate(customerKey).catch((err) => {
       console.error("[billing/me] getTemplate failed:", err instanceof Error ? err.message : err);
       return null;
@@ -273,6 +288,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     listInvoices(customerKey).catch((err) => {
       console.error("[billing/me] listInvoices failed:", err instanceof Error ? err.message : err);
       return { invoices: [], total: 0, outstandingAmount: 0 };
+    }),
+    // Extension state for the self-billed payer (fail-open null).
+    getBillingStatus(customerKey).catch((err) => {
+      console.error("[billing/me] getBillingStatus failed:", err instanceof Error ? err.message : err);
+      return null;
     }),
   ]);
 
@@ -299,6 +319,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     invoices: invoiceResult.invoices,
     outstandingAmount: invoiceResult.outstandingAmount,
     trial,
+    billedBy: "self",
+    extension: billingStatus?.extension ?? null,
+    // Self-billed: dealer_admin and up may request; dealer_user may not.
+    extensionRequestAllowed: claims.role !== "dealer_user",
   };
   return NextResponse.json(payload);
 }
