@@ -8,8 +8,12 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/migration/resend — Phase 13b step 3 (nudge a stalled/expired invite).
  * super_admin only. Body: { dealerId: <dealers.id UUID> }.
- * Re-fires the OTP migration invite (idempotent upsert — fresh code, resets
- * invited_at so the stall clock restarts). Only for dealers not yet migrated.
+ * Re-fires the OTP migration invite for PENDING recipients only (fresh code
+ * each; already-accepted recipients are skipped — the shared completed
+ * predicate in lib/migration-invite-otp). Allowed on already-MIGRATED dealers
+ * too: the first acceptor migrates the dealer, but the other admins still need
+ * their account-only invites — resend reaches exactly the ones who haven't
+ * accepted, and never regresses the dealer's migration_status.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireSuperAdmin();
@@ -26,19 +30,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .eq("id", body.dealerId)
     .maybeSingle<{ inventory_dealer_id: string | null; migration_status: string | null; name: string }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
-  if (dealer.migration_status === "migrated") return NextResponse.json({ error: "Already migrated." }, { status: 409 });
   if (!dealer.inventory_dealer_id) return NextResponse.json({ error: "Dealer has no inventory_dealer_id." }, { status: 400 });
 
   try {
     const res = await sendMigrationInvite(dealer.inventory_dealer_id, claims.sub);
-    // Manual resend restarts the drip: invited_at was just reset by
-    // sendMigrationInvite, so zero the follow-up count too.
-    await admin
-      .from("dealers")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .update({ invite_follow_up_count: 0 } as any)
-      .eq("id", body.dealerId);
-    return NextResponse.json({ ok: true, dealer: dealer.name, email: res.email, emailSent: res.emailSent, warning: res.warning });
+    if (!res.allCompleted) {
+      // Manual resend restarts the drip: invited_at was just reset by
+      // sendMigrationInvite, so zero the follow-up count too. (Skipped when
+      // nothing was sent — an all-completed "resend" changes nothing.)
+      await admin
+        .from("dealers")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .update({ invite_follow_up_count: 0 } as any)
+        .eq("id", body.dealerId);
+    }
+    return NextResponse.json({
+      ok: true,
+      dealer: dealer.name,
+      email: res.email,
+      emailSent: res.emailSent,
+      recipients: res.recipients,
+      skipped: res.skipped,
+      allCompleted: res.allCompleted,
+      warning: res.warning,
+    });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Resend failed" }, { status: 500 });
   }

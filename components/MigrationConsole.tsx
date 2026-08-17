@@ -194,7 +194,14 @@ export default function MigrationConsole() {
       const res = await fetch("/api/migration/resend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealerId: row.id }) });
       const j = await res.json();
       if (!res.ok) { alert(j.error ?? "Resend failed"); return; }
-      alert(`Invite resent${j.email ? ` to ${j.email}` : ""}.`);
+      if (j.allCompleted) {
+        alert("All recipients have already accepted — nothing to resend.");
+        return;
+      }
+      // List exactly who got a fresh code; completed recipients are skipped.
+      const sent = (j.recipients as string[] | undefined)?.join(", ") ?? j.email ?? "";
+      const skipped = (j.skipped as string[] | undefined) ?? [];
+      alert(`Invite resent to ${sent}.${skipped.length ? `\nSkipped (already accepted): ${skipped.join(", ")}` : ""}${j.warning ? `\n⚠ ${j.warning}` : ""}`);
       await load();
     } catch { alert("Resend failed"); } finally { setResendingId(null); }
   }

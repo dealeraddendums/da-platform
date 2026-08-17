@@ -20,14 +20,23 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildMigrationInviteEmail, buildMigrationFollowUpEmail } from "@/lib/invite-email";
+import { lastSignInByEmail } from "@/lib/last-sign-in";
 
 export interface MigrationInviteResult {
   ok: boolean;
   dealer_name: string;
-  /** Comma-joined recipient list (kept as `email` for send-wave/resend compat). */
+  /** Comma-joined EMAILED (pending) recipient list (kept as `email` for
+   *  send-wave/resend compat). */
   email: string | null;
   emailSent: boolean;
+  /** The recipients actually emailed this call (pending only, deduped). */
   recipients: string[];
+  /** Recipients skipped because they already completed (accepted their invite
+   *  or have a real, impersonation-safe sign-in). */
+  skipped: string[];
+  /** True when every resolved recipient had already completed — nothing was
+   *  rotated or emailed. */
+  allCompleted: boolean;
   emailsSent: number;
   warning?: string;
 }
@@ -129,6 +138,47 @@ async function upsertRecipientInvite(
 }
 
 /**
+ * THE per-recipient "completed" predicate — the single definition shared by
+ * the initial send, manual Resend, and the follow-up drip. A recipient has
+ * completed when EITHER:
+ *   (a) their migration invitation for this dealer is consumed
+ *       (invitations.accepted_at set), OR
+ *   (b) they have a REAL sign-in per lastSignInByEmail — the impersonation-
+ *       safe helper that excludes sign-ins within ±10 min of an impersonation
+ *       admin_audit event, so an operator ghosting the account never marks
+ *       the human as having accepted.
+ * Completed recipients must never be re-emailed a "you're invited" + fresh
+ * code. Note this is PER RECIPIENT, not "is the dealer migrated": on a
+ * migrated dealer the not-yet-accepted admins still need their account-only
+ * invites.
+ */
+async function completedRecipientEmails(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  dealerUuid: string,
+  candidateEmails: string[],
+): Promise<Set<string>> {
+  const done = new Set<string>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: acceptedRows } = await (admin as any)
+    .from("invitations")
+    .select("email")
+    .eq("dealer_id", dealerUuid)
+    .eq("purpose", "migration")
+    .not("accepted_at", "is", null) as { data: { email: string }[] | null };
+  for (const r of acceptedRows ?? []) done.add(r.email.toLowerCase());
+  try {
+    const signIns = await lastSignInByEmail();
+    for (const e of candidateEmails) {
+      if (signIns.get(e)) done.add(e);
+    }
+  } catch (e) {
+    // Best-effort: the accepted-invitation check above still applies.
+    console.error("[migration-invite] lastSignInByEmail failed:", e instanceof Error ? e.message : e);
+  }
+  return done;
+}
+
+/**
  * Kill the codes on pending migration invitations for this dealer whose email
  * is no longer in the recipient set (e.g. a deactivated admin) — a resend
  * should leave no live stray codes. Best-effort.
@@ -171,9 +221,9 @@ export async function sendMigrationInvite(
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, inventory_dealer_id, primary_contact, primary_contact_email, active")
+    .select("id, dealer_id, name, inventory_dealer_id, primary_contact, primary_contact_email, active, migration_status")
     .eq("inventory_dealer_id", inventoryDealerId)
-    .maybeSingle<DealerRow & { active: boolean | null }>();
+    .maybeSingle<DealerRow & { active: boolean | null; migration_status: string | null }>();
   if (!dealer) throw new Error(`Dealer not found: ${inventoryDealerId}`);
   // Deactivated dealers (e.g. Dealer General rooftops out of the paid+active
   // scope) must never receive migration invites — this guards every send path
@@ -182,8 +232,31 @@ export async function sendMigrationInvite(
     throw new Error(`Dealer "${dealer.name}" (${inventoryDealerId}) is deactivated — migration invites are blocked`);
   }
 
-  const recipients = await resolveMigrationRecipients(admin, dealer);
-  if (recipients.length === 0) throw new Error(`No contact email for dealer "${dealer.name}" (${inventoryDealerId}) — cannot send migration invite`);
+  const resolved = await resolveMigrationRecipients(admin, dealer);
+  if (resolved.length === 0) throw new Error(`No contact email for dealer "${dealer.name}" (${inventoryDealerId}) — cannot send migration invite`);
+
+  // Per-recipient completed skip (shared predicate): never re-email someone
+  // who already accepted / has a working login. On an already-migrated dealer
+  // the pending admins still get their account-only invites.
+  const done = await completedRecipientEmails(admin, dealer.id, resolved.map(r => r.email));
+  const recipients = resolved.filter(r => !done.has(r.email));
+  const skipped = resolved.filter(r => done.has(r.email)).map(r => r.email);
+
+  if (recipients.length === 0) {
+    // Everyone has accepted — nothing to rotate, nothing to email, and the
+    // dealer's status/invited_at/codes stay exactly as they are.
+    return {
+      ok: true,
+      dealer_name: dealer.name,
+      email: null,
+      emailSent: false,
+      recipients: [],
+      skipped,
+      allCompleted: true,
+      emailsSent: 0,
+      warning: "All recipients have already accepted — nothing to resend.",
+    };
+  }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com";
   const warnings: string[] = [];
@@ -212,15 +285,20 @@ export async function sendMigrationInvite(
     }
   }
 
-  if (emailsSent > 0) {
-    // Stamp invited (ETL keeps syncing until 'migrated'; 'invited' is just status).
+  // Stamp invited — but NEVER regress an already-migrated dealer back to
+  // 'invited' (that re-arms the /not-migrated gate and would lock out its
+  // real users). Account-only resends on migrated dealers leave status alone.
+  if (emailsSent > 0 && dealer.migration_status !== "migrated") {
     await admin
       .from("dealers")
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .update({ migration_status: "invited", invited_at: new Date().toISOString() } as any)
       .eq("id", dealer.id);
   }
-  await burnStaleRecipientCodes(admin, dealer.id, recipients.map(r => r.email));
+  // Burn keys off the FULL resolved set (pending + completed): completion must
+  // never burn someone's still-pending code — only genuinely removed
+  // recipients (e.g. deactivated admins) lose theirs.
+  await burnStaleRecipientCodes(admin, dealer.id, resolved.map(r => r.email));
 
   return {
     ok: true,
@@ -228,6 +306,8 @@ export async function sendMigrationInvite(
     email: recipients.map(r => r.email).join(", "),
     emailSent: emailsSent > 0,
     recipients: recipients.map(r => r.email),
+    skipped,
+    allCompleted: false,
     emailsSent,
     warning: warnings.length ? warnings.join(" · ") : undefined,
   };
@@ -261,17 +341,11 @@ export async function sendMigrationFollowUp(
   const all = await resolveMigrationRecipients(admin, dealer);
   if (all.length === 0) return { ok: false, email: null, emailSent: false, warning: `No contact email for "${dealer.name}"` };
 
-  // Skip recipients who already completed their invitation (accepted rows) —
-  // pre-migration this is rare, but a completed recipient must not be nagged.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: acceptedRows } = await (admin as any)
-    .from("invitations")
-    .select("email")
-    .eq("dealer_id", dealer.id)
-    .eq("purpose", "migration")
-    .not("accepted_at", "is", null) as { data: { email: string }[] | null };
-  const accepted = new Set((acceptedRows ?? []).map(r => r.email.toLowerCase()));
-  const recipients = all.filter(r => !accepted.has(r.email));
+  // Skip recipients who already completed (SAME shared predicate as the
+  // initial send + manual Resend: accepted invitation OR real sign-in) — a
+  // completed recipient must never be nagged.
+  const done = await completedRecipientEmails(admin, dealer.id, all.map(r => r.email));
+  const recipients = all.filter(r => !done.has(r.email));
   if (recipients.length === 0) return { ok: false, email: null, emailSent: false, warning: `All recipients for "${dealer.name}" already completed their invites` };
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com";
