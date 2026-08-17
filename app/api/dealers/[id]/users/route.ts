@@ -127,7 +127,13 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
     .gt("expires_at", new Date().toISOString())
     .eq("dealer_id", dealerRow.id)
     .order("created_at", { ascending: false });
+  // Dedupe by email: an ACTIVE profile on this dealer wins over a lingering
+  // pending row (e.g. a user created by other means before accepting).
+  const activeEmailSet = new Set(
+    enriched.filter(r => r.active !== false).map(r => (r.email ?? "").toLowerCase()),
+  );
   const pendingRows = ((pending ?? []) as Array<Record<string, unknown>>)
+    .filter(p => !activeEmailSet.has(String(p.email ?? "").toLowerCase()))
     .map(p => ({ ...p, source: "dealer" as const }));
 
   // Pending GROUP invitations that would grant access to this dealer: a

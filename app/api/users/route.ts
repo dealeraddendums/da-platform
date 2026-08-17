@@ -148,7 +148,41 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    return NextResponse.json({ users, total: count ?? 0 });
+    // Pending invitations for this dealer (same treatment the admin
+    // DealerUsersTab has had since 2026-06-05 — the dealer's OWN Users page
+    // was missing it, so operators couldn't see who they'd invited).
+    // Unexpired + unaccepted only (matches the admin tab: expired rows are
+    // omitted; Resend mints a fresh one). Deduped by lowercased email against
+    // ACTIVE profiles on this dealer — active wins, no pending+active pairs.
+    // Appended on the last page like the group-scoped section above.
+    let pendingInvitations: Array<Record<string, unknown>> = [];
+    let dealerUuid: string | null = null;
+    if (isLastPage) {
+      const { data: dlr } = await admin
+        .from("dealers").select("id").eq("dealer_id", dealer_id)
+        .maybeSingle<{ id: string }>();
+      dealerUuid = dlr?.id ?? null;
+      if (dealerUuid) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let iq = (admin as any)
+          .from("invitations")
+          .select("id, email, first_name, last_name, role, created_at, expires_at")
+          .eq("dealer_id", dealerUuid)
+          .is("accepted_at", null)
+          .gt("expires_at", new Date().toISOString())
+          .order("created_at", { ascending: false });
+        if (search) iq = iq.or(`email.ilike.%${search}%,first_name.ilike.%${search}%,last_name.ilike.%${search}%`);
+        const { data: pend } = await iq as { data: Array<{ email: string; role: string | null }> | null };
+        const { data: activeProfiles } = await admin
+          .from("profiles").select("email").eq("dealer_id", dealer_id).eq("active", true);
+        const activeEmails = new Set((activeProfiles ?? []).map(p => (p.email ?? "").toLowerCase()));
+        pendingInvitations = ((pend ?? []) as Array<Record<string, unknown>>)
+          .filter(p => !activeEmails.has(String(p.email ?? "").toLowerCase()))
+          .filter(p => !roleFilter || p.role === roleFilter);
+      }
+    }
+
+    return NextResponse.json({ users, total: count ?? 0, pendingInvitations, dealerUuid });
   }
 
   // ── group_admin in group context: scoped to group dealers + group users ──────

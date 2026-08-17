@@ -810,6 +810,11 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
   const activeTab = superAdminTab === "staff" ? "staff" : "users";
   const [users, setUsers]               = useState<UserRow[]>([]);
   const [total, setTotal]               = useState(0);
+  // Pending (unaccepted, unexpired) invitations for the dealer context —
+  // returned by GET /api/users in dealer-scoped mode, deduped server-side
+  // against active profiles. dealerUuid drives the resend/revoke endpoints.
+  const [pendingInvites, setPendingInvites] = useState<Array<{ id: string; email: string; first_name: string | null; last_name: string | null; role: string | null; created_at: string; expires_at: string }>>([]);
+  const [dealerUuid, setDealerUuid]     = useState<string | null>(null);
   const [loading, setLoading]           = useState(true);
   const [search, setSearch]             = useState("");
   const [searchInput, setSearchInput]   = useState("");
@@ -849,9 +854,11 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
     try {
       const res = await fetch(`/api/users?${params.toString()}`);
       if (res.ok) {
-        const data = await res.json() as { users: UserRow[]; total: number };
+        const data = await res.json() as { users: UserRow[]; total: number; pendingInvitations?: Array<{ id: string; email: string; first_name: string | null; last_name: string | null; role: string | null; created_at: string; expires_at: string }>; dealerUuid?: string | null };
         setUsers(data.users ?? []);
         setTotal(data.total ?? 0);
+        setPendingInvites(data.pendingInvitations ?? []);
+        setDealerUuid(data.dealerUuid ?? null);
       }
     } finally { setLoading(false); }
   }, [page, search, effectiveRoleFilter]);
@@ -974,9 +981,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
         subtitle={
           activeTab === "staff"
             ? `${staff.length} staff member${staff.length !== 1 ? "s" : ""}`
-            : dealerMode || groupMode
-              ? `${total.toLocaleString()} user${total !== 1 ? "s" : ""}`
-              : `${total.toLocaleString()} user${total !== 1 ? "s" : ""}`
+            : `${total.toLocaleString()} user${total !== 1 ? "s" : ""}${pendingInvites.length > 0 ? ` · ${pendingInvites.length} invited` : ""}`
         }
         action={
           activeTab === "users" ? (
@@ -1246,6 +1251,63 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
           </tbody>
         </table>
       </div>
+
+      {/* Pending Invitations — dealer context only (same treatment as the
+          admin DealerUsersTab). Rows appear the moment an invite is sent
+          (handleSuccess → fetchUsers) and disappear on accept/revoke/expiry. */}
+      {dealerMode && pendingInvites.length > 0 && dealerUuid && (
+        <div className="card mt-6" style={{ overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+            Pending Invitations ({pendingInvites.length})
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <tbody>
+              {pendingInvites.map(inv => (
+                <tr key={inv.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={{ padding: "10px 16px", color: "var(--text-primary)" }}>
+                    {[inv.first_name, inv.last_name].filter(Boolean).join(" ") || "—"}
+                  </td>
+                  <td style={{ padding: "10px 16px", color: "var(--text-secondary)" }}>{inv.email}</td>
+                  <td style={{ padding: "10px 16px", color: "var(--text-secondary)" }}>{roleLabel(inv.role ?? "dealer_user")}</td>
+                  <td style={{ padding: "10px 16px" }}>
+                    <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: "#fff8e1", color: "#b26a00", border: "1px solid #ffe082" }}>
+                      Invited
+                    </span>
+                  </td>
+                  <td style={{ padding: "10px 16px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                    Invited {formatDate(inv.created_at)}
+                  </td>
+                  <td style={{ padding: "10px 16px", textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ marginRight: 8 }}
+                      onClick={() => void (async () => {
+                        const res = await fetch(`/api/dealers/${dealerUuid}/invitations/${inv.id}`, { method: "POST" });
+                        const j = await res.json().catch(() => ({})) as { emailSent?: boolean; warning?: string; error?: string };
+                        if (res.ok) showToast(j.emailSent === false ? (j.warning ?? `Could not re-send to ${inv.email}.`) : `Invitation re-sent to ${inv.email}.`, j.emailSent !== false);
+                        else showToast(j.error ?? "Resend failed.", false);
+                      })()}
+                    >
+                      Resend
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => void (async () => {
+                        if (!confirm(`Revoke the invitation to ${inv.email}?`)) return;
+                        const res = await fetch(`/api/dealers/${dealerUuid}/invitations/${inv.id}`, { method: "DELETE" });
+                        if (res.ok) { showToast(`Invitation to ${inv.email} revoked.`); void fetchUsers(); }
+                        else showToast("Revoke failed.", false);
+                      })()}
+                    >
+                      Revoke
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Pagination */}
       {totalPages > 1 && (

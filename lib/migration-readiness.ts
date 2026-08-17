@@ -49,6 +49,9 @@ export interface ReadinessDealer {
   invited_at: string | null;
   /** Manual Aurora sync stamp (migration 130) — set by POST /api/migration/sync. */
   last_synced_at?: string | null;
+  /** Operator attestation "da-billing verified correct" (migration 145).
+   *  undefined = column not applied yet → fall back to the auto-detected check. */
+  billing_verified?: boolean | null;
   /** Deliberate Aurora-sync freeze — 5.0 config is hand-managed. */
   etl_locked?: boolean | null;
   // core ETL fields used by the etl-complete check
