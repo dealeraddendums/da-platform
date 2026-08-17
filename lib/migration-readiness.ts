@@ -75,11 +75,21 @@ export interface ReadinessRow {
   groupName: string | null;
   state: string | null;
   // ── HARD gates (these three determine `ready`) ──────────────────────────
+  /** THE billing gate. Since migration 145 this is the OPERATOR CHECKBOX
+   *  (dealers.billing_verified), not the auto-detected staging check — the
+   *  invite now fires the billing cutover, so a human attests first. Falls
+   *  back to the auto-check only while the column is missing. Name kept so
+   *  every downstream gate (ready, wave-send, migrate-group) inherits. */
   billingStaged: boolean;
-  billingReason: string;       // human note: staged / missing / active / past-date / no-customer / n-a trial
-  /** False for Trial-track dealers — nothing to bill until they upgrade, so
-   *  billing staging can't gate them. UI shows "—" instead of a check. */
+  billingReason: string;       // hover text: operator state + the auto-check detail
+  /** False for Trial-track dealers — nothing to bill until they upgrade — and
+   *  for 5.0-native dealers (no 4.0 billing to cut over). UI shows "—". */
   billingApplicable: boolean;
+  /** The raw operator checkbox value (false when the column is missing). */
+  billingVerified: boolean;
+  /** The pre-145 auto-detected staging state, kept as the hover hint. */
+  billingAutoStaged: boolean;
+  billingAutoReason: string;
   templateConfirmed: boolean;
   eligible: boolean;
   eligibleReason: string;      // why not eligible (white-glove group / complex / migrated / test)
@@ -184,36 +194,55 @@ export function computeReadiness(
   if (logoMissing) warnings.push('no logo');
   if (zeroInventory) warnings.push('no synced products');
 
-  // ── Billing template staged ───────────────────────────────────────────────
+  // ── Billing gate ─────────────────────────────────────────────────────────
   // Trial-track dealers (account_type 'Trial' / 'Trial Expired' / null) have
-  // nothing to bill until they upgrade to Paid — da-billing staging is N/A and
-  // must never gate their migration. canPrint handles Trial vs Paid on its own.
-  const billingApplicable = !isTrialTrackAccount(d.account_type);
-  // Group-billed dealers stage on the GROUP's customer; else their own.
+  // nothing to bill until they upgrade to Paid, and 5.0-native dealers have no
+  // 4.0 billing to cut over — the gate is N/A for both and must never block
+  // them. canPrint handles Trial vs Paid on its own.
+  const billingApplicable = !isTrialTrackAccount(d.account_type) && d.is_native !== true;
+  // Auto-detected staging state (the pre-migration-145 gate) — computed for
+  // the hover hint. Group-billed dealers stage on the GROUP's customer.
   const billedToGroup = d.subscription_billed_to === 'group';
   const customerId = billedToGroup ? ctx.groupBillingCustomerId : d.billing_customer_id;
-  let billingStaged = false;
-  let billingReason: string;
-  if (!billingApplicable) {
-    billingStaged = true;
-    billingReason = 'n/a — trial account (no billing until upgrade)';
-  } else if (!customerId) {
-    billingReason = billedToGroup ? 'no group billing customer' : 'no billing customer';
+  let billingAutoStaged = false;
+  let billingAutoReason: string;
+  if (!customerId) {
+    billingAutoReason = billedToGroup ? 'no group billing customer' : 'no billing customer';
   } else {
     const tmpl = ctx.billingByCustomer.get(customerId);
     if (!tmpl) {
-      billingReason = 'no template';
+      billingAutoReason = 'no template';
     } else {
-      // Billing is "staged" for migration when the da-billing customer is in
-      // Setup Mode (billingState==='setup', introduced 2026-06-27) — or, for the
-      // legacy paused-template model, when the template is inactive. Live billing
-      // (billingState==='active', the default when the field is absent) is NOT
-      // staged and must not be invite-ready.
+      // "Staged" = customer in Setup Mode (billingState==='setup', 2026-06-27)
+      // or, legacy paused-template model, template inactive — with a FUTURE
+      // nextInvoiceDate. Live billing also reads as sensible here (already cut
+      // over), so the auto state is a hint, not the gate.
       const isSetupMode = tmpl.active === false || tmpl.billingState === 'setup';
-      if (!isSetupMode) billingReason = 'billing not in setup mode (go live not set, or not in da-billing yet)';
-      else if (!isFutureDate(tmpl.nextInvoiceDate, ctx.now)) billingReason = 'nextInvoiceDate not in future';
-      else { billingStaged = true; billingReason = 'staged'; }
+      if (!isSetupMode) billingAutoReason = 'billing already live (or not in setup mode)';
+      else if (!isFutureDate(tmpl.nextInvoiceDate, ctx.now)) billingAutoReason = 'staged but nextInvoiceDate not in future';
+      else { billingAutoStaged = true; billingAutoReason = 'staged (setup mode, future nextInvoiceDate)'; }
     }
+  }
+  // THE gate (migration 145): the operator checkbox. While the column is
+  // missing (undefined), fall back to the auto check so a code deploy ahead of
+  // the SQL doesn't flip the fleet to not-ready.
+  const billingVerified = d.billing_verified === true;
+  const verifiedColumnPresent = d.billing_verified !== undefined;
+  let billingStaged: boolean;
+  let billingReason: string;
+  if (!billingApplicable) {
+    billingStaged = true;
+    billingReason = d.is_native === true
+      ? 'n/a — created on 5.0 (no billing cutover)'
+      : 'n/a — trial account (no billing until upgrade)';
+  } else if (!verifiedColumnPresent) {
+    billingStaged = billingAutoStaged;
+    billingReason = `${billingAutoReason} (billing_verified column missing — apply migration 145)`;
+  } else {
+    billingStaged = billingVerified;
+    billingReason = billingVerified
+      ? `operator-verified · auto-check: ${billingAutoReason}`
+      : `not verified by operator · auto-check: ${billingAutoReason}`;
   }
 
   // ── Eligible ───────────────────────────────────────────────────────────────
@@ -253,7 +282,8 @@ export function computeReadiness(
 
   return {
     id: d.id, dealer_id: d.dealer_id, name: d.name, groupId: d.group_id ?? null, groupName: ctx.groupName, state: d.state,
-    billingStaged, billingReason, billingApplicable, templateConfirmed, eligible, eligibleReason, synced, etlLocked, ready,
+    billingStaged, billingReason, billingApplicable, billingVerified, billingAutoStaged, billingAutoReason,
+    templateConfirmed, eligible, eligibleReason, synced, etlLocked, ready,
     settingsMissing, logoMissing, zeroInventory, warnings,
     inviteStatus, invitedAt: d.invited_at ?? null, waveId: ctx.invitation?.wave_id ?? null,
     inviteRecipients: ctx.inviteRecipients ?? [],

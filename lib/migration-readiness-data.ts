@@ -37,6 +37,8 @@ const DEALER_COLS_WITH_FLAGS = DEALER_COLS + ", migration_complex, template_conf
 export interface ReadinessResult {
   rows: ReadinessRow[];
   flagsColumnPresent: boolean;
+  /** false until migration 145 is applied — console disables the Billing checkbox. */
+  billingVerifiedColumnPresent?: boolean;
   billingTemplatesLoaded: number;
 }
 
@@ -120,12 +122,25 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
     as.forEach((d) => { if (d.migration_assigned_to) assignedBy.set(d.id, d.migration_assigned_to); });
   } catch { /* migration 105 not applied yet — all unassigned */ }
 
+  // Billing-verified operator checkbox (migration 145) — separate fetch so a
+  // missing column degrades to the auto-detected gate inside computeReadiness
+  // (billing_verified: undefined) instead of breaking the console.
+  let billingVerifiedColumnPresent = true;
+  const billingVerifiedById = new Map<string, boolean>();
+  try {
+    const bv = await fetchAll<{ id: string; billing_verified: boolean | null }>(admin, "dealers", "id, billing_verified", baseFilter);
+    bv.forEach((d) => billingVerifiedById.set(d.id, d.billing_verified === true));
+  } catch { billingVerifiedColumnPresent = false; }
+
   const billingByCustomer = await listBillingTemplatesByCustomer();
 
   const now = Date.now();
   const rows = dealers.map((d) => {
     const group = d.group_id ? groupById.get(d.group_id) : undefined;
-    return computeReadiness(d, {
+    return computeReadiness({
+      ...d,
+      billing_verified: billingVerifiedColumnPresent ? (billingVerifiedById.get(d.id) ?? false) : undefined,
+    }, {
       groupName: group?.name ?? null,
       groupBillingCustomerId: group?.billing_customer_id ?? null,
       groupEtlLocked: group?.etl_locked === true,
@@ -142,5 +157,5 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
   });
   rows.sort((a, b) => Number(b.ready) - Number(a.ready) || a.name.localeCompare(b.name));
 
-  return { rows, flagsColumnPresent, billingTemplatesLoaded: billingByCustomer.size };
+  return { rows, flagsColumnPresent, billingVerifiedColumnPresent, billingTemplatesLoaded: billingByCustomer.size };
 }

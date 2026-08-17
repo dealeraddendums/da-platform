@@ -54,12 +54,22 @@ export async function migrateDealerRecord(
     account_type: plan,
     converted_at: opts.nowIso,
     downgraded_at: null,
-    billing_cutover_at: opts.nowIso,
     ...(opts.extraPatch ?? {}),
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (admin as any).from("dealers").update(patch).eq("id", dealer.id);
   if (error) return { ok: false, error: error.message, plan };
+
+  // billing_cutover_at: stamp only if not already stamped — since 2026-08-17
+  // the cutover fires at INVITE for self-billed dealers, and the invite-time
+  // stamp must survive the later migrate-confirm (idempotent marker).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: cutErr } = await (admin as any)
+    .from("dealers")
+    .update({ billing_cutover_at: opts.nowIso })
+    .eq("id", dealer.id)
+    .is("billing_cutover_at", null);
+  if (cutErr) console.error("[migrate-dealer] billing_cutover_at stamp failed:", cutErr.message);
 
   // Box folder — ETL-created legacy dealers never got one; non-fatal.
   if (boxConfigured() && !dealer.box_folder_id) {

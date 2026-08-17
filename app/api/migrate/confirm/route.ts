@@ -69,9 +69,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, group_id, subscription_billed_to, billing_customer_id, account_type, migration_status, inventory_provider, inventory_provider_is_dms, box_folder_id")
+    .select("id, dealer_id, name, group_id, subscription_billed_to, billing_customer_id, account_type, migration_status, inventory_provider, inventory_provider_is_dms, box_folder_id, freshbooks_stopped_at")
     .eq("id", inv.dealer_id!)
-    .maybeSingle<{ id: string; dealer_id: string; name: string; group_id: string | null; subscription_billed_to: string | null; billing_customer_id: string | null; account_type: string | null; migration_status: string | null; inventory_provider: string | null; inventory_provider_is_dms: boolean | null; box_folder_id: string | null }>();
+    .maybeSingle<{ id: string; dealer_id: string; name: string; group_id: string | null; subscription_billed_to: string | null; billing_customer_id: string | null; account_type: string | null; migration_status: string | null; inventory_provider: string | null; inventory_provider_is_dms: boolean | null; box_folder_id: string | null; freshbooks_stopped_at: string | null }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
 
   // Multi-recipient invites: the FIRST acceptor migrates the dealer; every
@@ -145,9 +145,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     customerId = g?.billing_customer_id ?? null;
   }
   if (billingConfigured() && customerId) {
-    if (AUTO_ACTIVATE) {
+    // Invite-time cutover reconciliation (2026-08-17): a self-billed dealer's
+    // template usually went live when its migration invite was sent. An
+    // already-active template must be a NO-OP here — no re-activation, no
+    // nextInvoiceDate rewrite, no review queue (no double-fire, no catch-up).
+    let alreadyActive = false;
+    let tmpl: Awaited<ReturnType<typeof getTemplate>> = null;
+    try {
+      tmpl = await getTemplate(customerId);
+      alreadyActive = tmpl?.active === true;
+    } catch { /* fall through to the normal branches */ }
+    if (alreadyActive) {
+      billingState = "activated";
+      billingDetail = `template already live (billing cutover happened at invite) — nextInvoiceDate=${tmpl?.nextInvoiceDate ?? "unchanged"}`;
+    } else if (AUTO_ACTIVATE) {
       try {
-        const tmpl = await getTemplate(customerId);
         const next = futureNextInvoice(tmpl?.nextInvoiceDate, Date.now());
         await activateTemplate(customerId, next);
         billingState = "activated"; billingDetail = `active=true, nextInvoiceDate=${next}`;
@@ -165,13 +177,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ── 6. HubSpot lifecycle + conversion webhook fired inside migrateDealerRecord.
 
-  // ── 7. FreshBooks recurring-stop — ALWAYS operator-queued, never auto-run ───
-  // (OAuth refresh token rotates on every use; a careful manual stop avoids the
-  // dry-run-then-live token burn. Existing FreshBooks invoices stay DUE.)
-  void alert(
-    `⚠️ Queue FreshBooks recurring-stop — ${dealer.name}`,
-    `<p><strong>${dealer.name}</strong> (${dealer.dealer_id}) just self-migrated. <strong>Operator action:</strong> stop their FreshBooks recurring profile (manually — do not dry-run-then-live). Leave existing FreshBooks invoices due.</p>`,
-  );
+  // ── 7. FreshBooks recurring-stop ─────────────────────────────────────────
+  // Since 2026-08-17 the recurring pause fires automatically at INVITE for
+  // self-billed dealers (freshbooks_stopped_at stamped on confirmed pause) —
+  // only queue the manual operator task when that hasn't happened.
+  const fbAlreadyStopped = !!dealer.freshbooks_stopped_at;
+  if (!fbAlreadyStopped) {
+    void alert(
+      `⚠️ Queue FreshBooks recurring-stop — ${dealer.name}`,
+      `<p><strong>${dealer.name}</strong> (${dealer.dealer_id}) just self-migrated. <strong>Operator action:</strong> stop their FreshBooks recurring profile (manually — do not dry-run-then-live). Leave existing FreshBooks invoices due.</p>`,
+    );
+  }
 
   // ── 8. Consume the invite + log + summary alert ─────────────────────────────
   await a.from("invitations").update({ accepted_at: nowIso, setup_code_hash: null }).eq("id", inv.id);
@@ -181,7 +197,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   console.log(`[migrate/confirm] MIGRATED dealer=${dealer.dealer_id} (${dealer.name}) uuid=${dealer.id} plan=${paidType} billing=${billingState} (${billingDetail}) group_billed=${groupBilled} user=${userId}`);
   void alert(
     `✅ Self-migration complete — ${dealer.name}`,
-    `<p><strong>${dealer.name}</strong> (${dealer.dealer_id}) migrated to 5.0.<br>Plan: ${paidType}<br>Billing: <strong>${billingState}</strong> — ${billingDetail}<br>FreshBooks recurring-stop: <strong>queued for operator</strong>.</p>`,
+    `<p><strong>${dealer.name}</strong> (${dealer.dealer_id}) migrated to 5.0.<br>Plan: ${paidType}<br>Billing: <strong>${billingState}</strong> — ${billingDetail}<br>FreshBooks recurring-stop: <strong>${fbAlreadyStopped ? "already handled (paused at invite)" : "queued for operator"}</strong>.</p>`,
   );
 
   return NextResponse.json({

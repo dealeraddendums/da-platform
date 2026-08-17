@@ -12,6 +12,10 @@ interface Row {
   billingStaged: boolean;
   billingReason: string;
   billingApplicable?: boolean;
+  /** Operator "DA-Billing verified" checkbox (migration 145) — THE billing gate. */
+  billingVerified?: boolean;
+  billingAutoStaged?: boolean;
+  billingAutoReason?: string;
   templateConfirmed: boolean;
   eligible: boolean;
   eligibleReason: string;
@@ -58,7 +62,7 @@ function enrichmentAlertLines(rep: EnrichmentReport): string[] {
 interface Wave { waveId: string; sentAt: string | null; sent: number; migrated: number; pending: number; }
 interface Operator { id: string; name: string; }
 interface Summary { total: number; ready: number; eligible: number; billingStaged: number; templateConfirmed: number; readyPool: number; settingsMissing: number; logoMissing: number; zeroInventory: number; freshbooksStopPending: number; unassigned: number; }
-interface ApiResp { rows: Row[]; summary: Summary; operators: Operator[]; currentUserId: string; flagsColumnPresent: boolean; billingTemplatesLoaded: number; note: string; }
+interface ApiResp { rows: Row[]; summary: Summary; operators: Operator[]; currentUserId: string; flagsColumnPresent: boolean; billingVerifiedColumnPresent?: boolean; billingTemplatesLoaded: number; note: string; }
 // Billing Pending tab rows — migrated dealers whose da-billing template is still
 // paused. Fetched from /api/migration/billing-pending (NOT derived from readiness
 // rows, which exclude migrated dealers — that's why the tab was always empty).
@@ -102,7 +106,7 @@ export default function MigrationConsole() {
   const CAP = 100;
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
-  const [waveResult, setWaveResult] = useState<{ summary: { requested: number; sent: number; failed: number; blocked: number }; failed: { name: string; error: string }[]; blocked: { name: string; reason: string }[] } | null>(null);
+  const [waveResult, setWaveResult] = useState<{ summary: { requested: number; sent: number; failed: number; blocked: number }; sent?: { name: string; cutover?: string }[]; failed: { name: string; error: string }[]; blocked: { name: string; reason: string }[] } | null>(null);
 
   // filters
   const [readyOnly, setReadyOnly] = useState(false);
@@ -364,6 +368,34 @@ export default function MigrationConsole() {
     } catch { alert("Claim group failed"); } finally { setClaimingGroup(null); }
   }
 
+  // Operator "DA-Billing verified" attestation (migration 145) — THE billing
+  // readiness gate. Ticking it is what allows the invite, and the invite fires
+  // the billing cutover for self-billed dealers.
+  const toggleBillingVerified = async (row: Row) => {
+    if (!data?.billingVerifiedColumnPresent) return;
+    setSavingId(row.id);
+    const next = !row.billingVerified;
+    try {
+      const res = await fetch("/api/migration/billing-verified", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dealerId: row.id, verified: next }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Save failed");
+      setData((d) => d && {
+        ...d,
+        rows: d.rows.map((r) => r.id === row.id
+          ? { ...r, billingVerified: next, billingStaged: r.billingApplicable === false ? true : next, ready: r.synced && (r.billingApplicable === false ? true : next) && r.templateConfirmed && r.eligible }
+          : r),
+      });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   const toggleConfirmed = async (row: Row) => {
     if (!data?.flagsColumnPresent) return;
     setSavingId(row.id);
@@ -493,13 +525,13 @@ export default function MigrationConsole() {
     const ids = (data?.rows ?? []).filter((r) => selected.has(r.id) && r.ready).map((r) => r.id);
     if (ids.length === 0) { alert("No Ready dealers selected."); return; }
     if (ids.length > CAP) { alert(`${ids.length} ready selected — over the cap of ${CAP}. Deselect some.`); return; }
-    if (!confirm(`Send migration invites to ${ids.length} dealer${ids.length === 1 ? "" : "s"}? Each gets a one-time code to self-migrate. This does NOT change their billing.`)) return;
+    if (!confirm(`Send migration invites to ${ids.length} dealer${ids.length === 1 ? "" : "s"}? Each gets a one-time code to self-migrate.\n\n⚠️ SELF-BILLED dealers' billing cuts over NOW: da-billing goes live and their FreshBooks recurring profile is paused. Group-billed dealers' billing is untouched until "Migrate group".`)) return;
     setSending(true); setWaveResult(null);
     try {
       const res = await fetch("/api/migration/send-wave", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealerIds: ids }) });
       const j = await res.json();
       if (!res.ok) { alert(j.error ?? "Wave failed"); return; }
-      setWaveResult({ summary: j.summary, failed: j.failed ?? [], blocked: j.blocked ?? [] });
+      setWaveResult({ summary: j.summary, sent: j.sent ?? [], failed: j.failed ?? [], blocked: j.blocked ?? [] });
       setSelected(new Set());
       await load(); // refresh
     } catch (e) { alert(e instanceof Error ? e.message : "Wave failed"); } finally { setSending(false); }
@@ -540,7 +572,16 @@ export default function MigrationConsole() {
       <td style={{ ...td, textAlign: "center" }}>
         {r.billingApplicable === false
           ? <span title={r.billingReason} style={{ color: "#78828c", fontWeight: 700 }}>—</span>
-          : <Check ok={r.billingStaged} title={r.billingReason} />}
+          : <input
+              type="checkbox"
+              checked={r.billingVerified === true}
+              disabled={!data.billingVerifiedColumnPresent || savingId === r.id}
+              onChange={() => void toggleBillingVerified(r)}
+              title={data.billingVerifiedColumnPresent
+                ? `Operator: DA-Billing verified correct for this dealer — required before inviting (the invite starts 5.0 billing + pauses FreshBooks). ${r.billingReason}`
+                : "Apply migration 145 to enable"}
+              style={{ cursor: data.billingVerifiedColumnPresent ? "pointer" : "not-allowed" }}
+            />}
       </td>
       <td style={{ ...td, textAlign: "center" }}>
         <input
@@ -729,7 +770,7 @@ export default function MigrationConsole() {
         <div style={cardStyle}><div style={{ ...num, color: "#1976d2" }}>{s.readyPool}</div><div style={lbl}>One toggle from ready<br /><span style={{ fontSize: 10 }}>billing ∩ eligible</span></div></div>
         <div style={cardStyle}><div style={num}>{s.total}</div><div style={lbl}>Un-migrated dealers</div></div>
         <div style={cardStyle}><div style={num}>{s.eligible}</div><div style={lbl}>Eligible</div></div>
-        <div style={cardStyle}><div style={num}>{s.billingStaged}</div><div style={lbl}>Billing staged</div></div>
+        <div style={cardStyle}><div style={num}>{s.billingStaged}</div><div style={lbl}>Billing verified</div></div>
         <div style={cardStyle}><div style={num}>{s.templateConfirmed}</div><div style={lbl}>Template confirmed</div></div>
         <div style={cardStyle}><div style={{ ...num, color: "#1565c0" }}>{s.invited}</div><div style={lbl}>Invited (pending)</div></div>
         <div style={cardStyle}><div style={{ ...num, color: "#b06a00" }}>{s.stalled}</div><div style={lbl}>Stalled / expired</div></div>
@@ -847,6 +888,15 @@ export default function MigrationConsole() {
       {waveResult && (
         <div style={{ background: "#f1faf2", border: "1px solid #cfe8d2", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#2e7d32" }}>
           Wave sent — <strong>{waveResult.summary.sent}</strong> invited{waveResult.summary.failed ? `, ${waveResult.summary.failed} failed` : ""}{waveResult.summary.blocked ? `, ${waveResult.summary.blocked} blocked (not ready)` : ""}.
+          {(waveResult.sent ?? []).filter((s2) => s2.cutover).length > 0 && (
+            <div style={{ marginTop: 4 }}>
+              {(waveResult.sent ?? []).filter((s2) => s2.cutover).map((s2) => (
+                <div key={s2.name} style={{ fontSize: 12, color: s2.cutover?.includes("✗") || s2.cutover?.includes("⚠") ? "#b06a00" : "#2e7d32" }}>
+                  {s2.name} — billing: {s2.cutover}
+                </div>
+              ))}
+            </div>
+          )}
           {waveResult.failed.length > 0 && <div style={{ color: "#c62828", marginTop: 4 }}>Failed: {waveResult.failed.map((f) => `${f.name} (${f.error})`).join("; ")}</div>}
           {waveResult.blocked.length > 0 && <div style={{ color: "#b06a00", marginTop: 4 }}>Blocked: {waveResult.blocked.map((b) => `${b.name} (${b.reason})`).join("; ")}</div>}
         </div>

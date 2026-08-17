@@ -15,7 +15,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireSuperAdmin();
   if (error) return error;
 
-  const { rows, flagsColumnPresent, billingTemplatesLoaded } = await loadReadinessRows();
+  const { rows, flagsColumnPresent, billingVerifiedColumnPresent, billingTemplatesLoaded } = await loadReadinessRows();
 
   // Operators (the team that divides the tail) = ACTIVE super_admin profiles,
   // for the "Assigned to" column/filter + the assign dropdown. active=false
@@ -45,7 +45,8 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     operators,
     currentUserId: claims.sub,
     flagsColumnPresent,
+    billingVerifiedColumnPresent,
     billingTemplatesLoaded,
-    note: "Ready = synced + billing-template-staged + template-confirmed + eligible (HARD gates). Synced = the dealer's Platform 4.0 data (products, logo, settings) was pulled via the Sync action — the nightly ETL no longer refreshes config, so sync before inviting. 🔒 ETL-locked dealers (own flag or group's) COUNT AS SYNCED: their 5.0 config is hand-managed truth and Aurora sync is deliberately disabled. Settings/logo/inventory are WARNINGS only. Eligible excludes white-glove groups, flagged-complex, and dealers with no self-serve contact (operator/group-managed). GROUP flow: Sync group → verify billing + templates → Invite admins… → (admin signs in) → Migrate group… → manual FreshBooks stop. Group migration does NOT require self-serve eligibility — group-managed dealers migrate via Migrate group.",
+    note: "Ready = synced + billing-VERIFIED (operator checkbox, migration 145) + template-confirmed + eligible (HARD gates). The Billing checkbox is an operator attestation that da-billing is correct — required before inviting, because a self-billed dealer's FIRST invite now fires the billing cutover (da-billing go-live + FreshBooks recurring pause). Synced = the dealer's Platform 4.0 data (products, logo, settings) was pulled via the Sync action — the nightly ETL no longer refreshes config, so sync before inviting. 🔒 ETL-locked dealers (own flag or group's) COUNT AS SYNCED: their 5.0 config is hand-managed truth and Aurora sync is deliberately disabled. Settings/logo/inventory are WARNINGS only. Eligible excludes white-glove groups, flagged-complex, and dealers with no self-serve contact (operator/group-managed). GROUP flow: Sync group → verify billing + templates → Invite admins… → (admin signs in) → Migrate group… → manual FreshBooks stop. Group migration does NOT require self-serve eligibility — group-managed dealers migrate via Migrate group.",
   });
 }

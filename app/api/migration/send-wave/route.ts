@@ -15,9 +15,13 @@ const DEFAULT_CAP = 100; // weekly wave cap (spec: ~100/week)
  *
  * Fires the 13a scanner-proof OTP migration invite to each selected dealer. Hard
  * guards: refuses if the wave exceeds the cap, and RE-VALIDATES readiness
- * server-side (billing-staged + template-confirmed + eligible) — any not-ready
- * dealer is BLOCKED, not invited. Inviting changes NOTHING on the dealer's
- * billing (da-billing activation happens on the dealer's own /migrate confirm).
+ * server-side (billing-VERIFIED checkbox + template-confirmed + eligible) — any
+ * not-ready dealer is BLOCKED, not invited.
+ *
+ * ⚠️ Since 2026-08-17 a successful FIRST invite to a SELF-BILLED dealer fires
+ * the billing cutover (da-billing go-live + FreshBooks recurring pause) inside
+ * sendMigrationInvite — gated on the operator's billing_verified checkbox.
+ * Group-billed dealers still cut over only at "Migrate group".
  * Logs the wave + alerts the team.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -59,7 +63,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const waveId = "wave-" + new Date().toISOString();
-  const sent: { id: string; name: string; email: string | null }[] = [];
+  const sent: { id: string; name: string; email: string | null; cutover?: string }[] = [];
   const failed: { id: string; name: string; error: string }[] = [];
   for (const id of ready) {
     const r = byId.get(id)!;
@@ -67,7 +71,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!invId) { failed.push({ id, name: r.name, error: "no inventory_dealer_id" }); continue; }
     try {
       const res = await sendMigrationInvite(invId, claims.sub, waveId);
-      if (res.emailSent) sent.push({ id, name: r.name, email: res.email });
+      const cutover = res.cutover
+        ? `da-billing ${res.cutover.billingOk ? "✓" : "✗"} ${res.cutover.billing} · FreshBooks ${res.cutover.freshbooksOk ? "✓" : "⚠ pending"} ${res.cutover.freshbooks}`
+        : res.cutoverNote;
+      if (res.emailSent) sent.push({ id, name: r.name, email: res.email, cutover });
       else failed.push({ id, name: r.name, error: res.warning ?? "email not sent" });
     } catch (e) {
       failed.push({ id, name: r.name, error: e instanceof Error ? e.message : String(e) });
@@ -81,7 +88,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     subject: `Migration wave sent — ${sent.length} invite(s)`,
     from_email: "noreply@dealeraddendums.com", from_name: "DealerAddendums",
     to: [{ email: "support@dealeraddendums.com", name: "DA Support" }],
-    html: `<p>A migration wave was sent.</p><p>Requested: ${summary.requested} · <strong>Sent: ${summary.sent}</strong> · Failed: ${summary.failed} · Blocked (not ready): ${summary.blocked}</p>${sent.length ? `<p>Invited:<br>${sent.map((s) => `${s.name} — ${s.email}`).join("<br>")}</p>` : ""}${failed.length ? `<p>Failed:<br>${failed.map((f) => `${f.name} — ${f.error}`).join("<br>")}</p>` : ""}`,
+    html: `<p>A migration wave was sent.</p><p>Requested: ${summary.requested} · <strong>Sent: ${summary.sent}</strong> · Failed: ${summary.failed} · Blocked (not ready): ${summary.blocked}</p>${sent.length ? `<p>Invited:<br>${sent.map((s) => `${s.name} — ${s.email}${s.cutover ? `<br>&nbsp;&nbsp;↳ billing: ${s.cutover}` : ""}`).join("<br>")}</p>` : ""}${failed.length ? `<p>Failed:<br>${failed.map((f) => `${f.name} — ${f.error}`).join("<br>")}</p>` : ""}`,
   }).catch(() => {});
 
   return NextResponse.json({ ok: true, waveId, summary, sent, failed, blocked });

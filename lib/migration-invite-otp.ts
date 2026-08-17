@@ -21,6 +21,8 @@ import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildMigrationInviteEmail, buildMigrationFollowUpEmail } from "@/lib/invite-email";
 import { lastSignInByEmail } from "@/lib/last-sign-in";
+import { isTrialTrackAccount } from "@/lib/migration-readiness";
+import { runInviteBillingCutover, type BillingCutoverResult } from "@/lib/billing-cutover";
 
 export interface MigrationInviteResult {
   ok: boolean;
@@ -39,6 +41,10 @@ export interface MigrationInviteResult {
   allCompleted: boolean;
   emailsSent: number;
   warning?: string;
+  /** Invite-time billing cutover outcome (self-billed FIRST invites only). */
+  cutover?: BillingCutoverResult;
+  /** Why no cutover ran (group-billed / trial / already cut over / resend). */
+  cutoverNote?: string;
 }
 
 const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14-day migration window
@@ -219,17 +225,53 @@ export async function sendMigrationInvite(
 ): Promise<MigrationInviteResult> {
   const admin = createAdminSupabaseClient();
 
-  const { data: dealer } = await admin
-    .from("dealers")
-    .select("id, dealer_id, name, inventory_dealer_id, primary_contact, primary_contact_email, active, migration_status")
-    .eq("inventory_dealer_id", inventoryDealerId)
-    .maybeSingle<DealerRow & { active: boolean | null; migration_status: string | null }>();
+  type BillingCols = {
+    active: boolean | null; migration_status: string | null;
+    subscription_billed_to: string | null; billing_customer_id: string | null;
+    account_type: string | null; is_native: boolean | null;
+    billing_cutover_at: string | null; billing_verified?: boolean | null;
+  };
+  const BASE_COLS = "id, dealer_id, name, inventory_dealer_id, primary_contact, primary_contact_email, active, migration_status, " +
+    "subscription_billed_to, billing_customer_id, account_type, is_native, billing_cutover_at";
+  // billing_verified (migration 145) fetched tolerantly: a code deploy ahead of
+  // the SQL must not break invites — the gate + cutover just don't arm yet.
+  let dealer: (DealerRow & BillingCols) | null = null;
+  let billingVerifiedColumnPresent = true;
+  {
+    const res = await admin.from("dealers").select(`${BASE_COLS}, billing_verified`).eq("inventory_dealer_id", inventoryDealerId).maybeSingle<DealerRow & BillingCols>();
+    if (res.error && /billing_verified|column/i.test(res.error.message)) {
+      billingVerifiedColumnPresent = false;
+      console.warn("[migration-invite] billing_verified column missing (migration 145) — invite gate + billing cutover NOT armed");
+      const fb = await admin.from("dealers").select(BASE_COLS).eq("inventory_dealer_id", inventoryDealerId).maybeSingle<DealerRow & BillingCols>();
+      dealer = fb.data ?? null;
+    } else {
+      dealer = res.data ?? null;
+    }
+  }
   if (!dealer) throw new Error(`Dealer not found: ${inventoryDealerId}`);
   // Deactivated dealers (e.g. Dealer General rooftops out of the paid+active
   // scope) must never receive migration invites — this guards every send path
   // (direct invite, wave-send, resend, follow-up drip).
   if (dealer.active === false) {
     throw new Error(`Dealer "${dealer.name}" (${inventoryDealerId}) is deactivated — migration invites are blocked`);
+  }
+
+  // ── Billing-cutover scope + gate (2026-08-17) ───────────────────────────────
+  // The FIRST invite to a SELF-BILLED, billing-relevant dealer now fires the
+  // billing cutover (da-billing go-live + FreshBooks recurring pause) — so it
+  // is BLOCKED until the operator has ticked "Billing verified" in the console.
+  // Resends/follow-ups on already-invited dealers never re-fire the cutover or
+  // the gate. Group-billed dealers cut over at "Migrate group", never here.
+  const firstInvite = !["invited", "migrating", "migrated"].includes(dealer.migration_status ?? "");
+  const cutoverRelevant =
+    dealer.subscription_billed_to !== "group" &&
+    !isTrialTrackAccount(dealer.account_type) &&
+    dealer.is_native !== true;
+  if (firstInvite && cutoverRelevant && billingVerifiedColumnPresent && dealer.billing_verified !== true) {
+    throw new Error(
+      `Verify DA-Billing before inviting — the invite starts 5.0 billing and pauses 4.0 billing. ` +
+      `Tick the Billing checkbox for "${dealer.name}" once its da-billing customer + template are confirmed correct.`,
+    );
   }
 
   const resolved = await resolveMigrationRecipients(admin, dealer);
@@ -300,6 +342,32 @@ export async function sendMigrationInvite(
   // recipients (e.g. deactivated admins) lose theirs.
   await burnStaleRecipientCodes(admin, dealer.id, resolved.map(r => r.email));
 
+  // ── Billing cutover — AFTER a successful first-invite send ─────────────────
+  // Self-billed + billing-relevant + first invite + not already cut over.
+  // Tracked steps with their own error surfacing; never fails the invite.
+  let cutover: BillingCutoverResult | undefined;
+  let cutoverNote: string | undefined;
+  if (emailsSent > 0 && firstInvite) {
+    if (!billingVerifiedColumnPresent) {
+      cutoverNote = "billing cutover skipped — migration 145 not applied yet";
+    } else if (dealer.subscription_billed_to === "group") {
+      cutoverNote = "group-billed — no billing change at invite; the cutover happens at Migrate group";
+    } else if (!cutoverRelevant) {
+      cutoverNote = dealer.is_native === true
+        ? "5.0-native — no billing cutover"
+        : "trial account — no billing to cut over until upgrade";
+    } else if (dealer.billing_cutover_at) {
+      cutoverNote = `billing already cut over (${dealer.billing_cutover_at.slice(0, 10)}) — no change`;
+    } else {
+      cutover = await runInviteBillingCutover(admin, {
+        id: dealer.id, dealer_id: dealer.dealer_id, name: dealer.name,
+        inventory_dealer_id: dealer.inventory_dealer_id, billing_customer_id: dealer.billing_customer_id,
+      }, adminUserId);
+    }
+  } else if (emailsSent > 0 && !firstInvite) {
+    cutoverNote = "resend — billing untouched (cutover fires only on the first invite)";
+  }
+
   return {
     ok: true,
     dealer_name: dealer.name,
@@ -310,6 +378,8 @@ export async function sendMigrationInvite(
     allCompleted: false,
     emailsSent,
     warning: warnings.length ? warnings.join(" · ") : undefined,
+    cutover,
+    cutoverNote,
   };
 }
 
