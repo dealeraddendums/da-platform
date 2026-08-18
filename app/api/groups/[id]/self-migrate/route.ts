@@ -133,10 +133,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const { data, error } = await (admin as any).from("dealers").select(MEMBER_COLS).in("id", dealerIds);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const rows = (data ?? []) as (MemberRow & { group_id?: string | null })[];
-  // Group membership re-checked from the DB row, not the request.
+  // Group membership re-checked from the DB rows, not the request. A crafted
+  // request naming ANY out-of-group (or nonexistent) dealer is rejected whole.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: memberCheck } = await (admin as any).from("dealers").select("id").eq("group_id", group.id).in("id", dealerIds);
   const inGroup = new Set(((memberCheck ?? []) as { id: string }[]).map((m) => m.id));
+  if (dealerIds.some((id) => !inGroup.has(id))) {
+    return NextResponse.json({ error: "Forbidden — one or more dealers are not members of this group" }, { status: 403 });
+  }
 
   type RowResult = { id: string; name: string; status: "migrated" | "skipped" | "failed"; reason?: string };
   const results: RowResult[] = [];
@@ -145,8 +149,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const byId = new Map(rows.map((r) => [r.id, r]));
 
   for (const id of dealerIds) {
-    const d = byId.get(id);
-    if (!d || !inGroup.has(id)) { results.push({ id, name: d?.name ?? id, status: "failed", reason: "not a member of your group" }); continue; }
+    const d = byId.get(id)!; // membership (and thus existence) enforced above
     if (d.migration_status === "migrated") { results.push({ id, name: d.name, status: "skipped", reason: "already migrated" }); continue; }
     if (d.active === false) { results.push({ id, name: d.name, status: "failed", reason: "deactivated dealer" }); continue; }
     if (d.subscription_billed_to !== "group") {
