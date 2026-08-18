@@ -43,6 +43,8 @@ const NAVY = "#2a2b3c";
 const BLUE = "#1976d2";
 const BORDER = "#e0e0e0";
 const MUTED = "#78828c";
+// Notes that sit directly on the dark page background (not inside a card).
+const PAGE_NOTE = "rgba(255,255,255,0.78)";
 
 const fmtDate = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -297,7 +299,7 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
             />
             <Card label="Cohort lost" value={String(report.trials.cohort.lost)} sub="expired or closed without converting" />
           </div>
-          <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
+          <div style={{ fontSize: 12, color: PAGE_NOTE, marginTop: 8 }}>
             Cohort reconciliation: {report.trials.cohort.started} started ={" "}
             {report.trials.cohort.converted} converted + {report.trials.cohort.lost} lost +{" "}
             {report.trials.cohort.stillActive} still active. The rate is cohort-based (converted ÷ started) and can never exceed 100%.
@@ -314,7 +316,7 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
             />
             <Card label="Cohort lost" value={String(report.groupTrials.cohort.lost)} sub="expired or closed without converting" />
           </div>
-          <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
+          <div style={{ fontSize: 12, color: PAGE_NOTE, marginTop: 8 }}>
             Cohort reconciliation: {report.groupTrials.cohort.started} started ={" "}
             {report.groupTrials.cohort.converted} converted + {report.groupTrials.cohort.lost} lost +{" "}
             {report.groupTrials.cohort.stillActive} still active. Group dealers provisioned directly as paying are NOT trials — they appear under
@@ -354,7 +356,7 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
             <Card label="Cancellations — Group" value={String(report.cancellations.group)} />
           </div>
           {(report.cancellations.archivedIndependent > 0 || report.cancellations.archivedGroup > 0) && (
-            <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
+            <div style={{ fontSize: 12, color: PAGE_NOTE, marginTop: 8 }}>
               Also archived (60-day, later stage): {report.cancellations.archivedIndependent} independent · {report.cancellations.archivedGroup} group.
             </div>
           )}
@@ -378,11 +380,11 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
               ))}
             </tbody>
           </table>
-          <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
+          <div style={{ fontSize: 12, color: PAGE_NOTE, marginTop: 8 }}>
             Reconciliation: <strong>{report.cancellations.withoutReason}</strong> of {report.cancellations.total} cancellation{report.cancellations.total === 1 ? "" : "s"} have no closure row this period
             {report.cancellations.withoutReason > 0 ? " (counted under “Not specified” / missing)." : "."}
           </div>
-          <div style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>
+          <div style={{ fontSize: 12, color: PAGE_NOTE, marginTop: 4 }}>
             Note: lost trials ≠ cancellations. A lost trial never paid us — its trial window simply closed. A cancellation is a
             downgrade event (downgraded_at) — typically a paying account going Free. &ldquo;0 cancellations&rdquo; alongside lost trials is not a contradiction.
           </div>
@@ -412,7 +414,7 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
 
           {/* Definitions */}
           <SectionTitle>Definitions</SectionTitle>
-          <div style={{ fontSize: 11, color: MUTED, lineHeight: 1.7, maxWidth: 900 }}>
+          <div style={{ fontSize: 11, color: PAGE_NOTE, lineHeight: 1.7, maxWidth: 900 }}>
             <strong>Funnel A</strong> = independent (group_id NULL) trials — inbound self-serve, the team&rsquo;s funnel; Trial = account_type Trial/NULL.{" "}
             <strong>Funnel B</strong> = reseller/group-created trials (group_id set + explicit Trial, or ss_-born with an outcome) — e.g. Permaplate/AutoNation creating a Trial so the store sees its addendum. The two funnels never mix; an ss_-born dealer attached to a group (MB of Fremont) is Funnel B.{" "}
             <strong>Trial conversion</strong> = a 5.0-native trial that went paid (converted_at), split A/B as above; <strong>Migration / go-live</strong> = a 4.0 customer&rsquo;s 5.0 cutover or a group-billed store activation (also stamps converted_at, never counted as a trial win).{" "}
