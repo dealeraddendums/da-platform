@@ -8,7 +8,10 @@ import Link from "next/link";
 //   Ghost (👻)     — primary button, co-equal with Edit → ghost handler. Always on.
 //   │ divider
 //   Impersonate    — MUTED icon-only (eye) → impersonate handler. Disabled (greyed
-//                    + tooltip) when there's no user to become. NO auto-ghost.
+//                    + tooltip) when there's no user to become. The DEALER list's
+//                    handler falls back to Ghost Mode when impersonate 404s (no
+//                    dealer_admin — has_users counts non-admin roles too), same as
+//                    the profile Login button; the group list surfaces the error.
 
 const BLUE = "#1976d2";
 

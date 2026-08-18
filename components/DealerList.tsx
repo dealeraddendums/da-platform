@@ -6,7 +6,7 @@ import EmailAvailability from "@/components/EmailAvailability";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
-import { createClient } from "@/lib/supabase/client";
+import { loginAsDealer } from "@/lib/admin-login-as";
 import { PageHeader } from "@/components/PageHeader";
 import EntityRowActions from "@/components/EntityRowActions";
 import { TagChip, type Tag } from "@/components/TagPicker";
@@ -236,6 +236,8 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
 
     if (!res.ok || !json.ok) {
       setEnteringGhost(null);
+      setSyncToast({ msg: `Ghost Mode failed — ${json.error ?? `HTTP ${res.status}`}`, ok: false });
+      setTimeout(() => setSyncToast(null), 8000);
       return;
     }
 
@@ -247,46 +249,23 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
     window.location.href = "/dashboard";
   }
 
+  // Same resolve-then-fallback behavior as the profile Login button:
+  // dealer_admin impersonate → 404 (no admin, e.g. service-provider-group
+  // dealers with only dealer_user rows) → Ghost Mode. loginAsDealer
+  // navigates away on success; a returned string is a real error to surface —
+  // never a silent no-op (Winter Haven Honda eyeball bug, 2026-08-18).
   async function handleImpersonate(d: DealerListRow) {
     setImpersonating(d.dealer_id);
-    const supabase = createClient();
-    const { data: { session: currentSession } } = await supabase.auth.getSession();
-
-    const res = await fetch("/api/admin/impersonate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dealer_id: d.dealer_id }),
+    const errMsg = await loginAsDealer({
+      uuid: d.id,
+      textId: d.dealer_id,
+      name: decodeHtml(d.name) ?? d.dealer_id,
     });
-    const json = (await res.json()) as { access_token?: string; refresh_token?: string; dealer_name?: string; dealer_id?: string; error?: string };
-
-    if (!res.ok || !json.access_token || !json.refresh_token) {
+    if (errMsg) {
       setImpersonating(null);
-      // No auto-fallback to Ghost — Impersonate is simply disabled in the UI
-      // when there's no user (dealer.has_users false). Surfacing nothing here
-      // matches the prior silent-fail behavior for the rare race.
-      return;
+      setSyncToast({ msg: `Impersonate failed — ${errMsg}`, ok: false });
+      setTimeout(() => setSyncToast(null), 8000);
     }
-
-    localStorage.setItem("da_impersonate", JSON.stringify({
-      dealer_name: json.dealer_name,
-      dealer_id: json.dealer_id,
-      original_access_token: currentSession?.access_token ?? "",
-      original_refresh_token: currentSession?.refresh_token ?? "",
-    }));
-
-    const { error: setError } = await supabase.auth.setSession({
-      access_token: json.access_token,
-      refresh_token: json.refresh_token,
-    });
-
-    if (setError) {
-      localStorage.removeItem("da_impersonate");
-      setImpersonating(null);
-      return;
-    }
-
-    document.cookie = "da_impersonating=1; path=/; max-age=86400; SameSite=Lax";
-    window.location.href = "/dashboard";
   }
 
   return (
