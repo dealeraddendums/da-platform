@@ -30,6 +30,7 @@ interface Row {
   inviteRecipients?: string[];
   freshbooksStoppedAt: string | null;
   freshbooksStopPending: boolean;
+  legacyLockoutPending?: boolean;
   isNative: boolean;
   assignedTo: string | null;
   migrationStatus: string | null;
@@ -646,6 +647,11 @@ export default function MigrationConsole() {
             {r.freshbooksStoppedAt
               ? <span style={{ color: "#2e7d32" }} title={`stopped ${new Date(r.freshbooksStoppedAt).toLocaleString()}`}>FreshBooks stopped ✓ <button type="button" onClick={() => void markFbStopped(r, false)} style={{ fontSize: 10, color: "#9aa0a6", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>undo</button></span>
               : <span style={{ color: "#b06a00" }}>FreshBooks stop pending <button type="button" onClick={() => void markFbStopped(r, true)} style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>mark stopped</button></span>}
+            {r.legacyLockoutPending && (
+              <div style={{ color: "#b06a00" }} title="The automatic 4.0 migrated_to_v5 call failed or the 4.0 endpoint isn't live yet — flip the 'Migrated to 5.0' toggle in the 4.0 admin for this dealership.">
+                4.0 lockout pending
+              </div>
+            )}
           </div>
         )}
       </td>

@@ -69,9 +69,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, group_id, subscription_billed_to, billing_customer_id, account_type, migration_status, inventory_provider, inventory_provider_is_dms, box_folder_id, freshbooks_stopped_at")
+    .select("id, dealer_id, name, group_id, subscription_billed_to, billing_customer_id, account_type, migration_status, inventory_provider, inventory_provider_is_dms, box_folder_id, freshbooks_stopped_at, inventory_dealer_id")
     .eq("id", inv.dealer_id!)
-    .maybeSingle<{ id: string; dealer_id: string; name: string; group_id: string | null; subscription_billed_to: string | null; billing_customer_id: string | null; account_type: string | null; migration_status: string | null; inventory_provider: string | null; inventory_provider_is_dms: boolean | null; box_folder_id: string | null; freshbooks_stopped_at: string | null }>();
+    .maybeSingle<{ id: string; dealer_id: string; name: string; group_id: string | null; subscription_billed_to: string | null; billing_customer_id: string | null; account_type: string | null; migration_status: string | null; inventory_provider: string | null; inventory_provider_is_dms: boolean | null; box_folder_id: string | null; freshbooks_stopped_at: string | null; inventory_dealer_id: string | null }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
 
   // Multi-recipient invites: the FIRST acceptor migrates the dealer; every

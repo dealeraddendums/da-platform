@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { billingConfigured, deactivateTemplate } from "@/lib/billing";
+import { fireLegacyLockout } from "@/lib/legacy-lockout";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +26,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient();
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, group_id, subscription_billed_to, billing_customer_id, migration_status")
+    .select("id, dealer_id, name, group_id, subscription_billed_to, billing_customer_id, migration_status, inventory_dealer_id")
     .eq("id", body.dealerId)
-    .maybeSingle<{ id: string; dealer_id: string; name: string; group_id: string | null; subscription_billed_to: string | null; billing_customer_id: string | null; migration_status: string | null }>();
+    .maybeSingle<{ id: string; dealer_id: string; name: string; group_id: string | null; subscription_billed_to: string | null; billing_customer_id: string | null; migration_status: string | null; inventory_dealer_id: string | null }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
 
   // 1. migration_status back to 'invited' (they were invited; ETL resumes).
@@ -47,6 +48,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     try { await deactivateTemplate(customerId); billing = "deactivated"; }
     catch (e) { billing = "error"; billingDetail = e instanceof Error ? e.message : String(e); }
   }
+
+  // 3. Rollback symmetry for the 4.0 lockout: re-open the dealer's 4.0 login
+  // (migrated_to_v5 = No via the 4.0-owned endpoint — never an Aurora write).
+  fireLegacyLockout(admin, dealer, false);
 
   return NextResponse.json({ ok: true, dealer: dealer.name, migration_status: "invited", billing, billingDetail });
 }

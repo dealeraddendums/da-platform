@@ -202,6 +202,19 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+// ── Self-service migration (migrated, group-billed groups — migration 146) ──
+
+type MigrationInfo = {
+  migration_status: string;
+  migrated: boolean;
+  active: boolean;
+  group_billed: boolean;
+  is_test: boolean;
+};
+type MigrateRowResult = { id: string; name: string; status: "migrated" | "skipped" | "failed"; reason?: string };
+
+const MIGRATE_BATCH = 10; // server cap per call — bulk runs chunk sequentially
+
 export default function GroupDealerList({ groupId }: Props) {
   const router = useRouter();
   const [dealers, setDealers] = useState<DealerRow[]>([]);
@@ -211,6 +224,66 @@ export default function GroupDealerList({ groupId }: Props) {
   const [searchInput, setSearchInput] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [switching, setSwitching] = useState<string | null>(null);
+  // Self-service migration (only rendered when the group's gate is on).
+  const [migrationById, setMigrationById] = useState<Map<string, MigrationInfo> | null>(null);
+  const [migSelected, setMigSelected] = useState<Set<string>>(new Set());
+  const [migrating, setMigrating] = useState(false);
+  const [migProgress, setMigProgress] = useState<string | null>(null);
+  const [migResults, setMigResults] = useState<MigrateRowResult[] | null>(null);
+
+  const fetchMigrationInfo = useCallback(async () => {
+    if (!groupId) return;
+    try {
+      const res = await fetch(`/api/groups/${groupId}/self-migrate`);
+      if (!res.ok) { setMigrationById(null); return; } // 403 for non-enabled callers → feature hidden
+      const j = await res.json() as { enabled?: boolean; dealers?: ({ id: string } & MigrationInfo)[] };
+      if (!j.enabled || !j.dealers) { setMigrationById(null); return; }
+      setMigrationById(new Map(j.dealers.map((d) => [d.id, d])));
+    } catch { setMigrationById(null); }
+  }, [groupId]);
+
+  useEffect(() => { void fetchMigrationInfo(); }, [fetchMigrationInfo]);
+
+  const migEnabled = migrationById !== null;
+  const migratable = (id: string) => {
+    const m = migrationById?.get(id);
+    return !!m && !m.migrated && m.active && m.group_billed && !m.is_test;
+  };
+
+  async function runMigrate(ids: string[]) {
+    if (!groupId || ids.length === 0) return;
+    const label = ids.length === 1 ? "this dealer" : `${ids.length} dealers`;
+    if (!confirm(
+      `Migrate ${label} to Platform 5.0?\n\n` +
+      `Each dealer's current 4.0 products, settings, and logo are synced first, then their 5.0 login opens. ` +
+      `Your group's billing is NOT affected — group-billed dealers have no per-dealer billing change.\n\n` +
+      `This can take a few minutes per batch.`,
+    )) return;
+    setMigrating(true); setMigResults(null);
+    const all: MigrateRowResult[] = [];
+    try {
+      for (let i = 0; i < ids.length; i += MIGRATE_BATCH) {
+        const chunk = ids.slice(i, i + MIGRATE_BATCH);
+        setMigProgress(`Migrating ${Math.min(i + chunk.length, ids.length)} of ${ids.length}… (syncing 4.0 config — this takes a few minutes)`);
+        const res = await fetch(`/api/groups/${groupId}/self-migrate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dealer_ids: chunk }),
+        });
+        const j = await res.json().catch(() => null) as { results?: MigrateRowResult[]; error?: string } | null;
+        if (!res.ok || !j?.results) {
+          all.push(...chunk.map((id) => ({ id, name: dealers.find((d) => d.id === id)?.name ?? id, status: "failed" as const, reason: j?.error ?? `HTTP ${res.status}` })));
+        } else {
+          all.push(...j.results);
+        }
+      }
+    } finally {
+      setMigrating(false); setMigProgress(null);
+      setMigResults(all);
+      setMigSelected(new Set());
+      void fetchMigrationInfo();
+    }
+  }
 
   const fetchDealers = useCallback(async () => {
     setLoading(true);
@@ -268,6 +341,44 @@ export default function GroupDealerList({ groupId }: Props) {
         />
       )}
 
+      {/* Self-service migration bulk bar + results (gate-on groups only) */}
+      {migEnabled && (
+        <div className="card p-4 mb-4" style={{ border: "1px solid #bcdcff", background: "#eef6ff" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#2a2b3c" }}>Platform 5.0 Migration</span>
+            <span style={{ fontSize: 13, color: "#55595c" }}>
+              {Array.from(migrationById?.values() ?? []).filter((m) => m.migrated).length} migrated ·{" "}
+              {filtered.filter((d) => migratable(d.id)).length} ready to migrate
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              <button type="button" className="btn btn-secondary" disabled={migrating}
+                onClick={() => setMigSelected(new Set(filtered.filter((d) => migratable(d.id)).map((d) => d.id)))}>
+                Select all not migrated
+              </button>
+              <button type="button" className="btn btn-primary" disabled={migrating || migSelected.size === 0}
+                onClick={() => void runMigrate(Array.from(migSelected))}>
+                {migrating ? "Migrating…" : `Migrate selected (${migSelected.size})`}
+              </button>
+            </div>
+          </div>
+          {migProgress && <div style={{ marginTop: 8, fontSize: 13, color: "#1565c0" }}>{migProgress}</div>}
+          {migResults && (
+            <div style={{ marginTop: 10, borderTop: "1px solid #bcdcff", paddingTop: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                Done — {migResults.filter((r) => r.status === "migrated").length} migrated
+                {migResults.some((r) => r.status === "skipped") ? `, ${migResults.filter((r) => r.status === "skipped").length} skipped` : ""}
+                {migResults.some((r) => r.status === "failed") ? `, ${migResults.filter((r) => r.status === "failed").length} failed` : ""}
+              </div>
+              {migResults.map((r) => (
+                <div key={r.id} style={{ fontSize: 12, color: r.status === "migrated" ? "#2e7d32" : r.status === "skipped" ? "#78828c" : "#c62828" }}>
+                  {r.status === "migrated" ? "✓" : r.status === "skipped" ? "–" : "✗"} {r.name}{r.reason ? ` — ${r.reason}` : ""}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Search */}
       <div className="card p-4 mb-4">
         <form onSubmit={handleSearch} className="flex items-center gap-2">
@@ -300,8 +411,8 @@ export default function GroupDealerList({ groupId }: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
-                {["Dealer Name", "Location", "Phone", "Status", ""].map(h => (
-                  <th key={h} className="text-left px-4 py-2.5 font-semibold"
+                {[...(migEnabled ? [""] : []), "Dealer Name", "Location", "Phone", "Status", ...(migEnabled ? ["5.0 Migration"] : []), ""].map((h, hi) => (
+                  <th key={`${h}-${hi}`} className="text-left px-4 py-2.5 font-semibold"
                     style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
                     {h}
                   </th>
@@ -311,6 +422,16 @@ export default function GroupDealerList({ groupId }: Props) {
             <tbody>
               {filtered.map((d, i) => (
                 <tr key={d.id} style={{ borderBottom: i < filtered.length - 1 ? "1px solid var(--border)" : "none" }}>
+                  {migEnabled && (
+                    <td className="px-4 py-2.5" style={{ width: 34, textAlign: "center" }}>
+                      <input type="checkbox"
+                        checked={migSelected.has(d.id)}
+                        disabled={!migratable(d.id) || migrating}
+                        title={migratable(d.id) ? "Select for bulk migrate" : (migrationById?.get(d.id)?.migrated ? "Already migrated" : "Not migratable")}
+                        onChange={() => setMigSelected((s) => { const n = new Set(s); n.has(d.id) ? n.delete(d.id) : n.add(d.id); return n; })}
+                        style={{ cursor: migratable(d.id) ? "pointer" : "not-allowed" }} />
+                    </td>
+                  )}
                   <td className="px-4 py-2.5">
                     <a
                       href={`/dealers/${d.id}`}
@@ -333,6 +454,34 @@ export default function GroupDealerList({ groupId }: Props) {
                       {d.active ? "Active" : "Inactive"}
                     </span>
                   </td>
+                  {migEnabled && (
+                    <td className="px-4 py-2.5" style={{ whiteSpace: "nowrap" }}>
+                      {(() => {
+                        const m = migrationById?.get(d.id);
+                        if (!m) return <span style={{ color: "var(--text-muted)", fontSize: 12 }}>—</span>;
+                        if (m.migrated) return (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                            style={{ background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9" }}>
+                            Migrated ✓
+                          </span>
+                        );
+                        if (!migratable(d.id)) return (
+                          <span style={{ color: "var(--text-muted)", fontSize: 12 }}
+                            title={!m.active ? "Deactivated dealer" : !m.group_billed ? "Self-billed — contact DA support to migrate" : "Not migratable"}>
+                            Not migrated
+                          </span>
+                        );
+                        return (
+                          <button type="button" disabled={migrating}
+                            onClick={() => void runMigrate([d.id])}
+                            title="Sync this dealer's final 4.0 config and open their 5.0 login. Group billing is not affected."
+                            style={{ height: 28, padding: "0 12px", fontSize: 12, fontWeight: 600, borderRadius: 4, background: "#ffa500", color: "#fff", border: "none", cursor: migrating ? "not-allowed" : "pointer", opacity: migrating ? 0.6 : 1 }}>
+                            Migrate to 5.0
+                          </button>
+                        );
+                      })()}
+                    </td>
+                  )}
                   <td className="px-4 py-2.5">
                     <button
                       onClick={() => void handleSwitch(d.id)}

@@ -7,6 +7,7 @@ import { fireDealerReliable } from "@/lib/sync-hubspot";
 import { fireConversionWebhook } from "@/lib/marketing-webhook";
 import { fireAndForget } from "@/lib/billing-sync";
 import { boxConfigured, createDealerFolder } from "@/lib/box";
+import { fireLegacyLockout } from "@/lib/legacy-lockout";
 
 /** account_type Paid tier for a migrating dealer, from its inventory setup. */
 export function paidTierFor(dms: boolean | null, provider: string | null): string {
@@ -30,6 +31,9 @@ export interface MigratableDealer {
   inventory_provider: string | null;
   inventory_provider_is_dms: boolean | null;
   box_folder_id: string | null;
+  /** Legacy 4.0 DEALER_ID — keys the automatic 4.0 migrated_to_v5 lockout.
+   *  Optional so older callers compile; absent → lockout marked pending. */
+  inventory_dealer_id?: string | null;
 }
 
 /**
@@ -91,5 +95,10 @@ export async function migrateDealerRecord(
 
   fireDealerReliable(dealer.id, opts.hubspotContext);
   fireConversionWebhook({ dealerId: dealer.dealer_id, convertedAt: opts.nowIso, plan });
+  // 4.0 lockout: every migration path (self-serve confirm, group migrate,
+  // group self-service) auto-sets the legacy migrated_to_v5 flag via the
+  // 4.0-owned endpoint (never a direct Aurora write). Failure/missing endpoint
+  // → legacy_lockout_pending for the manual 4.0 admin-toggle path.
+  fireLegacyLockout(admin, dealer, true);
   return { ok: true, plan };
 }

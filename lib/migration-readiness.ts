@@ -121,6 +121,9 @@ export interface ReadinessRow {
   // ── 13d: legacy FreshBooks recurring-stop tracking (operator-managed) ───────
   freshbooksStoppedAt: string | null;
   freshbooksStopPending: boolean; // migrated but FreshBooks recurring not yet stopped (never for natives)
+  /** The automatic 4.0 migrated_to_v5 lockout call failed / endpoint missing —
+   *  operator flips the 4.0 admin toggle manually (migration 146). */
+  legacyLockoutPending: boolean;
   /** True = born on 5.0 (migration 138): console shows "5.0 native", no FreshBooks affordances. */
   isNative: boolean;
   // ── operator assignment (who owns this dealer's migration) ──────────────────
@@ -179,6 +182,7 @@ export function computeReadiness(
     invitation?: { accepted_at: string | null; expires_at: string | null; wave_id?: string | null } | null;
     inviteRecipients?: string[];
     freshbooksStoppedAt?: string | null;
+    legacyLockoutPending?: boolean;
     assignedTo?: string | null;
   },
 ): ReadinessRow {
@@ -290,6 +294,7 @@ export function computeReadiness(
     freshbooksStoppedAt: ctx.freshbooksStoppedAt ?? null,
     // Natives never had FreshBooks — nothing to stop, never "pending".
     freshbooksStopPending: inviteStatus === "migrated" && !ctx.freshbooksStoppedAt && d.is_native !== true,
+    legacyLockoutPending: ctx.legacyLockoutPending === true && d.is_native !== true,
     isNative: d.is_native === true,
     assignedTo: ctx.assignedTo ?? null,
     migrationStatus: d.migration_status ?? null,

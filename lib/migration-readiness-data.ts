@@ -115,6 +115,13 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
     fb.forEach((d) => { if (d.freshbooks_stopped_at) fbStopped.set(d.id, d.freshbooks_stopped_at); });
   } catch { /* migration 104 not applied yet — all treated as pending */ }
 
+  // 4.0 lockout pending (migration 146) — resilient like the flags above.
+  const lockoutPending = new Set<string>();
+  try {
+    const lp = await fetchAll<{ id: string; legacy_lockout_pending: boolean | null }>(admin, "dealers", "id, legacy_lockout_pending", baseFilter);
+    lp.forEach((d) => { if (d.legacy_lockout_pending === true) lockoutPending.add(d.id); });
+  } catch { /* migration 146 not applied yet — none pending */ }
+
   // Operator assignment (separate so a missing migration 105 stays harmless).
   const assignedBy = new Map<string, string | null>();
   try {
@@ -152,6 +159,7 @@ export async function loadReadinessRows(opts?: { dealerIds?: string[] }): Promis
       invitation: invByDealer.get(d.id) ?? null,
       inviteRecipients: recipientsByDealer.get(d.id) ?? [],
       freshbooksStoppedAt: fbStopped.get(d.id) ?? null,
+      legacyLockoutPending: lockoutPending.has(d.id),
       assignedTo: assignedBy.get(d.id) ?? null,
     });
   });

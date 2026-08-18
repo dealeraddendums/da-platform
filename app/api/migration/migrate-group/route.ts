@@ -73,9 +73,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: members } = await (admin as any)
     .from("dealers")
-    .select("id, dealer_id, name, active, is_test, migration_status, inventory_provider, inventory_provider_is_dms, box_folder_id")
+    .select("id, dealer_id, name, active, is_test, migration_status, inventory_provider, inventory_provider_is_dms, box_folder_id, inventory_dealer_id")
     .eq("group_id", groupId);
-  const allMembers = (members ?? []) as Array<{ id: string; dealer_id: string; name: string; active: boolean | null; is_test: boolean | null; migration_status: string | null; inventory_provider: string | null; inventory_provider_is_dms: boolean | null; box_folder_id: string | null }>;
+  const allMembers = (members ?? []) as Array<{ id: string; dealer_id: string; name: string; active: boolean | null; is_test: boolean | null; migration_status: string | null; inventory_provider: string | null; inventory_provider_is_dms: boolean | null; box_folder_id: string | null; inventory_dealer_id: string | null }>;
   if (allMembers.length === 0) return NextResponse.json({ error: "Group has no member dealers." }, { status: 400 });
 
   const skipped: Array<{ name: string; reason: string }> = [];

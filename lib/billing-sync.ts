@@ -16,7 +16,8 @@ export type BillingSyncEvent =
   | "billing.group.rename"
   | "xps.order.create"
   | "xps.shipment.poll"
-  | "box.folder.create";
+  | "box.folder.create"
+  | "legacy.lockout.set";
 
 export interface RunSyncOptions {
   event: BillingSyncEvent;
