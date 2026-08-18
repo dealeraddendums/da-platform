@@ -734,7 +734,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  if (!hasLegacyBilling) {
+  // Trial dealers stage NO billing at all — no standalone customer, no group
+  // template line. Billing starts at conversion (pick a paid plan → the normal
+  // customer/template/cascade flow runs then). This also kills the email-less
+  // createCustomer 400 → billing_sync_errors noise for trial creates, and it
+  // applies to BOTH roles (a super_admin "Trial" create previously still made
+  // an empty da-billing customer).
+  const isTrialCreate = (createdDealer.account_type as string | null) === "Trial";
+
+  if (!hasLegacyBilling && !isTrialCreate) {
     if (subscriptionBilledTo === "group" && createdDealerGroupId) {
       // Group owns the subscription line. Cascade adds a tagged line
       // item to the group's template (creating the template + customer

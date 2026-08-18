@@ -41,10 +41,15 @@ const inputStyle: React.CSSProperties = {
 
 // ── New Dealer Form ──────────────────────────────────────────────────────────
 
-const SUBSCRIPTION_OPTIONS: { id: "sub-manual" | "sub-auto-web" | "sub-auto-dms"; label: string }[] = [
+// "Trial" (exact account_type string the print-eligibility lifecycle keys on)
+// lets a group onboard a rooftop on the standard 30-day / 30-print trial with
+// NO billing staged — the server skips the da-billing customer/cascade for
+// Trial creates; billing starts when the dealer converts to a paid plan.
+const SUBSCRIPTION_OPTIONS: { id: "sub-manual" | "sub-auto-web" | "sub-auto-dms" | "Trial"; label: string }[] = [
   { id: "sub-manual",   label: "Monthly Subscription Manual" },
   { id: "sub-auto-web", label: "Monthly Subscription Automatic Web" },
   { id: "sub-auto-dms", label: "Monthly Subscription Automatic DMS" },
+  { id: "Trial",        label: "Trial — 30 days / 30 prints, no billing until conversion" },
 ];
 
 type BillingTarget = "dealer" | "group";
@@ -53,7 +58,7 @@ type NewDealerFields = {
   name: string; inventory_dealer_id: string;
   address: string; city: string; state: string; zip: string;
   phone: string; primary_contact: string; primary_contact_email: string;
-  account_type: "sub-manual" | "sub-auto-web" | "sub-auto-dms";
+  account_type: "sub-manual" | "sub-auto-web" | "sub-auto-dms" | "Trial";
   subscription_billed_to: BillingTarget;
   labels_billed_to: BillingTarget;
 };
@@ -172,6 +177,11 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
             <select style={inputStyle} value={fields.account_type} onChange={set("account_type")} required>
               {SUBSCRIPTION_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
             </select>
+            {fields.account_type === "Trial" && (
+              <p style={{ fontSize: 11, color: "#8a8f94", margin: "4px 0 0" }}>
+                No billing is set up for a trial. The Bill-To choices below are saved for when the dealer converts to a paid plan.
+              </p>
+            )}
           </div>
 
           <div>
