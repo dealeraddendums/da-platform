@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { migrateDealerRecord, type MigratableDealer } from "@/lib/migrate-dealer";
+import { billingConfigured, getCustomer } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 // The mandatory pre-migrate config sync runs full Aurora scans on the ETL box.
@@ -23,9 +24,15 @@ const MAX_PER_CALL = 10; // sync is minutes-slow; the UI chunks bulk runs
  *
  * Auth: super_admin (any group) or group_admin of THIS group. group_user
  * (regional managers) and out-of-group admins are 403'd server-side.
- * Gate (both verbs): groups.self_manages_migration = true (super_admin-set
- * trust toggle, migration 146) AND the group has a da-billing customer (the
- * "group is itself migrated + group-billed on DA-Billing" marker).
+ *
+ * Gate (both verbs; DEFAULT-ON since migration 147, Allan 2026-08-18):
+ * availability DERIVES from "migrated + group-billed" — the group has a
+ * da-billing customer AND that customer is LIVE (billingState !== 'setup';
+ * an absent field is the legacy-live default). A group's billing only goes
+ * Live at its migration, so live group billing IS the group-migrated signal
+ * (groups have no migration_status column). self_manages_migration is now a
+ * FORCE-OFF kill switch only: explicitly false hides the feature for that
+ * group; true/unset changes nothing. da-billing unreachable → fail closed.
  */
 
 type GroupRow = {
@@ -72,8 +79,25 @@ async function authorizeAndLoadGroup(groupId: string): Promise<
   if (!group) return { ok: false, res: NextResponse.json({ error: "Group not found" }, { status: 404 }) };
 
   let disabledReason: string | null = null;
-  if (group.self_manages_migration !== true) disabledReason = "self-service migration is not enabled for this group";
-  else if (!group.billing_customer_id) disabledReason = "group has no DA-Billing customer — group billing must be live first";
+  if (group.self_manages_migration === false) {
+    // Kill switch (migration 147): explicitly held back by super_admin.
+    disabledReason = "self-service migration is disabled for this group";
+  } else if (group.active === false) {
+    disabledReason = "group is deactivated";
+  } else if (!group.billing_customer_id) {
+    disabledReason = "group is not group-billed on DA-Billing";
+  } else if (!billingConfigured()) {
+    disabledReason = "billing status unavailable"; // fail closed
+  } else {
+    // Group-migrated signal: the group's da-billing customer is LIVE.
+    try {
+      const customer = await getCustomer(group.billing_customer_id);
+      if (!customer) disabledReason = "group's DA-Billing customer not found";
+      else if (customer.billingState === "setup") disabledReason = "group's billing is not live yet (still in setup)";
+    } catch {
+      disabledReason = "billing status unavailable"; // fail closed
+    }
+  }
   return { ok: true, claims: { sub: claims.sub, role: claims.role }, group, admin, enabled: disabledReason === null, disabledReason };
 }
 
