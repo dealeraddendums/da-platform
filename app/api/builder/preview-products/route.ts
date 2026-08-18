@@ -42,17 +42,21 @@ type PreviewItem = {
   conditions: PreviewCondition[];
 };
 
-/** Condition applicability from a product row's rules — mirrors the print
- *  evaluators' ad_types/ad_type handling (ad_types wins; legacy ad_type
- *  "New" → New only, "Used" → Used+CPO, else all). Non-'rules' rows
- *  (applies_to 'all'/'none') can appear on any condition. */
+/** Condition applicability from a product row's rules — mirrors the canonical
+ *  print evaluator (options-engine matchesRulesRow): ad_types gates the
+ *  condition for BOTH applies_to='all' AND 'rules' rows ('all' rows can and
+ *  do carry ad_types — e.g. Winter Haven Honda's New/Used product variants),
+ *  matched strictly (["Used"] does NOT admit CPO). Empty ad_types falls back
+ *  to the legacy ad_type string per the bulk evaluator ("New" → New only,
+ *  "Used" → Used+CPO, else all). applies_to='none' rows are manual-only —
+ *  addable to any vehicle, so any condition. */
 function rowConditions(
   appliesTo: string | null | undefined,
   adTypes: string[] | null | undefined,
   adType: string | null | undefined,
 ): PreviewCondition[] {
   const ALL: PreviewCondition[] = ["New", "Used", "CPO"];
-  if (appliesTo !== "rules") return ALL;
+  if (appliesTo === "none") return ALL;
   if (adTypes && adTypes.length > 0) return ALL.filter(c => adTypes.includes(c));
   const t = adType ?? "Both";
   if (t === "New") return ["New"];
