@@ -107,12 +107,14 @@ export function buildBiReportHtml(report: BiReport): string {
   const mrr = report.revenue.available ? money(report.revenue.currentMrr) : "—";
 
   const definitions = `
-    Trial = account_type Trial/NULL; Independent = no group. Converted = became paid (dated by converted_at).
-    Lost trial = past the 30-day/30-print allowance without converting (day-cap shown; print-cap approximate).
-    Cancellation = previously-paid dealer with downgraded_at in period. Acquisition source present only for
-    self-serve signups post-migration-087 (else Direct/Unknown). Reasons present only where an account_closures
-    row exists (admin downgrades default to "Admin downgrade"). Gross billable = invoiced totals/month
-    (post-discount) from da-billing. Period = previous calendar month by default.`;
+    Funnel A = independent (no group) trials — inbound self-serve. Funnel B = reseller/group-created trials
+    (explicit Trial on a group dealer, or ss_-born with an outcome); the two never mix. Converted = became paid
+    (dated by converted_at); migrations/go-lives also stamp converted_at and are never counted as trial wins.
+    Lost trial = trial window closed without converting (30 days, honoring trial_ends_at extensions).
+    Cancellation = downgraded_at in period. Acquisition source present only for self-serve signups
+    post-migration-087 (else Direct/Unknown). Gross billable = da-billing invoiced totals/month (post-discount);
+    MRR run-rate = recurring subscription lines of live-billing, non-paused templates. Default period =
+    current calendar month to date.`;
 
   return `<!doctype html>
 <html><head><meta charset="utf-8" />
@@ -137,12 +139,13 @@ export function buildBiReportHtml(report: BiReport): string {
   <div style="margin-top:12px;font-size:12px;color:${NAVY};">
     <strong>Current book</strong> (as of generation, all-time):
     <span style="margin-left:8px;">Paying accounts <strong>${report.totals.payingAccounts}</strong></span>
-    <span style="margin-left:14px;">Trial accounts (independent) <strong>${report.totals.trialAccounts}</strong></span>
+    <span style="margin-left:14px;">Trial accounts — independent, Funnel A <strong>${report.totals.trialAccounts}</strong></span>
+    <span style="margin-left:14px;">Group trials — Funnel B <strong>${report.totals.groupTrialAccounts}</strong></span>
   </div>
 
-  <h2>Trial funnel — this period&rsquo;s cohort (independent)</h2>
+  <h2>Funnel A — inbound self-serve trials (independent · this period&rsquo;s cohort)</h2>
   <div class="grid3">
-    ${card("Trials started", String(report.trials.started), "independent, created in period")}
+    ${card("Trials started", String(report.trials.started), "independent (no group), created in period")}
     ${card("Cohort conversion rate", `${report.trials.conversionRate}%`, `${report.trials.cohort.converted} of ${report.trials.cohort.started} converted${report.trials.cohort.stillActive > 0 ? ` · provisional — ${report.trials.cohort.stillActive} still in trial` : ""}`)}
     ${card("Cohort lost", String(report.trials.cohort.lost), "expired or closed without converting")}
   </div>
@@ -152,16 +155,29 @@ export function buildBiReportHtml(report: BiReport): string {
     ${report.trials.cohort.stillActive} still active. Rate is cohort-based (converted ÷ started).
   </div>
 
+  <h2>Funnel B — reseller / group-created trials (this period&rsquo;s cohort)</h2>
+  <div class="grid3">
+    ${card("Group trials started", String(report.groupTrials.started), "created by a reseller/group as a Trial")}
+    ${card("Cohort conversion rate", `${report.groupTrials.conversionRate}%`, `${report.groupTrials.cohort.converted} of ${report.groupTrials.cohort.started} converted${report.groupTrials.cohort.stillActive > 0 ? ` · provisional — ${report.groupTrials.cohort.stillActive} still in trial` : ""}`)}
+    ${card("Cohort lost", String(report.groupTrials.cohort.lost), "expired or closed without converting")}
+  </div>
+  <div style="font-size:11px;color:${MUTED};margin-top:8px;">
+    Cohort reconciliation: ${report.groupTrials.cohort.started} started =
+    ${report.groupTrials.cohort.converted} converted + ${report.groupTrials.cohort.lost} lost +
+    ${report.groupTrials.cohort.stillActive} still active. Group dealers provisioned directly as paying are not trials
+    (they count under Group dealers added). Converted history counts only ss_-born group trials.
+  </div>
+
   <h2>Period activity (any cohort — raw counts, not rates)</h2>
   <div class="grid3">
-    ${card("Trials converted in period", String(report.trials.activity.trialConversions), report.trials.activity.trialConversionsGroup > 0 ? `+${report.trials.activity.trialConversionsGroup} group-attached (anomaly)` : "independent trials that went paid")}
-    ${card("Migrations went live", String(report.trials.activity.migrations), "4.0 → 5.0 cutovers — not trial wins")}
+    ${card("Trials converted in period", String(report.trials.activity.trialConversions), `independent (Funnel A) · +${report.trials.activity.trialConversionsGroup} reseller/group (Funnel B)`)}
+    ${card("Migrations & go-lives", String(report.trials.activity.migrations), "4.0 → 5.0 cutovers + group store activations — not trial wins")}
     ${card("Trials lost in period", String(report.trials.activity.lost), `${report.trials.activity.lostIndependent} independent · ${report.trials.activity.lostGroup} group · 30-day window closed`)}
   </div>
 
   <h2>Accounts added &amp; churn</h2>
   <div class="grid3">
-    ${card("Group dealers added", String(report.groupDealersAdded))}
+    ${card("Group dealers added", String(report.groupDealersAdded), "provisioned paying — group-created trials count in Funnel B")}
     ${card("Cancellations — Independent", String(report.cancellations.independent))}
     ${card("Cancellations — Group", String(report.cancellations.group))}
   </div>

@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 type BiReport = {
   period: { from: string; to: string };
   generatedAt: string;
-  totals: { payingAccounts: number; trialAccounts: number };
+  totals: { payingAccounts: number; trialAccounts: number; groupTrialAccounts: number };
   trials: {
     started: number; conversionRate: number;
     cohort: { started: number; converted: number; lost: number; stillActive: number };
@@ -15,6 +15,11 @@ type BiReport = {
       trialConversions: number; trialConversionsGroup: number; migrations: number;
       lost: number; lostIndependent: number; lostGroup: number;
     };
+  };
+  groupTrials: {
+    started: number; conversionRate: number;
+    cohort: { started: number; converted: number; lost: number; stillActive: number };
+    activity: { conversions: number; lost: number };
   };
   acquisition: { source: string; count: number }[];
   groupDealersAdded: number;
@@ -28,8 +33,8 @@ type BiReport = {
 
 // Mirror of lib/bi.ts PeriodSummary.
 type PeriodSummaryRow = {
-  label: string; newTrials: number; trialsWon: number; trialsLost: number;
-  migrationsLive: number; groupAdded: number; manualAdded: number; downgradedFree: number;
+  label: string; newTrials: number; groupTrialsStarted: number; trialsWon: number; groupTrialsWon: number;
+  trialsLost: number; migrationsLive: number; groupAdded: number; manualAdded: number; downgradedFree: number;
   newPaying: number; growthPct: number | null;
 };
 type PeriodSummary = { periods: PeriodSummaryRow[]; totalPaying: number; generatedAt: string };
@@ -277,13 +282,14 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
         <>
           <div style={{ ...cardStyle, marginBottom: 16, display: "flex", gap: 28, fontSize: 13, color: NAVY, flexWrap: "wrap" }}>
             <div><span style={{ color: MUTED }}>Current book (point-in-time): </span><strong>Paying accounts {report.totals.payingAccounts}</strong> <span style={{ color: MUTED }}>(active, test-excluded — matches the Dashboard)</span></div>
-            <div><strong>Trial accounts {report.totals.trialAccounts}</strong> <span style={{ color: MUTED }}>(independent only — group dealers never trial)</span></div>
+            <div><strong>Trial accounts {report.totals.trialAccounts}</strong> <span style={{ color: MUTED }}>(independent — Funnel A)</span></div>
+            <div><strong>Group trials {report.totals.groupTrialAccounts}</strong> <span style={{ color: MUTED }}>(reseller/group-created — Funnel B)</span></div>
           </div>
 
-          {/* Section A — cohort (the rate) vs period activity (raw counts) */}
-          <SectionTitle>Trial funnel — this period&rsquo;s cohort (independent)</SectionTitle>
+          {/* Funnel A — cohort (the rate) vs period activity (raw counts) */}
+          <SectionTitle>Funnel A — inbound self-serve trials (independent · this period&rsquo;s cohort)</SectionTitle>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-            <Card label="Trials started" value={String(report.trials.started)} sub="independent, created in period" />
+            <Card label="Trials started" value={String(report.trials.started)} sub="independent (no group), created in period — your team's funnel" />
             <Card
               label="Cohort conversion rate"
               value={`${report.trials.conversionRate}%`}
@@ -297,14 +303,33 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
             {report.trials.cohort.stillActive} still active. The rate is cohort-based (converted ÷ started) and can never exceed 100%.
           </div>
 
+          {/* Funnel B — reseller / group-created trials */}
+          <SectionTitle>Funnel B — reseller / group-created trials (this period&rsquo;s cohort)</SectionTitle>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            <Card label="Group trials started" value={String(report.groupTrials.started)} sub="created by a reseller/group as a Trial (the Permaplate motion)" />
+            <Card
+              label="Cohort conversion rate"
+              value={`${report.groupTrials.conversionRate}%`}
+              sub={`${report.groupTrials.cohort.converted} of ${report.groupTrials.cohort.started} converted${report.groupTrials.cohort.stillActive > 0 ? ` · provisional — ${report.groupTrials.cohort.stillActive} still in trial` : ""}`}
+            />
+            <Card label="Cohort lost" value={String(report.groupTrials.cohort.lost)} sub="expired or closed without converting" />
+          </div>
+          <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
+            Cohort reconciliation: {report.groupTrials.cohort.started} started ={" "}
+            {report.groupTrials.cohort.converted} converted + {report.groupTrials.cohort.lost} lost +{" "}
+            {report.groupTrials.cohort.stillActive} still active. Group dealers provisioned directly as paying are NOT trials — they appear under
+            &ldquo;Group dealers added&rdquo;. Historical limitation: an already-converted form-created group trial can&rsquo;t be told apart from a
+            provisioned paying store, so converted history counts only self-serve-born (ss_) group trials.
+          </div>
+
           <SectionTitle>Period activity (any cohort — raw counts, not rates)</SectionTitle>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
             <Card
               label="Trials converted in period"
               value={String(report.trials.activity.trialConversions)}
-              sub={`independent trials that went paid${report.trials.activity.trialConversionsGroup > 0 ? ` · +${report.trials.activity.trialConversionsGroup} group-attached (anomaly)` : ""}`}
+              sub={`independent (Funnel A)${report.trials.activity.trialConversionsGroup > 0 ? ` · +${report.trials.activity.trialConversionsGroup} reseller/group-created (Funnel B)` : " · 0 reseller/group (Funnel B)"}`}
             />
-            <Card label="Migrations went live" value={String(report.trials.activity.migrations)} sub="4.0 → 5.0 cutovers — already-paying customers, not trial wins" />
+            <Card label="Migrations & go-lives" value={String(report.trials.activity.migrations)} sub="4.0 → 5.0 cutovers + group-billed store activations — already-paying, not trial wins" />
             <Card label="Trials lost in period" value={String(report.trials.activity.lost)} sub={`${report.trials.activity.lostIndependent} independent · ${report.trials.activity.lostGroup} group · 30-day window closed (extensions honored)`} />
           </div>
 
@@ -324,7 +349,7 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
           {/* Section B */}
           <SectionTitle>Accounts added &amp; churn</SectionTitle>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-            <Card label="Group dealers added" value={String(report.groupDealersAdded)} />
+            <Card label="Group dealers added" value={String(report.groupDealersAdded)} sub="provisioned paying — group-created trials count in Funnel B" />
             <Card label="Cancellations — Independent" value={String(report.cancellations.independent)} />
             <Card label="Cancellations — Group" value={String(report.cancellations.group)} />
           </div>
@@ -388,8 +413,9 @@ export default function BiClient({ defaultRecipient }: { defaultRecipient: strin
           {/* Definitions */}
           <SectionTitle>Definitions</SectionTitle>
           <div style={{ fontSize: 11, color: MUTED, lineHeight: 1.7, maxWidth: 900 }}>
-            <strong>Trial</strong> = account_type Trial/NULL; <strong>Independent</strong> = no group (group accounts never start as trials and are excluded from the funnel).{" "}
-            <strong>Trial conversion</strong> = an independent 5.0-native trial that went paid (converted_at); <strong>Migration</strong> = a 4.0 customer&rsquo;s 5.0 go-live (also stamps converted_at, never counted as a trial win).{" "}
+            <strong>Funnel A</strong> = independent (group_id NULL) trials — inbound self-serve, the team&rsquo;s funnel; Trial = account_type Trial/NULL.{" "}
+            <strong>Funnel B</strong> = reseller/group-created trials (group_id set + explicit Trial, or ss_-born with an outcome) — e.g. Permaplate/AutoNation creating a Trial so the store sees its addendum. The two funnels never mix; an ss_-born dealer attached to a group (MB of Fremont) is Funnel B.{" "}
+            <strong>Trial conversion</strong> = a 5.0-native trial that went paid (converted_at), split A/B as above; <strong>Migration / go-live</strong> = a 4.0 customer&rsquo;s 5.0 cutover or a group-billed store activation (also stamps converted_at, never counted as a trial win).{" "}
             <strong>Conversion rate</strong> = cohort-based: of trials started in the period, share converted (≤100%; provisional while cohort members still trial).{" "}
             <strong>Lost trial</strong> = trial window closed without converting — 30 days from signup, honoring operator extensions (trial_ends_at); the 30-print cap has no event date and isn&rsquo;t used for dating.{" "}
             <strong>Cancellation</strong> = downgrade event (downgraded_at in period) — distinct from lost trials, which never paid.{" "}
@@ -408,15 +434,17 @@ function PeriodSummaryGrid({ summary, error }: { summary: PeriodSummary | null; 
   if (!summary) return <div style={{ ...cardStyle, color: MUTED, fontSize: 13 }}>Loading…</div>;
 
   const rows: { label: string; key: keyof PeriodSummaryRow; strong?: boolean }[] = [
-    { label: "New Trials",          key: "newTrials" },
-    { label: "Trials Won",          key: "trialsWon" },
-    { label: "Trials Lost",         key: "trialsLost" },
-    { label: "Migrations Live",     key: "migrationsLive" },
-    { label: "Group Dealers Added", key: "groupAdded" },
-    { label: "Manually Added",      key: "manualAdded" },
-    { label: "Downgraded to Free",  key: "downgradedFree" },
-    { label: "New Paying",          key: "newPaying", strong: true },
-    { label: "Growth %",            key: "growthPct", strong: true },
+    { label: "New Trials (A)",        key: "newTrials" },
+    { label: "Group Trials (B)",      key: "groupTrialsStarted" },
+    { label: "Trials Won (A)",        key: "trialsWon" },
+    { label: "Group Trials Won (B)",  key: "groupTrialsWon" },
+    { label: "Trials Lost",           key: "trialsLost" },
+    { label: "Migrations Live",       key: "migrationsLive" },
+    { label: "Group Dealers Added",   key: "groupAdded" },
+    { label: "Manually Added",        key: "manualAdded" },
+    { label: "Downgraded to Free",    key: "downgradedFree" },
+    { label: "New Paying",            key: "newPaying", strong: true },
+    { label: "Growth %",              key: "growthPct", strong: true },
   ];
 
   const stickyBase: React.CSSProperties = {
@@ -477,8 +505,8 @@ function PeriodSummaryGrid({ summary, error }: { summary: PeriodSummary | null; 
         </tbody>
       </table>
       <div style={{ padding: "8px 12px", fontSize: 11, color: MUTED, borderTop: `1px solid ${BORDER}` }}>
-        New Paying = Trials Won + Group Dealers Added + Manually Added. Growth % = (New Paying − Downgraded) ÷ current paying base ({summary.totalPaying.toLocaleString("en-US")} — same active, test-excluded count as the header and the Dashboard).
-        Migrations Live are already-paying 4.0 customers going live on 5.0 — informational, excluded from New Paying and Growth.
+        New Paying = Trials Won (A) + Group Trials Won (B) + Group Dealers Added + Manually Added. Growth % = (New Paying − Downgraded) ÷ current paying base ({summary.totalPaying.toLocaleString("en-US")} — same active, test-excluded count as the header and the Dashboard).
+        Group Dealers Added = provisioned paying (group-created trials are counted in Group Trials, not here). Migrations Live are already-paying 4.0 customers going live on 5.0 (plus group store activations) — informational, excluded from New Paying and Growth.
         Weeks start Monday; quarters are calendar {new Date(summary.generatedAt).getFullYear()}. Fixed windows — the date picker above does not affect this grid.
       </div>
     </div>

@@ -13,6 +13,7 @@
 
 import { createAdminSupabaseClient } from "@/lib/db";
 import { isTrialAccountType, isPaidAccountType, TRIAL_DAYS_CAP } from "@/lib/print-eligibility";
+import { normalizeSubscriptionType } from "@/lib/hubspot";
 import { getGrossBillable, billingConfigured } from "@/lib/billing";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -22,8 +23,15 @@ export interface BiReport {
   generatedAt: string;
   /** Point-in-time snapshot (NOT period-filtered) — current active book.
    *  paying = active + isPaidAccountType; trial = active + independent +
-   *  isTrialAccountType. Both exclude test accounts. */
-  totals: { payingAccounts: number; trialAccounts: number };
+   *  isTrialAccountType; groupTrial = active + group-attached + NATIVE +
+   *  EXPLICIT account_type Trial (NULL on a group dealer is ETL-unknown, and
+   *  non-native "Trial" strings are Aurora-legacy artifacts — neither counts).
+   *  All exclude test accounts. */
+  totals: { payingAccounts: number; trialAccounts: number; groupTrialAccounts: number };
+  /** FUNNEL A — inbound self-serve trials (independent, group_id NULL). This
+   *  is the team-driven funnel: "what my team converts." Keyed on group_id,
+   *  NOT the ss_ prefix — an ss_-born dealer that is group-attached (the
+   *  Permaplate/AutoNation motion, e.g. MB of Fremont) belongs to Funnel B. */
   trials: {
     /** Independent dealers created in-period that started as a trial — counts
      *  those that have since converted/downgraded too (matches the doc). */
@@ -40,11 +48,12 @@ export interface BiReport {
      *  trialConversions   = independent NATIVE trials that went paid in-period
      *                       (converted_at in window; is_native excludes 4.0→5.0
      *                       migration cutovers, which also stamp converted_at).
-     *  trialConversionsGroup = ss_-born dealers now group-attached that
-     *                       converted (anomaly watch; expected 0 — group
-     *                       accounts do not start as trials).
+     *  trialConversionsGroup = Funnel B conversions — ss_-born (self-serve
+     *                       trial path) group-attached dealers that converted.
      *  migrations         = the remaining converted_at events: 4.0→5.0
-     *                       migration go-lives, NOT trial wins.
+     *                       migration go-lives + group-billed store activations
+     *                       (admin plan-set stamps converted_at too) — NOT
+     *                       trial wins.
      *  lost*              = trial windows that closed in-period without
      *                       converting (30-day cap, honoring trial_ends_at
      *                       extensions; expiry clamped to now). */
@@ -56,6 +65,25 @@ export interface BiReport {
       lostIndependent: number;
       lostGroup: number;
     };
+  };
+  /** FUNNEL B — reseller / group-created trials (group_id set, started as a
+   *  trial). The Permaplate motion: a reseller/group creates a Trial so the
+   *  store sees its addendum, then the dealer upgrades. Kept fully separate
+   *  from Funnel A — never merged, never divided into A's rate.
+   *
+   *  "Started as a trial" (group dealers): EXPLICIT account_type Trial now
+   *  (the group create form's Trial option + self-serve signups both set it),
+   *  OR ss_-born (self-serve trial path) with a converted_at/downgraded_at
+   *  outcome. HISTORICAL LIMITATION: a form-created group trial that has
+   *  already converted is indistinguishable from an admin-provisioned paying
+   *  store (both end at a paid account_type + converted_at, e.g. the Pugmire
+   *  adds) — only ss_-born conversions are countable retroactively. Going
+   *  forward a durable born-as-trial marker would close this. */
+  groupTrials: {
+    started: number;
+    conversionRate: number;
+    cohort: { started: number; converted: number; lost: number; stillActive: number };
+    activity: { conversions: number; lost: number };
   };
   acquisition: { source: string; count: number }[];
   groupDealersAdded: number;
@@ -159,14 +187,44 @@ function trialExpiryMs(d: DealerLite, nowMs: number): number {
   return (d.created_at ? new Date(d.created_at).getTime() : nowMs) + TRIAL_DAYS_CAP * DAY_MS;
 }
 
-/** Started-as-a-trial predicate for dealers CREATED in a window. A live trial
- *  account_type is the direct signal; for dealers that have since moved on,
- *  converted_at/downgraded_at count ONLY on is_native rows — non-native
- *  (Aurora-origin) dealers get converted_at stamped by 4.0→5.0 MIGRATION
- *  flows and were never 5.0 trials. */
+/** Started-as-a-trial predicate for INDEPENDENT dealers CREATED in a window.
+ *  A live trial account_type is the direct signal; for dealers that have since
+ *  moved on, converted_at/downgraded_at count ONLY on is_native rows —
+ *  non-native (Aurora-origin) dealers get converted_at stamped by 4.0→5.0
+ *  MIGRATION flows and were never 5.0 trials. */
 function startedAsTrial(d: DealerLite): boolean {
   if (isTrialAccountType(d.account_type)) return true;
   return d.is_native === true && (d.converted_at != null || d.downgraded_at != null);
+}
+
+/** EXPLICIT trial account_type. For GROUP dealers NULL must NOT read as trial
+ *  (isTrialAccountType treats NULL as trial — right for fresh self-serve rows,
+ *  wrong for ETL-discovered group rows whose Aurora type is simply unknown). */
+function isExplicitTrial(at: string | null): boolean {
+  return at != null && normalizeSubscriptionType(at) === "Trial";
+}
+
+/** Started-as-a-trial predicate for GROUP dealers (Funnel B). NATIVE + explicit
+ *  Trial now, or ss_-born (self-serve trial path, native by construction) with
+ *  an outcome. The is_native gate matters: ~85 Aurora-legacy group rows carry a
+ *  literal 4.0 account_type "Trial" (reseller-serviced stores, some ETL-
+ *  discovered mid-period) — without the gate they'd pollute cohorts and mint
+ *  phantom "lost group trials" 30 days after ETL discovery. is_native +
+ *  converted_at is NOT usable as the trial signal — native group stores get
+ *  converted_at from group-migrate / admin plan-set flows (e.g. the Pugmire
+ *  store adds), which are provisioned-paying events, not trials. */
+function startedAsTrialGroup(d: DealerLite): boolean {
+  if (d.is_native === true && isExplicitTrial(d.account_type)) return true;
+  return (d.dealer_id ?? "").startsWith("ss_") && (d.converted_at != null || d.downgraded_at != null);
+}
+
+/** "Is a trial right now" test for LOST-trial dating, funnel-specific:
+ *  independent NULL account_type = trial (fresh-signup default); group = only
+ *  a native explicit Trial (Funnel B definition). */
+function isTrialNow(d: DealerLite): boolean {
+  return d.group_id == null
+    ? isTrialAccountType(d.account_type)
+    : d.is_native === true && isExplicitTrial(d.account_type);
 }
 
 export async function buildBiReport(from: string, to: string): Promise<BiReport> {
@@ -195,12 +253,26 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
   // datable axis (trial_ends_at extensions honored); print-cap is approximate
   // and intentionally not used here. A downgraded/self-closed trial is LOST,
   // not still-active, regardless of its expiry date.
-  let cohortConverted = 0, cohortLost = 0, cohortActive = 0;
-  for (const d of startedRows) {
-    if (d.converted_at) { cohortConverted++; continue; }
-    if (d.downgraded_at) { cohortLost++; continue; }
-    if (trialExpiryMs(d, nowMs) <= nowMs) cohortLost++; else cohortActive++;
-  }
+  const cohortBreakdown = (rows: DealerLite[]) => {
+    let converted = 0, lostN = 0, active = 0;
+    for (const d of rows) {
+      if (d.converted_at) { converted++; continue; }
+      if (d.downgraded_at) { lostN++; continue; }
+      if (trialExpiryMs(d, nowMs) <= nowMs) lostN++; else active++;
+    }
+    return { converted, lost: lostN, active };
+  };
+  const { converted: cohortConverted, lost: cohortLost, active: cohortActive } = cohortBreakdown(startedRows);
+
+  // ── FUNNEL B cohort: reseller/group-created trials STARTED in-period ─────
+  const groupCreated = await fetchDealers(admin, (q) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (q as any).not("group_id", "is", null).gte("created_at", startIso).lt("created_at", endExclusiveIso),
+  );
+  const groupStartedRows = groupCreated.filter(startedAsTrialGroup);
+  const groupStarted = groupStartedRows.length;
+  const gb2 = cohortBreakdown(groupStartedRows);
+  const groupConversionRate = groupStarted > 0 ? Math.round((gb2.converted / groupStarted) * 1000) / 10 : 0;
 
   // Acquisition breakdown over the started cohort.
   const acqMap = new Map<string, number>();
@@ -244,7 +316,7 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
       .is("downgraded_at", null),
   );
   const lostRows = lostCandidates.filter((d) => {
-    if (!isTrialAccountType(d.account_type)) return false;
+    if (!isTrialNow(d)) return false;
     const expiry = trialExpiryMs(d, nowMs);
     return expiry >= startMs && expiry < endExclusiveMs && expiry <= nowMs;
   });
@@ -252,11 +324,10 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
   const lostIndependent = lostRows.filter((d) => d.group_id == null).length;
   const lostGroup = lost - lostIndependent;
 
-  // ── B1. Group dealer accounts added ──────────────────────────────────────
-  const groupDealersAdded = await countDealers(admin, (q) =>
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (q as any).not("group_id", "is", null).gte("created_at", startIso).lt("created_at", endExclusiveIso),
-  );
+  // ── B1. Group dealer accounts added (provisioned PAYING) ─────────────────
+  // Group-created TRIALS are Funnel B, not "added paying dealers" — counting
+  // them here would inflate additions with trials that may be lost.
+  const groupDealersAdded = groupCreated.length - groupStarted;
 
   // ── B2. Cancellations (downgraded_at in-period), split ───────────────────
   const cancelledRows = await fetchDealers(admin, (q) =>
@@ -316,10 +387,11 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (q as any).eq("active", true),
   );
-  let payingAccounts = 0, trialAccounts = 0;
+  let payingAccounts = 0, trialAccounts = 0, groupTrialAccounts = 0;
   for (const d of activeRows) {
     if (isPaidAccountType(d.account_type)) payingAccounts++;
     else if (d.group_id == null && isTrialAccountType(d.account_type)) trialAccounts++;
+    else if (d.group_id != null && d.is_native === true && isExplicitTrial(d.account_type)) groupTrialAccounts++;
   }
 
   // ── C. Revenue (da-billing) ──────────────────────────────────────────────
@@ -357,7 +429,7 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
   return {
     period: { from, to },
     generatedAt: new Date().toISOString(),
-    totals: { payingAccounts, trialAccounts },
+    totals: { payingAccounts, trialAccounts, groupTrialAccounts },
     trials: {
       started,
       conversionRate,
@@ -370,6 +442,12 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
         lostIndependent,
         lostGroup,
       },
+    },
+    groupTrials: {
+      started: groupStarted,
+      conversionRate: groupConversionRate,
+      cohort: { started: groupStarted, converted: gb2.converted, lost: gb2.lost, stillActive: gb2.active },
+      activity: { conversions: trialConversionsGroup, lost: lostGroup },
     },
     acquisition,
     groupDealersAdded,
@@ -394,15 +472,22 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
 
 export interface PeriodSummaryRow {
   label: string;
+  /** Funnel A — independent trials started (same predicate as the funnel). */
   newTrials: number;
+  /** Funnel B — reseller/group-created trials started (startedAsTrialGroup). */
+  groupTrialsStarted: number;
   /** Independent NATIVE trial → paid conversions (same rule as the funnel's
    *  activity.trialConversions — migrations are NOT trials won). */
   trialsWon: number;
+  /** Funnel B conversions — ss_-born group-attached dealers that went paid. */
+  groupTrialsWon: number;
   trialsLost: number;
-  /** 4.0→5.0 migration go-lives (converted_at events that are not trial
-   *  conversions). Informational — already-paying customers changing
-   *  platforms, so deliberately NOT part of newPaying/growth. */
+  /** 4.0→5.0 migration go-lives + group-billed store activations (converted_at
+   *  events that are not trial conversions). Informational — deliberately NOT
+   *  part of newPaying/growth. */
   migrationsLive: number;
+  /** Group dealers created in-window that did NOT start as a trial (Funnel B
+   *  starts are excluded — they count in newPaying only if/when they convert). */
   groupAdded: number;
   manualAdded: number;
   downgradedFree: number;
@@ -476,36 +561,43 @@ export async function buildPeriodSummary(): Promise<PeriodSummary> {
     const fromMs = from.getTime();
     const toMs = to.getTime();
 
-    let newTrials = 0, trialsWon = 0, trialsLost = 0, migrationsLive = 0, groupAdded = 0, manualAdded = 0, downgradedFree = 0;
+    let newTrials = 0, groupTrialsStarted = 0, trialsWon = 0, groupTrialsWon = 0, trialsLost = 0,
+      migrationsLive = 0, groupAdded = 0, manualAdded = 0, downgradedFree = 0;
     for (const d of rows) {
       const createdIn = inWin(d.created_at, fromMs, toMs);
       const independent = d.group_id == null;
 
-      // Started as a trial — SAME predicate as the funnel (startedAsTrial):
-      // migration-stamped converted_at on non-native rows must not count.
+      // Started as a trial — SAME predicates as the funnels: Funnel A
+      // (startedAsTrial, independent) and Funnel B (startedAsTrialGroup).
       if (createdIn && independent && startedAsTrial(d)) newTrials++;
+      if (createdIn && !independent && startedAsTrialGroup(d)) groupTrialsStarted++;
 
-      // Conversion EVENTS, classified with the funnel's discriminator:
-      // independent native = trial won; everything else = migration go-live.
+      // Conversion EVENTS, classified with the funnels' discriminators:
+      // independent native = Funnel A win; group ss_-born = Funnel B win;
+      // everything else = migration go-live / group store activation.
       if (inWin(d.converted_at, fromMs, toMs)) {
         if (independent && d.is_native === true) trialsWon++;
+        else if (!independent && (d.dealer_id ?? "").startsWith("ss_")) groupTrialsWon++;
         else migrationsLive++;
       }
 
       // Lost-trial EVENTS: still a trial, never converted/cancelled, and the
       // trial window (trial_ends_at override, else created+30d) closed inside
       // the window. Clamped at now — future expiries could still convert, and
-      // without the clamp the quarters wouldn't reconcile with YTD.
-      if (isTrialAccountType(d.account_type) && !d.converted_at && !d.downgraded_at && d.created_at) {
+      // without the clamp the quarters wouldn't reconcile with YTD. Trial-now
+      // test is funnel-specific (isTrialNow): group = native explicit Trial.
+      if (isTrialNow(d) && !d.converted_at && !d.downgraded_at && d.created_at) {
         const expiryMs = trialExpiryMs(d, nowMs);
         if (expiryMs >= fromMs && expiryMs < toMs && expiryMs <= nowMs) trialsLost++;
       }
 
-      if (createdIn && !independent) groupAdded++;
+      // Group dealers PROVISIONED paying — group-created trials excluded
+      // (they're groupTrialsStarted; they reach newPaying only via a win).
+      if (createdIn && !independent && !startedAsTrialGroup(d)) groupAdded++;
 
       // Manually-added paying: independent, created in window, paid now, not a
       // conversion (converted_at set → already counted in trialsWon), not
-      // self-serve. Keeps newPaying's three parts non-overlapping.
+      // self-serve. Keeps newPaying's parts non-overlapping.
       if (createdIn && independent && isPaidAccountType(d.account_type)
         && d.converted_at == null && !(d.dealer_id ?? "").startsWith("ss_")) manualAdded++;
 
@@ -514,26 +606,13 @@ export async function buildPeriodSummary(): Promise<PeriodSummary> {
 
     // Migrations are already-paying 4.0 customers changing platforms —
     // deliberately excluded from newPaying and growth.
-    const newPaying = trialsWon + groupAdded + manualAdded;
+    const newPaying = trialsWon + groupTrialsWon + groupAdded + manualAdded;
     const growthPct = totalPaying > 0
       ? Math.round(((newPaying - downgradedFree) / totalPaying) * 1000) / 10
       : null;
 
-    return { label, newTrials, trialsWon, trialsLost, migrationsLive, groupAdded, manualAdded, downgradedFree, newPaying, growthPct };
+    return { label, newTrials, groupTrialsStarted, trialsWon, groupTrialsWon, trialsLost, migrationsLive, groupAdded, manualAdded, downgradedFree, newPaying, growthPct };
   });
 
   return { periods, totalPaying, generatedAt: new Date().toISOString() };
-}
-
-/** head:true exact count for a filtered dealers query. Excludes test accounts. */
-async function countDealers(
-  admin: ReturnType<typeof createAdminSupabaseClient>,
-  build: (q: unknown) => unknown,
-): Promise<number> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const base = (admin.from("dealers").select("id", { count: "exact", head: true }) as any).not("is_test", "is", true);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { count, error } = await (build(base) as any);
-  if (error) throw error;
-  return count ?? 0;
 }
