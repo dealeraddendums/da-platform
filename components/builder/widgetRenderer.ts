@@ -70,13 +70,25 @@ function renderProductRow(
 }
 
 /** Canvas-only footnote under a real-product preview (BuilderPage sets
- *  d.previewBadge/previewOmitted at RENDER TIME only — never persisted, never
- *  set by the PDF path, so it cannot appear on prints). */
+ *  d.previewBadge/previewOmitted/previewCondition at RENDER TIME only — never
+ *  persisted, never set by the PDF path, so it cannot appear on prints). */
 function previewNote(d: D, shown: number): string {
   if (d.previewBadge !== true) return '';
   const omitted = Number(d.previewOmitted) || 0;
   const capNote = omitted > 0 ? ` Showing first ${shown} of ${shown + omitted}.` : '';
-  return `<div style="font-size:8px;color:#9aa0a6;font-style:italic;text-align:center;margin-top:3px">Preview: your products — the printed set varies per vehicle by your product rules.${capNote}</div>`;
+  const cond = typeof d.previewCondition === 'string' && d.previewCondition ? d.previewCondition : null;
+  const label = cond
+    ? `Preview: products that may apply to a ${cond} vehicle — the actual set varies per vehicle by your product rules.`
+    : `Preview: your products — the printed set varies per vehicle by your product rules.`;
+  return `<div style="font-size:8px;color:#9aa0a6;font-style:italic;text-align:center;margin-top:3px">${label}${capNote}</div>`;
+}
+
+/** Canvas-only: wrap a rendered product row so BuilderPage can measure which
+ *  rows overflow the widget box ("+N more · resize to fit"). Applied ONLY when
+ *  previewBadge is set — the PDF path never sets it, so printed markup is
+ *  byte-identical. */
+function markPreviewRow(row: string, isPreview: boolean): string {
+  return isPreview ? `<div class="pv-row">${row}</div>` : row;
 }
 
 export function renderW(type: string, d: D, fontScale: number): string {
@@ -256,7 +268,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
     // Canvas authoring mode (BuilderPage injects the scope's REAL products +
     // this flag at render time — never persisted, never set on the PDF path,
     // which always overwrites d.items from the vehicle's matched set).
-    const rows = items.map(it => renderProductRow(it, sz, szm, ls)).join('') + previewNote(d, items.length);
+    const rows = items.map(it => markPreviewRow(renderProductRow(it, sz, szm, ls), d.previewBadge === true)).join('') + previewNote(d, items.length);
     return `<div style="padding:3px 0">${header}${inset ? `<div style="${inset}">${rows}</div>` : rows}</div>`;
   }
 
@@ -302,7 +314,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const sampleNote = d.sampleBadge === true
       ? `<div style="font-size:8px;color:#9aa0a6;font-style:italic;text-align:center;margin-top:3px">Sample — actual products appear at print time</div>`
       : '';
-    const rows = items.map(it => renderProductRow(it, sz, szm, ls)).join('') + sampleNote + previewNote(d, items.length);
+    const rows = items.map(it => markPreviewRow(renderProductRow(it, sz, szm, ls), d.previewBadge === true)).join('') + sampleNote + previewNote(d, items.length);
     return `<div style="padding:3px 0">${header}${inset ? `<div style="${inset}">${rows}</div>` : rows}</div>`;
   }
 

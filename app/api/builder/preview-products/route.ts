@@ -21,7 +21,11 @@ import { formatOptionPrice, parseOptionPriceValue, priceSetUsesDecimals } from "
 // (order_by first) so a dealer with dozens keeps a usable canvas; totals are
 // returned so the client can label the cap.
 
-const CAP = 12;
+// Cap is a payload guard only — the canvas clips visually and shows a
+// "+N more · resize" indicator, so it can be generous.
+const CAP = 40;
+
+type PreviewCondition = "New" | "Used" | "CPO";
 
 type PreviewItem = {
   name: string;
@@ -30,7 +34,31 @@ type PreviewItem = {
   separator_above: boolean;
   separator_below: boolean;
   spaces: number;
+  /** Which vehicle conditions this product COULD apply to (from the row's
+   *  ad_types/ad_type condition rule; vehicle-specific rules like make/model/
+   *  MSRP can't be evaluated without a vehicle, so this is the could-apply
+   *  superset per condition). Drives the Builder's New/Used/CPO preview
+   *  toggle — canvas-only, the print path still runs full matchesRulesRow. */
+  conditions: PreviewCondition[];
 };
+
+/** Condition applicability from a product row's rules — mirrors the print
+ *  evaluators' ad_types/ad_type handling (ad_types wins; legacy ad_type
+ *  "New" → New only, "Used" → Used+CPO, else all). Non-'rules' rows
+ *  (applies_to 'all'/'none') can appear on any condition. */
+function rowConditions(
+  appliesTo: string | null | undefined,
+  adTypes: string[] | null | undefined,
+  adType: string | null | undefined,
+): PreviewCondition[] {
+  const ALL: PreviewCondition[] = ["New", "Used", "CPO"];
+  if (appliesTo !== "rules") return ALL;
+  if (adTypes && adTypes.length > 0) return ALL.filter(c => adTypes.includes(c));
+  const t = adType ?? "Both";
+  if (t === "New") return ["New"];
+  if (t === "Used") return ["Used", "CPO"];
+  return ALL;
+}
 
 function splitAndMap<T>(
   rows: T[],
@@ -86,6 +114,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         separator_above: r.separator_above === true,
         separator_below: r.separator_below === true,
         spaces: typeof r.spaces === "number" ? r.spaces : 0,
+        conditions: rowConditions(r.applies_to, r.ad_types, r.ad_type),
       }),
     );
     return NextResponse.json({ source: "group", cap: CAP, ...split });
@@ -126,6 +155,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     separator_above: boolean;
     separator_below: boolean;
     spaces: number;
+    conditions: PreviewCondition[];
   };
   const merged: Merged[] = [
     ...corp.map(g => ({
@@ -136,6 +166,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       separator_above: g.separator_above === true,
       separator_below: g.separator_below === true,
       spaces: typeof g.spaces === "number" ? g.spaces : 0,
+      conditions: rowConditions(g.applies_to, g.ad_types, (g as unknown as { ad_type?: string | null }).ad_type),
     })),
     ...((libData ?? []) as AddendumLibraryRow[]).map(r => ({
       required: r.required !== false,
@@ -145,6 +176,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       separator_above: r.separator_above === true,
       separator_below: r.separator_below === true,
       spaces: typeof r.spaces === "number" ? r.spaces : 0,
+      conditions: rowConditions(r.applies_to, r.ad_types, r.ad_type),
     })),
   ];
 
@@ -162,6 +194,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       separator_above: r.separator_above,
       separator_below: r.separator_below,
       spaces: r.spaces,
+      conditions: r.conditions,
     }),
   );
   return NextResponse.json({ source: "dealer", cap: CAP, ...split });

@@ -277,6 +277,43 @@ interface Props {
   starterTemplateId?: string;
 }
 
+
+/** Canvas-only wrapper for real-product previews: clips the rendered product
+ *  list to the widget's own bounding box (so an oversized preview never
+ *  overlaps neighboring widgets/address/barcode) and measures which pv-row
+ *  entries fall fully below the box to show an honest "+N more · resize
+ *  widget to fit" pill instead of silently hiding content. Print output is
+ *  untouched — the PDF path never renders through BuilderPage. */
+function PreviewClippedContent({ html, w, h }: { html: string; w: number; h: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [hiddenCount, setHiddenCount] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rows = Array.from(el.querySelectorAll('.pv-row')) as HTMLElement[];
+    const limit = el.clientHeight;
+    let n = 0;
+    for (const r of rows) {
+      if (r.offsetTop >= limit - 2) n++;
+    }
+    setHiddenCount(n);
+  }, [html, w, h]);
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div ref={ref} style={{ width: '100%', height: '100%', overflow: 'hidden' }} dangerouslySetInnerHTML={{ __html: html }} />
+      {hiddenCount > 0 && (
+        <div style={{
+          position: 'absolute', bottom: 2, right: 2, zIndex: 5, pointerEvents: 'none',
+          background: '#fff8e1', border: '1px solid #ffe082', color: '#b26a00',
+          fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap',
+        }}>
+          +{hiddenCount} more · resize widget to fit
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, canAddCustomSize = false, canAdminUpload = false, starterMode = false, starterTemplateId }: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
@@ -765,9 +802,16 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // template JSON, so the 23d09ef leak guards hold. Server caps each section
   // (cap field) so a dealer with dozens keeps a usable canvas. Platform
   // starter authoring has no dealer/group scope → keeps the generic samples.
-  type PreviewProductItem = { name: string; desc: string; price: string; separator_above: boolean; separator_below: boolean; spaces: number };
+  type PreviewCondition = 'New' | 'Used' | 'CPO';
+  type PreviewProductItem = { name: string; desc: string; price: string; separator_above: boolean; separator_below: boolean; spaces: number; conditions?: PreviewCondition[] };
   type PreviewProducts = { required: PreviewProductItem[]; suggested: PreviewProductItem[]; requiredTotal: number; suggestedTotal: number; cap: number };
   const [previewProducts, setPreviewProducts] = useState<PreviewProducts | null>(null);
+  // Which vehicle condition the canvas preview simulates. No single vehicle is
+  // both New and Used, so unfiltered previews double-rendered per-condition
+  // product variants (Winter Haven Advantage New+Used) and overflowed the box.
+  // Defaults to the condition with the MOST could-apply products (worst case
+  // for sizing). Canvas-only — never persisted, never in the PDF path.
+  const [previewCondition, setPreviewCondition] = useState<PreviewCondition>('New');
   useEffect(() => {
     if (starterMode) { setPreviewProducts(null); return; }
     const scopeQs = groupId && !dealerId
@@ -782,6 +826,13 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       .then((j: PreviewProducts | null) => {
         if (cancelled || !j) return;
         setPreviewProducts(j);
+        // Default the preview to the condition with the most products.
+        const counts: Record<PreviewCondition, number> = { New: 0, Used: 0, CPO: 0 };
+        for (const it of [...(j.required ?? []), ...(j.suggested ?? [])]) {
+          for (const c of it.conditions ?? ['New', 'Used', 'CPO']) counts[c as PreviewCondition]++;
+        }
+        setPreviewCondition((['New', 'Used', 'CPO'] as PreviewCondition[])
+          .reduce((best, c) => (counts[c] > counts[best] ? c : best), 'New'));
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -790,24 +841,40 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
 
   /** Render-argument override for the two product widgets: real products when
    *  the scope has them, generic samples otherwise. Never touches w.d. */
+  const byCondition = (items: PreviewProductItem[]): PreviewProductItem[] =>
+    items.filter(it => (it.conditions ?? ['New', 'Used', 'CPO']).includes(previewCondition));
+
   const previewRenderD = (w: Widget): Widget['d'] => {
     if (w.type === 'options' && previewProducts && previewProducts.required.length > 0) {
-      return {
-        ...w.d,
-        items: previewProducts.required,
-        previewBadge: true,
-        previewOmitted: Math.max(0, previewProducts.requiredTotal - previewProducts.required.length),
-      };
+      const items = byCondition(previewProducts.required);
+      if (items.length > 0) {
+        return {
+          ...w.d,
+          items,
+          previewBadge: true,
+          previewCondition,
+          previewOmitted: Math.max(0, previewProducts.requiredTotal - previewProducts.required.length),
+        };
+      }
     }
     if (w.type === 'suggested_options') {
       if (previewProducts && previewProducts.suggested.length > 0) {
-        return {
-          ...w.d,
-          items: previewProducts.suggested,
-          previewBadge: true,
-          previewOmitted: Math.max(0, previewProducts.suggestedTotal - previewProducts.suggested.length),
-        };
+        const items = byCondition(previewProducts.suggested);
+        if (items.length > 0) {
+          return {
+            ...w.d,
+            items,
+            previewBadge: true,
+            previewCondition,
+            previewOmitted: Math.max(0, previewProducts.suggestedTotal - previewProducts.suggested.length),
+          };
+        }
+        // The scope HAS suggested products, just none for this condition —
+        // show the widget's own empty state, NOT the generic samples (which
+        // would misleadingly imply content on e.g. a CPO vehicle).
+        return w.d;
       }
+      // No real suggested products at all → generic-sample fallback (66d3334).
       if (!Array.isArray(w.d.items) || (w.d.items as unknown[]).length === 0) {
         return { ...w.d, items: SAMPLE_SUGGESTED_ITEMS, sampleBadge: true };
       }
@@ -2017,10 +2084,32 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Canvas scroll */}
           <div
-            style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '32px 24px', background: '#3a6897', cursor: previewMode ? 'default' : undefined }}
+            style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '32px 24px', background: '#3a6897', cursor: previewMode ? 'default' : undefined, position: 'relative' }}
             onDragOver={e => e.preventDefault()}
             onDrop={onDropCanvas}
           >
+            {/* Product-preview condition toggle (canvas-only): no single vehicle
+                is both New and Used, so the preview simulates ONE condition. */}
+            {previewProducts && (previewProducts.required.length > 0 || previewProducts.suggested.length > 0) && (
+              <div style={{ position: 'sticky', top: 0, alignSelf: 'flex-start', zIndex: 60, marginRight: 12, background: '#2a2b3c', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Preview</span>
+                {(['New', 'Used', 'CPO'] as const).map(c => (
+                  <button
+                    key={c}
+                    onClick={() => setPreviewCondition(c)}
+                    style={{
+                      padding: '3px 10px', fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: 'pointer',
+                      border: '1px solid rgba(255,255,255,0.25)',
+                      background: previewCondition === c ? '#ffa500' : 'transparent',
+                      color: previewCondition === c ? '#2a2b3c' : 'rgba(255,255,255,0.8)',
+                    }}
+                    title={`Preview products that may apply to a ${c} vehicle`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
             {/* Paper */}
             <div
               ref={paperRef}
@@ -2105,10 +2194,22 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                         options, never sets sampleBadge/previewBadge) can't pick
                         them up. Lets authors see true content volume/overflow
                         while tuning box size + the label/products font pickers. */}
-                    <div
-                      style={{ width: '100%', height: '100%', overflow: 'visible' }}
-                      dangerouslySetInnerHTML={{ __html: renderW(w.type, previewRenderD(w), fontScale) }}
-                    />
+                    {(() => {
+                      const d2 = previewRenderD(w);
+                      const html = renderW(w.type, d2, fontScale);
+                      // Real-product previews clip to the widget's own box (and
+                      // show a "+N more" pill) so an oversized set never overlaps
+                      // neighboring widgets. Everything else keeps overflow
+                      // visible, exactly as before.
+                      return d2 !== w.d && (d2 as Record<string, unknown>).previewBadge === true
+                        ? <PreviewClippedContent html={html} w={w.w} h={w.h} />
+                        : (
+                          <div
+                            style={{ width: '100%', height: '100%', overflow: 'visible' }}
+                            dangerouslySetInnerHTML={{ __html: html }}
+                          />
+                        );
+                    })()}
                   </div>
                 );
               })}
