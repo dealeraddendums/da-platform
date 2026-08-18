@@ -152,12 +152,22 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const d = byId.get(id)!; // membership (and thus existence) enforced above
     if (d.migration_status === "migrated") { results.push({ id, name: d.name, status: "skipped", reason: "already migrated" }); continue; }
     if (d.active === false) { results.push({ id, name: d.name, status: "failed", reason: "deactivated dealer" }); continue; }
-    if (d.subscription_billed_to !== "group") {
-      results.push({ id, name: d.name, status: "failed", reason: "self-billed dealer — needs the operator migration path (billing cutover)" });
-      continue;
+    if (d.etl_locked === true || group.etl_locked === true) {
+      // Sync is skipped for locked dealers, so the stored billed-to flag is
+      // the only signal — check it now (it's operator-managed for these).
+      if (d.subscription_billed_to !== "group") {
+        results.push({ id, name: d.name, status: "failed", reason: "self-billed dealer — needs the operator migration path (billing cutover)" });
+        continue;
+      }
+      skipSync.push(d);
+    } else {
+      // Billed-to is checked AFTER the sync (2026-08-18): the sync now
+      // refreshes subscription_billed_to from 4.0's Sub Bill To (the truth),
+      // so a stale 'dealer' flag self-heals instead of wrongly blocking a
+      // group-billed member. Genuinely self-billed dealers are refused
+      // post-sync below.
+      toSync.push(d);
     }
-    if (d.etl_locked === true || group.etl_locked === true) skipSync.push(d);
-    else toSync.push(d);
   }
 
   // ── Mandatory final 4.0 config sync (one batched ETL call) ─────────────────
@@ -214,10 +224,29 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
   }
 
+  // ── Post-sync billed-to gate (fresh 4.0 truth) ─────────────────────────────
+  // The sync just refreshed subscription_billed_to from Aurora SUB_BILLING_TO —
+  // re-read it so the self-billed refusal is based on 4.0's CURRENT Sub Bill
+  // To, not a stale flag. Read failure falls back to the pre-sync value.
+  const freshBilledTo = new Map<string, string | null>();
+  const syncedToCheck = toSync.filter((d) => syncedOk.has(d.id)).map((d) => d.id);
+  if (syncedToCheck.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: fresh } = await (admin as any).from("dealers").select("id, subscription_billed_to").in("id", syncedToCheck);
+    for (const f of (fresh ?? []) as { id: string; subscription_billed_to: string | null }[]) {
+      freshBilledTo.set(f.id, f.subscription_billed_to);
+    }
+  }
+
   // ── Flip each synced dealer (canonical shared writes; NO billing) ──────────
   const nowIso = new Date().toISOString();
   for (const d of [...toSync, ...skipSync]) {
     if (!syncedOk.has(d.id)) continue;
+    const billedTo = freshBilledTo.has(d.id) ? freshBilledTo.get(d.id) : d.subscription_billed_to;
+    if (billedTo !== "group") {
+      results.push({ id: d.id, name: d.name, status: "failed", reason: "self-billed dealer (per 4.0 Sub Bill To) — needs the operator migration path (billing cutover)" });
+      continue;
+    }
     const res = await migrateDealerRecord(admin, d, {
       nowIso,
       hubspotContext: `group self-service migration (${group.name}) — upgrade to Paid`,
