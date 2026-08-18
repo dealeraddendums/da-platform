@@ -1128,6 +1128,7 @@ export type DealerVehicleRow = {
   print_queue: number | null;
   print_queue_at: string | null;   // migration 123 — when queued (mobile Print Later)
   print_cleared_at: string | null; // migration 140 — deliberate Clear Print History stamp (Job 6 guard)
+  options_saved_at: string | null; // migration 148 — options were explicitly saved (even an EMPTY set); read paths must not re-seed
   print_queue_by: string | null;   // migration 123 — who queued it
   print_user: string | null;
   print_flag: number | null;

@@ -114,7 +114,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } catch { /* columns may not exist until migrations 034/144 are applied */ }
 
     // ── Options from Supabase ─────────────────────────────────────────────────
-    // Check per-vehicle UUID first; fall back to legacy '0' sentinel
+    // Check per-vehicle UUID first; fall back to legacy '0' sentinel.
+    // options_saved_at (migration 148): when the operator has EXPLICITLY saved
+    // this vehicle's options — even an empty set — zero rows means "print no
+    // dealer options", NOT "never saved": skip the sentinel fallback and the
+    // library seed below (the Napleton Transit mis-print: deleting every
+    // dealer product then printing re-seeded Wheel Locks + 3M and inflated
+    // the asking price by $973).
+    const optionsExplicitlySaved = Boolean((dv as Record<string, unknown>).options_saved_at);
     let { data: optionRows } = await admin
       .from("vehicle_options")
       .select("*")
@@ -122,7 +129,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .eq("dealer_id", dv.dealer_id)
       .order("sort_order");
 
-    if (!optionRows || optionRows.length === 0) {
+    if ((!optionRows || optionRows.length === 0) && !optionsExplicitlySaved) {
       const { data: legacyRows } = await admin
         .from("vehicle_options")
         .select("*")
@@ -297,7 +304,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // applies_to='none' manual-only products are excluded (never auto-add);
     // legacy addendum_data vehicles are left to that path (the save-on-print
     // guard skips persisting them so the feed keeps its authoritative values).
-    const seededMatches = (optionRows ?? []).length === 0
+    const seededMatches = (optionRows ?? []).length === 0 && !optionsExplicitlySaved
       ? autoMatchedLibraryRows(dealerLib, vehicleData)
       : [];
     // Save-on-print legacy guard (checked at generation, before recordPrint

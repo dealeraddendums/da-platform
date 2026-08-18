@@ -363,6 +363,22 @@ export async function GET(
         return NextResponse.json({ data: hydrated, groupOptions, source: "saved", alwaysShowCents, legacyAddendum: legacyMinus(hydrated.map((h) => h.option_name)) });
       }
 
+      // Explicit saved-EMPTY set (migration 148): the operator deleted every
+      // dealer option and saved. Zero rows + options_saved_at set means the
+      // editor must reopen EMPTY (not re-seed matched previews) — otherwise a
+      // deliberate deletion resurrects on the next open/print (the Napleton
+      // Transit mis-print). Group options still merge at read as always.
+      if (isUUID(vid)) {
+        const { data: dvMark } = await admin
+          .from("dealer_vehicles")
+          .select("options_saved_at")
+          .eq("id", vid)
+          .maybeSingle<{ options_saved_at: string | null }>();
+        if (dvMark?.options_saved_at) {
+          return NextResponse.json({ data: [], groupOptions, source: "saved", alwaysShowCents, legacyAddendum: legacyMinus([]) });
+        }
+      }
+
       // If UUID and nothing found, also check legacy '0' sentinel as fallback
       if (isUUID(vid)) {
         const { data: legacySaved } = await admin
@@ -480,8 +496,19 @@ export async function POST(
         source: o.source ?? "manual",
         required: o.required !== false,
       }));
-      const { data, error: insertErr } = await admin.from("vehicle_options").insert(inserts).select("*");
+      const { data, error: insertErr } = inserts.length > 0
+        ? await admin.from("vehicle_options").insert(inserts).select("*")
+        : { data: [] as VehicleOptionRow[], error: null };
       if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 });
+      // Stamp the explicit-save marker (migration 148) so an EMPTY save is
+      // distinguishable from never-saved — read paths must not re-seed a set
+      // the operator deliberately emptied (the Napleton Transit mis-print).
+      if (isUUID(vid)) {
+        await admin.from("dealer_vehicles")
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .update({ options_saved_at: new Date().toISOString() } as any)
+          .eq("id", vid);
+      }
       // Mirror to addendum_data (save-state slice). Fire-and-forget;
       // a failure here must not break the save.
       void mirrorToAddendumItems(admin, vid, effectiveDealerId, body.options);
@@ -506,10 +533,9 @@ export async function POST(
       required: o.required !== false,
     }));
 
-    const { data, error: insertErr } = await admin
-      .from("vehicle_options")
-      .insert(inserts)
-      .select("*");
+    const { data, error: insertErr } = inserts.length > 0
+      ? await admin.from("vehicle_options").insert(inserts).select("*")
+      : { data: [] as VehicleOptionRow[], error: null };
 
     if (insertErr) {
       return NextResponse.json({ error: insertErr.message }, { status: 500 });

@@ -317,7 +317,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
 
   // ── Save ─────────────────────────────────────────────────────────────────────
 
-  async function saveOptions(override?: (VehicleOptionRow | MatchedOption)[]) {
+  async function saveOptions(override?: (VehicleOptionRow | MatchedOption)[]): Promise<boolean> {
     const list = override ?? options;
     setSaving(true);
     setError(null);
@@ -341,17 +341,23 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
       if (json.data) setOptions(json.data);
       setDirty(false);
       setSource("saved");
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
+      return false;
     } finally {
       setSaving(false);
     }
   }
 
   // ── Print — always saves current options before generating PDF ───────────────
+  // Save-first is what makes the PDF == the editor (deletions AND adds). If
+  // the save FAILS, do NOT print — the PDF would render the stale server set
+  // (the silent-proceed here was half of the Napleton Transit mis-print).
 
   async function handlePrint(docType: "addendum" | "infosheet" | "buyer_guide") {
-    await saveOptions();
+    const saved = await saveOptions();
+    if (!saved) return; // saveOptions surfaced the error banner
     setPrintDoc(docType);
   }
 

@@ -473,6 +473,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             description: o.description ?? null,
             required: (o.required as boolean | undefined) !== false,
           }));
+        } else if (Boolean((dv as Record<string, unknown>).options_saved_at)) {
+          // options_saved_at set + zero rows (migration 148): the operator
+          // explicitly saved an EMPTY dealer-option set — print group options
+          // only; never fall back to the '0' sentinel or re-seed the library.
+          optionsSource = "saved_empty";
+          // savedForMerge stays [] — newlyAddedLibraryMatches returns nothing
+          // for an empty saved set, so no library rows sneak back in.
+          effectiveOptions = [];
         } else {
           // 2. Legacy '0' sentinel (options saved before per-vehicle UUID migration)
           const { data: legacyOpts, error: legacyOptsErr } = await admin

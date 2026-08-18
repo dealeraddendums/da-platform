@@ -624,7 +624,8 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
       } else if (effective.length === 0) {
         if (legacy.length > 0) {
           effective = legacy; // migrated-dealer fallback — unchanged behavior
-        } else if (saved.length === 0) {
+        } else if (saved.length === 0 && !(dv as Record<string, unknown>).options_saved_at) {
+          // options_saved_at set + zero rows = deliberately emptied — never re-seed.
           effective = autoMatchedLibraryRows(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             libRows as any[],
