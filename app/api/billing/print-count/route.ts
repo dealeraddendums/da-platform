@@ -1,7 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
+
+/** Admin client with fetch caching HARD-DISABLED. Next.js's patched fetch
+ *  cached this route's constant-URL Supabase GETs (the groups lookup and the
+ *  member-store list) across requests — live-caught 2026-08-19: after
+ *  groups.billing_customer_id was cleared, the route kept resolving the group
+ *  from a cached read. Stale reads here are a MIS-BILLING vector (missed new
+ *  stores, wrong group resolution), so every query goes out no-store. */
+function freshAdminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",
+    process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder-service-role-key",
+    {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { fetch: (url: any, init?: any) => fetch(url, { ...init, cache: "no-store" }) },
+    },
+  );
+}
 
 /**
  * GET /api/billing/print-count — metered-usage source for the Restyler plan
@@ -47,7 +64,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "group or customer required" }, { status: 400 });
   }
 
-  const admin = createAdminSupabaseClient();
+  const admin = freshAdminClient();
 
   // Resolve the group. billing_customer_id is unique per group in practice;
   // if data drift ever produces two groups on one customer, fail loudly
