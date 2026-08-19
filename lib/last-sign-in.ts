@@ -22,7 +22,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 // legacy profiles.last_login (4.0-era data) if set, else null ("never") — for
 // the gates, under-counting is the safe direction.
 
-let cache: { at: number; map: Map<string, string | null> } | null = null;
+let cache: { at: number; maps: { display: Map<string, string | null>; strict: Map<string, string | null> } } | null = null;
 const TTL_MS = 60_000;
 const IMPERSONATION_WINDOW_MS = 10 * 60_000;
 
@@ -86,7 +86,25 @@ async function impersonationEventsByEmail(
  * copy, and every Users-list display consume it.
  */
 export async function lastSignInByEmail(): Promise<Map<string, string | null>> {
-  if (cache && Date.now() - cache.at < TTL_MS) return cache.map;
+  return (await buildSignInMaps()).display;
+}
+
+/**
+ * STRICT variant: last REAL 5.0 sign-in only — impersonation-coincident
+ * sign-ins are excluded WITHOUT the legacy profiles.last_login fallback the
+ * display variant applies. The fallback is right for "last seen" UI columns,
+ * but a 4.0-era Aurora last_login stamp is NOT a working 5.0 login: using the
+ * display variant in the migration-invite completed check made a never-
+ * invited dealer's only recipient look "already accepted" the moment an
+ * operator impersonated them (Myrtle Beach Hyundai, 2026-08-19). Consumers
+ * deciding "can this human already log in to 5.0" must use THIS one.
+ */
+export async function lastSignInByEmailStrict(): Promise<Map<string, string | null>> {
+  return (await buildSignInMaps()).strict;
+}
+
+async function buildSignInMaps(): Promise<{ display: Map<string, string | null>; strict: Map<string, string | null> }> {
+  if (cache && Date.now() - cache.at < TTL_MS) return cache.maps;
   const admin = createAdminSupabaseClient();
   const raw = new Map<string, string | null>();
   for (let page = 1; ; page++) {
@@ -113,10 +131,14 @@ export async function lastSignInByEmail(): Promise<Map<string, string | null>> {
       polluted.push(email);
     }
   });
+  // STRICT map: polluted entries are simply null — no legacy fallback.
+  const strict = new Map(raw);
+  for (const email of polluted) strict.set(email, null);
+
   if (polluted.length > 0) {
-    // Best-effort fallback to legacy profiles.last_login for the excluded set
-    // (an earlier REAL sign-in isn't recoverable from GoTrue — it only keeps
-    // the latest). Missing fallback → null = "never signed in".
+    // Display map only: best-effort fallback to legacy profiles.last_login for
+    // the excluded set (an earlier REAL sign-in isn't recoverable from GoTrue —
+    // it only keeps the latest). Missing fallback → null = "never signed in".
     const fallback = new Map<string, string | null>();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: profs } = await (admin as any)
@@ -131,6 +153,7 @@ export async function lastSignInByEmail(): Promise<Map<string, string | null>> {
     }
   }
 
-  cache = { at: Date.now(), map: raw };
-  return raw;
+  const maps = { display: raw, strict };
+  cache = { at: Date.now(), maps };
+  return maps;
 }

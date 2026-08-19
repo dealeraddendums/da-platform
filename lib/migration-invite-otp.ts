@@ -20,7 +20,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildMigrationInviteEmail, buildMigrationFollowUpEmail } from "@/lib/invite-email";
-import { lastSignInByEmail } from "@/lib/last-sign-in";
+import { lastSignInByEmailStrict } from "@/lib/last-sign-in";
 import { isTrialTrackAccount } from "@/lib/migration-readiness";
 import { runInviteBillingCutover, type BillingCutoverResult } from "@/lib/billing-cutover";
 
@@ -147,12 +147,12 @@ async function upsertRecipientInvite(
  * THE per-recipient "completed" predicate — the single definition shared by
  * the initial send, manual Resend, and the follow-up drip. A recipient has
  * completed when EITHER:
- *   (a) their migration invitation for this dealer is consumed
+ *   (a) their migration invitation for THIS dealer is consumed
  *       (invitations.accepted_at set), OR
- *   (b) they have a REAL sign-in per lastSignInByEmail — the impersonation-
- *       safe helper that excludes sign-ins within ±10 min of an impersonation
- *       admin_audit event, so an operator ghosting the account never marks
- *       the human as having accepted.
+ *   (b) they are an ACTIVE user of THIS dealer with a real 5.0 sign-in
+ *       (lastSignInByEmailStrict — impersonation-minted sessions excluded,
+ *       legacy 4.0 last_login stamps never count). A login or profile on a
+ *       DIFFERENT dealer says nothing about this dealer's invite.
  * Completed recipients must never be re-emailed a "you're invited" + fresh
  * code. Note this is PER RECIPIENT, not "is the dealer migrated": on a
  * migrated dealer the not-yet-accepted admins still need their account-only
@@ -161,9 +161,11 @@ async function upsertRecipientInvite(
 async function completedRecipientEmails(
   admin: ReturnType<typeof createAdminSupabaseClient>,
   dealerUuid: string,
+  dealerTextId: string,
   candidateEmails: string[],
 ): Promise<Set<string>> {
   const done = new Set<string>();
+  // (a) Accepted THIS dealer's migration invitation.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: acceptedRows } = await (admin as any)
     .from("invitations")
@@ -172,14 +174,32 @@ async function completedRecipientEmails(
     .eq("purpose", "migration")
     .not("accepted_at", "is", null) as { data: { email: string }[] | null };
   for (const r of acceptedRows ?? []) done.add(r.email.toLowerCase());
+
+  // (b) An ACTIVE user OF THIS DEALER with a real 5.0 sign-in. Both halves are
+  // deliberately narrow (the Myrtle Beach Hyundai lesson, 2026-08-19):
+  //   - dealer-scoped: a login/profile on a DIFFERENT dealer says nothing
+  //     about THIS dealer's invite — the old global check marked a
+  //     never-invited dealer's recipient "accepted".
+  //   - STRICT sign-in: impersonation-minted sessions are excluded and the
+  //     legacy profiles.last_login fallback (a 4.0-era Aurora stamp, fine for
+  //     "last seen" columns) does NOT count as a working 5.0 login — it was
+  //     the second half of the same false-accepted verdict.
   try {
-    const signIns = await lastSignInByEmail();
-    for (const e of candidateEmails) {
-      if (signIns.get(e)) done.add(e);
+    const { data: activeProfiles } = await admin
+      .from("profiles")
+      .select("email")
+      .eq("dealer_id", dealerTextId)
+      .eq("active", true);
+    const onThisDealer = new Set((activeProfiles ?? []).map(p => (p.email ?? "").toLowerCase()));
+    if (onThisDealer.size > 0) {
+      const signIns = await lastSignInByEmailStrict();
+      for (const e of candidateEmails) {
+        if (onThisDealer.has(e) && signIns.get(e)) done.add(e);
+      }
     }
   } catch (e) {
     // Best-effort: the accepted-invitation check above still applies.
-    console.error("[migration-invite] lastSignInByEmail failed:", e instanceof Error ? e.message : e);
+    console.error("[migration-invite] dealer-scoped sign-in check failed:", e instanceof Error ? e.message : e);
   }
   return done;
 }
@@ -280,7 +300,7 @@ export async function sendMigrationInvite(
   // Per-recipient completed skip (shared predicate): never re-email someone
   // who already accepted / has a working login. On an already-migrated dealer
   // the pending admins still get their account-only invites.
-  const done = await completedRecipientEmails(admin, dealer.id, resolved.map(r => r.email));
+  const done = await completedRecipientEmails(admin, dealer.id, dealer.dealer_id, resolved.map(r => r.email));
   const recipients = resolved.filter(r => !done.has(r.email));
   const skipped = resolved.filter(r => done.has(r.email)).map(r => r.email);
 
@@ -414,7 +434,7 @@ export async function sendMigrationFollowUp(
   // Skip recipients who already completed (SAME shared predicate as the
   // initial send + manual Resend: accepted invitation OR real sign-in) — a
   // completed recipient must never be nagged.
-  const done = await completedRecipientEmails(admin, dealer.id, all.map(r => r.email));
+  const done = await completedRecipientEmails(admin, dealer.id, dealer.dealer_id, all.map(r => r.email));
   const recipients = all.filter(r => !done.has(r.email));
   if (recipients.length === 0) return { ok: false, email: null, emailSent: false, warning: `All recipients for "${dealer.name}" already completed their invites` };
 
