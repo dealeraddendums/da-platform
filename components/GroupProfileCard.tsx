@@ -180,6 +180,22 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
     setTestToggling(false);
   }
 
+  // Restyler/Upfitter account type (migration 149) — super_admin only.
+  const [restylerToggling, setRestylerToggling] = useState(false);
+  async function toggleIsRestyler() {
+    setRestylerToggling(true);
+    const res = await fetch(`/api/groups/${group.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_restyler: !group.is_restyler }),
+    });
+    if (res.ok) {
+      const json = (await res.json()) as { data: GroupRow };
+      setGroup(json.data);
+    }
+    setRestylerToggling(false);
+  }
+
   // DA Legacy ETL config-lock (migration 094) — cascades to all member dealers.
   const ETL_DEFAULT_REASON = "Live on new platform (limited/parallel)";
   const [etlToggling, setEtlToggling] = useState(false);
@@ -277,6 +293,15 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
                 title="Test account — eligible for permanent deletion"
               >
                 TEST
+              </span>
+            )}
+            {group.is_restyler && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5"
+                style={{ background: "#1976d2", color: "#fff", borderRadius: 20 }}
+                title="Restyler/Upfitter account — lightweight client stores, one metered plan, locked print attribution"
+              >
+                RESTYLER
               </span>
             )}
             {group.etl_locked && (
@@ -386,6 +411,30 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
                   />
                   <span className="text-sm font-medium" style={{ color: group.is_test ? "#ffa500" : "var(--text-muted)" }}>
                     {testToggling ? "…" : group.is_test ? "TEST" : "Off"}
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {/* Restyler/Upfitter account type — super_admin only (migration 149). */}
+            {isSuperAdmin && (
+              <div className="flex items-start justify-between gap-4">
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Restyler / Upfitter</span>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                    Service-provider account: client stores are lightweight (no per-store billing — one metered plan), every print carries the locked &quot;created using dealeraddendums.com&quot; line, and the account is excluded from trial funnels.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer" style={{ userSelect: "none", flexShrink: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={group.is_restyler === true}
+                    disabled={restylerToggling || editing}
+                    onChange={() => void toggleIsRestyler()}
+                    style={{ cursor: restylerToggling ? "wait" : "pointer" }}
+                  />
+                  <span className="text-sm font-medium" style={{ color: group.is_restyler ? "#1976d2" : "var(--text-muted)" }}>
+                    {restylerToggling ? "…" : group.is_restyler ? "RESTYLER" : "Off"}
                   </span>
                 </label>
               </div>

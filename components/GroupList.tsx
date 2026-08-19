@@ -392,6 +392,15 @@ export default function GroupList() {
                           TEST
                         </span>
                       )}
+                      {g.is_restyler && (
+                        <span
+                          className="text-xs font-semibold px-2 py-0.5"
+                          style={{ background: "#1976d2", color: "#fff", borderRadius: 20, flexShrink: 0 }}
+                          title="Restyler/Upfitter account"
+                        >
+                          RESTYLER
+                        </span>
+                      )}
                     </div>
                     {g.tags && g.tags.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">

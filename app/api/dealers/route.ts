@@ -12,6 +12,7 @@ import {
   type BillingProduct,
 } from "@/lib/billing";
 import { runSync, fireAndForget } from "@/lib/billing-sync";
+import { isRestylerGroup } from "@/lib/restyler";
 import { fireDealerCreateReliable, fireProfileSync } from "@/lib/sync-hubspot";
 import { fireGroupAssignCascade } from "@/lib/group-billing-cascade";
 import { createDealerFolder, boxConfigured } from "@/lib/box";
@@ -742,7 +743,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // an empty da-billing customer).
   const isTrialCreate = (createdDealer.account_type as string | null) === "Trial";
 
-  if (!hasLegacyBilling && !isTrialCreate) {
+  // Restyler groups (migration 149) stage NO per-store billing — neither a
+  // standalone dealer customer nor a group-template subscription line. The
+  // account bills as ONE metered group plan (Phase 2); adding per-store lines
+  // here would double-charge the restyler at scale (~40 lightweight stores).
+  const isRestylerStore = await isRestylerGroup(admin, createdDealerGroupId);
+
+  if (!hasLegacyBilling && !isTrialCreate && !isRestylerStore) {
     if (subscriptionBilledTo === "group" && createdDealerGroupId) {
       // Group owns the subscription line. Cascade adds a tagged line
       // item to the group's template (creating the template + customer

@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerSettingsRow } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
+import { isRestylerGroup } from "@/lib/restyler";
 import { buildPdfKey } from "@/lib/s3-upload";
 import { useService as usePdfService, renderViaService, enqueueGenerate, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { enforceCanPrint } from "@/lib/print-eligibility";
@@ -91,9 +92,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // dealer_vehicles.dealer_id is the TEXT dealer_id (matches dealers.dealer_id, not dealers.id UUID)
     const { data: dealer } = await admin
       .from("dealers")
-      .select("id, dealer_id, internal_id, name, address, city, state, zip, phone, logo_url")
+      .select("id, dealer_id, internal_id, name, address, city, state, zip, phone, logo_url, group_id")
       .eq("dealer_id", dv.dealer_id)
       .maybeSingle();
+
+    // Restyler account (migration 149): every print from a restyler group's
+    // stores carries the locked attribution footer — forced at render time,
+    // never a template widget.
+    const restylerAttribution = await isRestylerGroup(admin, (dealer as { group_id?: string | null } | null)?.group_id ?? null);
 
     // dealer.dealer_id is the text ID used by group options / disclaimers
     const textDealerId = dealer?.dealer_id ?? "";
@@ -807,6 +813,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       dbDescription: vehicleData.DESCRIPTION ?? null,
       dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
       alwaysShowCents,
+      restylerAttribution,
     });
 
     const s3Key = buildPdfKey({

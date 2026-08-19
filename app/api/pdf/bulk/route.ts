@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerSettingsRow, BuyersGuideDefaults } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
+import { isRestylerGroup } from "@/lib/restyler";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/record-print";
 import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-save";
@@ -177,6 +178,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // the loop; the merged buffer + per-item signedUrls come back together.
   const serviceItems: (BulkItem & { vehicleId: string })[] = [];
   let firstDealerInternalId: string | null = null;
+  const restylerCache = new Map<string, boolean>();
 
   const dealerSettingsCache = new Map<string, DealerSettingsRow | null>();
   const templateCache = new Map<string, Widget[] | null>();
@@ -212,10 +214,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // id (UUID) is required for addendum_data FK
         const { data: dealer } = await admin
           .from("dealers")
-          .select("id, dealer_id, internal_id, name, address, city, state, zip, phone, logo_url")
+          .select("id, dealer_id, internal_id, name, address, city, state, zip, phone, logo_url, group_id")
           .eq("dealer_id", dv.dealer_id)
           .maybeSingle();
         const textDealerId = dealer?.dealer_id ?? "";
+        // Restyler account (migration 149): locked attribution on every render
+        // from a restyler group's stores. Cached per dealer text id — a bulk
+        // run is typically one dealer's queue.
+        let restylerAttribution = restylerCache.get(dv.dealer_id);
+        if (restylerAttribution === undefined) {
+          restylerAttribution = await isRestylerGroup(admin, (dealer as { group_id?: string | null } | null)?.group_id ?? null);
+          restylerCache.set(dv.dealer_id, restylerAttribution);
+        }
         if (firstDealerInternalId === null) {
           firstDealerInternalId = dealer?.internal_id ?? dv.dealer_id;
         }
@@ -903,6 +913,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo) : null;
 
         const html = await buildPdfHtml({
+          restylerAttribution,
           widgets, paperSize: effectivePaperSizeStr, fontScale, bgUrl,
           vehicle: vehicleData, options,
           disclaimers,

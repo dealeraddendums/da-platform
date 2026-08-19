@@ -4,6 +4,7 @@ import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
 import { resolveSessionProfile } from "@/lib/profile-session";
 import { verifyGhostToken } from "@/lib/ghost";
 import BuilderPage from "@/components/builder/BuilderPage";
+import { isRestylerGroup, dealerInRestylerGroup } from "@/lib/restyler";
 
 export const metadata = { title: "Document Builder — DA Platform" };
 
@@ -123,5 +124,13 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
   // library, a separate concern from dealer-scoped sizes.
   const canAddCustomSize = role === 'super_admin' || role === 'dealer_admin'
     || ((isGroupAdmin || isGroupUser) && !!profile?.active_dealer_id);
-  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={canAddCustomSize} canAdminUpload={role === 'super_admin'} />;
+
+  // Restyler account (migration 149): the canvas mirrors the PDF's locked
+  // attribution footer. Group mode → the group itself; dealer mode → the
+  // dealer's group.
+  const restylerAttribution = groupId
+    ? await isRestylerGroup(admin, groupId)
+    : await dealerInRestylerGroup(admin, dealerId);
+
+  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={canAddCustomSize} canAdminUpload={role === 'super_admin'} restylerAttribution={restylerAttribution} />;
 }

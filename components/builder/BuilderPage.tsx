@@ -1,5 +1,6 @@
 'use client';
 
+import { RESTYLER_ATTRIBUTION_TEXT } from '@/lib/restyler';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SNAP, MIN_W, MIN_H, BG_DEFAULT, IS_BG_DEFAULT, IB_DEFAULT,
@@ -275,6 +276,10 @@ interface Props {
   starterMode?: boolean;
   /** When editing an existing starter in starterMode, its id (load source). */
   starterTemplateId?: string;
+  /** Restyler account (migration 149): the canvas mirrors the PDF's locked
+   *  "created using dealeraddendums.com" footer — a forced overlay, not a
+   *  widget; the author cannot select, move, or delete it. */
+  restylerAttribution?: boolean;
 }
 
 
@@ -314,7 +319,7 @@ function PreviewClippedContent({ html, w, h }: { html: string; w: number; h: num
   );
 }
 
-export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, canAddCustomSize = false, canAdminUpload = false, starterMode = false, starterTemplateId }: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, canAddCustomSize = false, canAdminUpload = false, starterMode = false, starterTemplateId , restylerAttribution}: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
@@ -2133,6 +2138,14 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 alt="frame"
                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', pointerEvents: 'none', zIndex: 2, mixBlendMode: 'multiply', display: 'block' }}
               />
+              {/* Restyler locked attribution — mirrors the PDF's forced footer
+                  (lib/pdf-html.ts). pointer-events none: not selectable, not a
+                  widget, cannot be moved or removed. */}
+              {restylerAttribution && (
+                <div style={{ position: 'absolute', left: 0, right: 0, bottom: 3, zIndex: 9999, textAlign: 'center', fontSize: 9, lineHeight: 1.2, color: '#555', fontFamily: 'Roboto, Arial, sans-serif', pointerEvents: 'none' }}>
+                  {RESTYLER_ATTRIBUTION_TEXT}
+                </div>
+              )}
               {/* Widgets */}
               {Object.values(widgets).map(w => {
                 const isSelected = selId === w.id && !previewMode;

@@ -11,6 +11,7 @@
 // Period semantics: half-open [from 00:00Z, (to+1d) 00:00Z) — `to` is an
 // inclusive end DATE, so the whole day counts and boundaries don't double-count.
 
+import { restylerGroupIds } from "@/lib/restyler";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { isTrialAccountType, isPaidAccountType, TRIAL_DAYS_CAP } from "@/lib/print-eligibility";
 import { normalizeSubscriptionType } from "@/lib/hubspot";
@@ -143,7 +144,24 @@ async function fetchDealers(
     out.push(...rows);
     if (rows.length < PAGE) break;
   }
-  return out;
+  // Restyler accounts (migration 149) are their own business model — one
+  // metered group plan over lightweight client stores, not trials and not
+  // normal per-dealer subscriptions. Their stores are excluded from every
+  // dealers-based metric, same spirit as the is_test exclusion above.
+  const restylers = await getRestylerSet(admin);
+  return restylers.size ? out.filter((d) => d.group_id == null || !restylers.has(d.group_id)) : out;
+}
+
+// Restyler group ids, cached briefly — fetchDealers runs several times per
+// report build and the flag changes ~never mid-request.
+let restylerCache: { at: number; set: Set<string> } | null = null;
+async function getRestylerSet(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+): Promise<Set<string>> {
+  if (restylerCache && Date.now() - restylerCache.at < 60_000) return restylerCache.set;
+  const set = await restylerGroupIds(admin);
+  restylerCache = { at: Date.now(), set };
+  return set;
 }
 
 /** Bucket a dealer's acquisition jsonb into a human label (doc metric 4).
@@ -356,9 +374,16 @@ export async function buildBiReport(from: string, to: string): Promise<BiReport>
     .gte("closed_at", startIso)
     .lt("closed_at", endExclusiveIso);
   if (closureErr) throw closureErr;
-  const closures = (closureData ?? []) as {
+  const closuresRaw = (closureData ?? []) as {
     dealer_id: string; reason: string | null; closed_at: string; dealers: { group_id: string | null } | null;
   }[];
+  // Same restyler exclusion as fetchDealers — keeps the reasons table
+  // consistent with the (already-filtered) cancellation counts.
+  const restylersForClosures = await getRestylerSet(admin);
+  const closures = closuresRaw.filter((c) => {
+    const gid = c.dealers?.group_id ?? null;
+    return gid == null || !restylersForClosures.has(gid);
+  });
 
   const reasonAgg = new Map<string, { independent: number; group: number }>();
   const closureDealerIds = new Set<string>();
@@ -545,6 +570,17 @@ export async function buildPeriodSummary(): Promise<PeriodSummary> {
     const page = (data ?? []) as PeriodDealer[];
     rows.push(...page);
     if (page.length < PAGE) break;
+  }
+  // Restyler exclusion — same rule as fetchDealers (their stores are neither
+  // trials nor normal paying dealers).
+  {
+    const restylers = await getRestylerSet(admin);
+    if (restylers.size) {
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const gid = rows[i].group_id;
+        if (gid != null && restylers.has(gid)) rows.splice(i, 1);
+      }
+    }
   }
 
   // Denominator: current active paying book (same rule as totals.payingAccounts).

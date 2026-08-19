@@ -71,6 +71,7 @@ type ProfileUpdate = {
 };
 
 export type GroupRow = {
+  is_restyler?: boolean;
   id: string;
   name: string;
   active: boolean;
@@ -133,6 +134,7 @@ type GroupInsert = {
   name: string;
   active?: boolean;
   is_test?: boolean;
+  is_restyler?: boolean;
   account_type?: string;
   internal_id?: string | null;
   legacy_id?: number | null;
@@ -169,6 +171,7 @@ export type GroupUpdate = {
   name?: string;
   active?: boolean;
   is_test?: boolean;
+  is_restyler?: boolean;
   etl_locked?: boolean;
   etl_locked_at?: string | null;
   etl_locked_reason?: string | null;

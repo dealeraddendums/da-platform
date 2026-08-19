@@ -84,6 +84,9 @@ export async function PATCH(
   if (body.country !== undefined) patch.country = body.country;
   if (body.active !== undefined && claims.role === "super_admin") patch.active = body.active;
   if (body.is_test !== undefined && claims.role === "super_admin") patch.is_test = body.is_test;
+  // Restyler/Upfitter account type (migration 149) — super_admin only. Drives
+  // the locked print attribution, per-store billing skip, and metric exclusion.
+  if (body.is_restyler !== undefined && claims.role === "super_admin") patch.is_restyler = body.is_restyler === true;
   // DA Legacy ETL config-lock (migration 094) — super_admin only; cascades to
   // all member dealers. group_admin can edit name/contact, never this: a forged
   // etl_locked from group_admin is simply not copied into the patch.
