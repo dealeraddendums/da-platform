@@ -385,7 +385,24 @@ export async function sendMigrationInvite(
       }, adminUserId);
     }
   } else if (emailsSent > 0 && !firstInvite) {
-    cutoverNote = "resend — billing untouched (cutover fires only on the first invite)";
+    // Deferred-cutover retry (2026-08-19): if the first invite's cutover did
+    // not complete (billing_cutover_at still null — e.g. the FreshBooks pause
+    // failed on a mid-rotation bearer), Resend re-runs the whole cutover. Same
+    // scope + verified gate as the first invite; migrated dealers are excluded
+    // (the migrate flow owns billing from there).
+    const retryable = billingVerifiedColumnPresent && cutoverRelevant &&
+      dealer.subscription_billed_to !== "group" &&
+      dealer.migration_status !== "migrated" &&
+      dealer.billing_verified === true && !dealer.billing_cutover_at;
+    if (retryable) {
+      cutover = await runInviteBillingCutover(admin, {
+        id: dealer.id, dealer_id: dealer.dealer_id, name: dealer.name,
+        inventory_dealer_id: dealer.inventory_dealer_id, billing_customer_id: dealer.billing_customer_id,
+      }, adminUserId);
+      cutoverNote = "resend — retrying the deferred billing cutover (first invite's cutover did not complete)";
+    } else {
+      cutoverNote = "resend — billing untouched (cutover fires only on the first invite)";
+    }
   }
 
   return {
