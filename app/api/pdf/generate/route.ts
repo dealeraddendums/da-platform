@@ -412,6 +412,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     let savedTemplateWidgets: Widget[] | null = null;
     let savedTemplateIsGroup = false;
     let savedTemplateBgUrl: string | undefined;
+    let savedRestylerAttrPos: { x?: unknown; y?: unknown } | null = null;
     let savedTemplateFontScale: number | undefined;
     let savedTemplatePaperSize: PaperSize | undefined;
     let aiEnabled = true; // default: AI mode per platform default
@@ -469,10 +470,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               bgUrl?: string;
               fontScale?: number;
               paperSize?: string;
+              restylerAttrPos?: { x?: unknown; y?: unknown } | null;
             };
             if (tj.widgets && Object.keys(tj.widgets).length > 0) {
               savedTemplateWidgets = Object.values(tj.widgets);
             }
+            if (tj.restylerAttrPos) savedRestylerAttrPos = tj.restylerAttrPos;
             if (tj.bgUrl) savedTemplateBgUrl = tj.bgUrl;
             if (typeof tj.fontScale === "number") savedTemplateFontScale = tj.fontScale;
             if (tj.paperSize) savedTemplatePaperSize = tj.paperSize as PaperSize;
@@ -498,10 +501,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             bgUrl?: string;
             fontScale?: number;
             paperSize?: string;
+            restylerAttrPos?: { x?: unknown; y?: unknown } | null;
           };
           if (ftj.widgets && Object.keys(ftj.widgets).length > 0) {
             savedTemplateWidgets = Object.values(ftj.widgets);
           }
+          if (ftj.restylerAttrPos) savedRestylerAttrPos = ftj.restylerAttrPos;
           if (ftj.bgUrl) savedTemplateBgUrl = ftj.bgUrl;
           if (typeof ftj.fontScale === "number") savedTemplateFontScale = ftj.fontScale;
           if (ftj.paperSize) savedTemplatePaperSize = ftj.paperSize as PaperSize;
@@ -814,6 +819,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
       alwaysShowCents,
       restylerAttribution,
+      // Builder "Download PDF" sends live ad-hoc widgets + the current canvas
+      // position; a saved-template print reads it from the template JSON. The
+      // clamp in resolveRestylerAttrPos sanitizes either source.
+      restylerAttrPos: (body as { restylerAttrPos?: { x?: unknown; y?: unknown } | null }).restylerAttrPos ?? savedRestylerAttrPos,
     });
 
     const s3Key = buildPdfKey({

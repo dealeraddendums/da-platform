@@ -1,6 +1,6 @@
 'use client';
 
-import { RESTYLER_ATTRIBUTION_TEXT } from '@/lib/restyler';
+import { RESTYLER_ATTRIBUTION_TEXT, RESTYLER_ATTR_W, RESTYLER_ATTR_H, RESTYLER_ATTR_BOTTOM_RESERVE, resolveRestylerAttrPos } from '@/lib/restyler';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SNAP, MIN_W, MIN_H, BG_DEFAULT, IS_BG_DEFAULT, IB_DEFAULT,
@@ -338,6 +338,37 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [pdfLoading, setPdfLoading] = useState(false);
   const [bgOpen, setBgOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
+  // Restyler attribution position (template_json.restylerAttrPos): MOVABLE per
+  // template but never editable/removable — text + presence are render-forced;
+  // only x/y is authorable. null = default visible footer position.
+  const [restylerAttrPos, setRestylerAttrPos] = useState<{ x: number; y: number } | null>(null);
+  const [attrSelected, setAttrSelected] = useState(false);
+  // Arrow-nudge for the selected attribution (4px grid like widget nudge);
+  // Escape deselects. Move-only — no other key does anything to it.
+  useEffect(() => {
+    if (!attrSelected) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (e.key === 'Escape') { setAttrSelected(false); return; }
+      const step = 4;
+      const d: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+      const delta = d[e.key];
+      if (!delta) return;
+      e.preventDefault();
+      const dims = getPaperDims(paperSizeRef.current, customSizesRef.current);
+      setRestylerAttrPos(prev => {
+        const cur = resolveRestylerAttrPos(prev, dims.w, dims.h);
+        isDirtyRef.current = true;
+        return {
+          x: Math.min(Math.max(0, cur.x + delta[0]), dims.w - RESTYLER_ATTR_W),
+          y: Math.min(Math.max(0, cur.y + delta[1]), dims.h - RESTYLER_ATTR_H - RESTYLER_ATTR_BOTTOM_RESERVE),
+        };
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [attrSelected]);
   const [templateName, setTemplateName] = useState('New Template');
   const [history, setHistory] = useState<string[]>([]);
   const [histIdx, setHistIdx] = useState(-1);
@@ -955,6 +986,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                     setWidgets(ws); widgetsRef.current = ws;
                     setNid(n);
                     if (sTj.bgUrl) setBgUrl(sTj.bgUrl);
+        setRestylerAttrPos(((sTj ?? {}) as unknown as { restylerAttrPos?: { x: number; y: number } }).restylerAttrPos ?? null);
+                    setRestylerAttrPos(((sTj ?? {}) as unknown as { restylerAttrPos?: { x: number; y: number } }).restylerAttrPos ?? null);
                     setFontScale(typeof sTj.fontScale === 'number' ? sTj.fontScale : 1.0);
                     setPaperSize(ps); paperSizeRef.current = ps;
                     setLoadedTemplateId(null);
@@ -1016,6 +1049,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         widgetsRef.current = ws;
         setNid(n);
         if (tj.bgUrl) { setBgUrl(tj.bgUrl); }
+        setRestylerAttrPos(((tj ?? {}) as unknown as { restylerAttrPos?: { x: number; y: number } }).restylerAttrPos ?? null);
         if (typeof tj.fontScale === 'number') setFontScale(tj.fontScale);
         if (tj.paperSize) { setPaperSize(tj.paperSize); paperSizeRef.current = tj.paperSize; }
         setTemplateName((tmpl.name as string) || 'Template');
@@ -1124,6 +1158,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           setNid(n);
         }
         if (json?.bgUrl) { setBgUrl(json.bgUrl); }
+        setRestylerAttrPos(((json ?? {}) as unknown as { restylerAttrPos?: { x: number; y: number } }).restylerAttrPos ?? null);
         if (json?.fontScale) setFontScale(json.fontScale);
         if (json?.paperSize) setPaperSize(json.paperSize);
         setTemplateName((data.name as string) || 'Template');
@@ -1323,6 +1358,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           fontScale,
           bgUrl,
           docType,
+          ...(restylerAttrPos ? { restylerAttrPos } : {}),
         }),
       });
       if (!res.ok) {
@@ -1345,7 +1381,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } finally {
       setPdfLoading(false);
     }
-  }, [vehicle, paperSize, fontScale, bgUrl, showToast]);
+  }, [vehicle, paperSize, fontScale, bgUrl, showToast, restylerAttrPos]);
 
   // ── Save template ──────────────────────────────────────────────────
   const saveTemplate = useCallback(async (asCopy: boolean = false) => {
@@ -1359,7 +1395,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         name,
         doc_type: saveDocType,
         paper: paperSize,
-        template_json: { widgets: widgetsRef.current, nid, bgUrl, fontScale, paperSize },
+        template_json: { widgets: widgetsRef.current, nid, bgUrl, fontScale, paperSize, ...(restylerAttrPos ? { restylerAttrPos } : {}) },
       };
       try {
         const editId = starterTemplateId ?? loadedTemplateId;
@@ -1396,7 +1432,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       name,
       document_type: saveDocType,
       vehicle_types: vtypes.length ? vtypes : ['new'],
-      template_json: { widgets: widgetsRef.current, nid, bgUrl, fontScale, paperSize },
+      template_json: { widgets: widgetsRef.current, nid, bgUrl, fontScale, paperSize, ...(restylerAttrPos ? { restylerAttrPos } : {}) },
       is_active: !isDraft,
     };
     try {
@@ -1508,7 +1544,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     } catch {
       showToast('Save failed — try again');
     }
-  }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, paperSize, showToast, loadedTemplateId, loadedTemplateLocked, loadedTemplateSource, savedTemplates, dealerId, vehicle?.dealer_id, starterMode, starterTemplateId]);
+  }, [saveTname, templateName, saveDocType, saveVtypes, saveAsGroupTemplate, groupId, nid, bgUrl, fontScale, paperSize, showToast, loadedTemplateId, loadedTemplateLocked, loadedTemplateSource, savedTemplates, dealerId, vehicle?.dealer_id, starterMode, starterTemplateId, restylerAttrPos]);
 
   // ── Copy template (Open Template modal action, 2026-08-10) ─────────
   // Full duplicate of the source's row (widget JSON + doc type + applies-to;
@@ -1658,6 +1694,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       setWidgets(ws); widgetsRef.current = ws;
       setNid(n);
       if (json.bgUrl) { setBgUrl(json.bgUrl); }
+      setRestylerAttrPos(((json ?? {}) as unknown as { restylerAttrPos?: { x: number; y: number } }).restylerAttrPos ?? null);
       if (json.fontScale) setFontScale(json.fontScale);
       if (json.paperSize) { setPaperSize(json.paperSize); paperSizeRef.current = json.paperSize; }
       if (starterMode && (tmpl.doc_type === 'addendum' || tmpl.doc_type === 'infosheet' || tmpl.doc_type === 'buyers_guide')) {
@@ -1691,6 +1728,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // callers handle those). Shared by the "+ New" picker's Blank option and the
   // direct fallthrough paths.
   const applyBlankCanvas = useCallback(() => {
+    setRestylerAttrPos(null); setAttrSelected(false);
     seedSupersededRef.current = true;
     const order = ['logo','vehicle','msrp','options','subtotal','askbar','dealer','bgimage'];
     let nextNid = 1;
@@ -1736,6 +1774,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // "Blank" choice in the group-mode "+ New" picker (since 2026-08-12 the
   // group DEFAULT is the standard layout; empty is opt-in).
   const applyEmptyCanvas = useCallback(() => {
+    setRestylerAttrPos(null); setAttrSelected(false);
     seedSupersededRef.current = true;
     const ws: Record<string, Widget> = {};
     widgetsRef.current = ws;
@@ -1788,6 +1827,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       setWidgets(ws); widgetsRef.current = ws;
       setNid(n);
       if (json.bgUrl) setBgUrl(json.bgUrl);
+      setRestylerAttrPos(((json ?? {}) as unknown as { restylerAttrPos?: { x: number; y: number } }).restylerAttrPos ?? null);
       setFontScale(typeof json.fontScale === 'number' ? json.fontScale : 1.0);
       setPaperSize(psKey); paperSizeRef.current = psKey;
       // NEW, UNSAVED doc — Save → POST /api/templates (dealer's own), or the
@@ -2128,7 +2168,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 boxShadow: '0 12px 48px rgba(0,0,0,.22),0 2px 8px rgba(0,0,0,.1)',
                 overflow: 'hidden',
               }}
-              onClick={e => { if (e.target === paperRef.current || (e.target as HTMLElement).classList.contains('paper-frame')) setSelId(null); }}
+              onClick={e => { if (e.target === paperRef.current || (e.target as HTMLElement).classList.contains('paper-frame')) { setSelId(null); setAttrSelected(false); } }}
             >
               {/* Background frame */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2138,14 +2178,56 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                 alt="frame"
                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', pointerEvents: 'none', zIndex: 2, mixBlendMode: 'multiply', display: 'block' }}
               />
-              {/* Restyler locked attribution — mirrors the PDF's forced footer
-                  (lib/pdf-html.ts). pointer-events none: not selectable, not a
-                  widget, cannot be moved or removed. */}
-              {restylerAttribution && (
-                <div style={{ position: 'absolute', left: 0, right: 0, bottom: 3, zIndex: 9999, textAlign: 'center', fontSize: 9, lineHeight: 1.2, color: '#555', fontFamily: 'Roboto, Arial, sans-serif', pointerEvents: 'none' }}>
-                  {RESTYLER_ATTRIBUTION_TEXT}
-                </div>
-              )}
+              {/* Restyler locked attribution — MOVABLE but never editable or
+                  removable. Text + presence are render-forced (mirrors
+                  lib/pdf-html.ts); only x/y is authorable, clamped on-canvas and
+                  above the peel-off adhesive strip. Not in the widgets map, so
+                  no property editor and no delete affordance can ever target it. */}
+              {restylerAttribution && (() => {
+                const ap = resolveRestylerAttrPos(restylerAttrPos, ps.w, ps.h);
+                return (
+                  <>
+                    <div
+                      onMouseDown={e => {
+                        if (previewMode || e.button !== 0) return;
+                        e.preventDefault(); e.stopPropagation();
+                        setSelId(null); setAttrSelected(true);
+                        const startPos = ap;
+                        const sx = e.clientX, sy = e.clientY;
+                        const Zc = ZRef.current || 1;
+                        const move = (ev: MouseEvent) => {
+                          const nx = Math.round(startPos.x + (ev.clientX - sx) / Zc);
+                          const ny = Math.round(startPos.y + (ev.clientY - sy) / Zc);
+                          setRestylerAttrPos({
+                            x: Math.min(Math.max(0, nx), ps.w - RESTYLER_ATTR_W),
+                            y: Math.min(Math.max(0, ny), ps.h - RESTYLER_ATTR_H - RESTYLER_ATTR_BOTTOM_RESERVE),
+                          });
+                          isDirtyRef.current = true;
+                        };
+                        const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+                        window.addEventListener('mousemove', move);
+                        window.addEventListener('mouseup', up);
+                      }}
+                      onClick={e => { e.stopPropagation(); if (!previewMode) { setSelId(null); setAttrSelected(true); } }}
+                      title="Required — you can move this, but it can't be edited or removed"
+                      style={{
+                        position: 'absolute', left: ap.x, top: ap.y, width: RESTYLER_ATTR_W, height: RESTYLER_ATTR_H,
+                        zIndex: 9999, textAlign: 'center', fontSize: 9, lineHeight: `${RESTYLER_ATTR_H}px`, color: '#555',
+                        fontFamily: 'Roboto, Arial, sans-serif', whiteSpace: 'nowrap', userSelect: 'none',
+                        cursor: previewMode ? 'default' : 'move',
+                        outline: attrSelected && !previewMode ? '1.5px dashed #1976d2' : 'none', outlineOffset: 1,
+                      }}
+                    >
+                      <span aria-hidden style={{ fontSize: 8, marginRight: 3 }}>🔒</span>{RESTYLER_ATTRIBUTION_TEXT}
+                    </div>
+                    {attrSelected && !previewMode && (
+                      <div style={{ position: 'absolute', left: ap.x, top: ap.y + RESTYLER_ATTR_H + 4, width: RESTYLER_ATTR_W, zIndex: 9999, textAlign: 'center', fontSize: 9, color: '#1976d2', background: 'rgba(255,255,255,0.92)', border: '1px solid #1976d2', borderRadius: 4, padding: '2px 4px', pointerEvents: 'none' }}>
+                        Required — you can move this, but it can&apos;t be edited or removed
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               {/* Widgets */}
               {Object.values(widgets).map(w => {
                 const isSelected = selId === w.id && !previewMode;
@@ -2155,7 +2237,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                     ref={el => { if (el) widgetEls.current.set(w.id, el); else widgetEls.current.delete(w.id); }}
                     style={{ position: 'absolute', left: w.x, top: w.y, width: w.w, height: w.h, zIndex: w.z ?? 10, cursor: previewMode ? 'default' : 'move', userSelect: 'none', touchAction: 'none' }}
                     onPointerDown={e => startMove(e, w.id)}
-                    onClick={e => { e.stopPropagation(); if (!previewMode) setSelId(w.id); }}
+                    onClick={e => { e.stopPropagation(); if (!previewMode) { setSelId(w.id); setAttrSelected(false); } }}
                   >
                     {/* Selection overlay */}
                     {!previewMode && (

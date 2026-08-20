@@ -182,7 +182,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const dealerSettingsCache = new Map<string, DealerSettingsRow | null>();
   const templateCache = new Map<string, Widget[] | null>();
-  const templateMetaCache = new Map<string, { bgUrl?: string; fontScale?: number; paperSizeStr?: string; isGroup?: boolean }>();
+  const templateMetaCache = new Map<string, { bgUrl?: string; fontScale?: number; paperSizeStr?: string; isGroup?: boolean; restylerAttrPos?: { x?: unknown; y?: unknown } | null }>();
   const libCache = new Map<string, LibRow[]>();
 
   // No local Chrome on da-platform after Phase E.2. Service-mode loop
@@ -301,6 +301,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         let templateBgUrl: string | undefined;
         let templateFontScale: number | undefined;
         let templatePaperSizeStr: string | undefined;
+        let templateRestylerAttrPos: { x?: unknown; y?: unknown } | null = null;
 
         if (dealerSettings) {
           const condKey = dv.condition === "New" ? "new" : dv.condition === "Used" ? "used" : "cpo";
@@ -338,10 +339,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 const tj = tmpl.template_json as {
                   widgets?: Record<string, Widget>;
                   bgUrl?: string; fontScale?: number; paperSize?: string;
+                  restylerAttrPos?: { x?: unknown; y?: unknown } | null;
                 };
                 templateCache.set(templateId, tj.widgets ? Object.values(tj.widgets) : null);
                 templateMetaCache.set(templateId, {
                   bgUrl: tj.bgUrl, fontScale: tj.fontScale, paperSizeStr: tj.paperSize, isGroup: tmplIsGroup,
+                  restylerAttrPos: tj.restylerAttrPos ?? null,
                 });
               } else {
                 templateCache.set(templateId, null);
@@ -353,6 +356,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             templateBgUrl = meta?.bgUrl;
             templateFontScale = meta?.fontScale;
             templatePaperSizeStr = meta?.paperSizeStr;
+            templateRestylerAttrPos = meta?.restylerAttrPos ?? null;
           }
         }
 
@@ -370,9 +374,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               .limit(1)
               .maybeSingle<{ template_json: Record<string, unknown> }>();
             if (ft?.template_json) {
-              const ftj = ft.template_json as { widgets?: Record<string, Widget>; bgUrl?: string; fontScale?: number; paperSize?: string };
+              const ftj = ft.template_json as { widgets?: Record<string, Widget>; bgUrl?: string; fontScale?: number; paperSize?: string; restylerAttrPos?: { x?: unknown; y?: unknown } | null };
               templateCache.set(fallbackKey, ftj.widgets ? Object.values(ftj.widgets) : null);
-              templateMetaCache.set(fallbackKey, { bgUrl: ftj.bgUrl, fontScale: ftj.fontScale, paperSizeStr: ftj.paperSize });
+              templateMetaCache.set(fallbackKey, { bgUrl: ftj.bgUrl, fontScale: ftj.fontScale, paperSizeStr: ftj.paperSize, restylerAttrPos: ftj.restylerAttrPos ?? null });
             } else {
               templateCache.set(fallbackKey, null);
             }
@@ -380,7 +384,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           templateWidgets = templateCache.get(fallbackKey) ?? null;
           if (templateWidgets) {
             const meta = templateMetaCache.get(fallbackKey);
-            if (meta) { templateBgUrl = meta.bgUrl; templateFontScale = meta.fontScale; if (meta.paperSizeStr) templatePaperSizeStr = meta.paperSizeStr; }
+            if (meta) { templateBgUrl = meta.bgUrl; templateFontScale = meta.fontScale; if (meta.paperSizeStr) templatePaperSizeStr = meta.paperSizeStr; templateRestylerAttrPos = meta.restylerAttrPos ?? null; }
           }
         }
 
@@ -914,6 +918,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         const html = await buildPdfHtml({
           restylerAttribution,
+          restylerAttrPos: templateRestylerAttrPos,
           widgets, paperSize: effectivePaperSizeStr, fontScale, bgUrl,
           vehicle: vehicleData, options,
           disclaimers,

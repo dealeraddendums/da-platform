@@ -1,5 +1,5 @@
 // Server-only: builds an HTML string for Puppeteer to render as a PDF.
-import { RESTYLER_ATTRIBUTION_TEXT } from "@/lib/restyler";
+import { RESTYLER_ATTRIBUTION_TEXT, RESTYLER_ATTR_W, RESTYLER_ATTR_H, resolveRestylerAttrPos } from "@/lib/restyler";
 import { renderW } from '@/components/builder/widgetRenderer';
 import { PAPERS } from '@/components/builder/constants';
 import type { Widget, PaperSize } from '@/components/builder/types';
@@ -76,10 +76,15 @@ export interface BuildPdfHtmlInput {
    *  keeps the priceSetUsesDecimals whole-set rule (current behavior). */
   alwaysShowCents?: boolean;
   /** Restyler account (migration 149): forces the locked
-   *  "created using dealeraddendums.com" footer line into the render —
+   *  "created using DealerAddendums.com" line into the render —
    *  a real element written into the page, NOT a widget; present on every
    *  print from a restyler group's stores regardless of the template. */
   restylerAttribution?: boolean;
+  /** Author-chosen position for the attribution (template_json.restylerAttrPos)
+   *  — MOVABLE per template, but only within canvas bounds and above the
+   *  adhesive strip; anything else falls back to the default visible spot
+   *  (resolveRestylerAttrPos). Text/presence are never authorable. */
+  restylerAttrPos?: { x?: unknown; y?: unknown } | null;
 }
 
 export async function buildPdfHtml({
@@ -102,6 +107,7 @@ export async function buildPdfHtml({
   retailWholesalePrice,
   alwaysShowCents,
   restylerAttribution,
+  restylerAttrPos,
 }: BuildPdfHtmlInput): Promise<string> {
   // Use the SAME paper geometry as the Builder canvas (components/builder/
   // constants.ts PAPERS) so the PDF .paper width/height exactly matches the
@@ -362,7 +368,10 @@ body { width: ${paper.w}px; height: ${paper.h}px; overflow: hidden; background: 
 <div class="paper">
   <div class="frame"><img src="${bgUrl}" alt=""></div>
   ${widgetHtml}
-  ${restylerAttribution ? `<div style="position:absolute;left:0;right:0;bottom:3px;z-index:9999;text-align:center;font-size:9px;line-height:1.2;color:#555;font-family:Roboto, Arial, sans-serif;">${RESTYLER_ATTRIBUTION_TEXT}</div>` : ''}
+  ${restylerAttribution ? (() => {
+    const ap = resolveRestylerAttrPos(restylerAttrPos, paper.w, paper.h);
+    return `<div style="position:absolute;left:${ap.x}px;top:${ap.y}px;width:${RESTYLER_ATTR_W}px;height:${RESTYLER_ATTR_H}px;z-index:9999;text-align:center;font-size:9px;line-height:${RESTYLER_ATTR_H}px;color:#555;font-family:Roboto, Arial, sans-serif;white-space:nowrap;">${RESTYLER_ATTRIBUTION_TEXT}</div>`;
+  })() : ''}
 </div>
 </body>
 </html>`;

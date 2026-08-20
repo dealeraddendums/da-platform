@@ -60,4 +60,41 @@ export async function restylerGroupIds(admin: SupabaseClient): Promise<Set<strin
 }
 
 /** The locked attribution line, single source of truth for canvas + PDF. */
-export const RESTYLER_ATTRIBUTION_TEXT = "This addendum created using dealeraddendums.com";
+export const RESTYLER_ATTRIBUTION_TEXT = "This addendum created using DealerAddendums.com";
+
+// ── Movable-but-locked attribution geometry (2026-08-19 refinement) ─────────
+// The element is MOVABLE per template (position saved as template_json.
+// restylerAttrPos {x,y}) but its text/presence stay render-forced. Fixed
+// footprint — no resize, no font controls.
+export const RESTYLER_ATTR_W = 260;
+export const RESTYLER_ATTR_H = 14;
+/** The bottom of the sticker is the peel-off adhesive strip — anything placed
+ *  there is discarded when the label is applied. Positions must sit fully
+ *  above this reserve or they fall back to the default. */
+export const RESTYLER_ATTR_BOTTOM_RESERVE = 24;
+
+/**
+ * Resolve the attribution's render position for a given paper size. The saved
+ * position wins ONLY when it is fully on-canvas and above the adhesive-strip
+ * reserve — anything else (missing, hand-edited off-bounds, bottom strip)
+ * falls back to the default visible footer spot. The author controls WHERE
+ * within the visible sticker, never WHETHER it shows.
+ */
+export function resolveRestylerAttrPos(
+  pos: { x?: unknown; y?: unknown } | null | undefined,
+  paperW: number,
+  paperH: number,
+): { x: number; y: number } {
+  const maxY = paperH - RESTYLER_ATTR_H - RESTYLER_ATTR_BOTTOM_RESERVE;
+  const def = {
+    x: Math.max(0, Math.round((paperW - RESTYLER_ATTR_W) / 2)),
+    // Default: visible footer area above the bottom strip (author fine-tunes).
+    y: Math.max(0, paperH - RESTYLER_ATTR_H - 60),
+  };
+  const x = typeof pos?.x === "number" && Number.isFinite(pos.x) ? Math.round(pos.x as number) : NaN;
+  const y = typeof pos?.y === "number" && Number.isFinite(pos.y) ? Math.round(pos.y as number) : NaN;
+  const valid = !Number.isNaN(x) && !Number.isNaN(y)
+    && x >= 0 && x + RESTYLER_ATTR_W <= paperW
+    && y >= 0 && y <= maxY;
+  return valid ? { x, y } : def;
+}
