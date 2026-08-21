@@ -422,9 +422,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
 
         // ── Effective paper size ─────────────────────────────────────────────
+        // Each vehicle's OWN template width wins — same precedence as
+        // pdf/generate (savedTemplatePaperSize ?? paperSize). body.paperSize is
+        // only a fallback for templates that carry no size: the web inventory
+        // clients used to hardcode paperSize:"standard" into every bulk body,
+        // and with body-first precedence that flattened narrow/custom templates
+        // to regular width on every multi-print (single print was unaffected —
+        // its client sends no paperSize). Fixed 2026-08-21.
         const effectivePaperSizeStr =
-          (body.paperSize && knownSizes.has(body.paperSize) ? body.paperSize : null)
-          ?? templatePaperSizeStr
+          templatePaperSizeStr
+          ?? (body.paperSize && knownSizes.has(body.paperSize) ? body.paperSize : null)
           ?? (docType === "infosheet" ? "infosheet" : "standard");
         const effectivePaperSize = (knownSizes.has(effectivePaperSizeStr) ? effectivePaperSizeStr : "standard") as PaperSize;
 

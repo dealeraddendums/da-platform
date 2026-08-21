@@ -168,11 +168,13 @@ export default function VehicleInventory({ fixedDealerId, role, groupId, printGa
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
     try {
-      const paperSize = docType === "infosheet" ? "infosheet" : "standard";
       const res = await fetch("/api/pdf/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vehicleIds: ids, docType, paperSize }),
+        // No paperSize: each vehicle renders at its OWN template width (the
+        // server resolves it per job — a global value here flattened narrow
+        // templates to regular on every bulk print until 2026-08-21).
+        body: JSON.stringify({ vehicleIds: ids, docType }),
         signal: controller.signal,
       });
 
