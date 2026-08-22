@@ -712,7 +712,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const createdDealer = data as Record<string, unknown>;
   const createdDealerId = createdDealer.id as string;
   const createdDealerGroupId = createdDealer.group_id as string | null;
-  const subscriptionBilledTo = (createdDealer.subscription_billed_to as string | null) ?? "dealer";
+  let subscriptionBilledTo = (createdDealer.subscription_billed_to as string | null) ?? "dealer";
   const hasLegacyBilling = createdDealer.legacy_id != null;
 
   // Provision a Box.com folder for the dealer (fire-and-forget). Stores
@@ -748,6 +748,40 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // account bills as ONE metered group plan (Phase 2); adding per-store lines
   // here would double-charge the restyler at scale (~40 lightweight stores).
   const isRestylerStore = await isRestylerGroup(admin, createdDealerGroupId);
+
+  // GROUP-BILLED group guard (2026-08-22, Dealer General revenue leak): the
+  // group New Dealer form defaults subscription_billed_to to 'dealer', so a
+  // billable store added to a group whose members bill to the GROUP customer
+  // silently minted an orphan standalone da-billing customer (Setup Mode,
+  // never activated) instead of a line on the group's template — live and
+  // printing, but unbilled. When the target group is group-billed (has a
+  // da-billing customer AND >=1 active group-billed member), coerce the new
+  // store onto group billing so the cascade below adds its template line.
+  // Trial stores and restyler groups never reach this (guards above/below).
+  if (createdDealerGroupId && !hasLegacyBilling && !isTrialCreate && !isRestylerStore
+      && subscriptionBilledTo !== "group") {
+    try {
+      const [{ data: grpRow }, { count: groupBilledMembers }] = await Promise.all([
+        admin.from("groups").select("billing_customer_id").eq("id", createdDealerGroupId).maybeSingle<{ billing_customer_id: string | null }>(),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (admin as any).from("dealers").select("id", { count: "exact", head: true })
+          .eq("group_id", createdDealerGroupId).eq("active", true)
+          .eq("subscription_billed_to", "group").neq("id", createdDealerId),
+      ]);
+      if (grpRow?.billing_customer_id && (groupBilledMembers ?? 0) > 0) {
+        const { error: coerceErr } = await admin
+          .from("dealers")
+          .update({ subscription_billed_to: "group" })
+          .eq("id", createdDealerId);
+        if (!coerceErr) {
+          subscriptionBilledTo = "group";
+          console.log(`[dealers POST] group-billed group ${createdDealerGroupId}: coerced new store ${createdDealerId} subscription_billed_to dealer→group (billing line cascades to the group template)`);
+        }
+      }
+    } catch (e) {
+      console.error("[dealers POST] group-billed coercion check failed:", e instanceof Error ? e.message : e);
+    }
+  }
 
   if (!hasLegacyBilling && !isTrialCreate && !isRestylerStore) {
     if (subscriptionBilledTo === "group" && createdDealerGroupId) {

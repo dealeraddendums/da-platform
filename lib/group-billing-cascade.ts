@@ -23,6 +23,7 @@ import {
   type BillingProduct,
 } from "@/lib/billing";
 import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
+import { fireWrite } from "@/lib/db";
 
 // DA Platform never sets prices on line items. We pass productId
 // (and a human-readable name) and let da-billing resolve the canonical
@@ -128,6 +129,19 @@ export async function cascadeOnGroupAssign(args: {
   // the dealer. Without internal_id we can't safely cascade — bail.
   if (!dealer.internal_id) return;
 
+  // Idempotency: if the group template already carries a line tagged with
+  // this dealer's internal_id, the cascade already ran — re-adding would be
+  // the duplicate-line double-charge class. No-op, but still refresh the
+  // discount tier (member count may have changed via another path).
+  const existing = await getTemplate(groupCustomerId);
+  const tagPrefix = `${dealer.internal_id}::`;
+  if (existing?.products.some(p =>
+    (p as BillingProduct & { lineItemDescription?: string }).lineItemDescription?.startsWith(tagPrefix))) {
+    console.log(`[cascadeOnGroupAssign] group template already has a line for ${dealer.internal_id} (${dealer.name}) — idempotent skip`);
+    fireGroupDiscountSync(group.id);
+    return;
+  }
+
   // Resolve productId + display name only. Price is owned by da-billing.
   const descriptor = subscriptionDescriptorFor(dealer.account_type);
   if (!descriptor) {
@@ -199,6 +213,21 @@ export async function cascadeOnGroupAssign(args: {
     .update({ template_id: groupCustomerId })
     .eq("id", group.id)
     .is("template_id", null);
+
+  // Surface the money change where operators look (migration console reads
+  // migration_log) — a billing line was just added without a human in the
+  // loop on the self-service path.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fireWrite((admin as any).from("migration_log").insert({
+    dealer_id: dealer.id,
+    event: "group_billing_line_added",
+    billing_customer_id: groupCustomerId,
+    notes: `group-billing cascade: added "${subscriptionName}" (${descriptor.key}) to ${group.name}'s template, tagged ${dealer.internal_id}::${dealer.name}`,
+  }), "migration_log group_billing_line_added");
+
+  // Member count changed — recompute the group's auto-discount tier
+  // (locked/custom discounts are preserved by the sync itself).
+  fireGroupDiscountSync(group.id);
 }
 
 /**
