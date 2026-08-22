@@ -98,7 +98,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     dealerUuid = d?.id ?? null;
     dealerName = d?.name ?? null;
   } else if (isSuperAdmin) {
-    return NextResponse.json({ error: "Super admins must use POST /api/users directly" }, { status: 400 });
+    // super_admin invites through the same modal as everyone else, resolving the
+    // TARGET dealer from ghost context (the canonical dealer-context the Users
+    // page itself uses — GET /api/users scopes ghost mode the same way). The
+    // ghost token carries both the dealer UUID and text id; prefer the UUID,
+    // fall back to a text-id lookup for tokens that only carry dealer_text_id.
+    if (claims.is_ghost && claims.ghost_dealer_uuid) {
+      dealerUuid = claims.ghost_dealer_uuid;
+    } else if (claims.is_ghost && claims.dealer_id) {
+      const { data: d } = await admin.from("dealers").select("id, name").eq("dealer_id", claims.dealer_id).maybeSingle<{ id: string; name: string }>();
+      dealerUuid = d?.id ?? null;
+      dealerName = d?.name ?? null;
+    } else {
+      return NextResponse.json({
+        error: "No dealer selected. Open the dealer's Users page via Login / Ghost Mode on their profile, then send the invite from there.",
+      }, { status: 400 });
+    }
   }
 
   if (!dealerUuid) return NextResponse.json({ error: "No active dealer context" }, { status: 400 });
