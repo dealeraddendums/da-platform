@@ -84,17 +84,23 @@ export async function POST(
   // print_cleared_at (migration 140) records the deliberate clear so ETL Job 6
   // doesn't re-mark from Aurora that night unless 4.0 shows a NEWER print;
   // tolerant of the column not existing yet (retry without it).
-  const resetFields = { print_status: 0, print_info: 0, print_guide: 0, print_date: null, print_user: null };
+  // options_saved_at → NULL restores the never-saved state: the clear also
+  // deletes the vehicle's saved products below, and leaving the migration-148
+  // explicit-save marker in place classified the vehicle as "saved empty" —
+  // suppressing the all-vehicle library auto-apply in the editor AND on print
+  // (Burns Honda CR-V, 2026-08-24). Cleared must equal never-printed.
+  const baseReset = { print_status: 0, print_info: 0, print_guide: 0, print_date: null, print_user: null };
+  const resetFields = { ...baseReset, options_saved_at: null };
   let { error: dvResetErr } = await admin
     .from("dealer_vehicles")
     .update({ ...resetFields, print_cleared_at: new Date().toISOString() })
     .eq("dealer_id", dealerId)
     .eq("status", "active");
-  if (dvResetErr && /print_cleared_at/.test(dvResetErr.message)) {
+  if (dvResetErr && /print_cleared_at|options_saved_at/.test(dvResetErr.message)) {
     console.warn("[clear-print-history] print_cleared_at column missing (apply migration 140) — clearing without the Job-6 guard stamp");
     ({ error: dvResetErr } = await admin
       .from("dealer_vehicles")
-      .update(resetFields)
+      .update(baseReset)
       .eq("dealer_id", dealerId)
       .eq("status", "active"));
   }
