@@ -229,8 +229,19 @@ export default function MigrationConsole() {
     setStagingId(row.id);
     try {
       const res = await fetch("/api/migration/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealer_ids: [row.id] }) });
-      const j = await res.json() as { error?: string; synced_at?: string; dealers?: Array<{ status: string; reason?: string; enrichment_report?: EnrichmentReport | null }> };
-      if (!res.ok) { alert(j.error ?? "Sync failed"); return { ok: false, report: null }; }
+      // Gateway timeouts (ALB/nginx 504) return HTML, not JSON — never let that
+      // collapse into a bare "Sync failed" (Burns Honda 2026-08-24: three syncs
+      // SUCCEEDED server-side while the console alerted failure each time).
+      let j: { error?: string; synced_at?: string; dealers?: Array<{ status: string; reason?: string; enrichment_report?: EnrichmentReport | null }> } | null = null;
+      try { j = await res.json(); } catch { /* non-JSON body */ }
+      if (!res.ok || !j) {
+        const msg = j?.error
+          ?? (res.status === 504 || res.status === 502
+            ? `The gateway timed out waiting for the sync (HTTP ${res.status}). Long syncs keep running on the server — wait a minute, then refresh: if the dealer shows "Synced", it worked.`
+            : `Sync failed (HTTP ${res.status}${res.statusText ? " " + res.statusText : ""})`);
+        alert(msg);
+        return { ok: false, report: null };
+      }
       const d0 = j.dealers?.[0];
       if (d0 && d0.status !== "synced") {
         // Per-dealer refusal (migrated / etl_locked / 4.0 trial / …). In a
@@ -256,7 +267,7 @@ export default function MigrationConsole() {
         alert(`${row.name} synced.\n\nBilling/config enrichment:\n${enrichmentAlertLines(report).join("\n")}`);
       }
       return { ok: true, report };
-    } catch { alert("Sync failed"); return { ok: false, report: null }; } finally { setStagingId(null); }
+    } catch (e) { alert(`Sync failed: ${e instanceof Error ? e.message : String(e)}`); return { ok: false, report: null }; } finally { setStagingId(null); }
   }
 
   // Sync every non-migrated dealer in a group, sequentially (the ETL box
