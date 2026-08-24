@@ -25,6 +25,14 @@ import { createAdminSupabaseClient } from "@/lib/db";
 let cache: { at: number; maps: { display: Map<string, string | null>; strict: Map<string, string | null> } } | null = null;
 const TTL_MS = 60_000;
 const IMPERSONATION_WINDOW_MS = 10 * 60_000;
+// RECOVERY EXCLUSION (2026-08-24, Burns Honda / chall@): consuming a
+// password-recovery link stamps last_sign_in_at exactly like a login — and
+// recovery links get consumed by mail-scanner prefetch or an abandoned
+// reset-page visit without the human ever gaining a working login. A sign-in
+// landing shortly AFTER recovery_sent_at is therefore NOT proof the user can
+// log in; the STRICT map excludes it (display keeps it — "last seen" is fine).
+// Any later real login moves the stamp out of the window and counts again.
+const RECOVERY_WINDOW_MS = 30 * 60_000;
 
 /**
  * Resolve an existing auth user's id by email via the GoTrue admin API. Used by
@@ -107,6 +115,7 @@ async function buildSignInMaps(): Promise<{ display: Map<string, string | null>;
   if (cache && Date.now() - cache.at < TTL_MS) return cache.maps;
   const admin = createAdminSupabaseClient();
   const raw = new Map<string, string | null>();
+  const recoverySent = new Map<string, number>();
   for (let page = 1; ; page++) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
     if (error) {
@@ -115,7 +124,13 @@ async function buildSignInMaps(): Promise<{ display: Map<string, string | null>;
     }
     const users = data?.users ?? [];
     for (const u of users) {
-      if (u.email) raw.set(u.email.toLowerCase(), u.last_sign_in_at ?? null);
+      if (!u.email) continue;
+      raw.set(u.email.toLowerCase(), u.last_sign_in_at ?? null);
+      const rec = (u as { recovery_sent_at?: string | null }).recovery_sent_at;
+      if (rec) {
+        const ms = Date.parse(rec);
+        if (!Number.isNaN(ms)) recoverySent.set(u.email.toLowerCase(), ms);
+      }
     }
     if (users.length < 1000) break;
   }
@@ -134,6 +149,13 @@ async function buildSignInMaps(): Promise<{ display: Map<string, string | null>;
   // STRICT map: polluted entries are simply null — no legacy fallback.
   const strict = new Map(raw);
   for (const email of polluted) strict.set(email, null);
+  // STRICT-only: recovery-coincident sign-ins are not working logins either.
+  recoverySent.forEach((sentMs: number, email: string) => {
+    const signIn = strict.get(email);
+    if (!signIn) return;
+    const signInMs = Date.parse(signIn);
+    if (signInMs >= sentMs && signInMs - sentMs <= RECOVERY_WINDOW_MS) strict.set(email, null);
+  });
 
   if (polluted.length > 0) {
     // Display map only: best-effort fallback to legacy profiles.last_login for

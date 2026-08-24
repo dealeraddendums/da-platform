@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 type Params = { params: { id: string } };
@@ -50,6 +50,18 @@ export async function POST(
   if (resetError) {
     return NextResponse.json({ error: resetError.message }, { status: 500 });
   }
+
+  // Audit the trigger (2026-08-24): resetPasswordForEmail stamps GoTrue
+  // recovery_sent_at, and the link's consumption stamps last_sign_in_at — an
+  // operator-triggered reset previously left no trail while poisoning the
+  // "has this human signed in" signal (Burns Honda invite skip).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fireWrite((admin as any).from("admin_audit").insert({
+    admin_user_id: claims.sub,
+    action: "send_user_reset_email",
+    target_dealer_id: targetUser.dealer_id,
+    metadata: { target_user_id: targetUser.id, target_email: targetUser.email },
+  }), "admin_audit reset-password");
 
   return NextResponse.json({ success: true, message: "Password reset email sent" });
 }
