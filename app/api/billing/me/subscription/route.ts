@@ -146,19 +146,28 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // ── GROUP-BILLED members (2026-08-25): the subscription line lives on the
-  // GROUP's da-billing template, never a standalone customer. Handle entirely
-  // here and return — the standalone path below would mint an orphan customer
-  // (the Dealer General leak class) while the group line kept the old plan.
-  if (dealer.subscription_billed_to === "group" && dealer.group_id) {
+  // Restyler-group stores never get per-store subscriptions — the group bills
+  // on its single metered line, whatever the store's billed_to flag says
+  // (their stores are created billed_to='dealer' with billing skipped).
+  let grpForBranch: { id: string; name: string; billing_customer_id: string | null; is_restyler: boolean | null } | null = null;
+  if (dealer.group_id) {
     const { data: grp } = await admin
       .from("groups")
       .select("id, name, billing_customer_id, is_restyler")
       .eq("id", dealer.group_id)
       .maybeSingle<{ id: string; name: string; billing_customer_id: string | null; is_restyler: boolean | null }>();
+    grpForBranch = grp ?? null;
     if (grp?.is_restyler === true) {
       return NextResponse.json({ error: "This group bills on a single metered Restyler plan — per-store subscriptions don't apply." }, { status: 409 });
     }
+  }
+
+  // ── GROUP-BILLED members (2026-08-25): the subscription line lives on the
+  // GROUP's da-billing template, never a standalone customer. Handle entirely
+  // here and return — the standalone path below would mint an orphan customer
+  // (the Dealer General leak class) while the group line kept the old plan.
+  if (dealer.subscription_billed_to === "group" && dealer.group_id) {
+    const grp = grpForBranch;
     const newAccountType = ACCOUNT_TYPE_FOR_TIER[descriptor.key];
     const wasPaying = wasPayingEarly;
     // Flip the plan on the dealer row (the Plan column + print gate + HubSpot
