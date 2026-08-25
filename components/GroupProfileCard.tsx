@@ -780,7 +780,7 @@ function WhiteLabelCard({ group, onSaved }: { group: GroupRow; onSaved: (g: Part
 
 // ── Member Dealers section ────────────────────────────────────────────────────
 
-export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId: string; isSuperAdmin: boolean; isGroupAdmin: boolean }) {
+export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin, isRestyler = false }: { groupId: string; isSuperAdmin: boolean; isGroupAdmin: boolean; isRestyler?: boolean }) {
   const [dealers, setDealers] = useState<DealerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1026,7 +1026,7 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId:
                   { col: "name", label: "Name" },
                   { col: "inventory_dealer_id", label: "Inventory Dealer ID" },
                 ];
-                const staticCols = ["Status", "Location", "Controls Templates", "Subscription", "Labels", ""];
+                const staticCols = ["Status", "Location", "Plan", "Controls Templates", "Subscription", "Labels", ""];
                 return (
                   <>
                     {sortable.map(({ col, label }) => (
@@ -1050,7 +1050,7 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId:
           </thead>
           <tbody>
             {visible.length === 0 && (
-              <tr><td colSpan={9} className="px-4 py-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+              <tr><td colSpan={10} className="px-4 py-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>
                 No dealers match &ldquo;{query}&rdquo;.
               </td></tr>
             )}
@@ -1117,6 +1117,13 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin }: { groupId:
                 </td>
                 <td className="px-4 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>
                   {[d.city, d.state].filter(Boolean).join(", ") || "—"}
+                </td>
+                <td className="px-4 py-3">
+                  <MemberPlanCell
+                    dealer={d}
+                    canEdit={(isSuperAdmin || isGroupAdmin) && !isRestyler}
+                    onChanged={(newType) => setDealers((rs) => rs.map((r) => r.id === d.id ? { ...r, account_type: newType } : r))}
+                  />
                 </td>
                 <td className="px-4 py-3">
                   {(isSuperAdmin || isGroupAdmin) ? (
@@ -1483,6 +1490,113 @@ function Field({ label, value, view, editing, onChange, type = "text", required,
           : (view || <span style={{ color: "var(--text-muted)" }}>—</span>)}
       </span>
     </div>
+  );
+}
+
+// ── Member plan cell (Member Dealers table — Plan column, 2026-08-25) ────────
+// Group admins change any in-group member's subscription plan here, including
+// Downgrade to Free — no switch-in needed. Reuses the existing billing
+// endpoints (?dealer_id=): PATCH /api/billing/me/subscription for paid tiers
+// (group-billed members get their GROUP template line swapped server-side),
+// POST /api/billing/me/close for Free (line removed, print gate applies).
+// Hidden for restyler groups (single metered plan, no per-store subscriptions).
+const PLAN_LABELS: Record<string, string> = {
+  "manual": "Manual", "sub-manual": "Manual", "monthly subscription manual": "Manual",
+  "automatic web": "Automatic Web", "sub-auto-web": "Automatic Web", "monthly subscription automatic web": "Automatic Web",
+  "automatic dms": "Automatic DMS", "sub-auto-dms": "Automatic DMS", "monthly subscription automatic dms": "Automatic DMS",
+  "free": "Free", "trial": "Trial",
+};
+function planLabel(accountType: string | null | undefined): string {
+  if (!accountType) return "—";
+  return PLAN_LABELS[accountType.trim().toLowerCase()] ?? accountType;
+}
+
+function MemberPlanCell({ dealer, canEdit, onChanged }: {
+  dealer: DealerRow;
+  canEdit: boolean;
+  onChanged: (newAccountType: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const current = planLabel(dealer.account_type);
+
+  async function applyPlan(choice: string) {
+    setEditing(false);
+    if (!choice || choice === "keep") return;
+    const name = decodeHtmlEntities(dealer.name);
+    if (choice === "free") {
+      if (!confirm(`Downgrade ${name} to FREE?\n\nThey keep log-in access but can no longer print, and their subscription line is removed from the group's billing.`)) return;
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/billing/me/close?dealer_id=${encodeURIComponent(dealer.dealer_id)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: "Group admin downgrade to Free" }),
+        });
+        const j = await res.json().catch(() => null) as { error?: string; message?: string } | null;
+        if (!res.ok) { alert(j?.message ?? j?.error ?? `Downgrade failed (HTTP ${res.status})`); return; }
+        onChanged("Free");
+      } finally { setBusy(false); }
+      return;
+    }
+    const tierNames: Record<string, string> = { "sub-manual": "Manual", "sub-auto-web": "Automatic Web", "sub-auto-dms": "Automatic DMS" };
+    if (!confirm(`Change ${name}'s plan to ${tierNames[choice]}?\n\nBilling updates to the new plan's rate on the next invoice.`)) return;
+    // Conversions from Free/Trial to an Automatic tier need feed details.
+    const converting = !["manual", "sub-manual", "monthly subscription manual", "automatic web", "sub-auto-web", "monthly subscription automatic web", "automatic dms", "sub-auto-dms", "monthly subscription automatic dms"].includes((dealer.account_type ?? "").trim().toLowerCase());
+    let feed: { feedProvider?: string; feedAuthorizedName?: string; feedAuthorizedEmail?: string } = {};
+    if (converting && (choice === "sub-auto-web" || choice === "sub-auto-dms")) {
+      const feedProvider = window.prompt("Inventory feed provider (e.g. HomeNet, vAuto):")?.trim();
+      if (!feedProvider) return;
+      const feedAuthorizedName = window.prompt("Authorized dealership contact name (approves the feed):")?.trim();
+      if (!feedAuthorizedName) return;
+      const feedAuthorizedEmail = window.prompt("Authorized contact email:")?.trim();
+      if (!feedAuthorizedEmail) return;
+      feed = { feedProvider, feedAuthorizedName, feedAuthorizedEmail };
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/billing/me/subscription?dealer_id=${encodeURIComponent(dealer.dealer_id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier: choice, ...feed }),
+      });
+      const j = await res.json().catch(() => null) as { error?: string } | null;
+      if (!res.ok) { alert(j?.error ?? `Plan change failed (HTTP ${res.status})`); return; }
+      onChanged(tierNames[choice]);
+    } finally { setBusy(false); }
+  }
+
+  if (!canEdit) {
+    return <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>{current}</span>;
+  }
+  if (busy) return <span className="text-xs" style={{ color: "var(--text-muted)" }}>Updating…</span>;
+  if (!editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        title="Change this dealer's subscription plan"
+        className="text-xs font-semibold hover:underline"
+        style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: current === "Free" ? "#78828c" : "var(--blue)", whiteSpace: "nowrap" }}
+      >
+        {current} ✎
+      </button>
+    );
+  }
+  return (
+    <select
+      autoFocus
+      className="input"
+      style={{ fontSize: 12, padding: "2px 6px", height: 26 }}
+      defaultValue="keep"
+      onBlur={() => setEditing(false)}
+      onChange={(e) => void applyPlan(e.target.value)}
+    >
+      <option value="keep">{current} (keep)</option>
+      <option value="sub-manual">Manual</option>
+      <option value="sub-auto-web">Automatic Web</option>
+      <option value="sub-auto-dms">Automatic DMS</option>
+      <option value="free">Downgrade to Free</option>
+    </select>
   );
 }
 

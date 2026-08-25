@@ -60,8 +60,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (claims.role === "dealer_admin") {
     dealerTextId = claims.dealer_id ?? null;
   } else if (claims.role === "group_admin") {
-    // Only the active (switched-into) member dealer; group-verified after fetch.
-    dealerTextId = claims.dealer_id ?? null;
+    // The active (switched-into) member dealer, OR an explicit ?dealer_id= from
+    // the group Member Dealers plan control (2026-08-25) — either way the
+    // in-group check after the fetch is the authorization.
+    dealerTextId = req.nextUrl.searchParams.get("dealer_id") ?? claims.dealer_id ?? null;
   } else {
     // super_admin: ghost-mode dealer_id (claims.dealer_id) OR ?dealer_id= override
     const param = req.nextUrl.searchParams.get("dealer_id");
@@ -73,7 +75,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, billing_customer_id, internal_id, account_type, group_id")
+    .select("id, dealer_id, name, billing_customer_id, internal_id, account_type, group_id, subscription_billed_to")
     .eq("dealer_id", dealerTextId)
     .maybeSingle<{
       id: string;
@@ -83,6 +85,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       internal_id: string | null;
       account_type: string | null;
       group_id: string | null;
+      subscription_billed_to: string | null;
     }>();
   if (!dealer) {
     return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
@@ -91,6 +94,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // group_admin may only close a dealer in their own group (the active dealer).
   if (claims.role === "group_admin" && dealer.group_id !== claims.group_id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // ── GROUP-BILLED members (2026-08-25): their subscription line lives on the
+  // GROUP template — remove it there (idempotent, by {internal_id}:: tag) and
+  // recompute the discount tier. The group's own outstanding balance never
+  // blocks a member downgrade, and the dealer's standalone customerKey must
+  // NOT be template-deleted (it isn't the biller). A legacy group with no
+  // da-billing customer just gets the platform flip (billing lives on 4.0).
+  if (dealer.subscription_billed_to === "group" && dealer.group_id) {
+    const { data: grp } = await admin
+      .from("groups")
+      .select("billing_customer_id")
+      .eq("id", dealer.group_id)
+      .maybeSingle<{ billing_customer_id: string | null }>();
+    if (grp?.billing_customer_id) {
+      const { cascadeOnGroupUnassign } = await import("@/lib/group-billing-cascade");
+      const { fireGroupDiscountSync } = await import("@/lib/sync-group-discount");
+      try {
+        await cascadeOnGroupUnassign({ dealerUuid: dealer.id, groupId: dealer.group_id });
+      } catch (err) {
+        return NextResponse.json(
+          { error: `Could not remove the dealer's line from the group's billing template — try again. (${err instanceof Error ? err.message : String(err)})` },
+          { status: 502 },
+        );
+      }
+      fireGroupDiscountSync(dealer.group_id);
+    }
+    return await finalizeClose(admin, dealer, reason, detail, claims.sub);
   }
 
   // ── $0 balance gate ─────────────────────────────────────────────────────

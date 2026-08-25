@@ -79,19 +79,6 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: `Unknown subscription tier "${tier}"` }, { status: 400 });
   }
 
-  // Auto (feed/DMS) tiers require the feed provider + an authorized dealership
-  // contact who can approve the integration. Collected up front so the feed
-  // setup isn't stalled chasing approvals.
-  if (
-    (descriptor.key === "sub-auto-web" || descriptor.key === "sub-auto-dms")
-    && (!feedProvider || !feedAuthorizedName || !feedAuthorizedEmail)
-  ) {
-    return NextResponse.json(
-      { error: "Feed provider, authorized name, and authorized email are required for Automatic subscriptions." },
-      { status: 400 },
-    );
-  }
-
   // Resolve the acting dealer.
   const admin = createAdminSupabaseClient();
   let dealerTextId: string | null = null;
@@ -129,17 +116,94 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, name, internal_id, billing_customer_id, billing_id, legacy_id, account_type, primary_contact, primary_contact_email, phone, address, state")
+    .select("id, name, internal_id, billing_customer_id, billing_id, legacy_id, account_type, primary_contact, primary_contact_email, phone, address, state, group_id, subscription_billed_to")
     .eq("dealer_id", dealerTextId)
     .maybeSingle<{
       id: string; name: string; internal_id: string | null; billing_customer_id: string | null;
       billing_id: string | null; legacy_id: number | null; account_type: string | null;
       primary_contact: string | null; primary_contact_email: string | null;
       phone: string | null; address: string | null; state: string | null;
+      group_id: string | null; subscription_billed_to: string | null;
     }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
   if (!dealer.internal_id) {
     return NextResponse.json({ error: "Dealer missing internal_id (line item tag)" }, { status: 409 });
+  }
+
+  const wasPayingEarly = subscriptionDescriptorFor(dealer.account_type) != null;
+  // Auto (feed/DMS) tiers require feed details on CONVERSIONS (trial/Free →
+  // auto: the feed setup starts here). A plan SWAP by an operator/group admin
+  // isn't blocked on them — the feed usually already exists or is handled by
+  // the console sync (relaxed 2026-08-25 for the group-admin plan controls).
+  if (
+    !wasPayingEarly
+    && (descriptor.key === "sub-auto-web" || descriptor.key === "sub-auto-dms")
+    && (!feedProvider || !feedAuthorizedName || !feedAuthorizedEmail)
+  ) {
+    return NextResponse.json(
+      { error: "Feed provider, authorized name, and authorized email are required for Automatic subscriptions." },
+      { status: 400 },
+    );
+  }
+
+  // ── GROUP-BILLED members (2026-08-25): the subscription line lives on the
+  // GROUP's da-billing template, never a standalone customer. Handle entirely
+  // here and return — the standalone path below would mint an orphan customer
+  // (the Dealer General leak class) while the group line kept the old plan.
+  if (dealer.subscription_billed_to === "group" && dealer.group_id) {
+    const { data: grp } = await admin
+      .from("groups")
+      .select("id, name, billing_customer_id, is_restyler")
+      .eq("id", dealer.group_id)
+      .maybeSingle<{ id: string; name: string; billing_customer_id: string | null; is_restyler: boolean | null }>();
+    if (grp?.is_restyler === true) {
+      return NextResponse.json({ error: "This group bills on a single metered Restyler plan — per-store subscriptions don't apply." }, { status: 409 });
+    }
+    const newAccountType = ACCOUNT_TYPE_FOR_TIER[descriptor.key];
+    const wasPaying = wasPayingEarly;
+    // Flip the plan on the dealer row (the Plan column + print gate + HubSpot
+    // read this). Conversions also stamp the funnel date.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: upErr } = await (admin as any).from("dealers")
+      .update({
+        account_type: newAccountType,
+        ...(wasPaying ? {} : { converted_at: new Date().toISOString(), downgraded_at: null }),
+      })
+      .eq("id", dealer.id);
+    if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
+
+    // Swap the member's line on the GROUP template by reusing the canonical
+    // cascades: unassign strips ALL `{internal_id}::` lines (idempotent),
+    // assign re-adds at the NEW plan (reads the fresh account_type; creates
+    // the group customer/template if needed; fires the discount sync + the
+    // migration_log surface row). A legacy group with no da-billing customer
+    // gets only the account_type change — its billing still lives on 4.0.
+    if (grp?.billing_customer_id) {
+      const { cascadeOnGroupUnassign, cascadeOnGroupAssign } = await import("@/lib/group-billing-cascade");
+      await cascadeOnGroupUnassign({ dealerUuid: dealer.id, groupId: dealer.group_id });
+      await cascadeOnGroupAssign({ dealerUuid: dealer.id, groupId: dealer.group_id });
+    }
+
+    // Audit — a group-billed plan change moves money without a super_admin.
+    const { fireWrite } = await import("@/lib/db");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fireWrite((admin as any).from("admin_audit").insert({
+      admin_user_id: claims.sub,
+      action: "subscription_changed",
+      target_dealer_id: dealer.id,
+      metadata: { target_email: null, dealer_name: dealer.name, from: dealer.account_type, to: newAccountType, billed_to: "group", group_id: dealer.group_id },
+    }), "admin_audit subscription_changed");
+
+    fireDealerReliable(dealer.id, wasPaying ? "group-member plan swap" : "group-member plan conversion (lifecycle)");
+    return NextResponse.json({
+      ok: true,
+      tier: descriptor.key,
+      name: descriptor.name,
+      customerId: grp?.billing_customer_id ?? null,
+      converted: !wasPaying,
+      groupBilled: true,
+      note: grp?.billing_customer_id ? undefined : "Group has no da-billing customer (legacy 4.0 billing) — plan recorded on the platform only.",
+    });
   }
 
   // On the new platform EVERY paying dealer — native or migrated — bills via
@@ -271,6 +335,17 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   // HubSpot sync (lifecyclestage Trial → Customer). Runs for native AND migrated
   // dealers — the legacy_id-based skip is gone. An already-paying dealer swapping
   // tiers keeps its account_type + funnel date.
+  // Tier swap by an already-paying dealer: keep the funnel date but DO flip
+  // account_type — the plan drives the Subscription display, HubSpot plan
+  // tier, and sync continuity checks (2026-08-25; previously left stale).
+  if (wasPaying) {
+    const newAccountType = ACCOUNT_TYPE_FOR_TIER[descriptor.key];
+    if (newAccountType && newAccountType !== dealer.account_type) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any).from("dealers").update({ account_type: newAccountType }).eq("id", dealer.id);
+      fireDealerReliable(dealer.id, "plan swap (account_type)");
+    }
+  }
   if (!wasPaying) {
     const newAccountType = ACCOUNT_TYPE_FOR_TIER[descriptor.key];
     if (newAccountType && newAccountType !== dealer.account_type) {

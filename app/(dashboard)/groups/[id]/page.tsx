@@ -87,7 +87,7 @@ export default async function GroupPage({ params }: Props) {
       )}
       {(isSuperAdmin || isGroupAdmin) && (
         <div className="mt-6">
-          <GroupDealers groupId={params.id} isSuperAdmin={isSuperAdmin} isGroupAdmin={isGroupAdmin} />
+          <GroupDealers groupId={params.id} isSuperAdmin={isSuperAdmin} isGroupAdmin={isGroupAdmin} isRestyler={(groupData as { is_restyler?: boolean } | null)?.is_restyler === true} />
         </div>
       )}
     </div>
