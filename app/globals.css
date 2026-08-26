@@ -166,11 +166,11 @@
 .description-html ol    { margin: 0; padding-left: 1.2em; list-style: decimal outside; }
 .description-html li { margin: 0; padding: 0; }
 
-/* Product Fruits life-ring launcher (the red floating circle): pin it to the
-   bottom-LEFT. Its default bottom-right spot sat on top of list pagination's
-   Next button (Dealers list, 2026-08-26). The shared Pager is also centered
-   away from that corner, so this is belt-and-suspenders — and !important wins
-   over PF's own positioning regardless of dashboard config. */
+/* Product Fruits CLASSIC life-ring launcher: pin it bottom-LEFT if it ever
+   appears. NOTE: the red floating circle live today is PF's AI-assistant
+   launcher, which lives in a shadow root that page CSS cannot reach — that one
+   is repositioned by the style ProductFruitsWidget injects into the shadow
+   root. This rule only covers the non-shadow classic launcher as a belt. */
 .productfruits--lifering,
 [class*="productfruits"][class*="lifering"] {
   right: auto !important;
