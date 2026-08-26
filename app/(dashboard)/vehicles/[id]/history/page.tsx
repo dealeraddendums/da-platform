@@ -1,4 +1,5 @@
 import { redirect, notFound } from "next/navigation";
+import Pager from "@/components/Pager";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
 import { resolveSessionProfile } from "@/lib/profile-session";
 import type { AddendumHistoryRow } from "@/lib/db";
@@ -112,26 +113,10 @@ export default async function HistoryPage({ params, searchParams }: PageProps) {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: "1px solid var(--border)" }}>
-            <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Page {page} of {totalPages} · {count?.toLocaleString()} total
-            </span>
-            <div className="flex gap-2">
-              {page > 1 && (
-                <a href={`?page=${page - 1}`}
-                  className="text-xs px-3 py-1 rounded"
-                  style={{ border: "1px solid var(--border)", color: "var(--text-secondary)", background: "white" }}>
-                  ← Prev
-                </a>
-              )}
-              {page < totalPages && (
-                <a href={`?page=${page + 1}`}
-                  className="text-xs px-3 py-1 rounded"
-                  style={{ border: "1px solid var(--border)", color: "var(--text-secondary)", background: "white" }}>
-                  Next →
-                </a>
-              )}
-            </div>
+          <div className="px-4 py-2" style={{ borderTop: "1px solid var(--border)" }}>
+            <Pager page={page} totalPages={totalPages}
+              prevHref={`?page=${page - 1}`} nextHref={`?page=${page + 1}`}
+              summary={<span className="text-xs">{count?.toLocaleString()} total</span>} />
           </div>
         )}
       </div>

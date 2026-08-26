@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useEmailCheck, emailCheckBlocksSubmit } from "@/lib/use-email-check";
 import EmailAvailability from "@/components/EmailAvailability";
+import Pager from "@/components/Pager";
 import StateSelect from "@/components/StateSelect";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -610,30 +611,8 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
 
       {/* Pagination */}
       {total > PER_PAGE && (
-        <div className="flex items-center justify-between mt-4">
-          <p className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-            Showing {from}–{to} of {total}
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              className="btn btn-secondary"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              ← Prev
-            </button>
-            <span className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-              {page} / {totalPages}
-            </span>
-            <button
-              className="btn btn-secondary"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next →
-            </button>
-          </div>
-        </div>
+        <Pager page={page} totalPages={totalPages} onPage={setPage} light
+          summary={<>Showing {from}–{to} of {total}</>} />
       )}
     </div>
   );

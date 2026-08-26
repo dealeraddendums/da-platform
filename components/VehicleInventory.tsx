@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Pager from "@/components/Pager";
 import type { VehicleRow } from "@/lib/vehicles";
 import { parsePhotos, vehicleCondition } from "@/lib/vehicles";
 import VehicleDetail from "./VehicleDetail";
@@ -589,36 +590,24 @@ export default function VehicleInventory({ fixedDealerId, role, groupId, printGa
 
           {/* Pagination */}
           {total > 0 && (
-            <div className="flex items-center justify-between mt-4">
-              <div className="flex items-center gap-2">
-                <p className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-                  {perPage === 0 ? `All ${total.toLocaleString()} vehicles` : `Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
-                </p>
-                <select
-                  value={perPage}
-                  onChange={e => { setPerPage(Number(e.target.value)); setPage(1); }}
-                  style={{ height: 28, padding: "0 6px", fontSize: 12, border: "1px solid rgba(255,255,255,0.25)", borderRadius: 4, background: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.8)", cursor: "pointer" }}
-                >
-                  {PER_PAGE_OPTIONS.map(n => (
-                    <option key={n} value={n} style={{ background: "#2a2b3c", color: "#fff" }}>{n === 0 ? "All" : n}</option>
-                  ))}
-                </select>
-                <span className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>per page</span>
-              </div>
-              {totalPages > 1 && (
-                <div className="flex items-center gap-2">
-                  <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                    ← Prev
-                  </button>
-                  <span className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-                    {page} / {totalPages}
-                  </span>
-                  <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-                    Next →
-                  </button>
-                </div>
-              )}
-            </div>
+            <Pager page={page} totalPages={totalPages} onPage={setPage} light
+              summary={
+                <>
+                  <p className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
+                    {perPage === 0 ? `All ${total.toLocaleString()} vehicles` : `Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
+                  </p>
+                  <select
+                    value={perPage}
+                    onChange={e => { setPerPage(Number(e.target.value)); setPage(1); }}
+                    style={{ height: 28, padding: "0 6px", fontSize: 12, border: "1px solid rgba(255,255,255,0.25)", borderRadius: 4, background: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.8)", cursor: "pointer" }}
+                  >
+                    {PER_PAGE_OPTIONS.map(n => (
+                      <option key={n} value={n} style={{ background: "#2a2b3c", color: "#fff" }}>{n === 0 ? "All" : n}</option>
+                    ))}
+                  </select>
+                  <span className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>per page</span>
+                </>
+              } />
           )}
         </>
       )}

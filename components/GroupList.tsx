@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
+import Pager from "@/components/Pager";
 import StateSelect from "@/components/StateSelect";
 import EntityRowActions from "@/components/EntityRowActions";
 import { TagChip, type Tag } from "@/components/TagPicker";
@@ -511,30 +512,8 @@ export default function GroupList() {
 
       {/* Pagination */}
       {total > PER_PAGE && (
-        <div className="flex items-center justify-between mt-4">
-          <p className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-            Showing {fromRow}–{toRow} of {total}
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              className="btn btn-secondary"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              ← Prev
-            </button>
-            <span className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-              {page} / {totalPages}
-            </span>
-            <button
-              className="btn btn-secondary"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next →
-            </button>
-          </div>
-        </div>
+        <Pager page={page} totalPages={totalPages} onPage={setPage} light
+          summary={<>Showing {fromRow}–{toRow} of {total}</>} />
       )}
     </div>
   );

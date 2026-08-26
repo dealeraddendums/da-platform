@@ -165,3 +165,14 @@
 .description-html ul ul { list-style: circle outside; }
 .description-html ol    { margin: 0; padding-left: 1.2em; list-style: decimal outside; }
 .description-html li { margin: 0; padding: 0; }
+
+/* Product Fruits life-ring launcher (the red floating circle): pin it to the
+   bottom-LEFT. Its default bottom-right spot sat on top of list pagination's
+   Next button (Dealers list, 2026-08-26). The shared Pager is also centered
+   away from that corner, so this is belt-and-suspenders — and !important wins
+   over PF's own positioning regardless of dashboard config. */
+.productfruits--lifering,
+[class*="productfruits"][class*="lifering"] {
+  right: auto !important;
+  left: 20px !important;
+}

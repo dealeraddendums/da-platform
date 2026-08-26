@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
+import Pager from "@/components/Pager";
 import { PageHeader } from "@/components/PageHeader";
 import StoreTagsEditor from "@/components/StoreTagsEditor";
 
@@ -1311,16 +1312,8 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4">
-          <span className="text-sm" style={{ color: "rgba(255,255,255,0.55)" }}>
-            Showing {from}–{to} of {total.toLocaleString()}
-          </span>
-          <div className="flex gap-2">
-            <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
-            <span className="text-sm" style={{ color: "rgba(255,255,255,0.55)", alignSelf: "center" }}>{page} / {totalPages}</span>
-            <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Next →</button>
-          </div>
-        </div>
+        <Pager page={page} totalPages={totalPages} onPage={setPage} light
+          summary={<>Showing {from}–{to} of {total.toLocaleString()}</>} />
       )}
       </>
       )}
