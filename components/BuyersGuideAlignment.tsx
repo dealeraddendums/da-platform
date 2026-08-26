@@ -1,18 +1,18 @@
 "use client";
 
-// Buyer's Guide pre-printed-label alignment tool (migration 150).
+// Buyer's Guide pre-printed-label alignment — guided, photo-first flow
+// (UX redesign 2026-08-26; same data model + endpoints as the original tool).
 //
-// For dealers printing Buyer's Guides on their OWN pre-printed FTC label
-// stock: DA renders DATA-ONLY output, and this tool calibrates where each
-// standard field lands. Offsets start from the calibrated default positions;
-// the operator can (1) drag/nudge fields manually — optionally over an
-// uploaded photo/scan of the blank label as a faint backdrop — or (2) snap
-// front/back photos and let AI vision pre-fill approximate positions, then
-// fine-tune. The "Test print" outputs the data-only PDF with the CURRENT
-// (unsaved) offsets for iterative calibration on real label stock.
-//
-// This is a per-DEALER print setting (their physical label), independent of
-// templates — group-controlled-templates dealers still manage their own.
+// A dealer prints Buyer's Guides on their OWN pre-printed FTC label stock; DA
+// prints only the variable data. This tool calibrates where each field lands:
+//   1. Which label do you have? (language / variant)
+//   2. Take two photos of the blank label (front + back) — primary path
+//   3. Auto-detect places the fields ON the photo (runs automatically)
+//   4. Nudge anything that's off (drag, or arrows; per-field or all together)
+//   5. Test print on real label stock → nudge → reprint → Save
+// Nothing renders on the canvas until there's a photo (or the explicit
+// "align without photos" fallback). Offsets stay the source of truth; photos
+// live only in the browser + the one-time auto-detect call — never stored.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { bgFieldDefs, BG_PAGE_W, BG_PAGE_H, type BgFieldDef } from "@/lib/buyers-guide-alignment-constants";
@@ -20,6 +20,14 @@ import { bgFieldDefs, BG_PAGE_W, BG_PAGE_H, type BgFieldDef } from "@/lib/buyers
 const SCALE = 0.72;
 
 type Offsets = Record<string, { x: number; y: number }>;
+
+const stepBadge = (n: number): React.CSSProperties => ({
+  display: "inline-flex", alignItems: "center", justifyContent: "center",
+  width: 22, height: 22, borderRadius: "50%", background: "#1976d2", color: "#fff",
+  fontSize: 12, fontWeight: 700, marginRight: 8, flexShrink: 0,
+});
+const stepTitle: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: "var(--text-primary)" };
+const stepHint: React.CSSProperties = { fontSize: 12, color: "var(--text-muted)", margin: "2px 0 0 30px" };
 
 export default function BuyersGuideAlignment({ dealerId }: { dealerId: string }) {
   const [loaded, setLoaded] = useState(false);
@@ -30,10 +38,12 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
   const [fields, setFields] = useState<Offsets>({});
   const [page, setPage] = useState<0 | 1>(0);
   const [selKey, setSelKey] = useState<string | null>(null);
+  const [moveAll, setMoveAll] = useState(false);
   const [backdrop, setBackdrop] = useState<{ front: string | null; back: string | null }>({ front: null, back: null });
+  const [manualNoPhoto, setManualNoPhoto] = useState(false);
+  const [detectState, setDetectState] = useState<"idle" | "running" | "done" | "failed">("idle");
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const canvasRef = useRef<HTMLDivElement>(null);
   const frontFileRef = useRef<HTMLInputElement>(null);
   const backFileRef = useRef<HTMLInputElement>(null);
 
@@ -61,7 +71,7 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
   }), [global, fields]);
 
   function nudge(dx: number, dy: number) {
-    if (selKey) {
+    if (!moveAll && selKey) {
       setFields((f) => ({ ...f, [selKey]: { x: (f[selKey]?.x ?? 0) + dx, y: (f[selKey]?.y ?? 0) + dy } }));
     } else {
       setGlobal((g) => ({ x: g.x + dx, y: g.y + dy }));
@@ -71,6 +81,7 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
   function startDrag(e: React.MouseEvent, d: BgFieldDef) {
     e.preventDefault();
     setSelKey(d.key);
+    setMoveAll(false);
     const sx = e.clientX, sy = e.clientY;
     const start = fields[d.key] ?? { x: 0, y: 0 };
     const move = (ev: MouseEvent) => {
@@ -78,7 +89,7 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
         ...f,
         [d.key]: {
           x: Math.round(start.x + (ev.clientX - sx) / SCALE),
-          y: Math.round(start.y - (ev.clientY - sy) / SCALE), // screen-down = PDF-down (y flip)
+          y: Math.round(start.y - (ev.clientY - sy) / SCALE),
         },
       }));
     };
@@ -87,20 +98,24 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
     window.addEventListener("mouseup", up);
   }
 
-  function onBackdropFile(side: "front" | "back", file: File | null) {
+  const toDataUrl = (f: File) => new Promise<string>((resolve, reject) => {
+    const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = reject; r.readAsDataURL(f);
+  });
+
+  async function onPhotoChosen(side: "front" | "back", file: File | null) {
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    setBackdrop((b) => ({ ...b, [side]: url }));
+    setBackdrop((b) => ({ ...b, [side]: URL.createObjectURL(file) }));
+    setPage(side === "front" ? 0 : 1);
+    // Photo-first: auto-detect runs automatically whenever a photo lands and
+    // the front photo exists (a late-added back photo re-runs with both sides).
+    if (frontFileRef.current?.files?.[0]) void autoDetect();
   }
 
   async function autoDetect() {
-    const toDataUrl = (f: File) => new Promise<string>((resolve, reject) => {
-      const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = reject; r.readAsDataURL(f);
-    });
     const frontFile = frontFileRef.current?.files?.[0];
-    if (!frontFile) { setMsg("Choose at least the FRONT photo first (the file inputs below)."); return; }
+    if (!frontFile) { setMsg("Add the FRONT photo first."); return; }
     const backFile = backFileRef.current?.files?.[0];
-    setBusy("detect"); setMsg(null);
+    setDetectState("running"); setMsg(null);
     try {
       const body = {
         front: await toDataUrl(frontFile),
@@ -110,26 +125,33 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
       const res = await fetch(`/api/settings/buyers-guide-alignment/detect?dealer_id=${encodeURIComponent(dealerId)}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
-      const j = await res.json() as { ok?: boolean; global?: { x: number; y: number }; fields?: Offsets; detected_count?: number; total_fields?: number; error?: string };
-      if (!res.ok || !j.ok) { setMsg(j.error ?? "Auto-detect failed — align manually."); return; }
+      const j = await res.json() as { ok?: boolean; global?: { x: number; y: number }; fields?: Offsets; detected_count?: number; error?: string };
+      if (!res.ok || !j.ok) {
+        setDetectState("failed");
+        setMsg(j.error ?? "We couldn't place the fields automatically — drag them into position on your photo instead.");
+        return;
+      }
       setGlobal(j.global ?? { x: 0, y: 0 });
       setFields(j.fields ?? {});
-      setMsg(`Auto-detect placed ${j.detected_count}/${j.total_fields} fields (approximate) — review the chips over your photo, nudge what's off, then Test print.`);
-      onBackdropFile("front", frontFile);
-      if (backFile) onBackdropFile("back", backFile);
-    } finally { setBusy(null); }
+      setDetectState("done");
+      setMsg("Fields placed! Check them against your photo below — drag or nudge anything that's off, then run a test print.");
+    } catch {
+      setDetectState("failed");
+      setMsg("We couldn't place the fields automatically — drag them into position on your photo instead.");
+    }
   }
 
-  async function testPrint(withBackground: boolean) {
+  async function testPrint() {
     setBusy("print"); setMsg(null);
     try {
       const res = await fetch("/api/settings/buyers-guide-alignment/test-print", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealer_id: dealerId, language, global, fields, withBackground }),
+        body: JSON.stringify({ dealer_id: dealerId, language, global, fields }),
       });
-      if (!res.ok) { const j = await res.json().catch(() => null) as { error?: string } | null; setMsg(j?.error ?? "Test print failed"); return; }
+      if (!res.ok) { const j = await res.json().catch(() => null) as { error?: string } | null; setMsg(j?.error ?? "Test print failed — try again."); return; }
       const blob = await res.blob();
       window.open(URL.createObjectURL(blob), "_blank");
+      setMsg("Test page opened — print it on a BLANK label, hold it up to the light against a printed one, and nudge anything that's off. Repeat until it lines up, then Save.");
     } finally { setBusy(null); }
   }
 
@@ -141,77 +163,110 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
         body: JSON.stringify({ enabled: nextEnabled, global, fields, language }),
       });
       const j = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
-      if (!res.ok || !j?.ok) { setMsg(j?.error ?? "Save failed"); return; }
+      if (!res.ok || !j?.ok) { setMsg(j?.error ?? "Save failed — try again."); return; }
       setEnabled(nextEnabled);
       setMsg(nextEnabled
-        ? "Saved — this dealer's Buyer's Guides now print DATA-ONLY at these positions (single + bulk)."
-        : "Saved — pre-printed mode is OFF; full-background Buyer's Guides.");
+        ? "Saved! Buyer's Guides for this dealership now print just the data, positioned for your labels."
+        : "Saved — label mode is off; Buyer's Guides print the full form again.");
     } finally { setBusy(null); }
   }
 
-  if (!loaded) return <div className="p-4 text-sm" style={{ color: "var(--text-muted)" }}>Loading alignment…</div>;
+  if (!loaded) return <div className="p-4 text-sm" style={{ color: "var(--text-muted)" }}>Loading…</div>;
 
-  const pageDefs = defs.filter((d) => d.page === page);
   const bd = page === 0 ? backdrop.front : backdrop.back;
+  const showChips = Boolean(bd) || manualNoPhoto;
+  const pageDefs = defs.filter((d) => d.page === page);
+  const selDef = selKey ? defs.find((d) => d.key === selKey) : null;
 
   return (
-    <div>
-      <div className="flex items-center gap-3 flex-wrap mb-3">
-        <label className="flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
-          <input type="checkbox" checked={enabled} onChange={(e) => void save(e.target.checked)} disabled={busy !== null} />
-          <span className="text-sm font-semibold">Print Buyer&apos;s Guides on pre-printed labels (data-only)</span>
-        </label>
-        <select className="input" style={{ width: 120, height: 30, fontSize: 12 }} value={language} onChange={(e) => setLanguage(e.target.value as "en" | "es")}>
-          <option value="en">English</option>
-          <option value="es">Spanish</option>
-        </select>
-        <label className="flex items-center gap-1 text-xs" style={{ color: "var(--text-secondary)" }}>
-          <input type="checkbox" checked={implied} onChange={(e) => setImplied(e.target.checked)} /> Implied-only variant
-        </label>
+    <div style={{ maxWidth: 720 }}>
+      {/* Master switch */}
+      <label className="flex items-center gap-2 cursor-pointer mb-4" style={{ userSelect: "none" }}>
+        <input type="checkbox" checked={enabled} onChange={(e) => void save(e.target.checked)} disabled={busy !== null} />
+        <span className="text-sm font-semibold">This dealership prints Buyer&apos;s Guides on its own pre-printed labels</span>
+      </label>
+      {!enabled && (
+        <p className="text-xs mb-4" style={{ color: "var(--text-muted)", marginLeft: 24 }}>
+          Turn this on when your labels already have the Buyers Guide form printed on them — DA will print just the vehicle and warranty info, positioned to land in your form&apos;s boxes. Set up the alignment below first if you like; it only takes effect once this is on.
+        </p>
+      )}
+
+      {/* Step 1 */}
+      <div className="mb-4">
+        <div className="flex items-center flex-wrap gap-2">
+          <span style={stepBadge(1)}>1</span>
+          <span style={stepTitle}>Which label do you have?</span>
+          <select className="input" style={{ width: 110, height: 28, fontSize: 12 }} value={language} onChange={(e) => setLanguage(e.target.value as "en" | "es")}>
+            <option value="en">English</option>
+            <option value="es">Spanish</option>
+          </select>
+          <select className="input" style={{ width: 210, height: 28, fontSize: 12 }} value={implied ? "implied" : "asis"} onChange={(e) => setImplied(e.target.value === "implied")}>
+            <option value="asis">Standard (&ldquo;AS IS&rdquo;) version</option>
+            <option value="implied">&ldquo;Implied Warranties Only&rdquo; version</option>
+          </select>
+        </div>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap mb-3">
-        <div className="flex" style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-          {([0, 1] as const).map((pg) => (
-            <button key={pg} onClick={() => { setPage(pg); setSelKey(null); }}
-              className="text-xs font-semibold px-3 py-1.5"
-              style={{ background: page === pg ? "#1976d2" : "transparent", color: page === pg ? "#fff" : "var(--text-secondary)", border: "none", cursor: "pointer" }}>
-              {pg === 0 ? "Front" : "Back"}
-            </button>
-          ))}
+      {/* Step 2 */}
+      <div className="mb-4">
+        <div className="flex items-center flex-wrap gap-2">
+          <span style={stepBadge(2)}>2</span>
+          <span style={stepTitle}>Take two photos of a BLANK label — front and back</span>
         </div>
-        <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-          {selKey ? `Nudging: ${defs.find((d) => d.key === selKey)?.label ?? selKey}` : "Nudging: GLOBAL (all fields)"}
-        </span>
-        {selKey && <button className="text-xs" style={{ color: "var(--blue)", background: "none", border: "none", cursor: "pointer" }} onClick={() => setSelKey(null)}>switch to global</button>}
-        <div className="flex items-center gap-1">
-          {([["←", -1, 0], ["→", 1, 0], ["↑", 0, 1], ["↓", 0, -1]] as const).map(([sym, dx, dy]) => (
-            <button key={sym} onClick={() => nudge(dx, dy)} title={`Nudge 1pt ${sym}`}
-              style={{ width: 26, height: 26, border: "1px solid var(--border)", borderRadius: 4, background: "#fff", cursor: "pointer", fontSize: 12 }}>
-              {sym}
-            </button>
-          ))}
+        <p style={stepHint}>Straight-on, good light. We&apos;ll place the fields on your label for you.</p>
+        <div className="flex items-center gap-3 flex-wrap" style={{ margin: "8px 0 0 30px" }}>
+          <label className="btn btn-secondary" style={{ height: 34, fontSize: 12, cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
+            📷 {backdrop.front ? "Front photo ✓ (replace)" : "Add FRONT photo"}
+            <input ref={frontFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => void onPhotoChosen("front", e.target.files?.[0] ?? null)} />
+          </label>
+          <label className="btn btn-secondary" style={{ height: 34, fontSize: 12, cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
+            📷 {backdrop.back ? "Back photo ✓ (replace)" : "Add BACK photo"}
+            <input ref={backFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => void onPhotoChosen("back", e.target.files?.[0] ?? null)} />
+          </label>
+          {detectState === "running" && <span className="text-xs font-medium" style={{ color: "var(--blue)" }}>✨ Placing the fields on your photo…</span>}
+          {detectState === "done" && <span className="text-xs font-medium" style={{ color: "#2e7d32" }}>✓ Fields placed automatically</span>}
+          {detectState === "failed" && frontFileRef.current?.files?.[0] && (
+            <button className="text-xs" style={{ color: "var(--blue)", background: "none", border: "none", cursor: "pointer" }} onClick={() => void autoDetect()}>try auto-place again</button>
+          )}
         </div>
-        <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
-          global {global.x >= 0 ? "+" : ""}{global.x}, {global.y >= 0 ? "+" : ""}{global.y}pt
-        </span>
-        <button className="btn btn-secondary" style={{ height: 28, fontSize: 12 }} disabled={busy !== null} onClick={() => { setGlobal({ x: 0, y: 0 }); setFields({}); setSelKey(null); }}>
-          Reset offsets
-        </button>
+        {!showChips && (
+          <button className="text-xs mt-2" style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", marginLeft: 30, textDecoration: "underline" }}
+            onClick={() => setManualNoPhoto(true)}>
+            No photo handy? Align on a blank page instead
+          </button>
+        )}
       </div>
 
-      {/* Canvas */}
-      <div ref={canvasRef} style={{
+      {/* Step 3 + canvas */}
+      <div className="mb-2">
+        <div className="flex items-center flex-wrap gap-2">
+          <span style={stepBadge(3)}>3</span>
+          <span style={stepTitle}>Check the placement on your label</span>
+          <div className="flex" style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden", marginLeft: 6 }}>
+            {([0, 1] as const).map((pg) => (
+              <button key={pg} onClick={() => { setPage(pg); setSelKey(null); }}
+                className="text-xs font-semibold px-3 py-1"
+                style={{ background: page === pg ? "#1976d2" : "transparent", color: page === pg ? "#fff" : "var(--text-secondary)", border: "none", cursor: "pointer" }}>
+                {pg === 0 ? "Front" : "Back"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{
         position: "relative", width: BG_PAGE_W * SCALE, height: BG_PAGE_H * SCALE,
         background: "#fff", border: "1px solid var(--border)", borderRadius: 4, overflow: "hidden",
         backgroundImage: bd ? `url(${bd})` : undefined, backgroundSize: "100% 100%",
       }}>
-        {!bd && (
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#d0d5da", fontSize: 13, textAlign: "center", padding: 24, pointerEvents: "none" }}>
-            Upload a photo/scan of your BLANK pre-printed label below to align against it — or drag the field chips to match your label.
+        {!showChips && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#9aa3ac", fontSize: 14, textAlign: "center", padding: 32, gap: 8 }}>
+            <div style={{ fontSize: 34 }}>📷</div>
+            <div style={{ fontWeight: 600 }}>Upload a photo of your blank label to begin</div>
+            <div style={{ fontSize: 12 }}>We&apos;ll place the print fields right on your photo so you can see they line up.</div>
           </div>
         )}
-        {pageDefs.map((d) => {
+        {showChips && pageDefs.map((d) => {
           const p = fieldPos(d);
           const left = p.x * SCALE;
           const top = (BG_PAGE_H - p.y) * SCALE;
@@ -219,7 +274,7 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
           return (
             <div key={d.key}
               onMouseDown={(e) => startDrag(e, d)}
-              title={`${d.label} — drag to reposition (offset ${fields[d.key]?.x ?? 0}, ${fields[d.key]?.y ?? 0})`}
+              title={`${d.label} — drag it onto the matching spot on your label`}
               style={{
                 position: "absolute", left, top: top - 9, transform: d.kind === "checkbox" ? "translate(-50%, 0)" : undefined,
                 padding: "1px 5px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", cursor: "move", userSelect: "none",
@@ -232,33 +287,84 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
         })}
       </div>
 
-      {/* Backdrop uploads + auto-detect + test print */}
-      <div className="flex items-center gap-3 flex-wrap mt-3">
-        <label className="text-xs" style={{ color: "var(--text-secondary)" }}>
-          Front photo/scan: <input ref={frontFileRef} type="file" accept="image/*" onChange={(e) => onBackdropFile("front", e.target.files?.[0] ?? null)} />
-        </label>
-        <label className="text-xs" style={{ color: "var(--text-secondary)" }}>
-          Back: <input ref={backFileRef} type="file" accept="image/*" onChange={(e) => onBackdropFile("back", e.target.files?.[0] ?? null)} />
-        </label>
-        <button className="btn btn-secondary" style={{ height: 30, fontSize: 12 }} disabled={busy !== null} onClick={() => void autoDetect()}>
-          {busy === "detect" ? "Detecting…" : "✨ Auto-detect from photos"}
-        </button>
+      {/* Step 4 */}
+      {showChips && (
+        <div className="mt-3 mb-4">
+          <div className="flex items-center flex-wrap gap-2">
+            <span style={stepBadge(4)}>4</span>
+            <span style={stepTitle}>Nudge anything that&apos;s off</span>
+          </div>
+          <p style={stepHint}>Drag a field with your mouse, or click one and use the arrows for small moves.</p>
+          <div className="flex items-center gap-2 flex-wrap" style={{ margin: "8px 0 0 30px" }}>
+            <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Move:</span>
+            <div className="flex" style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+              <button onClick={() => setMoveAll(false)} disabled={!selDef}
+                className="text-xs font-semibold px-3 py-1"
+                style={{ background: !moveAll && selDef ? "#1976d2" : "transparent", color: !moveAll && selDef ? "#fff" : selDef ? "var(--text-secondary)" : "#c4cbd2", border: "none", cursor: selDef ? "pointer" : "not-allowed" }}>
+                {selDef ? `just “${selDef.label}”` : "just this field (click one)"}
+              </button>
+              <button onClick={() => setMoveAll(true)}
+                className="text-xs font-semibold px-3 py-1"
+                style={{ background: moveAll || !selDef ? "#1976d2" : "transparent", color: moveAll || !selDef ? "#fff" : "var(--text-secondary)", border: "none", cursor: "pointer" }}>
+                all fields together
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              {([["←", -1, 0], ["→", 1, 0], ["↑", 0, 1], ["↓", 0, -1]] as const).map(([sym, dx, dy]) => (
+                <button key={sym} onClick={() => nudge(dx, dy)} title="Small move"
+                  style={{ width: 28, height: 28, border: "1px solid var(--border)", borderRadius: 4, background: "#fff", cursor: "pointer", fontSize: 13 }}>
+                  {sym}
+                </button>
+              ))}
+            </div>
+            <button className="text-xs" style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+              disabled={busy !== null}
+              onClick={() => { if (confirm("Start over? This puts every field back at its standard position.")) { setGlobal({ x: 0, y: 0 }); setFields({}); setSelKey(null); setDetectState("idle"); } }}>
+              Start over
+            </button>
+            <span className="text-xs" style={{ color: "#c4cbd2", fontFamily: "monospace" }} title="Fine position readout (printer points)">
+              {moveAll || !selDef ? `all ${global.x >= 0 ? "+" : ""}${global.x}, ${global.y >= 0 ? "+" : ""}${global.y}` : `${(fields[selDef.key]?.x ?? 0) >= 0 ? "+" : ""}${fields[selDef.key]?.x ?? 0}, ${(fields[selDef.key]?.y ?? 0) >= 0 ? "+" : ""}${fields[selDef.key]?.y ?? 0}`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Step 5 */}
+      <div className="mt-3">
+        <div className="flex items-center flex-wrap gap-2">
+          <span style={stepBadge(5)}>5</span>
+          <span style={stepTitle}>Test print &amp; save</span>
+        </div>
+        <p style={stepHint}>Print the test page on a blank label. If anything misses its box, nudge it (step 4) and print again — then save.</p>
+        <div className="flex items-center gap-2 flex-wrap" style={{ margin: "8px 0 0 30px" }}>
+          <button className="btn btn-primary" style={{ height: 32 }} disabled={busy !== null} onClick={() => void testPrint()}>
+            {busy === "print" ? "Preparing…" : "🖨 Print a test on your label"}
+          </button>
+          <button className="btn btn-primary" style={{ height: 32, background: "#2e7d32" }} disabled={busy !== null} onClick={() => void save()}>
+            {busy === "save" ? "Saving…" : "Save alignment"}
+          </button>
+          <button className="text-xs" style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+            disabled={busy !== null}
+            title="On-screen sanity check: the standard DA Buyers Guide form with your data (no offsets applied)"
+            onClick={() => void (async () => {
+              setBusy("print");
+              try {
+                const res = await fetch("/api/settings/buyers-guide-alignment/test-print", {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ dealer_id: dealerId, language, withBackground: true }),
+                });
+                if (res.ok) window.open(URL.createObjectURL(await res.blob()), "_blank");
+              } finally { setBusy(null); }
+            })()}>
+            see it on DA&apos;s standard form
+          </button>
+        </div>
       </div>
-      <div className="flex items-center gap-2 flex-wrap mt-3">
-        <button className="btn btn-primary" style={{ height: 32 }} disabled={busy !== null} onClick={() => void testPrint(false)}>
-          {busy === "print" ? "Rendering…" : "🖨 Test print (data-only)"}
-        </button>
-        <button className="btn btn-secondary" style={{ height: 32 }} disabled={busy !== null} onClick={() => void testPrint(true)}>
-          Preview on DA form
-        </button>
-        <button className="btn btn-primary" style={{ height: 32, background: "#2e7d32" }} disabled={busy !== null} onClick={() => void save()}>
-          {busy === "save" ? "Saving…" : "Save alignment"}
-        </button>
-      </div>
+
+      {msg && <p className="text-xs mt-3 font-medium" style={{ color: "var(--blue)", maxWidth: 640 }}>{msg}</p>}
       <p className="text-xs mt-2" style={{ color: "var(--text-muted)", maxWidth: 640 }}>
-        Calibration loop: print the data-only test page onto a blank label, see what&apos;s off, nudge (drag a chip, or arrows for the selected field / global registration), reprint. Photos are used only in your browser and for the one-time auto-detect — they aren&apos;t stored. All required FTC fields stay present; this tool only repositions them.
+        Your photos stay in your browser and are used only to place the fields — they&apos;re never stored. Every required Buyers Guide field always prints; this tool only positions them on your label.
       </p>
-      {msg && <p className="text-xs mt-2 font-medium" style={{ color: "var(--blue)" }}>{msg}</p>}
     </div>
   );
 }
