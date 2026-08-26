@@ -25,7 +25,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { bgFieldDefs, BG_PAGE_W, BG_PAGE_H, type BgFieldDef } from "@/lib/buyers-guide-alignment-constants";
-import { flattenQuadToDataUrl, seedCorners, type Pt } from "@/lib/perspective-flatten";
+import { flattenQuadToDataUrl, seedCorners, printAreaGlobal, type Pt } from "@/lib/perspective-flatten";
 
 const SCALE = 0.72;
 
@@ -170,7 +170,18 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
         setMsg(j.error ?? "We couldn't place the fields automatically — drag them into position on your photo instead.");
         return;
       }
-      setGlobal(j.global ?? { x: 0, y: 0 });
+      // Global offset: prefer the deterministic pixel measurement of the
+      // flattened front (exact, repeatable) over the vision suggestion, whose
+      // form-box estimate wobbles ±40pt between runs on the same image — the
+      // "fields drop an inch after straighten" bug. Vision still supplies the
+      // per-field residuals (relative to its own box, so bias-cancelled).
+      const pixelGlobal = await new Promise<{ x: number; y: number } | null>((resolve) => {
+        const img = new Image();
+        img.onload = () => { try { resolve(printAreaGlobal(img)); } catch { resolve(null); } };
+        img.onerror = () => resolve(null);
+        img.src = front;
+      });
+      setGlobal(pixelGlobal ?? j.global ?? { x: 0, y: 0 });
       setFields(j.fields ?? {});
       setDetectState("done");
       setMsg("Fields placed! Check them against your photo below — drag or nudge anything that's off, then run a test print.");

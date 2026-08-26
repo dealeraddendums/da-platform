@@ -79,11 +79,16 @@ Return ONLY JSON: {"form": {"left":..,"top":..,"right":..,"bottom":..}, "fields"
     if (!jsonMatch) throw new Error(`no JSON in vision response (${side})`);
     return JSON.parse(jsonMatch[0]) as { form: { left: number; top: number; right: number; bottom: number }; fields: Record<string, { x: number; y: number }> };
   }
+  // The model occasionally returns unparseable output — retry once per side.
+  async function detectSideRetry(img: { media_type: "image/jpeg" | "image/png" | "image/webp"; data: string }, side: "front" | "back", keys: string) {
+    try { return await detectSide(img, side, keys); }
+    catch { return detectSide(img, side, keys); }
+  }
 
   try {
     const [frontDet, backDet] = await Promise.all([
-      detectSide(front, "front", frontKeys),
-      back ? detectSide(back, "back", backKeys) : Promise.resolve(null),
+      detectSideRetry(front, "front", frontKeys),
+      back ? detectSideRetry(back, "back", backKeys) : Promise.resolve(null),
     ]);
 
     // Map each normalized anchor into PDF points via the detected form bounds.
@@ -95,16 +100,16 @@ Return ONLY JSON: {"form": {"left":..,"top":..,"right":..,"bottom":..}, "fields"
     // straight-on photo of a standard label come out near-zero. Linear map —
     // the test print + manual nudge absorb residual perspective/skew.
     const PRINT = { left: 54, top: 54, right: 558, bottom: 738 };
-    // Flattened images (the alignment tool since the corner-outline flow) ARE
-    // the full label page — the printed area sits at the known 54pt margins,
-    // so the form box is deterministic and the model's own box estimate (the
-    // dominant noise source: ±40pt of global bias between runs on the same
-    // true-zero form — the reported "fields drop an inch after straighten")
-    // is discarded. Raw-photo callers keep the model-box path.
+    // NOTE: always map through the MODEL's own form box — the model reports
+    // anchors and box with the same internal coordinate skew, so normalizing
+    // by its box cancels that bias (measured: fixed known-geometry box gave
+    // global −72 on a true-zero form; the model's box gave −12). The
+    // remaining run-to-run global noise is handled client-side, which
+    // replaces the vision global with a deterministic pixel-measured one on
+    // flattened images.
     const flattened = body.flattened === true;
-    const FLAT_FORM = { left: PRINT.left / BG_PAGE_W, top: PRINT.top / BG_PAGE_H, right: PRINT.right / BG_PAGE_W, bottom: PRINT.bottom / BG_PAGE_H };
     const toPts = (det: { form: { left: number; top: number; right: number; bottom: number }; fields: Record<string, { x: number; y: number }> }, page: 0 | 1) => {
-      const form = flattened ? FLAT_FORM : det.form;
+      const form = det.form;
       const fw = Math.max(form.right - form.left, 0.05);
       const fh = Math.max(form.bottom - form.top, 0.05);
       const out: Record<string, { x: number; y: number }> = {};
@@ -145,9 +150,9 @@ Return ONLY JSON: {"form": {"left":..,"top":..,"right":..,"bottom":..}, "fields"
     const fields: Record<string, { x: number; y: number }> = {};
     // Per-field residual dead-zone: vision anchors carry ~16pt median noise
     // even on a perfectly-aligned form, so on flattened (geometry-exact)
-    // images small residuals are noise — trust the calibrated default and
+    // images sub-20pt residuals are noise — trust the calibrated default and
     // keep only genuine deviations (e.g. the %labor/%parts blanks at 80pt+).
-    const deadZone = flattened ? 8 : 1;
+    const deadZone = flattened ? 20 : 1;
     for (const [k, d] of Object.entries(deltas)) {
       const rx = d.x - global.x, ry = d.y - global.y;
       if (Math.abs(rx) > deadZone || Math.abs(ry) > deadZone) fields[k] = { x: rx, y: ry };

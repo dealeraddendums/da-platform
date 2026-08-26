@@ -158,3 +158,55 @@ export function seedCorners(img: HTMLImageElement): [Pt, Pt, Pt, Pt] {
   const up = (p: Pt): Pt => ({ x: Math.min(Math.max(p.x * scale, 0), img.naturalWidth), y: Math.min(Math.max(p.y * scale, 0), img.naturalHeight) });
   return [up(tl), up(tr), up(br), up(bl)];
 }
+
+/**
+ * Deterministic GLOBAL offset for a flattened label image: find the printed
+ * form's dark-pixel bounding box and compare its center to the reference
+ * printed area (54pt margins on the 612×792 FTC page). Pure pixel math — the
+ * vision model's global suggestion wobbles ±40pt between runs on the same
+ * image (its form-box estimate), which showed up as "fields drop an inch a
+ * few seconds after straighten"; this is exact and repeatable. Returns null
+ * when the image doesn't look like a printed form (caller falls back).
+ */
+export function printAreaGlobal(img: HTMLImageElement): { x: number; y: number } | null {
+  const W = 612, H = 792;
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const ctx = c.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0, W, H);
+  const d = ctx.getImageData(0, 0, W, H).data;
+  const lum = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) lum[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+  // Robust ink/paper threshold: midpoint of the 5th and 90th luminance
+  // percentiles (ink vs paper) — photo exposure independent.
+  const sorted = Float32Array.from(lum).sort();
+  const ink = sorted[Math.floor(sorted.length * 0.05)];
+  const paper = sorted[Math.floor(sorted.length * 0.90)];
+  if (paper - ink < 40) return null; // no real contrast — not a printed form
+  const th = (ink + paper) / 2;
+
+  // Bounding box of rows/cols with enough dark pixels (noise/dust rejected).
+  // The scan skips an 8px border: the warp's out-of-quad fill and JPEG edge
+  // fringes leave faint gray lines at the extreme page border that otherwise
+  // masquerade as content (measured: they dragged the box bottom from 738 to
+  // 791 on a low-contrast back page). The printed area starts ~54pt in, so
+  // the inset can never clip real form content.
+  const INSET = 8, MIN_RUN = 6;
+  const rowCount = new Int32Array(H), colCount = new Int32Array(W);
+  for (let y = INSET; y < H - INSET; y++) for (let x = INSET; x < W - INSET; x++) {
+    if (lum[y * W + x] < th) { rowCount[y]++; colCount[x]++; }
+  }
+  let top = -1, bottom = -1, left = -1, right = -1;
+  for (let y = 0; y < H; y++) if (rowCount[y] >= MIN_RUN) { if (top < 0) top = y; bottom = y; }
+  for (let x = 0; x < W; x++) if (colCount[x] >= MIN_RUN) { if (left < 0) left = x; right = x; }
+  if (top < 0 || left < 0) return null;
+  const w = right - left, h = bottom - top;
+  // Sanity: the FTC printed area is ~504×684pt — reject wildly different
+  // boxes (severe crop, blank page, photo of something else).
+  if (w < 300 || h < 450 || w > 596 || h > 776) return null;
+  // Compare CENTERS (robust to slight scale differences the offsets-only
+  // config can't express anyway). Reference print rect: 54,54 → 558,738.
+  const clamp = (n: number) => Math.max(-150, Math.min(150, Math.round(n)));
+  return { x: clamp((left + right) / 2 - 306), y: clamp(-((top + bottom) / 2 - 396)) }; // flip to bottom-left origin
+}
