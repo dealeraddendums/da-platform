@@ -16,6 +16,10 @@ export interface BgFieldDef {
   kind: BgFieldKind;
   /** only drawn for certain warranty configs; still adjustable */
   conditional?: boolean;
+  /** DISPLAY ONLY (alignment tool): approximate printed width in pt of a
+   *  typical value, drawn as a faint baseline line so overrun is visible.
+   *  Not used by any renderer — no lockstep requirement. */
+  extent?: number;
 }
 
 const VROW_Y = 646;
@@ -27,10 +31,10 @@ const FRONT_VARIANTS: Record<string, Omit<BgFieldDef, "page">[]> = {
     { key: "dlrW",    label: "Dealer Warranty checkbox",  x: 92,  y: 535, kind: "checkbox", conditional: true },
     { key: "full",    label: "Full Warranty checkbox",    x: 99,  y: 510, kind: "checkbox", conditional: true },
     { key: "lim",     label: "Limited Warranty checkbox", x: 99,  y: 492, kind: "checkbox", conditional: true },
-    { key: "labor",   label: "% Labor",                   x: 280, y: 489, kind: "text", conditional: true },
-    { key: "parts",   label: "% Parts",                   x: 370, y: 489, kind: "text", conditional: true },
-    { key: "systems", label: "Systems covered",           x: 68,  y: 419, kind: "text", conditional: true },
-    { key: "duration",label: "Duration",                  x: 315, y: 419, kind: "text", conditional: true },
+    { key: "labor",   label: "% Labor",                   x: 280, y: 489, kind: "text", conditional: true, extent: 16 },
+    { key: "parts",   label: "% Parts",                   x: 370, y: 489, kind: "text", conditional: true, extent: 16 },
+    { key: "systems", label: "Systems covered",           x: 68,  y: 419, kind: "text", conditional: true, extent: 200 },
+    { key: "duration",label: "Duration",                  x: 315, y: 419, kind: "text", conditional: true, extent: 110 },
     { key: "mfrNew",  label: "Mfr new-warranty box",      x: 85,  y: 325, kind: "checkbox", conditional: true },
     { key: "mfrUsed", label: "Mfr used-warranty box",     x: 85,  y: 301, kind: "checkbox", conditional: true },
     { key: "othUsed", label: "Other used-warranty box",   x: 85,  y: 285, kind: "checkbox", conditional: true },
@@ -41,10 +45,10 @@ const FRONT_VARIANTS: Record<string, Omit<BgFieldDef, "page">[]> = {
     { key: "dlrW",    label: "Dealer Warranty checkbox",  x: 92,  y: 536, kind: "checkbox", conditional: true },
     { key: "full",    label: "Full Warranty checkbox",    x: 99,  y: 511, kind: "checkbox", conditional: true },
     { key: "lim",     label: "Limited Warranty checkbox", x: 99,  y: 493, kind: "checkbox", conditional: true },
-    { key: "labor",   label: "% Labor",                   x: 280, y: 490, kind: "text", conditional: true },
-    { key: "parts",   label: "% Parts",                   x: 370, y: 490, kind: "text", conditional: true },
-    { key: "systems", label: "Systems covered",           x: 68,  y: 420, kind: "text", conditional: true },
-    { key: "duration",label: "Duration",                  x: 315, y: 420, kind: "text", conditional: true },
+    { key: "labor",   label: "% Labor",                   x: 280, y: 490, kind: "text", conditional: true, extent: 16 },
+    { key: "parts",   label: "% Parts",                   x: 370, y: 490, kind: "text", conditional: true, extent: 16 },
+    { key: "systems", label: "Systems covered",           x: 68,  y: 420, kind: "text", conditional: true, extent: 200 },
+    { key: "duration",label: "Duration",                  x: 315, y: 420, kind: "text", conditional: true, extent: 110 },
     { key: "mfrNew",  label: "Mfr new-warranty box",      x: 85,  y: 326, kind: "checkbox", conditional: true },
     { key: "mfrUsed", label: "Mfr used-warranty box",     x: 85,  y: 302, kind: "checkbox", conditional: true },
     { key: "othUsed", label: "Other used-warranty box",   x: 85,  y: 286, kind: "checkbox", conditional: true },
@@ -55,10 +59,10 @@ const FRONT_VARIANTS: Record<string, Omit<BgFieldDef, "page">[]> = {
     { key: "dlrW",    label: "Dealer Warranty checkbox",  x: 92,  y: 508, kind: "checkbox", conditional: true },
     { key: "full",    label: "Full Warranty checkbox",    x: 99,  y: 510, kind: "checkbox", conditional: true },
     { key: "lim",     label: "Limited Warranty checkbox", x: 99,  y: 465, kind: "checkbox", conditional: true },
-    { key: "labor",   label: "% Labor",                   x: 312, y: 462, kind: "text", conditional: true },
-    { key: "parts",   label: "% Parts",                   x: 402, y: 462, kind: "text", conditional: true },
-    { key: "systems", label: "Systems covered",           x: 68,  y: 392, kind: "text", conditional: true },
-    { key: "duration",label: "Duration",                  x: 315, y: 392, kind: "text", conditional: true },
+    { key: "labor",   label: "% Labor",                   x: 312, y: 462, kind: "text", conditional: true, extent: 16 },
+    { key: "parts",   label: "% Parts",                   x: 402, y: 462, kind: "text", conditional: true, extent: 16 },
+    { key: "systems", label: "Systems covered",           x: 68,  y: 392, kind: "text", conditional: true, extent: 200 },
+    { key: "duration",label: "Duration",                  x: 315, y: 392, kind: "text", conditional: true, extent: 110 },
     { key: "mfrNew",  label: "Mfr new-warranty box",      x: 85,  y: 311, kind: "checkbox", conditional: true },
     { key: "mfrUsed", label: "Mfr used-warranty box",     x: 85,  y: 292, kind: "checkbox", conditional: true },
     { key: "othUsed", label: "Other used-warranty box",   x: 85,  y: 280, kind: "checkbox", conditional: true },
@@ -69,10 +73,10 @@ const FRONT_VARIANTS: Record<string, Omit<BgFieldDef, "page">[]> = {
     { key: "dlrW",    label: "Dealer Warranty checkbox",  x: 92,  y: 536, kind: "checkbox", conditional: true },
     { key: "full",    label: "Full Warranty checkbox",    x: 99,  y: 511, kind: "checkbox", conditional: true },
     { key: "lim",     label: "Limited Warranty checkbox", x: 99,  y: 493, kind: "checkbox", conditional: true },
-    { key: "labor",   label: "% Labor",                   x: 280, y: 490, kind: "text", conditional: true },
-    { key: "parts",   label: "% Parts",                   x: 370, y: 490, kind: "text", conditional: true },
-    { key: "systems", label: "Systems covered",           x: 68,  y: 420, kind: "text", conditional: true },
-    { key: "duration",label: "Duration",                  x: 315, y: 420, kind: "text", conditional: true },
+    { key: "labor",   label: "% Labor",                   x: 280, y: 490, kind: "text", conditional: true, extent: 16 },
+    { key: "parts",   label: "% Parts",                   x: 370, y: 490, kind: "text", conditional: true, extent: 16 },
+    { key: "systems", label: "Systems covered",           x: 68,  y: 420, kind: "text", conditional: true, extent: 200 },
+    { key: "duration",label: "Duration",                  x: 315, y: 420, kind: "text", conditional: true, extent: 110 },
     { key: "mfrNew",  label: "Mfr new-warranty box",      x: 85,  y: 312, kind: "checkbox", conditional: true },
     { key: "mfrUsed", label: "Mfr used-warranty box",     x: 85,  y: 293, kind: "checkbox", conditional: true },
     { key: "othUsed", label: "Other used-warranty box",   x: 85,  y: 281, kind: "checkbox", conditional: true },
@@ -81,18 +85,18 @@ const FRONT_VARIANTS: Record<string, Omit<BgFieldDef, "page">[]> = {
 };
 
 const VEHICLE_ROW: Omit<BgFieldDef, "page">[] = [
-  { key: "make",  label: "Vehicle Make",  x: 72,  y: VROW_Y, kind: "text" },
-  { key: "model", label: "Vehicle Model", x: 190, y: VROW_Y, kind: "text" },
-  { key: "year",  label: "Vehicle Year",  x: 310, y: VROW_Y, kind: "text" },
-  { key: "vin",   label: "VIN",           x: 390, y: VROW_Y, kind: "text" },
+  { key: "make",  label: "Vehicle Make",  x: 72,  y: VROW_Y, kind: "text", extent: 60 },
+  { key: "model", label: "Vehicle Model", x: 190, y: VROW_Y, kind: "text", extent: 75 },
+  { key: "year",  label: "Vehicle Year",  x: 310, y: VROW_Y, kind: "text", extent: 22 },
+  { key: "vin",   label: "VIN",           x: 390, y: VROW_Y, kind: "text", extent: 92 },
 ];
 
 const BACK_FIELDS: Omit<BgFieldDef, "page">[] = [
-  { key: "name",       label: "Dealer Name",        x: 104, y: 197, kind: "text" },
-  { key: "addr",       label: "Dealer Address",     x: 104, y: 175, kind: "text" },
-  { key: "phone",      label: "Dealer Phone",       x: 104, y: 152, kind: "text" },
-  { key: "email",      label: "Dealer Email",       x: 346, y: 152, kind: "text", conditional: true },
-  { key: "complaints", label: "Complaints Contact", x: 104, y: 128, kind: "text", conditional: true },
+  { key: "name",       label: "Dealer Name",        x: 104, y: 197, kind: "text", extent: 140 },
+  { key: "addr",       label: "Dealer Address",     x: 104, y: 175, kind: "text", extent: 200 },
+  { key: "phone",      label: "Dealer Phone",       x: 104, y: 152, kind: "text", extent: 65 },
+  { key: "email",      label: "Dealer Email",       x: 346, y: 152, kind: "text", conditional: true, extent: 110 },
+  { key: "complaints", label: "Complaints Contact", x: 104, y: 128, kind: "text", conditional: true, extent: 170 },
 ];
 
 /** All fields for a variant, page-tagged. */

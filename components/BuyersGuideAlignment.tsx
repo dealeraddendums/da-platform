@@ -400,21 +400,43 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
           </div>
         )}
         {showChips && pageDefs.map((d) => {
+          // The wrapper's (left, top) IS the field's print anchor, exactly as
+          // the renderers use it: pdf-lib drawText places x = left edge and
+          // y = BASELINE, so text anchors baseline-left; checkbox X's are
+          // drawn about their CENTER (cx/cy). The ● marker sits at (0,0) of
+          // this wrapper, the label hangs off it, and dragging/nudging moves
+          // the wrapper — i.e. the anchor itself. Saved offsets are deltas of
+          // this same point, so the ● on the straightened form is exactly
+          // where the data prints.
           const p = fieldPos(d);
-          const left = p.x * SCALE;
-          const top = (BG_PAGE_H - p.y) * SCALE;
+          const ax = p.x * SCALE;
+          const ay = (BG_PAGE_H - p.y) * SCALE;
           const sel = selKey === d.key;
           return (
             <div key={d.key}
               onMouseDown={(e) => startDrag(e, d)}
-              title={`${d.label} — drag it onto the matching spot on your label`}
-              style={{
-                position: "absolute", left, top: top - 9, transform: d.kind === "checkbox" ? "translate(-50%, 0)" : undefined,
-                padding: "1px 5px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", cursor: "move", userSelect: "none",
+              title={d.kind === "checkbox"
+                ? `${d.label} — put the ● in the middle of the box`
+                : `${d.label} — put the ● where the text should start (it sits on the line)`}
+              style={{ position: "absolute", left: ax, top: ay, width: 0, height: 0, cursor: "move", userSelect: "none", zIndex: sel ? 20 : 10 }}>
+              {d.kind === "text" && d.extent ? (
+                <div style={{ position: "absolute", left: 0, top: 0, width: d.extent * SCALE, height: 1, background: sel ? "rgba(13,71,161,0.55)" : "rgba(211,47,47,0.35)", pointerEvents: "none" }} />
+              ) : null}
+              <div style={{
+                position: "absolute", left: -4, top: -4, width: 8, height: 8, borderRadius: "50%",
+                background: sel ? "#0d47a1" : "#d32f2f", border: "1.5px solid #fff", boxShadow: "0 0 3px rgba(0,0,0,0.55)",
+              }} />
+              <div style={{
+                position: "absolute", whiteSpace: "nowrap",
+                ...(d.kind === "checkbox"
+                  ? { left: 0, bottom: 7, transform: "translateX(-50%)" }
+                  : { left: 0, bottom: 3 }),
+                padding: "1px 5px", fontSize: 9, fontWeight: 700,
                 background: sel ? "#1976d2" : d.kind === "checkbox" ? "rgba(255,165,0,0.85)" : "rgba(25,118,210,0.75)",
-                color: "#fff", borderRadius: 3, border: sel ? "1.5px solid #0d47a1" : "1px solid rgba(0,0,0,0.15)", zIndex: sel ? 20 : 10,
+                color: "#fff", borderRadius: 3, border: sel ? "1.5px solid #0d47a1" : "1px solid rgba(0,0,0,0.15)",
               }}>
-              {d.kind === "checkbox" ? "✕ " : ""}{d.label}
+                {d.kind === "checkbox" ? "✕ " : ""}{d.label}
+              </div>
             </div>
           );
         })}
@@ -427,7 +449,7 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
             <span style={stepBadge(4)}>4</span>
             <span style={stepTitle}>Nudge anything that&apos;s off</span>
           </div>
-          <p style={stepHint}>Drag a field with your mouse, or click one and use the arrows for small moves.</p>
+          <p style={stepHint}>The <span style={{ color: "#d32f2f", fontWeight: 700 }}>●</span> is where each field prints from — line it up with your label: text starts there and sits on the line; ✕ marks center in their box. Drag a field, or click one and use the arrows for small moves.</p>
           <div className="flex items-center gap-2 flex-wrap" style={{ margin: "8px 0 0 30px" }}>
             <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Move:</span>
             <div className="flex" style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
