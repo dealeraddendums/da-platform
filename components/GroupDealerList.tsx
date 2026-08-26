@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useEmailCheck, emailCheckBlocksSubmit } from "@/lib/use-email-check";
 import EmailAvailability from "@/components/EmailAvailability";
+import StateSelect from "@/components/StateSelect";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { rememberDealerReturnPath } from "@/lib/dealer-return";
@@ -22,13 +23,6 @@ type DealerRow = {
 type Props = {
   groupId: string | null;
 };
-
-const US_STATES = [
-  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
-  "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
-  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
-  "VA","WA","WV","WI","WY",
-];
 
 const labelStyle: React.CSSProperties = {
   display: "block", fontSize: 12, fontWeight: 500, color: "#55595c",
@@ -141,10 +135,7 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <div>
               <label style={labelStyle}>State</label>
-              <select style={inputStyle} value={fields.state} onChange={set("state")}>
-                <option value="">—</option>
-                {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
+              <StateSelect style={inputStyle} value={fields.state} onChange={(code) => setFields((f) => ({ ...f, state: code }))} />
             </div>
             <div>
               <label style={labelStyle}>Zip</label>

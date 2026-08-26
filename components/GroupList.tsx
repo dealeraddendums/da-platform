@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
+import StateSelect from "@/components/StateSelect";
 import EntityRowActions from "@/components/EntityRowActions";
 import { TagChip, type Tag } from "@/components/TagPicker";
 import { createClient } from "@/lib/supabase/client";
@@ -733,7 +734,7 @@ function NewGroupForm({ onCreated, onCancel }: NewGroupFormProps) {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="label">State</label>
-              <input className="input" value={fields.state} onChange={set("state")} placeholder="IL" maxLength={2} />
+              <StateSelect className="input" value={fields.state} onChange={(code) => setFields((f) => ({ ...f, state: code }))} />
             </div>
             <div>
               <label className="label">Zip</label>

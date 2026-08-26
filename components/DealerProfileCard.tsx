@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
+import StateSelect from "@/components/StateSelect";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
 import EntityTagsCard from "@/components/EntityTagsCard";
 import { PageHeader } from "@/components/PageHeader";
 import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
+import { normalizeStateCode } from "@/lib/constants/us-states";
 import { DMS_PROVIDERS, OTHER_PROVIDERS, isDmsProvider } from "@/lib/inventory-providers";
 import { loginAsDealer } from "@/lib/admin-login-as";
 import type { SubscriptionBillingResult } from "@/lib/billing-subscription";
@@ -258,6 +260,12 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
   }
 
   async function saveEdit() {
+    // Legacy stored values that don't map to a state code stay visible in the
+    // dropdown as "(current: …)" — block save until a real state is picked.
+    if (form.state.trim() && !normalizeStateCode(form.state)) {
+      setError("Select a valid state from the list.");
+      return;
+    }
     setSaving(true);
     setError(null);
 
@@ -268,7 +276,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
       phone: form.phone.trim() || null,
       address: form.address.trim() || null,
       city: form.city.trim() || null,
-      state: form.state.trim().toUpperCase() || null,
+      state: normalizeStateCode(form.state),
       zip: form.zip.trim() || null,
       country: form.country.trim() || "US",
       makes: form.makes
@@ -1350,14 +1358,20 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
             />
             <div className="flex gap-3">
               <div className="flex-1">
-                <Field
-                  label="State"
-                  value={form.state}
-                  editing={editing}
-                  onChange={set("state")}
-                  view={dealer.state}
-                  maxLength={2}
-                />
+                {editing ? (
+                  <div>
+                    <label className="label">State</label>
+                    <StateSelect className="input" value={form.state} onChange={(code) => setForm((f) => ({ ...f, state: code }))} />
+                  </div>
+                ) : (
+                  <Field
+                    label="State"
+                    value={form.state}
+                    editing={false}
+                    onChange={set("state")}
+                    view={dealer.state}
+                  />
+                )}
               </div>
               <div className="flex-1">
                 <Field

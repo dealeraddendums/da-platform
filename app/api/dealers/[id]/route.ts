@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { US_STATE_CODES } from "@/lib/constants/us-states";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
@@ -12,6 +14,16 @@ import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 import { fireSuperAdminGroupAssignCascade } from "@/lib/group-billing-cascade";
 import { applyDealerSubscriptionChange, type SubscriptionBillingResult } from "@/lib/billing-subscription";
 import { applyInventoryDealerIdChange, DealerIdSyncError } from "@/lib/dealer-id-sync";
+
+// state must be one of the US_STATES codes (or empty). Upper-cased first so
+// legacy clients sending "tx" still pass; full names are rejected (the forms
+// only send codes).
+const stateSchema = z.union([
+  z.enum(US_STATE_CODES as [string, ...string[]]),
+  z.literal(""),
+  z.null(),
+]).optional();
+
 
 type Params = { params: { id: string } };
 
@@ -190,7 +202,13 @@ export async function PATCH(
   if (body.phone !== undefined) patch.phone = body.phone;
   if (body.address !== undefined) patch.address = body.address;
   if (body.city !== undefined) patch.city = body.city;
-  if (body.state !== undefined) patch.state = body.state;
+  if (body.state !== undefined) {
+    const st = typeof body.state === "string" ? body.state.trim().toUpperCase() : body.state;
+    if (!stateSchema.safeParse(st).success) {
+      return NextResponse.json({ error: "state must be a two-letter US state code" }, { status: 400 });
+    }
+    patch.state = st || null;
+  }
   if (body.zip !== undefined) patch.zip = body.zip;
   if (body.country !== undefined) patch.country = body.country;
   if (body.makes !== undefined) patch.makes = body.makes;

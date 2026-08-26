@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
+import StateSelect from "@/components/StateSelect";
 import type { GroupRow, GroupUpdate, DealerRow, GroupBranding } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
 import EntityTagsCard from "@/components/EntityTagsCard";
@@ -475,7 +476,14 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
             <Field label="City" value={form.city} editing={editing} onChange={set("city")} view={group.city} />
             <div className="flex gap-3">
               <div className="flex-1">
-                <Field label="State" value={form.state} editing={editing} onChange={set("state")} view={group.state} maxLength={2} />
+                {editing ? (
+                  <div>
+                    <label className="label">State</label>
+                    <StateSelect className="input" value={form.state} onChange={(code) => setForm((f) => ({ ...f, state: code }))} />
+                  </div>
+                ) : (
+                  <Field label="State" value={form.state} editing={false} onChange={set("state")} view={group.state} />
+                )}
               </div>
               <div className="flex-1">
                 <Field label="Zip" value={form.zip} editing={editing} onChange={set("zip")} view={group.zip} />
@@ -1351,13 +1359,6 @@ function AddDealerToGroup({ groupId, existingDealerIds, onAdded }: AddDealerProp
 
 // ── Create Dealer in Group (group_admin only) ─────────────────────────────────
 
-const US_STATES_SHORT = [
-  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
-  "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
-  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
-  "VA","WA","WV","WI","WY",
-];
-
 type CreateDealerProps = {
   groupId: string;
   onCreated: (dealer: DealerRow) => void;
@@ -1422,10 +1423,7 @@ function CreateDealerInGroup({ groupId: _groupId, onCreated, onCancel }: CreateD
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <div>
             <label className="label">State</label>
-            <select className="input" style={{ height: 32, fontSize: 13 }} value={fields.state} onChange={set("state")}>
-              <option value="">—</option>
-              {US_STATES_SHORT.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+            <StateSelect className="input" style={{ height: 32, fontSize: 13 }} value={fields.state} onChange={(code) => setFields((f) => ({ ...f, state: code }))} />
           </div>
           <div>
             <label className="label">Zip</label>

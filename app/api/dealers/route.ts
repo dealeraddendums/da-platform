@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { US_STATE_CODES } from "@/lib/constants/us-states";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerUpdate } from "@/lib/db";
@@ -19,6 +21,16 @@ import { createDealerFolder, boxConfigured } from "@/lib/box";
 import { seedTrialSampleData } from "@/lib/provisioning";
 import { SOURCE_FORM } from "@/lib/hubspot";
 import { resolveTagId, tagsForDealers, dealerIdsWithTag, dealerIdsWithAnyTag, dealerIdsMatchingTagName } from "@/lib/tags";
+
+// state must be one of the US_STATES codes (or empty). Upper-cased first so
+// legacy clients sending "tx" still pass; full names are rejected (the forms
+// only send codes).
+const stateSchema = z.union([
+  z.enum(US_STATE_CODES as [string, ...string[]]),
+  z.literal(""),
+  z.null(),
+]).optional();
+
 
 interface NewBillingCustomerArgs {
   adminClient: ReturnType<typeof createAdminSupabaseClient>;
@@ -603,6 +615,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // group_admin ga_ branch shipped — dealer_id and inventory_dealer_id could
   // diverge at birth).
   const { name, username, password, sendNotify, dealer_id: bodyDealerId, ...rest } = body;
+  if (rest.state !== undefined) {
+    rest.state = typeof rest.state === "string" ? rest.state.trim().toUpperCase() : rest.state;
+    if (!stateSchema.safeParse(rest.state).success) {
+      return NextResponse.json({ error: "state must be a two-letter US state code" }, { status: 400 });
+    }
+  }
   if (!name?.trim()) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }

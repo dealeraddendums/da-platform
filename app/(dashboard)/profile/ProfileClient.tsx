@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { DealerRow } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
+import StateSelect from "@/components/StateSelect";
+import { normalizeStateCode } from "@/lib/constants/us-states";
 import { LABEL_PRODUCTS, type LabelProduct } from "@/lib/label-products";
 import type { AddendumPaperSize } from "@/lib/recommended-labels";
 import { paperSizeWidthLabel, productMatchesPaperSize } from "@/lib/recommended-labels";
@@ -91,6 +93,12 @@ function InfoTab({ dealer, canEdit }: { dealer: DealerRow; canEdit: boolean }) {
   const [error, setError] = useState("");
 
   async function handleSave() {
+    // Legacy stored values that don't map to a state code stay visible in the
+    // dropdown as "(current: …)" — block save until a real state is picked.
+    if (form.state.trim() && !normalizeStateCode(form.state)) {
+      setError("Select a valid state from the list.");
+      return;
+    }
     setSaving(true);
     setSuccess(false);
     setError("");
@@ -143,7 +151,19 @@ function InfoTab({ dealer, canEdit }: { dealer: DealerRow; canEdit: boolean }) {
       </div>
       <div style={rowStyle}>
         <Field label="City" value={form.city} onChange={set("city")} disabled={!canEdit} />
-        <Field label="State" value={form.state} onChange={set("state")} disabled={!canEdit} style={{ maxWidth: 80 }} />
+        <div style={{ flex: 1, minWidth: 0, maxWidth: 160 }}>
+          <label style={labelStyle}>State</label>
+          <StateSelect
+            value={form.state}
+            onChange={(code) => setForm((f) => ({ ...f, state: code }))}
+            disabled={!canEdit}
+            style={{
+              display: "block", width: "100%", height: 36, padding: "0 10px",
+              border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 14, color: "#333",
+              background: !canEdit ? "#f5f6f7" : "#fff", boxSizing: "border-box", outline: "none",
+            }}
+          />
+        </div>
         <Field label="Zip" value={form.zip} onChange={set("zip")} disabled={!canEdit} style={{ maxWidth: 100 }} />
       </div>
 

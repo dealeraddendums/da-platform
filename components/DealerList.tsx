@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useEmailCheck, emailCheckBlocksSubmit } from "@/lib/use-email-check";
 import EmailAvailability from "@/components/EmailAvailability";
+import StateSelect from "@/components/StateSelect";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
@@ -921,7 +922,7 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="label">State</label>
-              <input className="input" value={fields.state} onChange={set("state")} placeholder="IL" maxLength={2} />
+              <StateSelect className="input" value={fields.state} onChange={(code) => setFields((f) => ({ ...f, state: code }))} />
             </div>
             <div>
               <label className="label">Zip</label>

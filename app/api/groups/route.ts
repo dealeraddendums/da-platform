@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { US_STATE_CODES } from "@/lib/constants/us-states";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow, GroupUpdate } from "@/lib/db";
@@ -9,6 +11,16 @@ import { fireGroupSync } from "@/lib/sync-hubspot";
 import { SOURCE_FORM } from "@/lib/hubspot";
 import { createGroupFolder, boxConfigured } from "@/lib/box";
 import { resolveTagId, tagsForGroups, groupIdsWithTag, groupIdsMatchingTagName } from "@/lib/tags";
+
+// state must be one of the US_STATES codes (or empty). Upper-cased first so
+// legacy clients sending "tx" still pass; full names are rejected (the forms
+// only send codes).
+const stateSchema = z.union([
+  z.enum(US_STATE_CODES as [string, ...string[]]),
+  z.literal(""),
+  z.null(),
+]).optional();
+
 
 type SortableCol = "name" | "active" | "account_type" | "dealer_count" | "created_at" | "billing_contact";
 const DB_SORT_COLS = new Set<SortableCol>(["name", "active", "account_type", "billing_contact", "created_at"]);
@@ -127,6 +139,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const { name, internal_id, username, password, sendNotify, ...rest } = body;
+  if (rest.state !== undefined) {
+    rest.state = typeof rest.state === "string" ? rest.state.trim().toUpperCase() : rest.state;
+    if (!stateSchema.safeParse(rest.state).success) {
+      return NextResponse.json({ error: "state must be a two-letter US state code" }, { status: 400 });
+    }
+  }
   if (!name?.trim()) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
