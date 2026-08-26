@@ -58,7 +58,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const prompt = (side: "front" | "back", keys: string) => `This is a photo of the ${side} of a blank pre-printed FTC Used Car Buyers Guide label (language: ${language === "es" ? "Spanish" : "English"}). Locate:
 1. "form": the bounding box of the printed FORM itself (the label's printed area, excluding photo background/table surface), as {left, top, right, bottom} in normalized 0-1 image coordinates (top-left origin).
-2. For each of these fill-in fields, the anchor point where variable data should be WRITTEN — for text fields the left end of the blank/line at text-baseline height; for checkbox fields the CENTER of the empty checkbox: ${keys}.
+2. For each of these fill-in fields, the anchor point where the FIRST TYPED CHARACTER of the variable data should be placed — this is INSIDE the blank space reserved for the answer, NOT on the printed caption/label text. For text fields: the left edge of the empty blank (just after the caption or under the column heading), at the height where typed text would sit on the ruled line. For checkbox fields: the exact CENTER of the empty checkbox square. Fields: ${keys}.
 Return ONLY JSON: {"form": {"left":..,"top":..,"right":..,"bottom":..}, "fields": {"<key>": {"x":.., "y":..}, ...}} with normalized 0-1 coordinates (top-left origin). Omit any field you cannot find.`;
 
   const anthropic = new Anthropic();
