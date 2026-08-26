@@ -22,7 +22,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { dealer_id?: string; language?: string; global?: { x?: number; y?: number }; fields?: Record<string, { x?: number; y?: number }>; withBackground?: boolean };
+  let body: { dealer_id?: string; language?: string; implied?: boolean; calibration?: boolean; global?: { x?: number; y?: number }; fields?: Record<string, { x?: number; y?: number }>; withBackground?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
 
   const dealerTextId = claims.role === "dealer_admin" ? (claims.dealer_id ?? null) : (body.dealer_id?.trim() || claims.dealer_id || null);
@@ -60,6 +60,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // the same offsets — useful on-screen to sanity-check placement against
     // DA's own form before burning label stock.
     preprinted: body.withBackground === true ? null : preprinted,
+    // Calibration: sample-fill EVERY field position so the dealer can verify
+    // each one — never used by real prints (their routes don't pass it).
+    calibration: body.calibration === true,
+    impliedLayout: body.implied === true,
     vehicle: { make: "SAMPLE MAKE", model: "SAMPLE MODEL", year: "2026", vin: "SAMPLE00000000000" },
     dealer: { name: dealer.name, address: dealer.address, city: dealer.city, state: dealer.state, zip: dealer.zip, phone: dealer.phone },
     warranty,

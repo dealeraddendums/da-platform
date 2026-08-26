@@ -16,6 +16,13 @@ export interface BuyersGuidePdfInput {
   /** Pre-printed-label mode: render data-only on blank pages at
    *  default coordinates + these offsets. */
   preprinted?: BgPreprintedOffsets | null;
+  /** Calibration render (alignment-tool Test print ONLY): draw a visible
+   *  sample in EVERY field position regardless of the vehicle/warranty logic,
+   *  so the dealer can verify each position. Never used for real prints. */
+  calibration?: boolean;
+  /** Calibration only: which front-page layout to sample-fill (the tool's
+   *  variant toggle) — real prints derive this from warranty_type. */
+  impliedLayout?: boolean;
   dealerUuid?: string | null;
   vehicle: {
     make: string | null;
@@ -50,8 +57,8 @@ type CB = { cx: number; cy: number; sz: number };
 
 // ── English AS IS coords (calibrated) ────────────────────────────────────────
 const EN_P0 = {
-  asIs:    { cx: 92, cy: 585, sz: 11 } as CB,
-  dlrW:    { cx: 92, cy: 535, sz: 11 } as CB,
+  asIs:    { cx: 92, cy: 585, sz:  8 } as CB,
+  dlrW:    { cx: 92, cy: 535, sz:  8 } as CB,
   full:    { cx: 99, cy: 510, sz:  4 } as CB,
   lim:     { cx: 99, cy: 492, sz:  4 } as CB,
   laborX:  280, laborY:  489,
@@ -66,8 +73,8 @@ const EN_P0 = {
 
 // ── English IMPLIED coords (calibrated) ──────────────────────────────────────
 const EN_P1 = {
-  implied: { cx: 92, cy: 586, sz: 11 } as CB,
-  dlrW:    { cx: 92, cy: 536, sz: 11 } as CB,
+  implied: { cx: 92, cy: 586, sz:  8 } as CB,
+  dlrW:    { cx: 92, cy: 536, sz:  8 } as CB,
   full:    { cx: 99, cy: 511, sz:  4 } as CB,
   lim:     { cx: 99, cy: 493, sz:  4 } as CB,
   laborX:  280, laborY:  490,
@@ -84,8 +91,8 @@ const EN_P1 = {
 // non-dealer: mfrNew −14pt, mfrUsed −9pt, othUsed −5pt
 // dlrW/lim/labor/parts: −27pt (3/8" down); laborX/partsX +32pt (7/16" right)
 const ES_P0 = {
-  asIs:    { cx: 92, cy: 585, sz: 11 } as CB,
-  dlrW:    { cx: 92, cy: 508, sz: 11 } as CB,
+  asIs:    { cx: 92, cy: 585, sz:  8 } as CB,
+  dlrW:    { cx: 92, cy: 508, sz:  8 } as CB,
   full:    { cx: 99, cy: 510, sz:  4 } as CB,
   lim:     { cx: 99, cy: 465, sz:  4 } as CB,
   laborX:  312, laborY:  462,
@@ -101,8 +108,8 @@ const ES_P0 = {
 // ── Spanish IMPLIED coords — EN_P1 base with same non-dealer offsets as ES_P0 ─
 // mfrNew -14pt (3/16"), mfrUsed -9pt (1/8"), othUsed -5pt (1/16")
 const ES_P1 = {
-  implied: { cx: 92, cy: 586, sz: 11 } as CB,
-  dlrW:    { cx: 92, cy: 536, sz: 11 } as CB,
+  implied: { cx: 92, cy: 586, sz:  8 } as CB,
+  dlrW:    { cx: 92, cy: 536, sz:  8 } as CB,
   full:    { cx: 99, cy: 511, sz:  4 } as CB,
   lim:     { cx: 99, cy: 493, sz:  4 } as CB,
   laborX:  280, laborY:  490,
@@ -162,8 +169,12 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
   const oy = (key: string, y: number) => y + gy + (Number(fo(key).y) || 0);
   const oCB = (key: string, cb: CB): CB => (pp ? { ...cb, cx: ox(key, cb.cx), cy: oy(key, cb.cy) } : cb);
 
+  const cal = input.calibration === true;
   const isAsIs    = w.warranty_type === 'as_is';
   const isImplied = w.warranty_type === 'implied_only';
+  // Which front-page layout: calibration follows the tool's variant toggle,
+  // real prints follow the warranty type.
+  const layoutImplied = cal ? input.impliedLayout === true : isImplied;
   const isFull    = w.warranty_type === 'full';
   const isLimited = w.warranty_type === 'limited';
   const hasDealerW = isFull || isLimited;
@@ -173,7 +184,7 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
     outDoc.addPage([612, 792]);
     outDoc.addPage([612, 792]);
   } else {
-    const bgKey: BgKey = `${lang === 'es' ? 'spanish' : 'english'}-${isImplied ? 'implied' : 'as-is-warranty'}`;
+    const bgKey: BgKey = `${lang === 'es' ? 'spanish' : 'english'}-${layoutImplied ? 'implied' : 'as-is-warranty'}`;
     const srcBuf = await getBuyersGuidePdfBytes(bgKey, dealerUuid);
     const srcDoc = await PDFDocument.load(srcBuf);
     const [front, back] = await outDoc.copyPages(srcDoc, [0, 1]);
@@ -187,8 +198,8 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
   // ── Front page ─────────────────────────────────────────────────────────────
   const fp = outDoc.getPage(0);
   const C = lang === 'es'
-    ? (isImplied ? ES_P1 : ES_P0)
-    : (isImplied ? EN_P1 : EN_P0);
+    ? (layoutImplied ? ES_P1 : ES_P0)
+    : (layoutImplied ? EN_P1 : EN_P0);
 
   // Vehicle data
   drawTxt(fp, font, ox('make', MAKE_X),   oy('make', VROW_Y),  v.make  ?? '');
@@ -196,27 +207,28 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
   drawTxt(fp, font, ox('year', YEAR_X),   oy('year', VROW_Y),  v.year  ?? '');
   drawTxt(fp, font, ox('vin', VIN_X),     oy('vin', VROW_Y),   v.vin   ?? '');
 
-  // Primary warranty checkbox
-  if (isAsIs    && 'asIs'    in C) drawX(fp, oCB('asIs', (C as typeof EN_P0).asIs));
-  if (isImplied && 'implied' in C) drawX(fp, oCB('implied', (C as typeof EN_P1).implied));
-  if (hasDealerW) drawX(fp, oCB('dlrW', C.dlrW));
+  // Primary warranty checkbox. Calibration marks the layout's own primary box
+  // (every position must print something); real prints follow the warranty.
+  if ((cal ? !layoutImplied : isAsIs)    && 'asIs'    in C) drawX(fp, oCB('asIs', (C as typeof EN_P0).asIs));
+  if ((cal ? layoutImplied  : isImplied) && 'implied' in C) drawX(fp, oCB('implied', (C as typeof EN_P1).implied));
+  if (cal || hasDealerW) drawX(fp, oCB('dlrW', C.dlrW));
 
   // Sub-checkboxes and warranty details
-  if (isFull) drawX(fp, oCB('full', C.full));
-  if (isLimited) {
+  if (cal || isFull) drawX(fp, oCB('full', C.full));
+  if (cal || isLimited) {
     drawX(fp, oCB('lim', C.lim));
-    drawPct(fp, fontBold, ox('labor', C.laborX), oy('labor', C.laborY), w.labor_pct);
-    drawPct(fp, fontBold, ox('parts', C.partsX), oy('parts', C.partsY), w.parts_pct);
+    drawPct(fp, fontBold, ox('labor', C.laborX), oy('labor', C.laborY), cal ? (w.labor_pct ?? 100) : w.labor_pct);
+    drawPct(fp, fontBold, ox('parts', C.partsX), oy('parts', C.partsY), cal ? (w.parts_pct ?? 100) : w.parts_pct);
   }
-  if (hasDealerW && w.systems_covered) drawTxt(fp, font, ox('systems', C.sysX), oy('systems', C.sysY), w.systems_covered, 7.5);
-  if (hasDealerW && w.duration)        drawTxt(fp, font, ox('duration', C.durX), oy('duration', C.durY), w.duration, 7.5);
+  if (cal || (hasDealerW && w.systems_covered)) drawTxt(fp, font, ox('systems', C.sysX), oy('systems', C.sysY), (cal ? (w.systems_covered || 'SAMPLE SYSTEMS') : w.systems_covered) ?? '', 7.5);
+  if (cal || (hasDealerW && w.duration))        drawTxt(fp, font, ox('duration', C.durX), oy('duration', C.durY), (cal ? (w.duration || 'SAMPLE DURATION') : w.duration) ?? '', 7.5);
 
   // Non-dealer warranty checkboxes
   const ndw = w.non_dealer_warranties ?? [];
-  if (ndw.includes('mfr_new'))    drawX(fp, oCB('mfrNew', C.mfrNew));
-  if (ndw.includes('mfr_used'))   drawX(fp, oCB('mfrUsed', C.mfrUsed));
-  if (ndw.includes('other_used')) drawX(fp, oCB('othUsed', C.othUsed));
-  if (w.service_contract)         drawX(fp, oCB('svcCont', C.svcCont));
+  if (cal || ndw.includes('mfr_new'))    drawX(fp, oCB('mfrNew', C.mfrNew));
+  if (cal || ndw.includes('mfr_used'))   drawX(fp, oCB('mfrUsed', C.mfrUsed));
+  if (cal || ndw.includes('other_used')) drawX(fp, oCB('othUsed', C.othUsed));
+  if (cal || w.service_contract)         drawX(fp, oCB('svcCont', C.svcCont));
 
   // ── Back page ──────────────────────────────────────────────────────────────
   const bp = outDoc.getPage(1);
@@ -224,13 +236,14 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
   const dealerName = d.name ?? '';
   const dealerAddr = [d.address, [d.city, d.state, d.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
   const dealerPhone = d.phone ?? '';
-  const dealerEmail = w.dealer_email ?? d.email ?? '';
+  const dealerEmail = w.dealer_email ?? d.email ?? (cal ? 'sample@dealer.com' : '');
 
   drawTxt(bp, font, ox('name', BACK.nameX),   oy('name', BACK.nameY),  dealerName,  8);
   drawTxt(bp, font, ox('addr', BACK.addrX),   oy('addr', BACK.addrY),  dealerAddr,  8);
   drawTxt(bp, font, ox('phone', BACK.phoneX), oy('phone', BACK.phoneY), dealerPhone, 8);
   if (dealerEmail) drawTxt(bp, font, ox('email', BACK.emailX), oy('email', BACK.emailY), dealerEmail, 8);
-  if (w.complaints_contact) drawTxt(bp, font, ox('complaints', BACK.complaintsX), oy('complaints', BACK.complaintsY), w.complaints_contact, 8);
+  const complaints = cal ? (w.complaints_contact || 'SAMPLE CONTACT') : w.complaints_contact;
+  if (complaints) drawTxt(bp, font, ox('complaints', BACK.complaintsX), oy('complaints', BACK.complaintsY), complaints, 8);
 
   const bytes = await outDoc.save();
   return Buffer.from(bytes);

@@ -182,7 +182,7 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
     try {
       const res = await fetch("/api/settings/buyers-guide-alignment/test-print", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealer_id: dealerId, language, global, fields }),
+        body: JSON.stringify({ dealer_id: dealerId, language, implied, calibration: true, global, fields }),
       });
       if (!res.ok) { const j = await res.json().catch(() => null) as { error?: string } | null; setMsg(j?.error ?? "Test print failed — try again."); return; }
       const blob = await res.blob();
@@ -449,7 +449,7 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
               try {
                 const res = await fetch("/api/settings/buyers-guide-alignment/test-print", {
                   method: "POST", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ dealer_id: dealerId, language, withBackground: true }),
+                  body: JSON.stringify({ dealer_id: dealerId, language, implied, calibration: true, withBackground: true }),
                 });
                 if (res.ok) window.open(URL.createObjectURL(await res.blob()), "_blank");
               } finally { setBusy(null); }
