@@ -157,6 +157,9 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
         front,
         back: back ?? undefined,
         language, implied,
+        // The images are corner-outlined + perspective-flattened full pages —
+        // the server uses the known form geometry instead of estimating it.
+        flattened: true,
       };
       const res = await fetch(`/api/settings/buyers-guide-alignment/detect?dealer_id=${encodeURIComponent(dealerId)}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -210,7 +213,12 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
   if (!loaded) return <div className="p-4 text-sm" style={{ color: "var(--text-muted)" }}>Loading…</div>;
 
   const bd = page === 0 ? flat.front : flat.back;
-  const showChips = Boolean(bd) || manualNoPhoto;
+  // While auto-detect is in flight the chips are withheld: rendering defaults
+  // first and moving them when the (async, ~3-5s) suggestion lands is exactly
+  // the "fields drop after straighten" bug — the first placement the dealer
+  // sees must be the final one.
+  const placing = detectState === "running" && Boolean(bd);
+  const showChips = !placing && (Boolean(bd) || manualNoPhoto);
   const pageDefs = defs.filter((d) => d.page === page);
   const selDef = selKey ? defs.find((d) => d.key === selKey) : null;
 
@@ -357,11 +365,18 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
         background: "#fff", border: "1px solid var(--border)", borderRadius: 4, overflow: "hidden",
         backgroundImage: bd ? `url(${bd})` : undefined, backgroundSize: "100% 100%",
       }}>
-        {!showChips && (
+        {!showChips && !placing && (
           <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#9aa3ac", fontSize: 14, textAlign: "center", padding: 32, gap: 8 }}>
             <div style={{ fontSize: 34 }}>📷</div>
             <div style={{ fontWeight: 600 }}>Upload a photo of your blank label to begin</div>
             <div style={{ fontSize: 12 }}>We&apos;ll place the print fields right on your photo so you can see they line up.</div>
+          </div>
+        )}
+        {placing && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#5a6472", fontSize: 14, textAlign: "center", padding: 32, gap: 8, background: "rgba(255,255,255,0.55)" }}>
+            <div style={{ fontSize: 30 }}>✨</div>
+            <div style={{ fontWeight: 600 }}>Placing the fields on your label…</div>
+            <div style={{ fontSize: 12 }}>Just a few seconds.</div>
           </div>
         )}
         {showChips && pageDefs.map((d) => {

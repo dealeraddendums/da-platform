@@ -37,7 +37,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Too many auto-detect attempts — wait a minute and try again (or align manually)." }, { status: 429 });
   }
 
-  let body: { front?: string; back?: string; language?: string; implied?: boolean };
+  let body: { front?: string; back?: string; language?: string; implied?: boolean; flattened?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
   if (!body.front) return NextResponse.json({ error: "front photo required" }, { status: 400 });
 
@@ -95,15 +95,24 @@ Return ONLY JSON: {"form": {"left":..,"top":..,"right":..,"bottom":..}, "fields"
     // straight-on photo of a standard label come out near-zero. Linear map —
     // the test print + manual nudge absorb residual perspective/skew.
     const PRINT = { left: 54, top: 54, right: 558, bottom: 738 };
+    // Flattened images (the alignment tool since the corner-outline flow) ARE
+    // the full label page — the printed area sits at the known 54pt margins,
+    // so the form box is deterministic and the model's own box estimate (the
+    // dominant noise source: ±40pt of global bias between runs on the same
+    // true-zero form — the reported "fields drop an inch after straighten")
+    // is discarded. Raw-photo callers keep the model-box path.
+    const flattened = body.flattened === true;
+    const FLAT_FORM = { left: PRINT.left / BG_PAGE_W, top: PRINT.top / BG_PAGE_H, right: PRINT.right / BG_PAGE_W, bottom: PRINT.bottom / BG_PAGE_H };
     const toPts = (det: { form: { left: number; top: number; right: number; bottom: number }; fields: Record<string, { x: number; y: number }> }, page: 0 | 1) => {
-      const fw = Math.max(det.form.right - det.form.left, 0.05);
-      const fh = Math.max(det.form.bottom - det.form.top, 0.05);
+      const form = flattened ? FLAT_FORM : det.form;
+      const fw = Math.max(form.right - form.left, 0.05);
+      const fh = Math.max(form.bottom - form.top, 0.05);
       const out: Record<string, { x: number; y: number }> = {};
       for (const [k, a] of Object.entries(det.fields ?? {})) {
         const def = defs.find((d) => d.key === k && d.page === page);
         if (!def || typeof a?.x !== "number" || typeof a?.y !== "number") continue;
-        const xTop = PRINT.left + ((a.x - det.form.left) / fw) * (PRINT.right - PRINT.left);
-        const yTop = PRINT.top + ((a.y - det.form.top) / fh) * (PRINT.bottom - PRINT.top);
+        const xTop = PRINT.left + ((a.x - form.left) / fw) * (PRINT.right - PRINT.left);
+        const yTop = PRINT.top + ((a.y - form.top) / fh) * (PRINT.bottom - PRINT.top);
         out[k] = { x: xTop, y: BG_PAGE_H - yTop }; // flip to bottom-left origin
       }
       return out;
@@ -134,9 +143,14 @@ Return ONLY JSON: {"form": {"left":..,"top":..,"right":..,"bottom":..}, "fields"
     const median = (arr: number[]) => (arr.length ? arr[Math.floor(arr.length / 2)] : 0);
     const global = { x: median(xs), y: median(ys) };
     const fields: Record<string, { x: number; y: number }> = {};
+    // Per-field residual dead-zone: vision anchors carry ~16pt median noise
+    // even on a perfectly-aligned form, so on flattened (geometry-exact)
+    // images small residuals are noise — trust the calibrated default and
+    // keep only genuine deviations (e.g. the %labor/%parts blanks at 80pt+).
+    const deadZone = flattened ? 8 : 1;
     for (const [k, d] of Object.entries(deltas)) {
       const rx = d.x - global.x, ry = d.y - global.y;
-      if (Math.abs(rx) > 1 || Math.abs(ry) > 1) fields[k] = { x: rx, y: ry };
+      if (Math.abs(rx) > deadZone || Math.abs(ry) > deadZone) fields[k] = { x: rx, y: ry };
     }
 
     return NextResponse.json({ ok: true, global, fields, detected_count: Object.keys(deltas).length, total_fields: defs.length });
