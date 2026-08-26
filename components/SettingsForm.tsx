@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { DealerSettingsRow, TemplateRow, UserRole, BuyersGuideDefaults } from "@/lib/db";
+import BuyersGuideAlignment from "@/components/BuyersGuideAlignment";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
 import { BG_KEYS, BG_LABELS, type BgKey } from "@/lib/buyers-guide-constants";
 
@@ -740,6 +741,17 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
 
           {/* Buyer's Guide tab content (also shown to isReadOnly roles) */}
           {(isReadOnly || docTab === "buyers_guide") && <BuyersGuideTabContent />}
+          {/* Pre-printed-label alignment (migration 150) — dealer_admin + admins.
+              Per-DEALER print setting: the dealer's own FTC label stock carries
+              the form; DA prints data-only at these calibrated positions. */}
+          {docTab === "buyers_guide" && canEdit && dealerId && (
+            <div className="card p-5 mt-4" style={{ border: "1px solid var(--border)" }}>
+              <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+                Pre-Printed Label Alignment
+              </p>
+              <BuyersGuideAlignment dealerId={dealerId} />
+            </div>
+          )}
         </div>
         )}
       </div>

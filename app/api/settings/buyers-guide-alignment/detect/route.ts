@@ -1,0 +1,124 @@
+import { NextRequest, NextResponse } from "next/server";
+import Anthropic from "@anthropic-ai/sdk";
+import { requireAuth } from "@/lib/auth";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
+import { bgFieldDefs, BG_PAGE_W, BG_PAGE_H } from "@/lib/buyers-guide-alignment-constants";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 120;
+
+/**
+ * POST /api/settings/buyers-guide-alignment/detect — Phase 2 auto-approximate.
+ * The dealer photographs the FRONT and BACK of their blank pre-printed FTC
+ * label; Claude vision locates each standard field's fill-in position and the
+ * form boundary on each photo; we map the normalized anchors into PDF points
+ * and return SUGGESTED offsets (global = median delta, fields = residuals).
+ * This is an approximation — the alignment tool + test print finish the job.
+ * Photos are processed in-memory only, never stored.
+ *
+ * Body: { front: dataUrl, back?: dataUrl, language: "en"|"es", implied?: bool }
+ */
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const { claims, error } = await requireAuth();
+  if (error) return error;
+  if (!["super_admin", "dealer_admin", "group_admin"].includes(claims.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const param = req.nextUrl.searchParams.get("dealer_id")?.trim() || claims.dealer_id || null;
+  if (claims.role !== "super_admin" && param) {
+    const authz = await authorizeDealerAction(claims, param);
+    if (!authz.ok) return authz.response;
+  }
+
+  let body: { front?: string; back?: string; language?: string; implied?: boolean };
+  try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+  if (!body.front) return NextResponse.json({ error: "front photo required" }, { status: 400 });
+
+  const language = body.language === "es" ? "es" : "en";
+  const defs = bgFieldDefs(language, body.implied === true);
+
+  const parseImage = (dataUrl: string): { media_type: "image/jpeg" | "image/png" | "image/webp"; data: string } | null => {
+    const m = dataUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
+    if (!m) return null;
+    return { media_type: m[1] as "image/jpeg" | "image/png" | "image/webp", data: m[2] };
+  };
+  const front = parseImage(body.front);
+  const back = body.back ? parseImage(body.back) : null;
+  if (!front) return NextResponse.json({ error: "front must be a jpeg/png/webp data URL" }, { status: 400 });
+
+  const frontKeys = defs.filter((d) => d.page === 0).map((d) => `${d.key} (${d.label})`).join(", ");
+  const backKeys = defs.filter((d) => d.page === 1).map((d) => `${d.key} (${d.label})`).join(", ");
+
+  const prompt = (side: "front" | "back", keys: string) => `This is a photo of the ${side} of a blank pre-printed FTC Used Car Buyers Guide label (language: ${language === "es" ? "Spanish" : "English"}). Locate:
+1. "form": the bounding box of the printed FORM itself (the label's printed area, excluding photo background/table surface), as {left, top, right, bottom} in normalized 0-1 image coordinates (top-left origin).
+2. For each of these fill-in fields, the anchor point where variable data should be WRITTEN — for text fields the left end of the blank/line at text-baseline height; for checkbox fields the CENTER of the empty checkbox: ${keys}.
+Return ONLY JSON: {"form": {"left":..,"top":..,"right":..,"bottom":..}, "fields": {"<key>": {"x":.., "y":..}, ...}} with normalized 0-1 coordinates (top-left origin). Omit any field you cannot find.`;
+
+  const anthropic = new Anthropic();
+  async function detectSide(img: { media_type: "image/jpeg" | "image/png" | "image/webp"; data: string }, side: "front" | "back", keys: string) {
+    const resp = await anthropic.messages.create({
+      model: "claude-sonnet-5",
+      max_tokens: 1500,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: img.media_type, data: img.data } },
+          { type: "text", text: prompt(side, keys) },
+        ],
+      }],
+    });
+    const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error(`no JSON in vision response (${side})`);
+    return JSON.parse(jsonMatch[0]) as { form: { left: number; top: number; right: number; bottom: number }; fields: Record<string, { x: number; y: number }> };
+  }
+
+  try {
+    const [frontDet, backDet] = await Promise.all([
+      detectSide(front, "front", frontKeys),
+      back ? detectSide(back, "back", backKeys) : Promise.resolve(null),
+    ]);
+
+    // Map each normalized anchor into PDF points via the detected form bounds
+    // (linear map — the test print + manual nudge absorb residual skew).
+    const toPts = (det: { form: { left: number; top: number; right: number; bottom: number }; fields: Record<string, { x: number; y: number }> }, page: 0 | 1) => {
+      const fw = Math.max(det.form.right - det.form.left, 0.05);
+      const fh = Math.max(det.form.bottom - det.form.top, 0.05);
+      const out: Record<string, { x: number; y: number }> = {};
+      for (const [k, a] of Object.entries(det.fields ?? {})) {
+        const def = defs.find((d) => d.key === k && d.page === page);
+        if (!def || typeof a?.x !== "number" || typeof a?.y !== "number") continue;
+        out[k] = {
+          x: ((a.x - det.form.left) / fw) * BG_PAGE_W,
+          y: BG_PAGE_H - ((a.y - det.form.top) / fh) * BG_PAGE_H, // flip to bottom-left origin
+        };
+      }
+      return out;
+    };
+    const detected: Record<string, { x: number; y: number }> = {
+      ...toPts(frontDet, 0),
+      ...(backDet ? toPts(backDet, 1) : {}),
+    };
+
+    // Deltas vs the calibrated defaults → suggested global (median) + residuals.
+    const deltas: Record<string, { x: number; y: number }> = {};
+    for (const def of defs) {
+      const d = detected[def.key];
+      if (!d) continue;
+      deltas[def.key] = { x: Math.round(d.x - def.x), y: Math.round(d.y - def.y) };
+    }
+    const xs = Object.values(deltas).map((d) => d.x).sort((a, b) => a - b);
+    const ys = Object.values(deltas).map((d) => d.y).sort((a, b) => a - b);
+    const median = (arr: number[]) => (arr.length ? arr[Math.floor(arr.length / 2)] : 0);
+    const global = { x: median(xs), y: median(ys) };
+    const fields: Record<string, { x: number; y: number }> = {};
+    for (const [k, d] of Object.entries(deltas)) {
+      const rx = d.x - global.x, ry = d.y - global.y;
+      if (Math.abs(rx) > 1 || Math.abs(ry) > 1) fields[k] = { x: rx, y: ry };
+    }
+
+    return NextResponse.json({ ok: true, global, fields, detected_count: Object.keys(deltas).length, total_fields: defs.length });
+  } catch (e) {
+    return NextResponse.json({ error: `Auto-detect failed: ${e instanceof Error ? e.message : String(e)} — use the manual backdrop alignment instead.` }, { status: 502 });
+  }
+}

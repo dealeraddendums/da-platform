@@ -176,12 +176,14 @@ export async function renderBulkViaService(
 }
 
 export async function renderBuyerGuideViaService(
-  srcPdfBytes: Buffer,
+  srcPdfBytes: Buffer | null,
   input: unknown,
   s3Key: string,
 ): Promise<{ buffer: Buffer; s3Key: string }> {
+  // srcPdfBytes is null in pre-printed-label mode (input.preprinted set):
+  // the service renders data-only on blank pages, no background needed.
   const { jobId } = await postJson("/api/pdf/buyer-guide", {
-    srcPdfBase64: srcPdfBytes.toString("base64"),
+    ...(srcPdfBytes ? { srcPdfBase64: srcPdfBytes.toString("base64") } : {}),
     input,
     s3Key,
   });

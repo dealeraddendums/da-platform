@@ -70,9 +70,16 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
   // ── Warranty defaults ─────────────────────────────────────────────────────
   const { data: settings } = await admin
     .from("dealer_settings")
-    .select("buyers_guide_defaults")
+    .select("buyers_guide_defaults, bg_preprinted_config")
     .eq("dealer_id", dv.dealer_id)
-    .maybeSingle<{ buyers_guide_defaults: BuyersGuideDefaults | null }>();
+    .maybeSingle<{ buyers_guide_defaults: BuyersGuideDefaults | null; bg_preprinted_config: { enabled?: boolean; global?: { x?: number; y?: number }; fields?: Record<string, { x?: number; y?: number }> } | null }>();
+
+  // Pre-printed-label mode (migration 150): the dealer's own FTC label stock
+  // carries the form — render data-only at default coords + saved offsets.
+  const ppConfig = settings?.bg_preprinted_config;
+  const preprinted = ppConfig?.enabled === true
+    ? { global: ppConfig.global ?? { x: 0, y: 0 }, fields: ppConfig.fields ?? {} }
+    : null;
 
   const savedDefaults = settings?.buyers_guide_defaults ?? null;
   const warranty: BuyersGuideDefaults = {
@@ -113,12 +120,14 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     }
     const isImplied = warranty.warranty_type === 'implied_only';
     const bgKey = `${lang === 'es' ? 'spanish' : 'english'}-${isImplied ? 'implied' : 'as-is-warranty'}` as BgKey;
-    const srcPdfBytes = await getBuyersGuidePdfBytes(bgKey, dealerUuid);
+    // Pre-printed mode needs no background bytes (data-only render).
+    const srcPdfBytes = preprinted ? null : await getBuyersGuidePdfBytes(bgKey, dealerUuid);
     const result = await renderBuyerGuideViaService(srcPdfBytes, {
       language: lang,
       vehicle: vehicleData,
       dealer: dealerData,
       warranty,
+      ...(preprinted ? { preprinted } : {}),
     }, s3Key);
     return result.buffer;
   }

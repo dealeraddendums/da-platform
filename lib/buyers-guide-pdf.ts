@@ -4,8 +4,18 @@ import type { BuyersGuideDefaults } from '@/lib/db';
 import { getBuyersGuidePdfBytes } from '@/lib/buyers-guide-storage';
 import type { BgKey } from '@/lib/buyers-guide-constants';
 
+/** Pre-printed-label offsets (PDF points). Same shape + field keys as the
+ *  da-pdf-service overlay — the two implementations must stay in lockstep. */
+export interface BgPreprintedOffsets {
+  global?: { x?: number; y?: number };
+  fields?: Record<string, { x?: number; y?: number }>;
+}
+
 export interface BuyersGuidePdfInput {
   language: 'en' | 'es';
+  /** Pre-printed-label mode: render data-only on blank pages at
+   *  default coordinates + these offsets. */
+  preprinted?: BgPreprintedOffsets | null;
   dealerUuid?: string | null;
   vehicle: {
     make: string | null;
@@ -141,20 +151,35 @@ function drawPct(page: PDFPage, font: PDFFont, x: number, y: number, val: number
 export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<Buffer> {
   const { language: lang, dealerUuid, vehicle: v, dealer: d, warranty: w } = input;
 
+  // Pre-printed-label mode (2026-08-25): data-only on blank pages, each field
+  // at its calibrated default + the dealer's saved offsets. Field SET is
+  // unchanged (compliance) — repositioning only.
+  const pp = input.preprinted && typeof input.preprinted === 'object' ? input.preprinted : null;
+  const gx = pp ? Number(pp.global?.x) || 0 : 0;
+  const gy = pp ? Number(pp.global?.y) || 0 : 0;
+  const fo = (key: string) => (pp?.fields?.[key]) ?? {};
+  const ox = (key: string, x: number) => x + gx + (Number(fo(key).x) || 0);
+  const oy = (key: string, y: number) => y + gy + (Number(fo(key).y) || 0);
+  const oCB = (key: string, cb: CB): CB => (pp ? { ...cb, cx: ox(key, cb.cx), cy: oy(key, cb.cy) } : cb);
+
   const isAsIs    = w.warranty_type === 'as_is';
   const isImplied = w.warranty_type === 'implied_only';
   const isFull    = w.warranty_type === 'full';
   const isLimited = w.warranty_type === 'limited';
   const hasDealerW = isFull || isLimited;
 
-  const bgKey: BgKey = `${lang === 'es' ? 'spanish' : 'english'}-${isImplied ? 'implied' : 'as-is-warranty'}`;
-  const srcBuf = await getBuyersGuidePdfBytes(bgKey, dealerUuid);
-  const srcDoc = await PDFDocument.load(srcBuf);
-
   const outDoc = await PDFDocument.create();
-  const [front, back] = await outDoc.copyPages(srcDoc, [0, 1]);
-  outDoc.addPage(front);
-  outDoc.addPage(back);
+  if (pp) {
+    outDoc.addPage([612, 792]);
+    outDoc.addPage([612, 792]);
+  } else {
+    const bgKey: BgKey = `${lang === 'es' ? 'spanish' : 'english'}-${isImplied ? 'implied' : 'as-is-warranty'}`;
+    const srcBuf = await getBuyersGuidePdfBytes(bgKey, dealerUuid);
+    const srcDoc = await PDFDocument.load(srcBuf);
+    const [front, back] = await outDoc.copyPages(srcDoc, [0, 1]);
+    outDoc.addPage(front);
+    outDoc.addPage(back);
+  }
 
   const font     = await outDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await outDoc.embedFont(StandardFonts.HelveticaBold);
@@ -166,32 +191,32 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
     : (isImplied ? EN_P1 : EN_P0);
 
   // Vehicle data
-  drawTxt(fp, font, MAKE_X,  VROW_Y, v.make  ?? '');
-  drawTxt(fp, font, MODEL_X, VROW_Y, v.model ?? '');
-  drawTxt(fp, font, YEAR_X,  VROW_Y, v.year  ?? '');
-  drawTxt(fp, font, VIN_X,   VROW_Y, v.vin   ?? '');
+  drawTxt(fp, font, ox('make', MAKE_X),   oy('make', VROW_Y),  v.make  ?? '');
+  drawTxt(fp, font, ox('model', MODEL_X), oy('model', VROW_Y), v.model ?? '');
+  drawTxt(fp, font, ox('year', YEAR_X),   oy('year', VROW_Y),  v.year  ?? '');
+  drawTxt(fp, font, ox('vin', VIN_X),     oy('vin', VROW_Y),   v.vin   ?? '');
 
   // Primary warranty checkbox
-  if (isAsIs    && 'asIs'    in C) drawX(fp, (C as typeof EN_P0).asIs);
-  if (isImplied && 'implied' in C) drawX(fp, (C as typeof EN_P1).implied);
-  if (hasDealerW) drawX(fp, C.dlrW);
+  if (isAsIs    && 'asIs'    in C) drawX(fp, oCB('asIs', (C as typeof EN_P0).asIs));
+  if (isImplied && 'implied' in C) drawX(fp, oCB('implied', (C as typeof EN_P1).implied));
+  if (hasDealerW) drawX(fp, oCB('dlrW', C.dlrW));
 
   // Sub-checkboxes and warranty details
-  if (isFull) drawX(fp, C.full);
+  if (isFull) drawX(fp, oCB('full', C.full));
   if (isLimited) {
-    drawX(fp, C.lim);
-    drawPct(fp, fontBold, C.laborX, C.laborY, w.labor_pct);
-    drawPct(fp, fontBold, C.partsX, C.partsY, w.parts_pct);
+    drawX(fp, oCB('lim', C.lim));
+    drawPct(fp, fontBold, ox('labor', C.laborX), oy('labor', C.laborY), w.labor_pct);
+    drawPct(fp, fontBold, ox('parts', C.partsX), oy('parts', C.partsY), w.parts_pct);
   }
-  if (hasDealerW && w.systems_covered) drawTxt(fp, font, C.sysX, C.sysY, w.systems_covered, 7.5);
-  if (hasDealerW && w.duration)        drawTxt(fp, font, C.durX, C.durY, w.duration, 7.5);
+  if (hasDealerW && w.systems_covered) drawTxt(fp, font, ox('systems', C.sysX), oy('systems', C.sysY), w.systems_covered, 7.5);
+  if (hasDealerW && w.duration)        drawTxt(fp, font, ox('duration', C.durX), oy('duration', C.durY), w.duration, 7.5);
 
   // Non-dealer warranty checkboxes
   const ndw = w.non_dealer_warranties ?? [];
-  if (ndw.includes('mfr_new'))    drawX(fp, C.mfrNew);
-  if (ndw.includes('mfr_used'))   drawX(fp, C.mfrUsed);
-  if (ndw.includes('other_used')) drawX(fp, C.othUsed);
-  if (w.service_contract)         drawX(fp, C.svcCont);
+  if (ndw.includes('mfr_new'))    drawX(fp, oCB('mfrNew', C.mfrNew));
+  if (ndw.includes('mfr_used'))   drawX(fp, oCB('mfrUsed', C.mfrUsed));
+  if (ndw.includes('other_used')) drawX(fp, oCB('othUsed', C.othUsed));
+  if (w.service_contract)         drawX(fp, oCB('svcCont', C.svcCont));
 
   // ── Back page ──────────────────────────────────────────────────────────────
   const bp = outDoc.getPage(1);
@@ -201,11 +226,11 @@ export async function buildBuyersGuidePdf(input: BuyersGuidePdfInput): Promise<B
   const dealerPhone = d.phone ?? '';
   const dealerEmail = w.dealer_email ?? d.email ?? '';
 
-  drawTxt(bp, font, BACK.nameX,  BACK.nameY,  dealerName,  8);
-  drawTxt(bp, font, BACK.addrX,  BACK.addrY,  dealerAddr,  8);
-  drawTxt(bp, font, BACK.phoneX, BACK.phoneY, dealerPhone, 8);
-  if (dealerEmail) drawTxt(bp, font, BACK.emailX, BACK.emailY, dealerEmail, 8);
-  if (w.complaints_contact) drawTxt(bp, font, BACK.complaintsX, BACK.complaintsY, w.complaints_contact, 8);
+  drawTxt(bp, font, ox('name', BACK.nameX),   oy('name', BACK.nameY),  dealerName,  8);
+  drawTxt(bp, font, ox('addr', BACK.addrX),   oy('addr', BACK.addrY),  dealerAddr,  8);
+  drawTxt(bp, font, ox('phone', BACK.phoneX), oy('phone', BACK.phoneY), dealerPhone, 8);
+  if (dealerEmail) drawTxt(bp, font, ox('email', BACK.emailX), oy('email', BACK.emailY), dealerEmail, 8);
+  if (w.complaints_contact) drawTxt(bp, font, ox('complaints', BACK.complaintsX), oy('complaints', BACK.complaintsY), w.complaints_contact, 8);
 
   const bytes = await outDoc.save();
   return Buffer.from(bytes);

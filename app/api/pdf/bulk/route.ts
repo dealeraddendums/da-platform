@@ -234,16 +234,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         if (docType === "buyer_guide") {
           const { data: bgSettings } = await admin
             .from("dealer_settings")
-            .select("buyers_guide_defaults")
+            .select("buyers_guide_defaults, bg_preprinted_config")
             .eq("dealer_id", dv.dealer_id)
-            .maybeSingle<{ buyers_guide_defaults: BuyersGuideDefaults | null }>();
+            .maybeSingle<{ buyers_guide_defaults: BuyersGuideDefaults | null; bg_preprinted_config: { enabled?: boolean; global?: { x?: number; y?: number }; fields?: Record<string, { x?: number; y?: number }> } | null }>();
 
           const warranty: BuyersGuideDefaults = {
             warranty_type: "as_is",
             ...(bgSettings?.buyers_guide_defaults ?? {}),
           };
+          // Pre-printed-label mode (migration 150) — same semantics as the
+          // single buyers-guide route: data-only at default coords + offsets.
+          const bulkPp = bgSettings?.bg_preprinted_config;
+          const bulkPreprinted = bulkPp?.enabled === true
+            ? { global: bulkPp.global ?? { x: 0, y: 0 }, fields: bulkPp.fields ?? {} }
+            : null;
 
           const pdfBuffer = await buildBuyersGuidePdf({
+            preprinted: bulkPreprinted,
             language: "en",
             dealerUuid: dealer?.id ?? null,
             vehicle: {
