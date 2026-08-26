@@ -86,8 +86,15 @@ Return ONLY JSON: {"form": {"left":..,"top":..,"right":..,"bottom":..}, "fields"
       back ? detectSide(back, "back", backKeys) : Promise.resolve(null),
     ]);
 
-    // Map each normalized anchor into PDF points via the detected form bounds
-    // (linear map — the test print + manual nudge absorb residual skew).
+    // Map each normalized anchor into PDF points via the detected form bounds.
+    // The model's "form" box is the PRINTED AREA, which on the FTC layout sits
+    // inside 54pt (3/4") margins on a 612×792 page (measured from our own
+    // form renders — both sides: 54,54 → 558,738). Mapping the detected box to
+    // the FULL page stretched everything ~10% and skewed the deltas (the first
+    // live run's systematic −50pt x bias); mapping to the printed rect makes a
+    // straight-on photo of a standard label come out near-zero. Linear map —
+    // the test print + manual nudge absorb residual perspective/skew.
+    const PRINT = { left: 54, top: 54, right: 558, bottom: 738 };
     const toPts = (det: { form: { left: number; top: number; right: number; bottom: number }; fields: Record<string, { x: number; y: number }> }, page: 0 | 1) => {
       const fw = Math.max(det.form.right - det.form.left, 0.05);
       const fh = Math.max(det.form.bottom - det.form.top, 0.05);
@@ -95,10 +102,9 @@ Return ONLY JSON: {"form": {"left":..,"top":..,"right":..,"bottom":..}, "fields"
       for (const [k, a] of Object.entries(det.fields ?? {})) {
         const def = defs.find((d) => d.key === k && d.page === page);
         if (!def || typeof a?.x !== "number" || typeof a?.y !== "number") continue;
-        out[k] = {
-          x: ((a.x - det.form.left) / fw) * BG_PAGE_W,
-          y: BG_PAGE_H - ((a.y - det.form.top) / fh) * BG_PAGE_H, // flip to bottom-left origin
-        };
+        const xTop = PRINT.left + ((a.x - det.form.left) / fw) * (PRINT.right - PRINT.left);
+        const yTop = PRINT.top + ((a.y - det.form.top) / fh) * (PRINT.bottom - PRINT.top);
+        out[k] = { x: xTop, y: BG_PAGE_H - yTop }; // flip to bottom-left origin
       }
       return out;
     };
