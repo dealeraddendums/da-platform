@@ -182,7 +182,16 @@ export default function BuyersGuideAlignment({ dealerId }: { dealerId: string })
         img.src = front;
       });
       setGlobal(pixelGlobal ?? j.global ?? { x: 0, y: 0 });
-      setFields(j.fields ?? {});
+      // Per-field residuals are only meaningful when the vision run's frame
+      // was sound — when its global agrees with the measured one. A bad
+      // form-box run produces structured residual garbage (measured: a −68
+      // vision global left 16 of 21 fields past the 20pt dead-zone on a
+      // true-zero form); defaults + the exact global beat that scatter.
+      const visionFrameOk = !pixelGlobal || (
+        Math.abs((j.global?.x ?? 0) - pixelGlobal.x) <= 30 &&
+        Math.abs((j.global?.y ?? 0) - pixelGlobal.y) <= 30
+      );
+      setFields(visionFrameOk ? (j.fields ?? {}) : {});
       setDetectState("done");
       setMsg("Fields placed! Check them against your photo below — drag or nudge anything that's off, then run a test print.");
     } catch {
