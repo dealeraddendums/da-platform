@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { requireAuth } from "@/lib/auth";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { bgFieldDefs, BG_PAGE_W, BG_PAGE_H } from "@/lib/buyers-guide-alignment-constants";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -28,6 +29,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (claims.role !== "super_admin" && param) {
     const authz = await authorizeDealerAction(claims, param);
     if (!authz.ok) return authz.response;
+  }
+
+  // Vision calls are expensive — cap per user (per-worker limiter is fine for
+  // an authed, low-volume calibration endpoint; the check-email precedent).
+  if (!rateLimit(`bg-detect:${claims.sub}`, 10, 60_000)) {
+    return NextResponse.json({ error: "Too many auto-detect attempts — wait a minute and try again (or align manually)." }, { status: 429 });
   }
 
   let body: { front?: string; back?: string; language?: string; implied?: boolean };
@@ -107,6 +114,15 @@ Return ONLY JSON: {"form": {"left":..,"top":..,"right":..,"bottom":..}, "fields"
       if (!d) continue;
       deltas[def.key] = { x: Math.round(d.x - def.x), y: Math.round(d.y - def.y) };
     }
+    // Low confidence: if the model located under a third of the known fields,
+    // the photo is probably unusable (blur/glare/crop) — degrade to manual
+    // rather than pre-filling garbage.
+    if (Object.keys(deltas).length < Math.max(4, Math.floor(defs.length / 3))) {
+      return NextResponse.json({
+        error: `Couldn't auto-place enough fields (found ${Object.keys(deltas).length} of ${defs.length}) — the photo may be blurry, cropped, or glary. Retake it straight-on in good light, or align manually with the backdrop.`,
+      }, { status: 422 });
+    }
+
     const xs = Object.values(deltas).map((d) => d.x).sort((a, b) => a - b);
     const ys = Object.values(deltas).map((d) => d.y).sort((a, b) => a - b);
     const median = (arr: number[]) => (arr.length ? arr[Math.floor(arr.length / 2)] : 0);
