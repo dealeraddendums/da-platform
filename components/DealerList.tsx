@@ -509,7 +509,26 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                         >
                           {decodeHtml(d.name || `Dealer ${d.dealer_id}`)}
                         </Link>
-                        {d.is_test && (
+                        {/* Pill mirrors the profile's Account Purpose field.
+                            sales_demo was wrongly lumped in as TEST before
+                            (is_test is true for BOTH non-real purposes — it's
+                            the BI/billing/HubSpot exclusion gate, not a label).
+                            Legacy rows with a bare is_test flag and no purpose
+                            still read as Test. Real accounts get no pill. */}
+                        {d.account_purpose === "sales_demo" ? (
+                          <span
+                            className="text-xs font-semibold px-2 py-0.5"
+                            style={{
+                              background: "#7561ad",
+                              color: "#fff",
+                              borderRadius: 20,
+                              flexShrink: 0,
+                            }}
+                            title="Sales Demo account — excluded from BI/billing/HubSpot"
+                          >
+                            SALES DEMO
+                          </span>
+                        ) : d.is_test ? (
                           <span
                             className="text-xs font-semibold px-2 py-0.5"
                             style={{
@@ -522,7 +541,7 @@ export default function DealerList({ role = "dealer_user" }: { role?: string }) 
                           >
                             TEST
                           </span>
-                        )}
+                        ) : null}
                         {/* Only meaningful while the dealer is actually in a group —
                             matches the lock gate in layout/settings/builder. A
                             group-less dealer with a stale flag is NOT locked. */}

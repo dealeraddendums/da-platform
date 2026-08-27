@@ -16,6 +16,7 @@ export const DMS_PROVIDERS: readonly string[] = [
   "Dealervault",
   "PBS",
   "Reynolds",
+  "Team Velocity",
   "Tekion",
 ];
 

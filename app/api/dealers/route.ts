@@ -284,7 +284,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     let query = admin
       .from("dealers")
-      .select("id, dealer_id, name, active, is_test, city, state, phone, primary_contact, primary_contact_email, account_type, group_id, internal_id", { count: "exact" })
+      .select("id, dealer_id, name, active, is_test, account_purpose, city, state, phone, primary_contact, primary_contact_email, account_type, group_id, internal_id", { count: "exact" })
       .eq("group_id", claims.group_id)
       .order("name");
     if (tagUuids) query = query.in("id", tagUuids);
@@ -335,7 +335,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     let query = admin
       .from("dealers")
-      .select("id, dealer_id, name, active, is_test, city, state, phone, primary_contact, primary_contact_email, account_type, group_id, internal_id", { count: "exact" })
+      .select("id, dealer_id, name, active, is_test, account_purpose, city, state, phone, primary_contact, primary_contact_email, account_type, group_id, internal_id", { count: "exact" })
       .eq("group_id", claims.group_id)
       .in("id", scopedUuids)
       .order("name");
