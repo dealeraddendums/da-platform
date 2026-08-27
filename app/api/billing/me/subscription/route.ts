@@ -179,6 +179,17 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       .update({
         account_type: newAccountType,
         ...(wasPaying ? {} : { converted_at: new Date().toISOString(), downgraded_at: null }),
+        // Feed details were never persisted on the group-billed branch — the
+        // standalone path below always had this, so the Feed Details modal's
+        // provider pick silently vanished for group-billed members (found
+        // 2026-08-27 while verifying the optional-contacts change). Same
+        // rules: auto tiers only, contact fields only when supplied.
+        ...((descriptor.key === "sub-auto-web" || descriptor.key === "sub-auto-dms") && feedProvider ? {
+          inventory_provider: feedProvider,
+          inventory_provider_is_dms: descriptor.key === "sub-auto-dms",
+          ...(feedAuthorizedName  ? { feed_authorized_name:  feedAuthorizedName }  : {}),
+          ...(feedAuthorizedEmail ? { feed_authorized_email: feedAuthorizedEmail } : {}),
+        } : {}),
       })
       .eq("id", dealer.id);
     if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
