@@ -5,13 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
+import InventoryProviderSelect from "@/components/InventoryProviderSelect";
 import StateSelect from "@/components/StateSelect";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
 import EntityTagsCard from "@/components/EntityTagsCard";
 import { PageHeader } from "@/components/PageHeader";
 import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
 import { normalizeStateCode } from "@/lib/constants/us-states";
-import { DMS_PROVIDERS, OTHER_PROVIDERS, isDmsProvider } from "@/lib/inventory-providers";
+import { isDmsProvider } from "@/lib/inventory-providers";
 import { loginAsDealer } from "@/lib/admin-login-as";
 import type { SubscriptionBillingResult } from "@/lib/billing-subscription";
 
@@ -962,20 +963,7 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
                     (inventory-feed vendor)
                   </span>
                 </label>
-                <select
-                  className="input"
-                  value={invProvValue}
-                  onChange={(e) => setInvProvValue(e.target.value)}
-                  autoFocus
-                >
-                  <option value="">— None —</option>
-                  <optgroup label="DMS Providers">
-                    {DMS_PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
-                  </optgroup>
-                  <optgroup label="All Other Providers">
-                    {OTHER_PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
-                  </optgroup>
-                </select>
+                <InventoryProviderSelect value={invProvValue} onChange={setInvProvValue} autoFocus />
                 {invProvError && (
                   <p className="text-xs mt-1" style={{ color: "var(--error)" }}>{invProvError}</p>
                 )}

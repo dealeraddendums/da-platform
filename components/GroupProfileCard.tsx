@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { HubSpotEmail } from "@/components/HubSpotEmail";
+import InventoryProviderSelect from "@/components/InventoryProviderSelect";
 import StateSelect from "@/components/StateSelect";
 import type { GroupRow, GroupUpdate, DealerRow, GroupBranding } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
@@ -1516,7 +1517,30 @@ function MemberPlanCell({ dealer, canEdit, onChanged }: {
 }) {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  // Free/Trial → Automatic-tier conversions need feed details. Collected in an
+  // in-app modal (was a chain of window.prompt()s — free-text providers never
+  // normalized; the modal's dropdown constrains values to the canonical
+  // lib/inventory-providers.ts list, same as the dealer profile).
+  const [feedModal, setFeedModal] = useState<null | { choice: string; tierName: string }>(null);
+  const [feedProvider, setFeedProvider] = useState("");
+  const [feedName, setFeedName] = useState("");
+  const [feedEmail, setFeedEmail] = useState("");
+  const [feedError, setFeedError] = useState<string | null>(null);
   const current = planLabel(dealer.account_type);
+
+  async function submitPlan(choice: string, tierName: string, feed: { feedProvider?: string; feedAuthorizedName?: string; feedAuthorizedEmail?: string }) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/billing/me/subscription?dealer_id=${encodeURIComponent(dealer.dealer_id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier: choice, ...feed }),
+      });
+      const j = await res.json().catch(() => null) as { error?: string } | null;
+      if (!res.ok) { alert(j?.error ?? `Plan change failed (HTTP ${res.status})`); return; }
+      onChanged(tierName);
+    } finally { setBusy(false); }
+  }
 
   async function applyPlan(choice: string) {
     setEditing(false);
@@ -1541,35 +1565,58 @@ function MemberPlanCell({ dealer, canEdit, onChanged }: {
     if (!confirm(`Change ${name}'s plan to ${tierNames[choice]}?\n\nBilling updates to the new plan's rate on the next invoice.`)) return;
     // Conversions from Free/Trial to an Automatic tier need feed details.
     const converting = !["manual", "sub-manual", "monthly subscription manual", "automatic web", "sub-auto-web", "monthly subscription automatic web", "automatic dms", "sub-auto-dms", "monthly subscription automatic dms"].includes((dealer.account_type ?? "").trim().toLowerCase());
-    let feed: { feedProvider?: string; feedAuthorizedName?: string; feedAuthorizedEmail?: string } = {};
     if (converting && (choice === "sub-auto-web" || choice === "sub-auto-dms")) {
-      const feedProvider = window.prompt("Inventory feed provider (e.g. HomeNet, vAuto):")?.trim();
-      if (!feedProvider) return;
-      const feedAuthorizedName = window.prompt("Authorized dealership contact name (approves the feed):")?.trim();
-      if (!feedAuthorizedName) return;
-      const feedAuthorizedEmail = window.prompt("Authorized contact email:")?.trim();
-      if (!feedAuthorizedEmail) return;
-      feed = { feedProvider, feedAuthorizedName, feedAuthorizedEmail };
+      setFeedProvider(dealer.inventory_provider ?? "");
+      setFeedName("");
+      setFeedEmail("");
+      setFeedError(null);
+      setFeedModal({ choice, tierName: tierNames[choice] });
+      return;
     }
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/billing/me/subscription?dealer_id=${encodeURIComponent(dealer.dealer_id)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier: choice, ...feed }),
-      });
-      const j = await res.json().catch(() => null) as { error?: string } | null;
-      if (!res.ok) { alert(j?.error ?? `Plan change failed (HTTP ${res.status})`); return; }
-      onChanged(tierNames[choice]);
-    } finally { setBusy(false); }
+    await submitPlan(choice, tierNames[choice], {});
   }
+
+  const feedModalEl = feedModal ? (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) setFeedModal(null); }}>
+      <div style={{ background: "#fff", borderRadius: 6, border: "1px solid #e0e0e0", width: 420, maxWidth: "92vw", padding: 20, textAlign: "left" }}>
+        <p className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
+          Feed details for {decodeHtmlEntities(dealer.name)}
+        </p>
+        <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
+          Switching to {feedModal.tierName} sets up an inventory feed — tell us who supplies it and who approves access.
+        </p>
+        <label className="label">Inventory Provider</label>
+        <InventoryProviderSelect value={feedProvider} onChange={setFeedProvider} noneLabel="— select provider —" autoFocus />
+        <label className="label" style={{ marginTop: 10 }}>Authorized Contact Name</label>
+        <input className="input" value={feedName} onChange={(e) => setFeedName(e.target.value)} placeholder="Full name of person approving feed access" />
+        <label className="label" style={{ marginTop: 10 }}>Authorized Contact Email</label>
+        <input className="input" type="email" value={feedEmail} onChange={(e) => setFeedEmail(e.target.value)} placeholder="email@dealership.com" />
+        {feedError && <p className="text-xs mt-2" style={{ color: "#d32f2f" }}>{feedError}</p>}
+        <div className="flex justify-end gap-2 mt-4">
+          <button className="btn btn-secondary" onClick={() => setFeedModal(null)}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => {
+            if (!feedProvider) { setFeedError("Select the inventory provider."); return; }
+            if (!feedName.trim()) { setFeedError("Enter the authorized contact's name."); return; }
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(feedEmail.trim())) { setFeedError("Enter a valid contact email."); return; }
+            const m = feedModal;
+            setFeedModal(null);
+            void submitPlan(m.choice, m.tierName, { feedProvider, feedAuthorizedName: feedName.trim(), feedAuthorizedEmail: feedEmail.trim() });
+          }}>
+            Change plan
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   if (!canEdit) {
     return <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>{current}</span>;
   }
   if (busy) return <span className="text-xs" style={{ color: "var(--text-muted)" }}>Updating…</span>;
   if (!editing) {
-    return (
+    return (<>
+      {feedModalEl}
       <button
         onClick={() => setEditing(true)}
         title="Change this dealer's subscription plan"
@@ -1578,9 +1625,10 @@ function MemberPlanCell({ dealer, canEdit, onChanged }: {
       >
         {current} ✎
       </button>
-    );
+    </>);
   }
-  return (
+  return (<>
+    {feedModalEl}
     <select
       autoFocus
       className="input"
@@ -1595,7 +1643,7 @@ function MemberPlanCell({ dealer, canEdit, onChanged }: {
       <option value="sub-auto-dms">Automatic DMS</option>
       <option value="free">Downgrade to Free</option>
     </select>
-  );
+  </>);
 }
 
 // ── Billing routing cell (Member Dealers table — Subscription/Labels) ────────
