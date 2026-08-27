@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect } from "react";
 
 // ProductFruits in-app tours / onboarding (docs/in-app-tours.md). Per ProductFruits'
 // Next.js App Router guide, load via dynamic import with ssr:false so the widget
@@ -34,32 +33,11 @@ export type ProductFruitsUser = {
  * requires a unique user identifier). Renders nothing if we don't have one.
  */
 export default function ProductFruitsWidget({ user }: { user: ProductFruitsUser }) {
-  // Move the PF AI-assistant launcher (the red floating circle) to the
-  // bottom-LEFT: its default bottom-right spot covered list pagination and the
-  // last table row's action buttons (2026-08-26). It renders inside an open
-  // shadow root on a [data-pfai-container] host div under <html>, so page CSS
-  // can't reach it — inject the override into the shadow root instead. At
-  // bottom-left it sits over the sidebar's version label (non-interactive;
-  // the nav above it scrolls). The fullscreen assistant panel is inset-0 and
-  // unaffected.
-  useEffect(() => {
-    const inject = () => {
-      const host = document.querySelector("[data-pfai-container]");
-      const sr = host?.shadowRoot;
-      if (!sr || sr.querySelector("#da-pfai-position")) return;
-      const style = document.createElement("style");
-      style.id = "da-pfai-position";
-      style.textContent = ".actor-launcher { right: auto !important; left: 20px !important; }";
-      sr.appendChild(style);
-    };
-    inject();
-    // The container mounts (and can be re-created) whenever PF boots — watch
-    // <html>'s direct children; the host div is appended there.
-    const mo = new MutationObserver(inject);
-    mo.observe(document.documentElement, { childList: true });
-    return () => mo.disconnect();
-  }, []);
-
+  // The PF AI-assistant launcher sits at its native bottom-RIGHT default.
+  // (2026-08-26 it was briefly moved bottom-left via a shadow-root style
+  // injection because it covered list pagination — the shared Pager is
+  // centered now, so the corner is free and Allan asked for the default
+  // back; bottom-left overlapped the sidebar version label.)
   if (!user?.username) return null;
   return <ProductFruits workspaceCode={WORKSPACE_CODE} language="en" user={user} />;
 }
