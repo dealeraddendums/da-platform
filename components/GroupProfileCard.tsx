@@ -1588,20 +1588,26 @@ function MemberPlanCell({ dealer, canEdit, onChanged }: {
         </p>
         <label className="label">Inventory Provider</label>
         <InventoryProviderSelect value={feedProvider} onChange={setFeedProvider} noneLabel="— select provider —" autoFocus />
-        <label className="label" style={{ marginTop: 10 }}>Authorized Contact Name</label>
+        <label className="label" style={{ marginTop: 10 }}>Authorized Contact Name <span style={{ fontWeight: 400, color: "var(--text-muted)", textTransform: "none" }}>(optional)</span></label>
         <input className="input" value={feedName} onChange={(e) => setFeedName(e.target.value)} placeholder="Full name of person approving feed access" />
-        <label className="label" style={{ marginTop: 10 }}>Authorized Contact Email</label>
+        <label className="label" style={{ marginTop: 10 }}>Authorized Contact Email <span style={{ fontWeight: 400, color: "var(--text-muted)", textTransform: "none" }}>(optional)</span></label>
         <input className="input" type="email" value={feedEmail} onChange={(e) => setFeedEmail(e.target.value)} placeholder="email@dealership.com" />
         {feedError && <p className="text-xs mt-2" style={{ color: "#d32f2f" }}>{feedError}</p>}
         <div className="flex justify-end gap-2 mt-4">
           <button className="btn btn-secondary" onClick={() => setFeedModal(null)}>Cancel</button>
           <button className="btn btn-primary" onClick={() => {
+            // Only the provider is required — the authorized contact can be
+            // filled in later (Allan 2026-08-27). An email that IS entered
+            // still gets a light format check.
             if (!feedProvider) { setFeedError("Select the inventory provider."); return; }
-            if (!feedName.trim()) { setFeedError("Enter the authorized contact's name."); return; }
-            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(feedEmail.trim())) { setFeedError("Enter a valid contact email."); return; }
+            if (feedEmail.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(feedEmail.trim())) { setFeedError("That email doesn't look right — fix it or leave it blank."); return; }
             const m = feedModal;
             setFeedModal(null);
-            void submitPlan(m.choice, m.tierName, { feedProvider, feedAuthorizedName: feedName.trim(), feedAuthorizedEmail: feedEmail.trim() });
+            void submitPlan(m.choice, m.tierName, {
+              feedProvider,
+              ...(feedName.trim() ? { feedAuthorizedName: feedName.trim() } : {}),
+              ...(feedEmail.trim() ? { feedAuthorizedEmail: feedEmail.trim() } : {}),
+            });
           }}>
             Change plan
           </button>

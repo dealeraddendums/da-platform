@@ -135,13 +135,15 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   // auto: the feed setup starts here). A plan SWAP by an operator/group admin
   // isn't blocked on them — the feed usually already exists or is handled by
   // the console sync (relaxed 2026-08-25 for the group-admin plan controls).
+  // Contacts made OPTIONAL 2026-08-27 (Allan): only the provider is required —
+  // the authorized name/email can be added later on the dealer profile.
   if (
     !wasPayingEarly
     && (descriptor.key === "sub-auto-web" || descriptor.key === "sub-auto-dms")
-    && (!feedProvider || !feedAuthorizedName || !feedAuthorizedEmail)
+    && !feedProvider
   ) {
     return NextResponse.json(
-      { error: "Feed provider, authorized name, and authorized email are required for Automatic subscriptions." },
+      { error: "Feed provider is required for Automatic subscriptions." },
       { status: 400 },
     );
   }
@@ -370,11 +372,13 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     // fireDealerReliable so the HubSpot re-fetch picks up the new values.
     if ((descriptor.key === "sub-auto-web" || descriptor.key === "sub-auto-dms") && feedProvider) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // Contact fields only when supplied — a provider-only change must not
+      // null out contacts recorded earlier.
       await (admin as any).from("dealers").update({
         inventory_provider: feedProvider,
         inventory_provider_is_dms: descriptor.key === "sub-auto-dms",
-        feed_authorized_name:  feedAuthorizedName,
-        feed_authorized_email: feedAuthorizedEmail,
+        ...(feedAuthorizedName  ? { feed_authorized_name:  feedAuthorizedName }  : {}),
+        ...(feedAuthorizedEmail ? { feed_authorized_email: feedAuthorizedEmail } : {}),
       }).eq("id", dealer.id);
     }
     fireDealerReliable(dealer.id, "trial→paid conversion (lifecycle)");
