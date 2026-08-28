@@ -54,6 +54,16 @@ function listMatchesWithNot(
   notFlag: boolean
 ): boolean {
   if (!listField || listField === "ALL" || listField === "") return true;
+  // Literal "NONE"/"-NONE" sentinel (4.0's applies-to-no-vehicles marker) =
+  // matches NOTHING in IN-mode (so NOT-IN mode matches everything). The
+  // substring matcher below already yielded no-match for real vehicle values,
+  // but a value merely CONTAINING "none" would have leaked — and body_styles
+  // used to SKIP the filter entirely on "NONE" (auto-applying instead of
+  // never-applying). Belt to the 2026-08-28 fleet conversion of NONE-rule
+  // products to applies_to='none' (savedRow survival normalizes these
+  // sentinels away separately, by design — saved/manual rows never drop).
+  const lf = listField.trim().toUpperCase();
+  if (lf === "NONE" || lf === "-NONE") return notFlag;
   const val = (vehicleValue ?? "").toLowerCase().trim();
   if (!val) return !notFlag; // empty vehicle value: matches "ALL" lists but not specific ones
   const items = listField.split(",").map((s) => s.toLowerCase().trim()).filter(Boolean);
@@ -123,7 +133,7 @@ export function matchesRulesRow(row: RulesRow, vehicle: VehicleRow): boolean {
   if (!listMatchesWithNot(vehicle.TRIM, row.trims ?? null, !!row.trims_not)) return false;
   if (!listMatchesWithNot(vehicle.FUEL, row.fuel ?? null, !!row.fuel_not)) return false;
 
-  if (row.body_styles && row.body_styles !== "NONE" && row.body_styles !== "") {
+  if (row.body_styles && row.body_styles !== "") {
     if (!listMatchesWithNot(vehicle.BODYSTYLE, row.body_styles, false)) return false;
   }
 
