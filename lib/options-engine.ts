@@ -76,6 +76,9 @@ export function matchesAdTypes(
  * shared between addendum_library and group_options.
  */
 type RulesRow = {
+  /** Library def's name — used by savedRowSurvivesLibraryRules to narrow the
+   *  same-name candidate set to exact-case matches (Serra APEX 2026-08-27). */
+  option_name?: string | null;
   applies_to?: string | null;
   ad_types?: string[] | null;
   makes?: string | null;
@@ -186,6 +189,13 @@ export function normalizeSentinelList(v: string | null | undefined): string | nu
  */
 export function normalizeOptionName(name: string | null | undefined): string {
   return (name ?? "").trim().replace(/\^+$/, "").trim().toLowerCase();
+}
+
+/** Case-PRESERVING analog of normalizeOptionName (trim + trailing carets
+ *  only) — the identity key for exact-name matching between a saved row and
+ *  its library definition. */
+export function exactOptionName(name: string | null | undefined): string {
+  return (name ?? "").trim().replace(/\^+$/, "").trim();
 }
 
 /**
@@ -328,9 +338,25 @@ export function autoMatchedLibraryRows(
  * the vehicle) still drops: library rules trump saved state by design
  * (2026-05-13).
  */
-export function savedRowSurvivesLibraryRules(rules: RulesRow[], vehicle: VehicleRow): boolean {
+export function savedRowSurvivesLibraryRules(rules: RulesRow[], vehicle: VehicleRow, savedName?: string | null): boolean {
   if (rules.length === 0) return true;
-  return rules.some(rule =>
+  // Identity narrowing (Serra APEX 2026-08-27): the same-name grouping is
+  // case-INSENSITIVE, so "APEX PROTECT GPS" (New-only) and "APEX Protect GPS"
+  // (Used-only, $595) shared one candidate set — and the New def matching a
+  // New vehicle kept the USED $595 row alive on it (wrong product + price on
+  // customer stickers). When the saved row's name matches one or more defs
+  // EXACTLY (case preserved), the row belongs to those defs — judge survival
+  // against them alone, so each twin is gated by ITS OWN condition/rules. The
+  // case-insensitive any-match remains only as the fallback for saved rows
+  // with case drift vs the library (the KARR class the any-match was built
+  // for), where no exact-case def exists.
+  let candidates = rules;
+  if (savedName != null) {
+    const key = exactOptionName(savedName);
+    const exact = rules.filter(r => r.option_name != null && exactOptionName(r.option_name) === key);
+    if (exact.length > 0) candidates = exact;
+  }
+  return candidates.some(rule =>
     rule.applies_to === "none" ||
     matchesRulesRow({
       ...rule,

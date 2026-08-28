@@ -221,6 +221,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // for the savedFiltered gate below, so auto-add (which reads the raw
         // addendum_library value elsewhere) is unaffected.
         const ruleRow = {
+          option_name: lr.option_name as string | null,
           applies_to: lr.applies_to,
           ad_types: lr.ad_types,
           makes: lr.makes,
@@ -291,7 +292,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // products, and "-NONE" auto-add sentinels are kept — shared gate with
     // the options GET and pdf/bulk (savedRowSurvivesLibraryRules).
     const savedFiltered = (optionRows ?? []).filter(r =>
-      savedRowSurvivesLibraryRules(libRulesByName.get(normalizeOptionName(r.option_name as string)) ?? [], vehicleData)
+      savedRowSurvivesLibraryRules(libRulesByName.get(normalizeOptionName(r.option_name as string)) ?? [], vehicleData, r.option_name as string)
     );
 
     // Library products added AFTER this vehicle's last save that rules-match

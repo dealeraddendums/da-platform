@@ -210,6 +210,7 @@ async function loadDealerLibrary(
 }
 
 const libRowToRulesRow = (rule: DealerLibRow) => ({
+  option_name: rule.option_name,
   applies_to: rule.applies_to,
   ad_types: rule.ad_types,
   makes: rule.makes,
@@ -278,7 +279,7 @@ function hydrateSavedAgainstLibrary<T extends SavedRow>(
     else rulesByName.set(key, [libRowToRulesRow(r)]);
   }
   const filtered = withLiveType.filter(r =>
-    savedRowSurvivesLibraryRules(rulesByName.get(normalizeOptionName(r.option_name)) ?? [], vehicle)
+    savedRowSurvivesLibraryRules(rulesByName.get(normalizeOptionName(r.option_name)) ?? [], vehicle, r.option_name)
   );
 
   const fresh = newlyAddedLibraryMatches(lib, rows, vehicle);

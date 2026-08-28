@@ -571,6 +571,7 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
           (libRulesByName.get(normalizeOptionName(r.option_name)) ?? []) as any,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           rulesVehicle as any,
+          r.option_name,
         ),
       );
       const freshLib = newlyAddedLibraryMatches(
