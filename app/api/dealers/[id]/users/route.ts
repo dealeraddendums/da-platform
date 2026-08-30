@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { duplicateRegistrationMessage } from "@/lib/invite-duplicate";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
@@ -217,16 +218,10 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     return NextResponse.json({ error: "Only super_admin can invite another dealer_admin" }, { status: 403 });
   }
 
-  // Reject if already registered. (auth schema isn't on the data API — the old
-  // admin.schema("auth") check silently returned null; a profile is the reliable
-  // case-insensitive existence signal.)
-  const { data: existingProfile } = await admin
-    .from("profiles")
-    .select("id")
-    .ilike("email", email.trim().toLowerCase())
-    .maybeSingle<{ id: string }>();
-  if (existingProfile) {
-    return NextResponse.json({ error: "This email is already registered." }, { status: 409 });
+  // Duplicate check — scope-aware message (lib/invite-duplicate.ts).
+  {
+    const dupMsg = await duplicateRegistrationMessage(admin, email, { dealerTextId: dealer.dealer_id });
+    if (dupMsg) return NextResponse.json({ error: dupMsg }, { status: 409 });
   }
 
   const setupCode = generateSetupCode();

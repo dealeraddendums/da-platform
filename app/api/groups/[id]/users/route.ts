@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { duplicateRegistrationMessage } from "@/lib/invite-duplicate";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
@@ -123,20 +124,12 @@ export async function POST(
     .eq("id", params.id)
     .maybeSingle<{ name: string }>();
 
-  // Check if already registered. NOTE: the auth schema isn't exposed to the data
-  // API (admin.schema("auth") returns a 406, silently null), so the old check
-  // never detected anyone. A profile existing for the email is the reliable,
-  // case-insensitive signal that they already have an account.
-  const { data: existingProfile } = await admin
-    .from("profiles")
-    .select("id")
-    .ilike("email", email.trim().toLowerCase())
-    .maybeSingle<{ id: string }>();
-
-  if (existingProfile) {
-    return NextResponse.json({
-      error: "This email is already registered.",
-    }, { status: 409 });
+  // Duplicate check — scope-aware message (lib/invite-duplicate.ts). NOTE:
+  // the auth schema isn't exposed to the data API, so a profile existing for
+  // the email is the reliable case-insensitive registration signal.
+  {
+    const dupMsg = await duplicateRegistrationMessage(admin, email, { groupId: params.id });
+    if (dupMsg) return NextResponse.json({ error: dupMsg }, { status: 409 });
   }
 
   // Invite-time tag scope: every tag must be IN USE on this group's dealers
