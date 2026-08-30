@@ -34,6 +34,16 @@ function formatNumber(n: number, decimals: boolean): string {
  * Modifier codes (FR, INC, NC, NP, ^, |, ~, %) bypass numeric formatting
  * and are unaffected by this flag.
  */
+/** Liberal numeric parse for a price body: tolerates a currency sign and
+ *  thousands commas ("$1,495", "1,495.00", "-$50"). Bare parseFloat read
+ *  "$1,495" as NaN→0 and "1,495" as 1 — Grissom Corvette (2026-08-30):
+ *  three visibly-priced products summed to a $0 subtotal, printing the
+ *  asking price as bare MSRP. Display (formatOptionPrice) fell back to raw
+ *  passthrough for the same strings, so the sticker LOOKED right. */
+function parsePriceBody(body: string): number {
+  return parseFloat(body.replace(/\$/g, "").replace(/,(?=\d{3})/g, "").trim());
+}
+
 export function formatOptionPrice(price: string | null | undefined, decimals: boolean = true): string {
   if (price == null) return '';
   const p = String(price).trim();
@@ -59,7 +69,7 @@ export function formatOptionPrice(price: string | null | undefined, decimals: bo
     body = body.slice(0, tildeIdx);
   }
 
-  const n = parseFloat(body);
+  const n = parsePriceBody(body);
   // The minus sign belongs to the LEFT of the dollar sign: -$5,000, not $-5,000.
   if (!isNaN(n)) {
     const sign = n < 0 ? '-' : '';
@@ -123,6 +133,6 @@ export function parseOptionPriceValue(price: string | null | undefined): number 
   const tildeIdx = body.indexOf('~');
   if (tildeIdx >= 0) body = body.slice(0, tildeIdx);
 
-  const n = parseFloat(body);
+  const n = parsePriceBody(body);
   return isNaN(n) ? 0 : n;
 }
