@@ -17,7 +17,7 @@ import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from 
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, libraryNameSet, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { enforceCanPrint } from "@/lib/print-eligibility";
-import { generateVehicleContent } from "@/lib/ai-content";
+import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
 import QRCode from "qrcode";
 import { PDFDocument } from "pdf-lib";
 import type { Widget, PaperSize } from "@/components/builder/types";
@@ -925,6 +925,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             }
           }
         }
+        // Mileage is a fact — override/drop the AI table's mileage row with
+        // the real DB value (also corrects stale ai_content_cache rows; see
+        // enforceDbMileage). Applied before BOTH consumers: the features
+        // widget and the {{ai.features}} custom-text token.
+        if (aiContent) aiContent = { ...aiContent, features: enforceDbMileage(aiContent.features, dv.mileage as number | null) };
 
         console.log(`[BULK]   aiEnabled=${aiEnabled} aiContent=${aiContent ? 'yes' : 'none'} dbDescription=${vehicleData.DESCRIPTION ? 'yes' : 'null'} dbOptions=${(dv as Record<string, unknown>).options ? 'yes' : 'null'}`);
 

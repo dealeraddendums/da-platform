@@ -96,3 +96,41 @@ Return only raw JSON with no markdown fences or extra text.`;
     modelVersion: 'claude-haiku-4-5-20251001',
   };
 }
+
+/**
+ * Mileage is a FACT and must come from the database, never the model.
+ * The AI feature table both fabricates mileage ("0 miles" printed for a
+ * 32,500-mile Kory Hooks vehicle, 2026-08-31) and freezes it: ai_content_cache
+ * persists per VIN+dealer and never regenerates as the odometer changes.
+ * Enforced at READ time (both pdf routes, right after cache/generation) so
+ * stale cached rows are corrected too, and the {{ai.features}} custom-text
+ * token inherits the same truth.
+ *
+ * Any AI row whose label looks like mileage/odometer is REPLACED with the
+ * vehicle's real dealer_vehicles mileage; when the DB mileage is absent, 0,
+ * or unparseable, the row is DROPPED entirely — a fabricated "0 miles" (or
+ * any guessed value) must never print. Duplicate mileage rows collapse to one.
+ */
+export function enforceDbMileage(
+  features: [string, string][] | null | undefined,
+  dbMileage: number | string | null | undefined,
+): [string, string][] {
+  const n = typeof dbMileage === 'number'
+    ? dbMileage
+    : parseInt(String(dbMileage ?? '').replace(/[^0-9]/g, ''), 10);
+  const real = Number.isFinite(n) && n > 0;
+  const isMileageLabel = (l: string) => /mileage|odometer/i.test(l) || /^miles$/i.test(l.trim());
+  const out: [string, string][] = [];
+  let replaced = false;
+  for (const row of features ?? []) {
+    if (Array.isArray(row) && typeof row[0] === 'string' && isMileageLabel(row[0])) {
+      if (real && !replaced) {
+        out.push([row[0], `${n.toLocaleString('en-US')} miles`]);
+        replaced = true;
+      }
+      continue; // no real DB mileage, or duplicate row → drop
+    }
+    out.push(row);
+  }
+  return out;
+}
