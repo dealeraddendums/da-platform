@@ -24,6 +24,8 @@ import {
   autoMatchedLibraryRows,
   parseOptionPriceValue,
   isPipeExcludedPrice,
+  libraryNameSet,
+  pruneOrphanedDefaultRows,
 } from "@/lib/options-engine";
 
 export interface ColumnMapping {
@@ -475,7 +477,7 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
     for (const ids of chunk(vehicleIds, 200)) {
       const opts = await fetchAllRows<Dv>((from, to) => admin
         .from("vehicle_options")
-        .select("vehicle_id, option_name, option_price, active, created_at, updated_at")
+        .select("vehicle_id, option_name, option_price, source, active, created_at, updated_at")
         .in("vehicle_id", ids)
         .eq("active", true)
         .range(from, to));
@@ -561,9 +563,17 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
     }
 
     // 5. Per-vehicle: effective options → computed fields → mapped CSV row.
+    // Orphan gate: a saved source:"default" row whose library product was
+    // deleted must not export (same prune as the print paths — Jenkins
+    // Traverse 2026-08-31). Manual one-offs are kept.
+    const libNames = libraryNameSet(libRows as Array<{ option_name?: string | null }>);
+
     for (const dv of vehicles) {
       const rulesVehicle = toRulesVehicle(dv, dealerTextId);
-      const saved = savedByVehicle.get(String(dv.id)) ?? [];
+      const saved = pruneOrphanedDefaultRows(
+        (savedByVehicle.get(String(dv.id)) ?? []) as Array<Dv & { option_name: string; source?: string | null }>,
+        libNames,
+      );
 
       const savedFiltered = saved.filter((r) =>
         savedRowSurvivesLibraryRules(

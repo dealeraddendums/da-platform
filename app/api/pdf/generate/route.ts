@@ -19,7 +19,7 @@ import {
   LAYOUT_INFOSHEET,
   makeWidget,
 } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows, libraryNameSet, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-save";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent } from "@/lib/ai-content";
@@ -119,31 +119,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       alwaysShowCents = dealerQrSettings?.always_show_cents === true;
     } catch { /* columns may not exist until migrations 034/144 are applied */ }
 
-    // ── Options from Supabase ─────────────────────────────────────────────────
-    // Check per-vehicle UUID first; fall back to legacy '0' sentinel.
-    // options_saved_at (migration 148): when the operator has EXPLICITLY saved
-    // this vehicle's options — even an empty set — zero rows means "print no
-    // dealer options", NOT "never saved": skip the sentinel fallback and the
-    // library seed below (the Napleton Transit mis-print: deleting every
-    // dealer product then printing re-seeded Wheel Locks + 3M and inflated
-    // the asking price by $973).
+    // Options are fetched AFTER the library load below — the orphan prune
+    // (pruneOrphanedDefaultRows) needs the library's name set before the
+    // uuid → sentinel → seed cascade can be decided.
     const optionsExplicitlySaved = Boolean((dv as Record<string, unknown>).options_saved_at);
-    let { data: optionRows } = await admin
-      .from("vehicle_options")
-      .select("*")
-      .eq("vehicle_id", dealerVehicleId)
-      .eq("dealer_id", dv.dealer_id)
-      .order("sort_order");
-
-    if ((!optionRows || optionRows.length === 0) && !optionsExplicitlySaved) {
-      const { data: legacyRows } = await admin
-        .from("vehicle_options")
-        .select("*")
-        .eq("vehicle_id", "0")
-        .eq("dealer_id", dv.dealer_id)
-        .order("sort_order");
-      optionRows = legacyRows;
-    }
 
     // For options missing a description, fall back to addendum_library by name.
     // Also load required + layout (separator_above/below, spaces) so the
@@ -249,6 +228,42 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Live Required/Suggested flag — the library's current value always wins
     // over the value cached on vehicle_options at save time.
     const liveRequired = buildLiveRequiredByName(dealerLib);
+
+    // ── Options from Supabase ─────────────────────────────────────────────────
+    // Check per-vehicle UUID first; fall back to legacy '0' sentinel.
+    // options_saved_at (migration 148): when the operator has EXPLICITLY saved
+    // this vehicle's options — even an empty set — zero rows means "print no
+    // dealer options", NOT "never saved": skip the sentinel fallback and the
+    // library seed below (the Napleton Transit mis-print: deleting every
+    // dealer product then printing re-seeded Wheel Locks + 3M and inflated
+    // the asking price by $973).
+    //
+    // Each stage is pruned of orphaned source:"default" rows (library product
+    // deleted → snapshot must not print; Jenkins Traverse 2026-08-31), and the
+    // cascade advances on PRUNED emptiness — a fully-orphaned set behaves like
+    // never-saved and falls through to the current-library seed.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    type SavedOptRow = any; // select("*") rows — same loose shape the sites below always consumed
+    const libNames = libraryNameSet(dealerLib);
+    const { data: uuidRows } = await admin
+      .from("vehicle_options")
+      .select("*")
+      .eq("vehicle_id", dealerVehicleId)
+      .eq("dealer_id", dv.dealer_id)
+      .order("sort_order");
+    let optionRows: SavedOptRow[] = pruneOrphanedDefaultRows(
+      (uuidRows ?? []) as Array<{ option_name: string; source?: string | null }>, libNames);
+
+    if (optionRows.length === 0 && !optionsExplicitlySaved) {
+      const { data: legacyRows } = await admin
+        .from("vehicle_options")
+        .select("*")
+        .eq("vehicle_id", "0")
+        .eq("dealer_id", dv.dealer_id)
+        .order("sort_order");
+      optionRows = pruneOrphanedDefaultRows(
+        (legacyRows ?? []) as Array<{ option_name: string; source?: string | null }>, libNames);
+    }
 
     const disclaimers = await getGroupDisclaimers(textDealerId, dealer?.state ?? null, docType);
 

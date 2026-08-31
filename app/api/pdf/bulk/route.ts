@@ -14,7 +14,7 @@ import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-sa
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { useService as usePdfService, renderBulkViaService, type BulkItem, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, libraryNameSet, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { enforceCanPrint } from "@/lib/print-eligibility";
 import { generateVehicleContent } from "@/lib/ai-content";
@@ -481,18 +481,47 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // it compares library created_at against the newest saved timestamp.
         let savedForMerge: Array<{ option_name: string; created_at?: string | null; updated_at?: string | null }> = [];
 
+        // Library loaded up front (was lazy in branch 3): the orphan prune
+        // needs the current library's name set before the uuid → sentinel →
+        // seed cascade can be decided. A saved source:"default" row whose
+        // library product was deleted must not print as a "custom one-off"
+        // (Jenkins Traverse 2026-08-31), and a fully-orphaned stage falls
+        // through to the next one like never-saved.
+        if (!libCache.has(dv.dealer_id)) {
+          const { data: lib } = await admin
+            .from("addendum_library")
+            .select([
+              "option_name", "item_price", "description", "applies_to",
+              "ad_types", "ad_type",
+              "makes", "makes_not", "models", "models_not", "trims", "trims_not",
+              "body_styles", "fuel", "fuel_not",
+              "year_condition", "year_value",
+              "miles_condition", "miles_value",
+              "msrp_condition", "msrp1", "msrp2",
+              "required", "created_at",
+              "separator_above", "separator_below", "spaces",
+            ].join(", "))
+            .eq("dealer_id", dv.dealer_id)
+            .eq("active", true)
+            .order("sort_order");
+          libCache.set(dv.dealer_id, (lib ?? []) as unknown as LibRow[]);
+          console.log(`[BULK]   library_fetched dealer_id=${dv.dealer_id} total=${lib?.length ?? 0}`);
+        }
+        const libNames = libraryNameSet(libCache.get(dv.dealer_id)! as unknown as Array<{ option_name?: string | null }>);
+
         // 1. Saved options keyed to this vehicle's UUID
-        const { data: savedOpts, error: savedOptsErr } = await admin
+        const { data: savedOptsRaw, error: savedOptsErr } = await admin
           .from("vehicle_options")
-          .select("option_name, option_price, description, required, created_at, updated_at")
+          .select("option_name, option_price, description, required, source, created_at, updated_at")
           .eq("vehicle_id", vehicleId)
           .eq("dealer_id", dv.dealer_id)
           .eq("active", true)
           .order("sort_order");
+        const savedOpts = pruneOrphanedDefaultRows(savedOptsRaw ?? [], libNames);
 
-        console.log(`[BULK]   uuid_lookup vehicle_id=${vehicleId} dealer_id=${dv.dealer_id} err=${savedOptsErr?.message ?? "none"} count=${savedOpts?.length ?? 0}`);
+        console.log(`[BULK]   uuid_lookup vehicle_id=${vehicleId} dealer_id=${dv.dealer_id} err=${savedOptsErr?.message ?? "none"} count=${savedOptsRaw?.length ?? 0} live=${savedOpts.length}`);
 
-        if (savedOpts && savedOpts.length > 0) {
+        if (savedOpts.length > 0) {
           optionsSource = "uuid";
           savedForMerge = savedOpts;
           effectiveOptions = savedOpts.map(o => ({
@@ -511,17 +540,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           effectiveOptions = [];
         } else {
           // 2. Legacy '0' sentinel (options saved before per-vehicle UUID migration)
-          const { data: legacyOpts, error: legacyOptsErr } = await admin
+          const { data: legacyOptsRaw, error: legacyOptsErr } = await admin
             .from("vehicle_options")
-            .select("option_name, option_price, description, required, created_at, updated_at")
+            .select("option_name, option_price, description, required, source, created_at, updated_at")
             .eq("vehicle_id", "0")
             .eq("dealer_id", dv.dealer_id)
             .eq("active", true)
             .order("sort_order");
+          const legacyOpts = pruneOrphanedDefaultRows(legacyOptsRaw ?? [], libNames);
 
-          console.log(`[BULK]   legacy_lookup vehicle_id=0 dealer_id=${dv.dealer_id} err=${legacyOptsErr?.message ?? "none"} count=${legacyOpts?.length ?? 0}`);
+          console.log(`[BULK]   legacy_lookup vehicle_id=0 dealer_id=${dv.dealer_id} err=${legacyOptsErr?.message ?? "none"} count=${legacyOptsRaw?.length ?? 0} live=${legacyOpts.length}`);
 
-          if (legacyOpts && legacyOpts.length > 0) {
+          if (legacyOpts.length > 0) {
             optionsSource = "legacy_sentinel";
             savedForMerge = legacyOpts;
             effectiveOptions = legacyOpts.map(o => ({
@@ -531,27 +561,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               required: (o.required as boolean | undefined) !== false,
             }));
           } else {
-            // 3. Library matching rules per vehicle
-            if (!libCache.has(dv.dealer_id)) {
-              const { data: lib } = await admin
-                .from("addendum_library")
-                .select([
-                  "option_name", "item_price", "description", "applies_to",
-                  "ad_types", "ad_type",
-                  "makes", "makes_not", "models", "models_not", "trims", "trims_not",
-                  "body_styles", "fuel", "fuel_not",
-                  "year_condition", "year_value",
-                  "miles_condition", "miles_value",
-                  "msrp_condition", "msrp1", "msrp2",
-                  "required", "created_at",
-                  "separator_above", "separator_below", "spaces",
-                ].join(", "))
-                .eq("dealer_id", dv.dealer_id)
-                .eq("active", true)
-                .order("sort_order");
-              libCache.set(dv.dealer_id, (lib ?? []) as unknown as LibRow[]);
-              console.log(`[BULK]   library_fetched dealer_id=${dv.dealer_id} total=${lib?.length ?? 0}`);
-            }
+            // 3. Library matching rules per vehicle (library already cached above)
             const dealerLib = libCache.get(dv.dealer_id)!;
             const vehicleCond = dv.condition === "New" ? "New" : dv.condition === "Used" ? "Used" : "CPO";
             effectiveOptions = dealerLib

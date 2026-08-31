@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { getGroupOptionsForDealer, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows, libraryNameSet, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import type { VehicleOptionRow } from "@/lib/db";
 
@@ -233,6 +233,7 @@ const libRowToRulesRow = (rule: DealerLibRow) => ({
 
 type SavedRow = {
   option_name: string;
+  source?: string | null;
   required?: boolean | null;
   sort_order?: number | null;
   created_at?: string | null;
@@ -350,6 +351,13 @@ export async function GET(
         return legacyAll.filter((l) => !seen.has(normalizeOptionName(l.item_name)));
       };
 
+      // Library loaded up front: the orphan prune (a saved source:"default"
+      // row whose library product was deleted must not resurface — Jenkins
+      // Traverse 2026-08-31) gates every stage of the saved → sentinel →
+      // matched cascade below.
+      const lib = await loadDealerLibrary(admin, effectiveDealerId);
+      const libNames = libraryNameSet(lib);
+
       // Check for saved options keyed by this vehicleId
       const { data: saved } = await admin
         .from("vehicle_options")
@@ -357,10 +365,10 @@ export async function GET(
         .eq("vehicle_id", vid)
         .eq("dealer_id", effectiveDealerId)
         .order("sort_order", { ascending: true });
+      const savedLive = pruneOrphanedDefaultRows((saved ?? []) as SavedRow[], libNames);
 
-      if (saved && saved.length > 0) {
-        const lib = await loadDealerLibrary(admin, effectiveDealerId);
-        const hydrated = hydrateSavedAgainstLibrary(lib, saved, vehicleForRules);
+      if (savedLive.length > 0) {
+        const hydrated = hydrateSavedAgainstLibrary(lib, savedLive, vehicleForRules);
         return NextResponse.json({ data: hydrated, groupOptions, source: "saved", alwaysShowCents, legacyAddendum: legacyMinus(hydrated.map((h) => h.option_name)) });
       }
 
@@ -388,10 +396,10 @@ export async function GET(
           .eq("vehicle_id", "0")
           .eq("dealer_id", effectiveDealerId)
           .order("sort_order", { ascending: true });
+        const legacyLive = pruneOrphanedDefaultRows((legacySaved ?? []) as SavedRow[], libNames);
 
-        if (legacySaved && legacySaved.length > 0) {
-          const lib = await loadDealerLibrary(admin, effectiveDealerId);
-          const hydrated = hydrateSavedAgainstLibrary(lib, legacySaved, vehicleForRules);
+        if (legacyLive.length > 0) {
+          const hydrated = hydrateSavedAgainstLibrary(lib, legacyLive, vehicleForRules);
           return NextResponse.json({ data: hydrated, groupOptions, source: "saved", alwaysShowCents, legacyAddendum: legacyMinus(hydrated.map((h) => h.option_name)) });
         }
       }
@@ -431,8 +439,11 @@ export async function GET(
 
     if (saved && saved.length > 0) {
       const lib = await loadDealerLibrary(admin, effectiveDealerId);
-      const hydrated = hydrateSavedAgainstLibrary(lib, saved, vehicleForRulesFallback);
-      return NextResponse.json({ data: hydrated, groupOptions, source: "saved", alwaysShowCents });
+      const savedLive = pruneOrphanedDefaultRows(saved as SavedRow[], libraryNameSet(lib));
+      if (savedLive.length > 0) {
+        const hydrated = hydrateSavedAgainstLibrary(lib, savedLive, vehicleForRulesFallback);
+        return NextResponse.json({ data: hydrated, groupOptions, source: "saved", alwaysShowCents });
+      }
     }
 
     // No saved options — seed from the dealer's addendum_library (shared helper).

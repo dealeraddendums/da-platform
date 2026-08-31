@@ -348,6 +348,41 @@ export function autoMatchedLibraryRows(
  * the vehicle) still drops: library rules trump saved state by design
  * (2026-05-13).
  */
+/** Normalized-name existence set for a dealer's library rows — the key
+ *  pruneOrphanedDefaultRows checks saved rows against. Build it from the
+ *  same library array the call site already fetched for its rules map. */
+export function libraryNameSet(lib: Array<{ option_name?: string | null }>): Set<string> {
+  const s = new Set<string>();
+  for (const r of lib) s.add(normalizeOptionName(r.option_name));
+  return s;
+}
+
+/**
+ * Drop saved/sentinel vehicle_options rows whose library product was DELETED.
+ *
+ * A source:"default" row is a snapshot of a library product (bulk-save
+ * materialization, save-on-print, or the legacy ETL's vehicle_id='0' dealer
+ * defaults) — when no same-name library row remains, the product was deleted
+ * from the dealer's list and the snapshot must not keep printing as a
+ * "custom one-off" (Jenkins Chevrolet of Venice 2026-08-31: 15 orphaned
+ * sentinel rows — All Weather Mats, Wheel Locks, FOUR Market Adjustments —
+ * put $80,108 of deleted "required products" on a live addendum).
+ * source:"manual" rows are operator-authored per-vehicle content with no
+ * library identity — always kept. Fleet-wide, source is only ever
+ * "default"/"manual" (verified 2026-08-31: 10,193 / 116 rows).
+ *
+ * Call sites apply this BEFORE savedRowSurvivesLibraryRules and before the
+ * never-saved/sentinel/seed cascade decisions, so a fully-orphaned set
+ * behaves exactly like never-saved (falls through to the current-library
+ * seed) instead of rendering ghosts.
+ */
+export function pruneOrphanedDefaultRows<T extends { option_name: string; source?: string | null }>(
+  rows: T[],
+  libraryNames: Set<string>,
+): T[] {
+  return rows.filter(r => r.source === "manual" || libraryNames.has(normalizeOptionName(r.option_name)));
+}
+
 export function savedRowSurvivesLibraryRules(rules: RulesRow[], vehicle: VehicleRow, savedName?: string | null): boolean {
   if (rules.length === 0) return true;
   // Identity narrowing (Serra APEX 2026-08-27): the same-name grouping is

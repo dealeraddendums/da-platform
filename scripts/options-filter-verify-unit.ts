@@ -18,7 +18,7 @@
  *   - no library definition (custom one-off) survives
  */
 import assert from "node:assert/strict";
-import { savedRowSurvivesLibraryRules, normalizeSentinelList, matchesRulesRow, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches } from "@/lib/options-engine";
+import { savedRowSurvivesLibraryRules, normalizeSentinelList, matchesRulesRow, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, libraryNameSet, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import type { VehicleRow } from "@/lib/vehicles";
 
 // ── tiny test runner ─────────────────────────────────────────────────────────
@@ -219,6 +219,39 @@ void test("newlyAddedLibraryMatches: inactive, applies_to='none', and rule-misma
 
 void test("newlyAddedLibraryMatches: no saved rows → no merge (seed path owns that case)", () => {
   assert.deepEqual(newlyAddedLibraryMatches([libNew], [], vehicle()), []);
+});
+
+// ── pruneOrphanedDefaultRows (orphaned library snapshots must not print) ──────
+
+void test("pruneOrphanedDefaultRows: default row with no library def drops (deleted product)", () => {
+  const names = libraryNameSet([{ option_name: "Private Tag Agency" }]);
+  const rows = [
+    { option_name: "All Weather Mats", source: "default" },
+    { option_name: "Market Adjustment", source: "default" },
+    { option_name: "Private Tag Agency", source: "default" },
+  ];
+  assert.deepEqual(pruneOrphanedDefaultRows(rows, names).map(r => r.option_name), ["Private Tag Agency"]);
+});
+
+void test("pruneOrphanedDefaultRows: manual one-offs always survive", () => {
+  const names = libraryNameSet([]);
+  const rows = [{ option_name: "Hand-typed special", source: "manual" }];
+  assert.deepEqual(pruneOrphanedDefaultRows(rows, names).map(r => r.option_name), ["Hand-typed special"]);
+});
+
+void test("pruneOrphanedDefaultRows: name match is caret- and case-insensitive", () => {
+  const names = libraryNameSet([{ option_name: "AVC Appearance^" }]);
+  const rows = [{ option_name: "avc appearance", source: "default" }];
+  assert.equal(pruneOrphanedDefaultRows(rows, names).length, 1);
+});
+
+void test("pruneOrphanedDefaultRows: fully-orphaned set prunes to empty (never-saved semantics)", () => {
+  const names = libraryNameSet([{ option_name: "Jenkins Value Package" }]);
+  const rows = [
+    { option_name: "Wheel Locks", source: "default" },
+    { option_name: "C8 Car Cover", source: "default" },
+  ];
+  assert.deepEqual(pruneOrphanedDefaultRows(rows, names), []);
 });
 
 // ── report ───────────────────────────────────────────────────────────────────
