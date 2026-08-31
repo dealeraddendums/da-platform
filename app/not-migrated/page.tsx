@@ -32,15 +32,16 @@ export default function NotMigratedPage() {
         </div>
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#2a2b3c", margin: "0 0 12px" }}>
-          Your account is on Platform 4.0
+          Your migration isn&apos;t finished yet
         </h1>
         <p style={{ fontSize: 14, color: "#55595c", lineHeight: 1.6, margin: "0 0 28px" }}>
-          Your dealership hasn&apos;t been moved to the new platform yet.
-          Log in to your current account below, or contact DA to get on the migration list.
+          Your dealership&apos;s move to Platform 5.0 hasn&apos;t been completed —
+          but you can start using 5.0 now. Your billing stays on your current
+          plan until the migration wraps up, and there&apos;s nothing you need to do.
         </p>
 
         <a
-          href="https://dealeraddendums.com/app/login"
+          href="/dashboard"
           style={{
             display: "block",
             background: "#1976d2",
@@ -53,11 +54,11 @@ export default function NotMigratedPage() {
             marginBottom: 16,
           }}
         >
-          Log in to Platform 4.0
+          Continue to Platform 5.0
         </a>
 
         <a
-          href="mailto:support@dealeraddendums.com?subject=Migration%20Request"
+          href="https://dealeraddendums.com/app/login"
           style={{
             display: "block",
             border: "1px solid #e0e0e0",
@@ -66,9 +67,17 @@ export default function NotMigratedPage() {
             padding: "11px 0",
             fontSize: 14,
             textDecoration: "none",
+            marginBottom: 16,
           }}
         >
-          Request migration to Platform 5.0
+          Log in to Platform 4.0 instead
+        </a>
+
+        <a
+          href="mailto:support@dealeraddendums.com?subject=Migration%20Question"
+          style={{ display: "block", fontSize: 13, color: "#78828c" }}
+        >
+          Questions? support@dealeraddendums.com
         </a>
       </div>
     </div>

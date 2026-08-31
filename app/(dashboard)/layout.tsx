@@ -10,6 +10,7 @@ import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import PlatformBanner from "@/components/PlatformBanner";
+import UnmigratedNotice from "@/components/UnmigratedNotice";
 import MainContent from "@/components/MainContent";
 import ProductFruitsWidget from "@/components/ProductFruitsWidget";
 import { BuilderBreadcrumbProvider } from "@/contexts/BuilderBreadcrumb";
@@ -107,13 +108,17 @@ export default async function DashboardLayout({
     dealerAccountType = dealerData?.account_type ?? null;
   }
 
-  // ── V5.0 access gate ──────────────────────────────────────────────────────
-  // A real dealer-role login may use the V5.0 dashboard only if it's V5-native
-  // (self-serve dealer_id, "ss_" prefix) or explicitly migrated; everyone else
-  // is still on Platform 4.0 and is bounced to /not-migrated.
-  // Bypassed when a super_admin has session-switched into the dealer
-  // (da_impersonating=1) so admins can preview unmigrated dealer accounts
-  // without getting trapped on the /not-migrated page.
+  // ── V5.0 migration notice (SOFT — policy change 2026-08-31, Allan) ────────
+  // The old gate HARD-redirected dealer-role users of unmigrated dealers to
+  // the dead-end /not-migrated page. That locked out legitimately-invited
+  // users (Serra Nissan VW's Heather Deiber accepted her setup code and was
+  // still bounced). Only invited users have V5.0 credentials at all, so
+  // letting authenticated dealer users in is safe — a random 4.0 customer
+  // still can't sign in. Unmigrated dealers now get the full dashboard plus
+  // a dismissible "you're not fully migrated yet" notice; migrated and
+  // V5-native (ss_/ga_) dealers see nothing, and super_admin/group roles
+  // were never gated.
+  let unmigratedNoticeStatus: string | null = null;
   if (isDealerRole && !isImpersonating) {
     // V5-native prefixes: ss_ = self-serve trial (lib/provisioning.ts),
     // ga_ = group_admin-created dealer (app/api/dealers POST). Both are born
@@ -124,7 +129,7 @@ export default async function DashboardLayout({
     const isV5Native = dealerTextId.startsWith("ss_") || dealerTextId.startsWith("ga_");
     const isMigrated = dealerData?.migration_status === "migrated";
     if (!isV5Native && !isMigrated) {
-      redirect("/not-migrated");
+      unmigratedNoticeStatus = dealerData?.migration_status ?? "legacy";
     }
   }
 
@@ -207,6 +212,9 @@ export default async function DashboardLayout({
       <div className="flex flex-col flex-1 overflow-hidden">
         <ImpersonationBanner />
         <PlatformBanner />
+        {unmigratedNoticeStatus && (
+          <UnmigratedNotice status={unmigratedNoticeStatus} dealerTextId={dealerData?.dealer_id ?? ""} />
+        )}
         <BuilderBreadcrumbProvider>
           <Topbar user={userDisplay} />
           <MainContent>{children}</MainContent>
