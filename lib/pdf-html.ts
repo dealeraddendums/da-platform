@@ -268,19 +268,30 @@ export async function buildPdfHtml({
       }));
     }
 
-    // Infosheet description: inject AI or DB vehicle description if widget has no custom content.
-    // d.aiMode arrives carrying the dealer's PREFERENCE; we overwrite it
-    // with the ACTUAL source picked so the rendered AI/DB pill matches the
-    // text the dealer sees.
+    // Infosheet description: inject the vehicle description if the widget has
+    // no custom content. The PER-WIDGET source toggle (AiSourceToggle in the
+    // Builder; missing = 'db', matching the Builder's display default) is
+    // authoritative:
+    //   - 'db' is a HARD setting — the database description or nothing, never
+    //     a silent switch to AI (Kory Hooks FCDJR 2026-08-31: DB-set widgets
+    //     printed AI content + AI badge because this fill keyed on the
+    //     dealer-level aiEnabled preference and ignored d.aiMode).
+    //   - 'ai' keeps the pre-existing behavior: the dealer master toggle
+    //     (aiEnabled) is respected and the other source fills in when the
+    //     preferred one has no content.
+    // d.aiMode is then overwritten with the ACTUAL source used so the
+    // rendered AI/DB pill always matches the text on the sheet.
     if (w.type === 'description') {
       // Detect all known placeholder variants (from DEFS default or widgetRenderer fallback)
       const isPlaceholder = d.text == null || d.text === '' ||
         (typeof d.text === 'string' && d.text.startsWith('Vehicle description will appear here'));
       if (isPlaceholder) {
-        // prefer DB when ai_content_default=false; prefer AI when true; fallback to whichever exists
         let text: string | null = null;
         let source: 'db' | 'ai' | null = null;
-        if (aiEnabled) {
+        if (d.aiMode !== 'ai') {
+          text = dbDescription ?? '';
+          source = 'db';
+        } else if (aiEnabled) {
           if (aiDescription) { text = aiDescription; source = 'ai'; }
           else if (dbDescription) { text = dbDescription; source = 'db'; }
         } else {
@@ -299,9 +310,11 @@ export async function buildPdfHtml({
       d.disclaimers = disclaimers ?? [];
     }
 
-    // Infosheet features: inject AI features or DB options text if widget has no custom content.
-    // Same pill-match logic as description — set d.aiMode to whatever source
-    // ended up populating d.items.
+    // Infosheet features: inject AI features or DB options text if widget has
+    // no custom content. Same per-widget-source rule as description: 'db'
+    // (or missing) = database options or an empty table, NEVER a silent AI
+    // switch; 'ai' keeps the pre-existing aiEnabled-preference behavior.
+    // d.aiMode is set to the source that actually populated d.items.
     if (w.type === 'features') {
       const rawItems = d.items as [string, string][] | null | undefined;
       // Detect default placeholder: null/empty, or every row starts with 'Feature' (DEFS default pattern)
@@ -322,7 +335,10 @@ export async function buildPdfHtml({
           : null;
         let chosen: [string, string][] | null = null;
         let source: 'db' | 'ai' | null = null;
-        if (aiEnabled) {
+        if (d.aiMode !== 'ai') {
+          chosen = dbPairs;
+          source = 'db';
+        } else if (aiEnabled) {
           if (aiPairs) { chosen = aiPairs; source = 'ai'; }
           else if (dbPairs) { chosen = dbPairs; source = 'db'; }
         } else {

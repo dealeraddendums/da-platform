@@ -885,10 +885,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
 
         // ── Fetch AI content for infosheet description/features + {{ai.}} tokens ─
-        // Always fetch for infosheet — ai_content_default controls AI vs DB preference,
-        // but we always need content available so placeholders never appear in PDFs.
+        // Fetched when an AI-set widget or an {{ai.}} token needs it; DB-set
+        // widgets render database data only (see pdf-html.ts) and skip the call.
         let aiContent: { description: string; features: [string, string][] } | null = null;
-        const needsAiForInfosheet = isInfosheet; // always, not gated by aiEnabled
+        // Only when a description/features widget is actually SET to AI —
+        // the per-widget toggle is authoritative (pdf-html honors it), so a
+        // sheet whose widgets are all DB never needs (or pays for) an AI call.
+        const needsAiForInfosheet = isInfosheet && widgets.some(
+          w => (w.type === "description" || w.type === "features") && w.d?.aiMode === "ai"
+        );
         const hasAiTokens = widgets.some(
           w => w.type === "customtext" && ((w.d.text as string) || "").includes("{{ai.")
         );
