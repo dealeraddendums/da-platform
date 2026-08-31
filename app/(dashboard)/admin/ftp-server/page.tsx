@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PageHeader } from "@/components/PageHeader";
+import Pager from "@/components/Pager";
 
 export const dynamic = "force-dynamic";
 
@@ -179,31 +180,13 @@ export default function FtpServerPage() {
           </table>
         )}
 
-        {filtered.length > PAGE_SIZE && (
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderTop: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-                style={{ padding: "4px 10px", fontSize: 12, background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, cursor: page === 1 ? "default" : "pointer", opacity: page === 1 ? 0.5 : 1, fontFamily: "inherit" }}
-              >
-                Prev
-              </button>
-              <span style={{ fontSize: 12, color: "var(--text-muted)", alignSelf: "center" }}>Page {page} of {totalPages}</span>
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                style={{ padding: "4px 10px", fontSize: 12, background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, cursor: page === totalPages ? "default" : "pointer", opacity: page === totalPages ? 0.5 : 1, fontFamily: "inherit" }}
-              >
-                Next
-              </button>
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* Pagination (shared centered Pager — keeps Next clear of corner overlays) */}
+      {filtered.length > PAGE_SIZE && (
+        <Pager page={page} totalPages={totalPages} onPage={setPage} light
+          summary={<>Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}</>} />
+      )}
 
       {addOpen && (
         <AddUserModal

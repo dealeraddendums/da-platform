@@ -8,6 +8,7 @@ import ProductAuthoringFields from "@/components/ProductAuthoringFields";
 import ProductRulesFields from "@/components/ProductRulesFields";
 import ProductImportExport from "@/components/ProductImportExport";
 import RulesInfoTip from "@/components/RulesInfoTip";
+import Pager from "@/components/Pager";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -775,34 +776,26 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
                 </button>
               </div>
             )}
-            {/* Pagination */}
-            {!reorderMode && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderTop: "1px solid #e0e0e0", background: "#fafafa" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 12, color: "#78828c" }}>Rows per page:</span>
-                  <select value={perPage} onChange={e => { setPerPage(parseInt(e.target.value)); setPage(1); }}
-                    style={{ padding: "4px 8px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 12, color: "#333" }}>
-                    {[10, 25, 50].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </div>
-                <div style={{ fontSize: 12, color: "#78828c" }}>
-                  {total > 0 ? `${(page - 1) * perPage + 1}–${Math.min(page * perPage, total)} of ${total}` : "0 results"}
-                </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
-                    style={{ padding: "5px 12px", border: "1px solid #e0e0e0", borderRadius: 4, background: "#fff", cursor: page <= 1 ? "default" : "pointer", fontSize: 12, color: "#333", opacity: page <= 1 ? 0.4 : 1 }}>
-                    ‹ Prev
-                  </button>
-                  <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}
-                    style={{ padding: "5px 12px", border: "1px solid #e0e0e0", borderRadius: 4, background: "#fff", cursor: page >= totalPages ? "default" : "pointer", fontSize: 12, color: "#333", opacity: page >= totalPages ? 0.4 : 1 }}>
-                    Next ›
-                  </button>
-                </div>
-              </div>
-            )}
           </>
         )}
       </div>
+
+      {/* Pagination (shared centered Pager — keeps Next clear of corner overlays) */}
+      {!reorderMode && displayItems.length > 0 && (
+        <Pager page={page} totalPages={totalPages} onPage={setPage} light
+          summary={
+            <>
+              <span style={{ fontSize: 12 }}>Rows per page:</span>
+              <select value={perPage} onChange={e => { setPerPage(parseInt(e.target.value)); setPage(1); }}
+                style={{ height: 28, padding: "0 6px", fontSize: 12, border: "1px solid rgba(255,255,255,0.25)", borderRadius: 4, background: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.8)", cursor: "pointer" }}>
+                {[10, 25, 50].map(n => <option key={n} value={n} style={{ background: "#2a2b3c", color: "#fff" }}>{n}</option>)}
+              </select>
+              <span style={{ fontSize: 12 }}>
+                {total > 0 ? `${(page - 1) * perPage + 1}–${Math.min(page * perPage, total)} of ${total}` : "0 results"}
+              </span>
+            </>
+          } />
+      )}
 
       {/* Add/Edit modal */}
       {showModal && (

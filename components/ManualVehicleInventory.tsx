@@ -8,6 +8,7 @@ import PrintPreviewModal from "./PrintPreviewModal";
 import PdfBuildingOverlay from "./PdfBuildingOverlay";
 import VehicleHistoryPanel from "./VehicleHistoryPanel";
 import type { DealerVehicleRow, DealerVehicleArchiveRow } from "@/lib/db";
+import Pager from "@/components/Pager";
 
 type Props = {
   dealerId: string;
@@ -624,38 +625,29 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
           </div>
         )}
 
-        {total > 0 && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderTop: "1px solid var(--border)", background: "#fafafa" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+      </div>
+
+      {/* Pagination (shared centered Pager — keeps Next clear of corner overlays) */}
+      {total > 0 && (
+        <Pager page={page} totalPages={totalPages} onPage={setPage} light
+          summary={
+            <>
+              <span style={{ fontSize: 13 }}>
                 {perPage === 0 ? `All ${total} vehicles` : `Page ${page} of ${totalPages} — ${total} total`}
               </span>
               <select
                 value={perPage}
                 onChange={e => { setPerPage(Number(e.target.value)); setPage(1); }}
-                style={{ height: 28, padding: "0 6px", fontSize: 12, border: "1px solid var(--border)", borderRadius: 4, background: "#fff", color: "var(--text-primary)", cursor: "pointer" }}
+                style={{ height: 28, padding: "0 6px", fontSize: 12, border: "1px solid rgba(255,255,255,0.25)", borderRadius: 4, background: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.8)", cursor: "pointer" }}
               >
                 {PER_PAGE_OPTIONS.map(n => (
-                  <option key={n} value={n}>{n === 0 ? "All" : n}</option>
+                  <option key={n} value={n} style={{ background: "#2a2b3c", color: "#fff" }}>{n === 0 ? "All" : n}</option>
                 ))}
               </select>
-              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>per page</span>
-            </div>
-            {totalPages > 1 && (
-              <div style={{ display: "flex", gap: 6 }}>
-                <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
-                  style={{ height: 32, padding: "0 12px", background: page <= 1 ? "#f5f6f7" : "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: page <= 1 ? "not-allowed" : "pointer", color: page <= 1 ? "var(--text-muted)" : "var(--text-primary)" }}>
-                  Previous
-                </button>
-                <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}
-                  style={{ height: 32, padding: "0 12px", background: page >= totalPages ? "#f5f6f7" : "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: page >= totalPages ? "not-allowed" : "pointer", color: page >= totalPages ? "var(--text-muted)" : "var(--text-primary)" }}>
-                  Next
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+              <span style={{ fontSize: 12 }}>per page</span>
+            </>
+          } />
+      )}
 
       {/* Edit modal */}
       {editingVehicle && (
