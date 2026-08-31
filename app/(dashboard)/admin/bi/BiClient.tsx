@@ -435,7 +435,10 @@ function PeriodSummaryGrid({ summary, error }: { summary: PeriodSummary | null; 
   if (error) return <div style={{ ...cardStyle, color: "#c62828", fontSize: 13 }}>{error}</div>;
   if (!summary) return <div style={{ ...cardStyle, color: MUTED, fontSize: 13 }}>Loading…</div>;
 
-  const rows: { label: string; key: keyof PeriodSummaryRow; strong?: boolean }[] = [
+  // "netPaying" is a derived row (New Paying − Downgraded, per column) — the
+  // Growth % numerator made visible. Computed here from the same two grid rows
+  // so Net always equals New Paying − Downgraded and Net ÷ base = Growth %.
+  const rows: { label: string; key: keyof PeriodSummaryRow | "netPaying"; strong?: boolean }[] = [
     { label: "New Trials (A)",        key: "newTrials" },
     { label: "Group Trials (B)",      key: "groupTrialsStarted" },
     { label: "Trials Won (A)",        key: "trialsWon" },
@@ -446,6 +449,7 @@ function PeriodSummaryGrid({ summary, error }: { summary: PeriodSummary | null; 
     { label: "Manually Added",        key: "manualAdded" },
     { label: "Downgraded to Free",    key: "downgradedFree" },
     { label: "New Paying",            key: "newPaying", strong: true },
+    { label: "Net Paying +/-",        key: "netPaying", strong: true },
     { label: "Growth %",              key: "growthPct", strong: true },
   ];
 
@@ -489,7 +493,16 @@ function PeriodSummaryGrid({ summary, error }: { summary: PeriodSummary | null; 
                     </td>
                   );
                 }
-                const v = p[r.key] as number;
+                if (r.key === "netPaying") {
+                  const v = p.newPaying - p.downgradedFree;
+                  const color = v === 0 ? MUTED : v > 0 ? "#2e7d32" : "#c62828";
+                  return (
+                    <td key={p.label} style={{ ...num, fontWeight: 700, color, background: "#f9fafb" }}>
+                      {v === 0 ? "—" : `${v > 0 ? "+" : ""}${v}`}
+                    </td>
+                  );
+                }
+                const v = p[r.key as keyof PeriodSummaryRow] as number;
                 return (
                   <td key={p.label} style={{
                     ...num,
@@ -507,7 +520,7 @@ function PeriodSummaryGrid({ summary, error }: { summary: PeriodSummary | null; 
         </tbody>
       </table>
       <div style={{ padding: "8px 12px", fontSize: 11, color: MUTED, borderTop: `1px solid ${BORDER}` }}>
-        New Paying = Trials Won (A) + Group Trials Won (B) + Group Dealers Added + Manually Added. Growth % = (New Paying − Downgraded) ÷ current paying base ({summary.totalPaying.toLocaleString("en-US")} — same active, test-excluded count as the header and the Dashboard).
+        New Paying = Trials Won (A) + Group Trials Won (B) + Group Dealers Added + Manually Added. Net Paying +/- = New Paying − Downgraded to Free. Growth % = Net ÷ current paying base ({summary.totalPaying.toLocaleString("en-US")} — same active, test-excluded count as the header and the Dashboard).
         Group Dealers Added = provisioned paying (group-created trials are counted in Group Trials, not here). Migrations Live are already-paying 4.0 customers going live on 5.0 (plus group store activations) — informational, excluded from New Paying and Growth.
         Weeks start Monday; quarters are calendar {new Date(summary.generatedAt).getFullYear()}. Fixed windows — the date picker above does not affect this grid.
       </div>
