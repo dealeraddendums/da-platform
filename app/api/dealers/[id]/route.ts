@@ -252,11 +252,13 @@ export async function PATCH(
   let prevGroupId: string | null = null;
   let prevName: string | null = null;
   let prevAccountType: string | null = null;
-  // Snapshot runs whenever active, group_id, name, OR account_type is being touched.
-  if (typeof patch.active === "boolean" || patch.group_id !== undefined || typeof patch.name === "string" || patchAny.account_type !== undefined) {
+  let prevSubscriptionBilledTo: string | null = null;
+  // Snapshot runs whenever active, group_id, name, account_type, OR
+  // subscription_billed_to is being touched.
+  if (typeof patch.active === "boolean" || patch.group_id !== undefined || typeof patch.name === "string" || patchAny.account_type !== undefined || patch.subscription_billed_to !== undefined) {
     const { data: snap } = await admin
       .from("dealers")
-      .select("active, billing_customer_id, internal_id, group_id, name, account_type")
+      .select("active, billing_customer_id, internal_id, group_id, name, account_type, subscription_billed_to")
       .eq("id", dealerUuid)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .maybeSingle<any>();
@@ -267,6 +269,7 @@ export async function PATCH(
     prevGroupId = snap?.group_id ?? null;
     prevName = snap?.name ?? null;
     prevAccountType = snap?.account_type ?? null;
+    prevSubscriptionBilledTo = snap?.subscription_billed_to ?? null;
   }
 
   // inventory_dealer_id change must keep dealer_id in sync. Route it through the
@@ -415,6 +418,25 @@ export async function PATCH(
     && claims.role === "super_admin"
   ) {
     fireSuperAdminGroupAssignCascade(dealerUuid, patch.group_id);
+  }
+
+  // subscription_billed_to flipped dealer→group on a dealer ALREADY in a
+  // group: the group template must gain the store's line (the Bill Jacobs /
+  // Straub class — before this hook the flip changed billing routing on the
+  // platform while da-billing kept billing nothing for the store). The
+  // cascade is idempotent (skips when the tag already exists), resolves the
+  // plan from account_type (unresolvable plans skip with a console warning),
+  // and fires the group discount sync. The null→UUID group_id edge above
+  // already covers its own billed_to handling via cascadeSuperAdminGroupAssign.
+  if (
+    patch.subscription_billed_to === "group"
+    && prevSubscriptionBilledTo !== null
+    && prevSubscriptionBilledTo !== "group"
+    && (patch.group_id === undefined || patch.group_id === prevGroupId) // not the group-assign edge above
+    && dealerGroupId
+  ) {
+    const { fireGroupAssignCascade } = await import("@/lib/group-billing-cascade");
+    fireGroupAssignCascade(dealerUuid, dealerGroupId);
   }
 
   // Dealer name change → propagate to da-billing.

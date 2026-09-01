@@ -1366,10 +1366,24 @@ type CreateDealerProps = {
   onCancel: () => void;
 };
 
+// Subscription choices — parity with GroupDealerList's New Dealer form. This
+// form previously sent NO account_type at all, so created stores inherited the
+// DB column default 'Standard' — which resolves to no subscription descriptor,
+// so the create-time group billing-line cascade silently skipped them (the
+// Straub Honda/Nissan class, 2026-09-01: group-billed at birth but absent from
+// the group's da-billing template until someone touched the Plan control).
+const CREATE_SUBSCRIPTION_OPTIONS: { id: "sub-manual" | "sub-auto-web" | "sub-auto-dms" | "Trial"; label: string }[] = [
+  { id: "sub-manual",   label: "Monthly Subscription Manual" },
+  { id: "sub-auto-web", label: "Monthly Subscription Automatic Web" },
+  { id: "sub-auto-dms", label: "Monthly Subscription Automatic DMS" },
+  { id: "Trial",        label: "Trial — 30 days / 30 prints, no billing until conversion" },
+];
+
 function CreateDealerInGroup({ groupId: _groupId, onCreated, onCancel }: CreateDealerProps) {
   const [fields, setFields] = useState({
     name: "", address: "", city: "", state: "", zip: "",
     phone: "", primary_contact: "", primary_contact_email: "",
+    account_type: "sub-manual" as "sub-manual" | "sub-auto-web" | "sub-auto-dms" | "Trial",
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -1396,6 +1410,7 @@ function CreateDealerInGroup({ groupId: _groupId, onCreated, onCancel }: CreateD
         phone: fields.phone.trim() || null,
         primary_contact: fields.primary_contact.trim() || null,
         primary_contact_email: fields.primary_contact_email.trim() || null,
+        account_type: fields.account_type,
       }),
     });
     const json = (await res.json()) as { data?: DealerRow; error?: string };
@@ -1412,6 +1427,21 @@ function CreateDealerInGroup({ groupId: _groupId, onCreated, onCancel }: CreateD
         <div style={{ gridColumn: "1 / -1" }}>
           <label className="label">Dealer Name *</label>
           <input className="input" style={{ height: 32, fontSize: 13 }} value={fields.name} onChange={set("name")} placeholder="ABC Motors" required />
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label className="label">Subscription Type *</label>
+          <select className="input" style={{ height: 32, fontSize: 13 }} value={fields.account_type} onChange={set("account_type")} required>
+            {CREATE_SUBSCRIPTION_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+          {fields.account_type === "Trial" ? (
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+              No billing is set up for a trial — billing starts when the dealer converts to a paid plan.
+            </p>
+          ) : (
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+              Paid plans in a group-billed group add the store&apos;s line to the group&apos;s billing automatically.
+            </p>
+          )}
         </div>
         <div style={{ gridColumn: "1 / -1" }}>
           <label className="label">Address</label>
