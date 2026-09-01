@@ -44,11 +44,25 @@ function usd(n: number): string {
 
 // ── FreshBooks nightly summary (admin_settings.fb_billing_summary) ──────────
 
+interface FbCoverageSlice {
+  count: number;
+  monthly: number;
+}
+
 interface FbSummary {
   fb_mrr: number;
   fb_active_profiles: number;
   fb_outstanding: { count: number; total: number };
   double_billing_suspects: { count: number; names: string[] };
+  /** Since 2026-09-01: full-coverage enumeration breakdown (all Aurora
+   *  RECURE_IDs + invoice-parent scan, not just active-dealer links) — see
+   *  ETL runFbBillingSummaryJob. Absent on pre-coverage snapshots. */
+  fb_coverage?: {
+    via_active_dealers: FbCoverageSlice;
+    other_aurora_links: FbCoverageSlice;
+    invoice_only: FbCoverageSlice;
+    invoice_scan_days: number;
+  };
   computed_at: string;
 }
 
@@ -237,7 +251,13 @@ export default async function BillingPage() {
         {fb ? (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard label="Monthly Recurring Revenue" value={usd(fb.fb_mrr)} note="Active recurring profiles, monthly run-rate" />
+              <StatCard
+                label="Monthly Recurring Revenue"
+                value={usd(fb.fb_mrr)}
+                note={fb.fb_coverage
+                  ? `All active recurring profiles — incl. ${(fb.fb_coverage.other_aurora_links.count + fb.fb_coverage.invoice_only.count).toLocaleString()} beyond active dealer links (${usd(fb.fb_coverage.other_aurora_links.monthly + fb.fb_coverage.invoice_only.monthly)}/mo)`
+                  : "Active recurring profiles, monthly run-rate"}
+              />
               <StatCard label="Active Profiles" value={fb.fb_active_profiles.toLocaleString()} note="Recurring profiles still billing on FreshBooks" />
               <StatCard
                 label="Outstanding"
