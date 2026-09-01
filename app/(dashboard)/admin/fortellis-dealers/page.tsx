@@ -63,6 +63,7 @@ export default function FortellisDealersPage() {
   const [syncing, setSyncing] = useState<Record<number, boolean>>({});
   const [importing, setImporting] = useState<Record<number, boolean>>({});
   const [health, setHealth] = useState<Health | null>(null);
+  const [usage, setUsage] = useState<{ total: number; vehicle_search: number; month: string } | null>(null);
   const [fleetStatus, setFleetStatus] = useState<FleetStatus | null>(null);
   const [fleetStalled, setFleetStalled] = useState(false);
   const [rowMsg, setRowMsg] = useState<Record<number, { ok: boolean; msg: string } | null>>({});
@@ -80,6 +81,18 @@ export default function FortellisDealersPage() {
     if (res.ok) { const j = await res.json() as { health: Health }; setHealth(j.health); }
   }, []);
   useEffect(() => { void loadHealth(); }, [loadHealth]);
+
+  // Month-to-date API call counts (server-cached ~1h) — the cert-report
+  // obligation to track our own volume; Fortellis won't warn near limits.
+  useEffect(() => {
+    void (async () => {
+      const res = await fetch("/api/admin/fortellis/usage");
+      if (res.ok) {
+        const j = await res.json() as { usage: { total: number; vehicle_search: number; month: string } };
+        setUsage(j.usage);
+      }
+    })();
+  }, []);
 
   // ── Fleet status self-chaining poll ─────────────────────────────────────────
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -214,6 +227,12 @@ export default function FortellisDealersPage() {
       />
 
       <HealthBanner health={health} />
+
+      {usage && (
+        <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
+          API calls this month: {usage.total.toLocaleString()} ({usage.vehicle_search.toLocaleString()} vehicle searches) — UTC calendar month, matches Fortellis&apos;s billing window
+        </p>
+      )}
 
       {fleetStatus && (
         <FleetBanner status={fleetStatus} stalled={fleetStalled} onDismiss={() => void dismissFleetStatus()} />

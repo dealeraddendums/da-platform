@@ -76,6 +76,24 @@ async function runPurgeJob(): Promise<void> {
     `[purge-old-pdfs] PDF purge complete: scanned ${totalScanned} files, deleted ${totalDeleted} files, failed ${totalFailed} files`
   );
 
+  // Fortellis monthly usage rollup — MUST run before the fortellis_api_log
+  // purge below. Persists the prior UTC month's per-endpoint call counts to
+  // admin_settings (Certification Report obligation: Fortellis reports only
+  // monthly totals and won't warn near contracted volume) + sends the monthly
+  // usage email. Idempotent (keyed on the month's admin_settings row), so a
+  // re-run or schedule change never double-sends.
+  try {
+    const { rollupPriorMonthIfNeeded } = await import("@/lib/fortellis-usage");
+    const rollup = await rollupPriorMonthIfNeeded(admin);
+    console.log(
+      rollup.rolledUp
+        ? `[purge-old-pdfs] fortellis usage rollup persisted for ${rollup.monthKey}: ${rollup.counts?.total} calls`
+        : `[purge-old-pdfs] fortellis usage rollup for ${rollup.monthKey} already persisted — skipped`,
+    );
+  } catch (err) {
+    console.error("[purge-old-pdfs] fortellis usage rollup error:", err instanceof Error ? err.message : err);
+  }
+
   // Fortellis certification logs: retain >=60 days, purge >90 days.
   try {
     const logCutoff = new Date();
