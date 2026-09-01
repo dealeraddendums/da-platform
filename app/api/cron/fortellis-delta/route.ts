@@ -81,6 +81,20 @@ async function runDelta(): Promise<void> {
     if (auth401.length) await notify401Dealers(auth401);
 
     console.log(`[fortellis-delta] done: ${dealers.length} dealers, +${added} added, ${updated} updated, ${sold} sold, ${failed} failed`);
+
+    // Contracted-volume watch. This run just generated calls, so it's the right
+    // place to check where the month stands — Fortellis never warns us as we
+    // approach contracted volume. No-op until a cap is entered; emails at most
+    // once per threshold per calendar month.
+    try {
+      const { checkUsageThresholds } = await import("@/lib/fortellis-usage");
+      const r = await checkUsageThresholds(admin);
+      if (r.alerted !== null) {
+        console.log(`[fortellis-delta] usage alert sent: ${r.pct}% of ${r.cap} contracted calls (${r.alerted}% threshold)`);
+      }
+    } catch (err) {
+      console.error("[fortellis-delta] usage threshold check failed:", err instanceof Error ? err.message : err);
+    }
   } catch (err) {
     console.error("[fortellis-delta] run error:", err instanceof Error ? err.message : err);
   } finally {

@@ -13,6 +13,9 @@
 //     survives the 90-day fortellis_api_log purge) and sends the monthly
 //     usage email. Idempotent — keyed on the admin_settings row existing, so
 //     it's safe whether the host cron runs daily or monthly.
+//   - checkUsageThresholds(): compares month-to-date vehicle searches against
+//     the operator-entered contracted volume and emails once per month at each
+//     threshold crossed (80%, 95%). Called from the hourly delta cron.
 //
 // Endpoint classes (by URL, matching lib/fortellis-api.ts constants):
 //   token         — identity.fortellis.io OAuth exchanges
@@ -42,6 +45,22 @@ export interface FortellisMonthCounts {
 
 export const FORTELLIS_COUNTS_KEY_PREFIX = "fortellis_call_counts_";
 
+/** Contracted monthly VEHICLE SEARCH volume (the metered MVS2 calls — token and
+ *  subscription lookups are not what Fortellis meters against the contract).
+ *  Unset until an operator enters it on the Fortellis Dealers tab. */
+export const FORTELLIS_CAP_KEY = "fortellis_contracted_monthly_calls";
+
+/** Per-month record of which usage thresholds have already been emailed.
+ *  Month-scoped, so the flags reset naturally at rollover. */
+export const FORTELLIS_ALERT_KEY_PREFIX = "fortellis_usage_alerts_";
+
+/** Percent-of-cap points that trigger a one-time email each month. */
+export const USAGE_ALERT_THRESHOLDS = [80, 95] as const;
+
+/** Projection is suppressed for the first two days of a month — extrapolating
+ *  from a few hours of traffic produces alarming nonsense. */
+const PROJECTION_MIN_ELAPSED_MS = 48 * 60 * 60 * 1000;
+
 /** UTC calendar-month window. monthOffset 0 = the month containing `now`,
  *  -1 = the prior month. End is exclusive. */
 export function monthRangeUtc(now: Date, monthOffset = 0): { key: string; startIso: string; endIso: string } {
@@ -49,6 +68,46 @@ export function monthRangeUtc(now: Date, monthOffset = 0): { key: string; startI
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset + 1, 1));
   const key = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, "0")}`;
   return { key, startIso: start.toISOString(), endIso: end.toISOString() };
+}
+
+/** Contracted monthly vehicle-search volume, or null when never set. */
+export async function readContractedCap(admin: Admin): Promise<number | null> {
+  const { data } = await admin
+    .from("admin_settings")
+    .select("value")
+    .eq("key", FORTELLIS_CAP_KEY)
+    .maybeSingle<{ value: string }>();
+  const n = Number(data?.value);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
+/** Set (or clear, with null) the contracted monthly vehicle-search volume. */
+export async function writeContractedCap(admin: Admin, cap: number | null): Promise<void> {
+  if (cap === null) {
+    const { error } = await admin.from("admin_settings").delete().eq("key", FORTELLIS_CAP_KEY);
+    if (error) throw new Error(`contracted-volume clear failed: ${error.message}`);
+    return;
+  }
+  const { error } = await admin.from("admin_settings").upsert(
+    { key: FORTELLIS_CAP_KEY, value: String(Math.round(cap)), updated_at: new Date().toISOString() },
+    { onConflict: "key" },
+  );
+  if (error) throw new Error(`contracted-volume save failed: ${error.message}`);
+}
+
+/**
+ * Month-end projection from month-to-date volume, straight-line against the
+ * elapsed fraction of the UTC month. Returns null during the first 48 hours of
+ * a month (too little signal — the number swings wildly).
+ */
+export function projectMonthEnd(mtd: number, now: Date = new Date()): number | null {
+  const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  const elapsedMs = now.getTime() - start;
+  if (elapsedMs < PROJECTION_MIN_ELAPSED_MS) return null;
+  const fraction = elapsedMs / (end - start);
+  if (fraction <= 0) return null;
+  return Math.round(mtd / fraction);
 }
 
 async function countWhere(
@@ -112,13 +171,18 @@ function monthLabel(monthKey: string): string {
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 }
 
-function usageEmailHtml(counts: FortellisMonthCounts, trend: FortellisMonthCounts[]): string {
+function usageEmailHtml(counts: FortellisMonthCounts, trend: FortellisMonthCounts[], cap: number | null): string {
   const row = (label: string, n: number) =>
     `<tr><td style="padding:4px 12px 4px 0;color:#666">${label}</td><td style="text-align:right"><strong>${n.toLocaleString()}</strong></td></tr>`;
   const trendRows = trend
     .map((t) => `<tr><td style="padding:4px 12px 4px 0;color:#666">${monthLabel(t.month)}</td><td style="text-align:right">${t.total.toLocaleString()}</td><td style="text-align:right;color:#666">${t.vehicle_search.toLocaleString()} searches</td></tr>`)
     .join("");
+  const capLine =
+    cap && cap > 0
+      ? `<p style="font-size:14px">Vehicle searches used <strong>${counts.vehicle_search.toLocaleString()} of ${cap.toLocaleString()}</strong> contracted calls — <strong>${Math.round((counts.vehicle_search / cap) * 100)}%</strong>.</p>`
+      : `<p style="font-size:13px;color:#888">Contracted monthly volume is not set — enter it on the Fortellis Dealers tab to track usage against the contract.</p>`;
   return `<p><strong>Fortellis API usage — ${monthLabel(counts.month)}</strong> (UTC calendar month, from fortellis_api_log)</p>
+${capLine}
 <table style="font-family:sans-serif;font-size:14px;border-collapse:collapse">
   ${row("Vehicle search (MVS2)", counts.vehicle_search)}
   ${row("Token exchanges", counts.token)}
@@ -168,9 +232,13 @@ export async function rollupPriorMonthIfNeeded(
       const persisted = prior === monthKey ? counts : await readPersistedMonth(admin, prior);
       if (persisted) trend.push(persisted);
     }
+    // Best-available cap: the current setting. Contracted volume isn't
+    // versioned historically, so a mid-stream contract change would label the
+    // prior month with the new number — acceptable for a monthly digest.
+    const cap = await readContractedCap(admin).catch(() => null);
     await sendMandrillEmail({
       subject: `Fortellis API usage — ${monthLabel(monthKey)}: ${counts.total.toLocaleString()} calls`,
-      html: usageEmailHtml(counts, trend),
+      html: usageEmailHtml(counts, trend, cap),
       from_email: "noreply@dealeraddendums.com",
       from_name: "DA Platform",
       to: [
@@ -183,4 +251,95 @@ export async function rollupPriorMonthIfNeeded(
   }
 
   return { rolledUp: true, monthKey, counts };
+}
+
+// ── Threshold alerts ─────────────────────────────────────────────────────────
+// Fortellis reports only monthly totals and will never warn us as we approach
+// contracted volume, so we warn ourselves. Checked from the hourly delta cron
+// (it's the thing generating the calls) rather than a cron of its own.
+
+interface AlertState { [threshold: string]: string } // threshold → ISO sent-at
+
+async function readAlertState(admin: Admin, alertKey: string): Promise<AlertState> {
+  const { data } = await admin
+    .from("admin_settings")
+    .select("value")
+    .eq("key", alertKey)
+    .maybeSingle<{ value: string }>();
+  if (!data?.value) return {};
+  try {
+    const parsed: unknown = JSON.parse(data.value);
+    return parsed && typeof parsed === "object" ? (parsed as AlertState) : {};
+  } catch { return {}; }
+}
+
+function thresholdEmailHtml(
+  threshold: number,
+  pct: number,
+  used: number,
+  cap: number,
+  projected: number | null,
+  monthKey: string,
+): string {
+  return `<p><strong>Fortellis vehicle-search volume is at ${pct}% of contracted capacity.</strong></p>
+<p style="font-size:15px">${used.toLocaleString()} of ${cap.toLocaleString()} contracted calls used in ${monthLabel(monthKey)} (UTC calendar month — Fortellis's billing window).</p>
+${projected !== null ? `<p style="font-size:14px">At the current rate this month ends near <strong>${projected.toLocaleString()}</strong> calls${projected > cap ? ` — <strong style="color:#c62828">over contract by ${(projected - cap).toLocaleString()}</strong>` : ""}.</p>` : ""}
+<p style="font-size:13px;color:#666">Counted from fortellis_api_log; vehicle searches only (token exchanges and subscription lookups are excluded). The ${threshold}% alert sends once per calendar month.</p>
+<p style="color:#888;font-size:12px;margin-top:14px">Fortellis does not warn integrators approaching contracted volume — this alert is DA's own tracking, per the signed Certification Report obligation.</p>`;
+}
+
+/**
+ * Check month-to-date vehicle-search volume against the contracted cap and
+ * send a one-per-month email at each threshold crossed. No-op when the cap is
+ * unset. When a single check crosses several thresholds at once (e.g. the cap
+ * was lowered), one email goes out for the highest and all crossed thresholds
+ * are marked sent — no duplicate warnings for the same event.
+ *
+ * The email is sent BEFORE the sent-flag is persisted: a Mandrill failure
+ * leaves the flag unset so the next hourly run retries, which matters more
+ * here than the rare duplicate a persist failure would cause.
+ */
+export async function checkUsageThresholds(
+  admin: Admin,
+  now: Date = new Date(),
+): Promise<{ alerted: number | null; pct: number | null; cap: number | null }> {
+  const cap = await readContractedCap(admin);
+  if (!cap) return { alerted: null, pct: null, cap: null };
+
+  const { key: monthKey, startIso, endIso } = monthRangeUtc(now, 0);
+  const counts = await countFortellisCalls(admin, monthKey, startIso, endIso);
+  const used = counts.vehicle_search;
+  const pct = Math.round((used / cap) * 100);
+
+  const alertKey = `${FORTELLIS_ALERT_KEY_PREFIX}${monthKey}`;
+  const state = await readAlertState(admin, alertKey);
+  const crossed = USAGE_ALERT_THRESHOLDS.filter((t) => pct >= t && !state[String(t)]);
+  if (crossed.length === 0) return { alerted: null, pct, cap };
+
+  const highest = Math.max(...crossed);
+  await sendMandrillEmail({
+    subject: `Fortellis usage at ${pct}% of contracted volume — ${used.toLocaleString()}/${cap.toLocaleString()}`,
+    html: thresholdEmailHtml(highest, pct, used, cap, projectMonthEnd(used, now), monthKey),
+    from_email: "noreply@dealeraddendums.com",
+    from_name: "DA Platform",
+    to: [
+      { email: "allan@dealeraddendums.com", name: "Allan Tone" },
+      { email: process.env.SUPPORT_NOTIFICATION_EMAIL ?? "support@dealeraddendums.com", name: "DA Support" },
+    ],
+  });
+
+  const stamp = now.toISOString();
+  for (const t of crossed) state[String(t)] = stamp;
+  const { error } = await admin.from("admin_settings").upsert(
+    { key: alertKey, value: JSON.stringify(state), updated_at: stamp },
+    { onConflict: "key" },
+  );
+  if (error) {
+    console.error(
+      `[fortellis-usage] threshold alert sent but flag persist FAILED (${alertKey}) — may re-send next run:`,
+      error.message,
+    );
+  }
+
+  return { alerted: highest, pct, cap };
 }

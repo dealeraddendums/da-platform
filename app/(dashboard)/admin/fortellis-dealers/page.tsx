@@ -43,6 +43,17 @@ interface FleetStatus {
 
 interface Health { state: "up" | "down"; since?: string; last_error?: string; last_ok_at?: string }
 
+interface UsageCounts {
+  month: string;
+  total: number;
+  token: number;
+  subscriptions: number;
+  vehicle_search: number;
+  ping: number;
+  other: number;
+}
+interface UsageResponse { usage: UsageCounts; cap: number | null; projected: number | null }
+
 const inp: React.CSSProperties = { width: "100%", padding: "8px 10px", height: 36, border: "1px solid #e0e0e0", borderRadius: 6, background: "#fff", fontSize: 13, color: "#333" };
 const lbl: React.CSSProperties = { display: "block", fontSize: 11, fontWeight: 600, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 };
 
@@ -63,7 +74,7 @@ export default function FortellisDealersPage() {
   const [syncing, setSyncing] = useState<Record<number, boolean>>({});
   const [importing, setImporting] = useState<Record<number, boolean>>({});
   const [health, setHealth] = useState<Health | null>(null);
-  const [usage, setUsage] = useState<{ total: number; vehicle_search: number; month: string } | null>(null);
+  const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [fleetStatus, setFleetStatus] = useState<FleetStatus | null>(null);
   const [fleetStalled, setFleetStalled] = useState(false);
   const [rowMsg, setRowMsg] = useState<Record<number, { ok: boolean; msg: string } | null>>({});
@@ -82,17 +93,14 @@ export default function FortellisDealersPage() {
   }, []);
   useEffect(() => { void loadHealth(); }, [loadHealth]);
 
-  // Month-to-date API call counts (server-cached ~1h) — the cert-report
-  // obligation to track our own volume; Fortellis won't warn near limits.
-  useEffect(() => {
-    void (async () => {
-      const res = await fetch("/api/admin/fortellis/usage");
-      if (res.ok) {
-        const j = await res.json() as { usage: { total: number; vehicle_search: number; month: string } };
-        setUsage(j.usage);
-      }
-    })();
+  // Month-to-date API call counts vs contracted volume (counts server-cached
+  // ~1h, cap read fresh) — the cert-report obligation to track our own volume;
+  // Fortellis won't warn as we approach the contracted amount.
+  const loadUsage = useCallback(async () => {
+    const res = await fetch("/api/admin/fortellis/usage", { cache: "no-store" });
+    if (res.ok) setUsage(await res.json() as UsageResponse);
   }, []);
+  useEffect(() => { void loadUsage(); }, [loadUsage]);
 
   // ── Fleet status self-chaining poll ─────────────────────────────────────────
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -228,11 +236,7 @@ export default function FortellisDealersPage() {
 
       <HealthBanner health={health} />
 
-      {usage && (
-        <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
-          API calls this month: {usage.total.toLocaleString()} ({usage.vehicle_search.toLocaleString()} vehicle searches) — UTC calendar month, matches Fortellis&apos;s billing window
-        </p>
-      )}
+      {usage && <UsageMeter data={usage} onSaved={() => void loadUsage()} />}
 
       {fleetStatus && (
         <FleetBanner status={fleetStatus} stalled={fleetStalled} onDismiss={() => void dismissFleetStatus()} />
@@ -333,6 +337,122 @@ function CopyChip({ text }: { text: string }) {
     >
       {copied ? "✓ copied" : "⧉ copy"}
     </button>
+  );
+}
+
+// ── Contracted-volume usage meter ─────────────────────────────────────────────
+// Fortellis reports only monthly totals and never warns as we near contracted
+// volume, so this is DA's own gauge (Certification Report obligation). Metered
+// against VEHICLE SEARCHES — token and subscription calls are not what counts
+// toward the contract.
+function UsageMeter({ data, onSaved }: { data: UsageResponse; onSaved: () => void }) {
+  const { usage, cap, projected } = data;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const used = usage.vehicle_search;
+  const pct = cap ? Math.round((used / cap) * 100) : null;
+  // Amber at 70%, red at 90% — the platform badge palette, no new colors.
+  const barColor = pct === null ? "#1976d2" : pct >= 90 ? "#c62828" : pct >= 70 ? "#ffa500" : "#1976d2";
+
+  const breakdown = `${usage.token.toLocaleString()} token · ${usage.subscriptions.toLocaleString()} subscriptions`
+    + (usage.ping ? ` · ${usage.ping.toLocaleString()} ping` : "")
+    + (usage.other ? ` · ${usage.other.toLocaleString()} other` : "");
+
+  async function save(next: string) {
+    setSaving(true); setErr(null);
+    const value = next.trim();
+    const res = await fetch("/api/admin/fortellis/usage", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cap: value === "" ? null : Number(value.replace(/,/g, "")) }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({})) as { error?: string };
+      setErr(j.error ?? "Save failed");
+      return;
+    }
+    setEditing(false);
+    onSaved();
+  }
+
+  return (
+    <div className="card p-4 mb-4">
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 14, color: "var(--text-primary)" }}>
+          {cap ? (
+            <>
+              <strong>{used.toLocaleString()}</strong> of <strong>{cap.toLocaleString()}</strong> contracted calls
+              {" — "}
+              <strong style={{ color: barColor }}>{pct}%</strong>
+            </>
+          ) : (
+            <>
+              <strong>{used.toLocaleString()}</strong> vehicle searches this month
+              <span style={{ marginLeft: 8, fontSize: 12, color: "var(--text-muted)" }}>contracted volume not set</span>
+            </>
+          )}
+        </div>
+        {!editing && (
+          <button
+            className="text-xs"
+            style={{ color: "var(--blue)", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+            onClick={() => { setDraft(cap ? String(cap) : ""); setErr(null); setEditing(true); }}
+          >
+            {cap ? "edit contracted volume" : "set contracted volume"}
+          </button>
+        )}
+      </div>
+
+      {cap && (
+        <div style={{ marginTop: 8, height: 8, borderRadius: 4, background: "#f0f0f0", overflow: "hidden" }}>
+          <div style={{ width: `${Math.min(100, pct ?? 0)}%`, height: "100%", background: barColor, transition: "width .3s" }} />
+        </div>
+      )}
+
+      {cap && projected !== null && (
+        <p className="text-xs" style={{ marginTop: 6, color: projected > cap ? "#c62828" : "var(--text-secondary)" }}>
+          On pace for ~{projected.toLocaleString()} by month end
+          {projected > cap ? ` — ${(projected - cap).toLocaleString()} over contract` : ""}
+        </p>
+      )}
+
+      <p className="text-xs" style={{ marginTop: 6, color: "var(--text-muted)" }} title={breakdown}>
+        {usage.total.toLocaleString()} total API calls this month ({breakdown}) — UTC calendar month, matches Fortellis&apos;s billing window
+      </p>
+
+      {editing && (
+        <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <label style={{ ...lbl, marginBottom: 0 }}>Contracted vehicle searches / month</label>
+          <input
+            type="number"
+            min={1}
+            value={draft}
+            autoFocus
+            disabled={saving}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") void save(draft); if (e.key === "Escape") setEditing(false); }}
+            style={{ ...inp, width: 140, height: 32 }}
+            placeholder="e.g. 25000"
+          />
+          <button className="btn btn-primary" style={{ padding: "6px 14px", fontSize: 12 }} disabled={saving} onClick={() => void save(draft)}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+          <button className="text-xs" style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }} disabled={saving} onClick={() => setEditing(false)}>
+            Cancel
+          </button>
+          {cap && (
+            <button className="text-xs" style={{ color: "var(--error)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }} disabled={saving} onClick={() => void save("")}>
+              Clear
+            </button>
+          )}
+          {err && <span className="text-xs" style={{ color: "var(--error)" }}>{err}</span>}
+        </div>
+      )}
+    </div>
   );
 }
 
