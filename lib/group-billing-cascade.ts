@@ -19,6 +19,7 @@ import {
   deleteTemplate,
   getTemplate,
   putTemplate,
+  searchCustomers,
   subscriptionDescriptorFor,
   type BillingProduct,
 } from "@/lib/billing";
@@ -62,19 +63,72 @@ function dealerCustomerKey(d: DealerSnap): string | null {
   return d.billing_customer_id ?? d.internal_id ?? null;
 }
 
+/**
+ * Resolve the da-billing customer that a group's subscription lines belong on.
+ *
+ * `groups.billing_customer_id` is NOT trusted on sight. It can point at a
+ * customer that does not exist in da-billing (StarShield Solutions, found
+ * 2026-09-01: the column held a UUID that had never been a customer, while
+ * the group's real 39-line template lived on a different customer entirely).
+ * A phantom id here is worse than a null one — every cascade "succeeds"
+ * against nothing, so the dealer's line lands on an orphan template that can
+ * never invoice, and the group's real template silently misses the member.
+ *
+ * Resolution order, each step verified against da-billing before it is used:
+ *   1. billing_customer_id, if the customer actually exists
+ *   2. billing_id (the FreshBooks-era link), if it resolves — heal the column
+ *   3. an existing active customer whose company/name matches the group name
+ *      exactly — heal the column (link-don't-duplicate)
+ *   4. create a new group customer — heal the column
+ */
 async function ensureGroupCustomer(
   admin: ReturnType<typeof createAdminSupabaseClient>,
   group: GroupSnap,
 ): Promise<string | null> {
-  if (group.billing_customer_id) return group.billing_customer_id;
+  const heal = async (customerId: string, via: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any).from("groups").update({ billing_customer_id: customerId }).eq("id", group.id);
+    console.warn(
+      `[ensureGroupCustomer] group ${group.id} (${group.name}) billing_customer_id ${group.billing_customer_id ?? "null"} did not resolve — healed to ${customerId} via ${via}`,
+    );
+    return customerId;
+  };
+
+  if (group.billing_customer_id) {
+    if (await customerExists(group.billing_customer_id)) return group.billing_customer_id;
+    console.warn(
+      `[ensureGroupCustomer] group ${group.id} (${group.name}) has a STALE billing_customer_id (${group.billing_customer_id}) — no such da-billing customer; re-resolving`,
+    );
+  }
+
   // Link-don't-duplicate: a migrated group already carries its da-billing
   // customer UUID in billing_id. If it still resolves, link it instead of
   // creating a duplicate.
   if (group.billing_id && (await customerExists(group.billing_id))) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any).from("groups").update({ billing_customer_id: group.billing_id }).eq("id", group.id);
-    return group.billing_id;
+    return heal(group.billing_id, "billing_id");
   }
+
+  // Exact company/name match on an active customer. searchCustomers is a
+  // substring search, so require an exact (trimmed, case-insensitive) hit
+  // and exactly one candidate — anything fuzzier is the collision-prone
+  // auto-link this codebase deliberately avoids elsewhere.
+  const wanted = (group.name ?? "").trim().toLowerCase();
+  if (wanted) {
+    try {
+      const matches = (await searchCustomers(group.name)).filter(
+        m => (m.company ?? "").trim().toLowerCase() === wanted || (m.name ?? "").trim().toLowerCase() === wanted,
+      );
+      if (matches.length === 1) return heal(matches[0].id, "exact name match");
+      if (matches.length > 1) {
+        console.warn(
+          `[ensureGroupCustomer] group ${group.id} (${group.name}) matched ${matches.length} da-billing customers by name — not auto-linking, creating a new one`,
+        );
+      }
+    } catch (err) {
+      console.warn(`[ensureGroupCustomer] searchCustomers failed for group ${group.id} (${group.name}):`, err);
+    }
+  }
+
   const created = await createCustomer({
     name: group.name,
     company: group.name,
