@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { lastSignInByEmail } from "@/lib/last-sign-in";
+import { lastSignInByEmail, lastSignInByEmailStrict } from "@/lib/last-sign-in";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 import { buildGroupAdminMigrationInviteEmail } from "@/lib/invite-email";
 import { sendMandrillEmail } from "@/lib/mandrill";
@@ -41,14 +41,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .eq("group_id", groupId)
     .eq("role", "group_admin");
 
-  const signIns = await lastSignInByEmail();
+  // Two signals, deliberately distinct (see lib/last-sign-in.ts):
+  //   strict  = "can this human log in to 5.0 RIGHT NOW" — impersonation-,
+  //             recovery- and forced-reset-excluded, NO legacy fallback.
+  //   display = "last seen", which for an impersonation-polluted account falls
+  //             back to the 4.0-era Aurora profiles.last_login.
+  // Gate A and the invite/skip decision MUST use strict. Using display here is
+  // what showed Straub's michaelh@ as "Active ✓ · signed in 1/28/2024" — a 4.0
+  // Aurora stamp from 27 months before his auth user even existed — and let the
+  // group migrate on a premise no admin could actually satisfy (2026-09-01).
+  const [signIns, seen] = await Promise.all([lastSignInByEmailStrict(), lastSignInByEmail()]);
   const admins = ((profiles ?? []) as { id: string; email: string | null; full_name: string | null; active: boolean | null }[])
     .filter((p) => p.email)
     .map((p) => {
       const email = (p.email as string).toLowerCase();
       const hasAuth = signIns.has(email);
       const lastSignIn = signIns.get(email) ?? null;
-      return { id: p.id, email, full_name: p.full_name, active: p.active !== false, has_auth: hasAuth, last_sign_in: lastSignIn };
+      const lastSeen = seen.get(email) ?? null;
+      return {
+        id: p.id, email, full_name: p.full_name, active: p.active !== false,
+        has_auth: hasAuth,
+        last_sign_in: lastSignIn,
+        // Only surfaced when it ISN'T a verified 5.0 login, so the modal can say
+        // "last seen X" honestly instead of dressing it up as a sign-in.
+        last_seen: lastSignIn ? null : lastSeen,
+      };
     });
 
   // Pending group_admin invitations (not accepted, not expired).
@@ -99,7 +116,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .from("dealers").select("id", { count: "exact", head: true })
     .eq("group_id", groupId).eq("active", true);
 
-  const signIns = await lastSignInByEmail();
+  // STRICT: an admin whose only "sign-in" is an impersonation mint, a consumed
+  // recovery link, or who is still pinned to /reset-password has no working
+  // credentials and MUST remain invitable.
+  const signIns = await lastSignInByEmailStrict();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com";
   const results: Array<{ email: string; status: "sent" | "skipped" | "error"; detail?: string }> = [];
 

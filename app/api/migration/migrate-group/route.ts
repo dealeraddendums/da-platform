@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { loadReadinessRows } from "@/lib/migration-readiness-data";
-import { lastSignInByEmail } from "@/lib/last-sign-in";
+import { lastSignInByEmailStrict } from "@/lib/last-sign-in";
 import { migrateDealerRecord, futureNextInvoice } from "@/lib/migrate-dealer";
 import { billingConfigured, getTemplate, activateTemplate, setBillingState } from "@/lib/billing";
 import { fireGroupSync } from "@/lib/sync-hubspot";
@@ -60,12 +60,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .select("email, active")
     .eq("group_id", groupId)
     .eq("role", "group_admin");
-  const signIns = await lastSignInByEmail();
+  // STRICT, not the display map: the display map falls back to the 4.0-era
+  // Aurora profiles.last_login for impersonation-polluted accounts, so a group
+  // whose admin had merely been impersonated read as "signed in" on a 2024 date
+  // and satisfied this gate (Straub Automotive Group, 2026-09-01). Strict also
+  // excludes consumed-recovery stamps and users still pinned to /reset-password.
+  const signIns = await lastSignInByEmailStrict();
   const activeAdmin = ((adminProfiles ?? []) as { email: string | null; active: boolean | null }[])
     .some((p) => p.email && p.active !== false && signIns.get(p.email.toLowerCase()));
   if (!activeAdmin) {
     return NextResponse.json({
-      error: "No group admin has signed in to 5.0 yet. Invite an admin (Invite admins…) and wait for their first sign-in before migrating the group.",
+      error: "No group admin has completed a real sign-in to 5.0 yet. Impersonating an admin, a consumed password-reset link, and a 4.0-era login do NOT count. Invite an admin (Invite admins…) and wait for their first real sign-in before migrating the group.",
     }, { status: 409 });
   }
 

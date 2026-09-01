@@ -1047,7 +1047,11 @@ export default function MigrationConsole() {
 }
 
 // ── Group-admin invite modal ─────────────────────────────────────────────────
-type AdminCandidate = { id: string; email: string; full_name: string | null; active: boolean; has_auth: boolean; last_sign_in: string | null };
+// last_sign_in = VERIFIED 5.0 login (strict: impersonation-, recovery- and
+// forced-reset-excluded). last_seen = a softer "last seen" stamp that may be a
+// 4.0-era Aurora login; only sent when last_sign_in is null, and never shown as
+// a sign-in. Gate A keys off last_sign_in alone.
+type AdminCandidate = { id: string; email: string; full_name: string | null; active: boolean; has_auth: boolean; last_sign_in: string | null; last_seen?: string | null };
 type AdminsResp = {
   group: { id: string; name: string };
   admins: AdminCandidate[];
@@ -1061,6 +1065,15 @@ const modalBox: React.CSSProperties = { background: "#fff", borderRadius: 8, pad
 
 function adminStatusChip(a: AdminCandidate): React.ReactNode {
   if (a.last_sign_in) return <span style={{ fontSize: 11, fontWeight: 700, color: "#2e7d32" }}>Active ✓ · signed in {new Date(a.last_sign_in).toLocaleDateString()}</span>;
+  // A stamp exists but isn't a verified 5.0 login (impersonation mint, consumed
+  // recovery link, or a 4.0-era Aurora last_login). Say so rather than dressing
+  // it up as a sign-in — that misread migrated Straub on a 2024 date.
+  if (a.last_seen) return (
+    <span style={{ fontSize: 11, fontWeight: 700, color: "#b06a00", textAlign: "right" }}>
+      Not signed in to 5.0
+      <span style={{ display: "block", fontWeight: 400, color: "#78828c" }}>last seen {new Date(a.last_seen).toLocaleDateString()} — not a 5.0 login</span>
+    </span>
+  );
   if (a.has_auth) return <span style={{ fontSize: 11, fontWeight: 700, color: "#b06a00" }}>Has login · never signed in — can re-invite</span>;
   return <span style={{ fontSize: 11, fontWeight: 700, color: "#c62828" }}>No 5.0 login</span>;
 }
@@ -1118,7 +1131,7 @@ function InviteAdminsModal({ group, onClose }: { group: { id: string; name: stri
       <div style={modalBox} onClick={(e) => e.stopPropagation()}>
         <div style={{ fontSize: 16, fontWeight: 700, color: NAVY, marginBottom: 4 }}>Invite admins — {group.name}</div>
         <p style={{ fontSize: 12, color: "#78828c", margin: "0 0 14px" }}>
-          Sends the scanner-proof 5.0 setup invite (8-digit code). Migrating the group requires at least one admin to have signed in.
+          Sends the scanner-proof 5.0 setup invite (8-digit code). Migrating the group requires at least one admin to have completed a real 5.0 sign-in — impersonating an admin or a consumed password-reset link does not count.
         </p>
         {loadErr && <div style={{ color: "#c62828", fontSize: 13 }}>{loadErr}</div>}
         {!info && !loadErr && <div style={{ color: "#78828c", fontSize: 13 }}>Loading…</div>}
@@ -1130,10 +1143,13 @@ function InviteAdminsModal({ group, onClose }: { group: { id: string; name: stri
               </div>
             )}
             {info.admins.map((a) => (
-              // Only a user who has actually SIGNED IN is non-selectable — they
-              // already have working credentials. "Has an auth user but never
-              // signed in" is invitable (the common case for shuffled legacy
-              // admins who don't know their credentials).
+              // Only a user with a VERIFIED 5.0 sign-in is non-selectable — they
+              // already have working credentials. Everything else is invitable:
+              // "has an auth user but never signed in" (shuffled legacy admins)
+              // AND "has a stamp that isn't a real login" (impersonation mint,
+              // consumed recovery link, 4.0-era last_login). The latter used to
+              // be disabled here, so the one admin who most needed an invite
+              // could not be selected (Straub, 2026-09-01).
               <label key={a.email} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 4px", borderBottom: "1px solid #f0f0f0", cursor: a.last_sign_in ? "default" : "pointer" }}>
                 <input type="checkbox" disabled={!!a.last_sign_in} checked={checked.has(a.email)} onChange={() => toggle(a.email)} />
                 <span style={{ flex: 1, minWidth: 0 }}>
@@ -1267,8 +1283,8 @@ function MigrateGroupModal({ group, memberRows, onClose, onMigrated }: {
             <div style={{ fontSize: 13, marginBottom: 4, fontWeight: 700, color: "#55595c" }}>Checklist</div>
             <div style={{ fontSize: 13, padding: "5px 0", borderBottom: "1px solid #f0f0f0" }}>
               {adminInfo == null ? "… checking group admin logins" : adminOk
-                ? <span style={{ color: "#2e7d32" }}>✓ A group admin has an active 5.0 login</span>
-                : <span style={{ color: "#c62828" }}>✗ No group admin has signed in to 5.0 yet — use “Invite admins…” first, then wait for their first sign-in</span>}
+                ? <span style={{ color: "#2e7d32" }}>✓ A group admin has completed a real 5.0 sign-in</span>
+                : <span style={{ color: "#c62828" }}>✗ No group admin has completed a real 5.0 sign-in — impersonating one, a consumed password-reset link, and a 4.0-era login don’t count. Use “Invite admins…”, then wait for their first real sign-in</span>}
             </div>
             {memberChecks.map((m) => (
               <div key={m.name} style={{ fontSize: 13, padding: "5px 0", borderBottom: "1px solid #f0f0f0" }}>

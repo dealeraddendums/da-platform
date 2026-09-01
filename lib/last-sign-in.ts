@@ -33,6 +33,13 @@ const IMPERSONATION_WINDOW_MS = 10 * 60_000;
 // log in; the STRICT map excludes it (display keeps it — "last seen" is fine).
 // Any later real login moves the stamp out of the window and counts again.
 const RECOVERY_WINDOW_MS = 30 * 60_000;
+// FORCED-RESET EXCLUSION (2026-09-01, Straub / michaelh@): middleware pins any
+// session whose app_metadata.force_password_reset is true to /reset-password —
+// such a user cannot reach the dashboard at all, and completing a real sign-in
+// clears the flag (POST /api/auth/clear-force-reset). So the flag being STILL
+// SET is direct, non-heuristic proof the human has never completed a login,
+// whatever last_sign_in_at says. Unlike the two time-window rules above this
+// one cannot produce a false negative: a working login always clears it.
 
 /**
  * Resolve an existing auth user's id by email via the GoTrue admin API. Used by
@@ -116,6 +123,7 @@ async function buildSignInMaps(): Promise<{ display: Map<string, string | null>;
   const admin = createAdminSupabaseClient();
   const raw = new Map<string, string | null>();
   const recoverySent = new Map<string, number>();
+  const forceReset = new Set<string>();
   for (let page = 1; ; page++) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
     if (error) {
@@ -130,6 +138,9 @@ async function buildSignInMaps(): Promise<{ display: Map<string, string | null>;
       if (rec) {
         const ms = Date.parse(rec);
         if (!Number.isNaN(ms)) recoverySent.set(u.email.toLowerCase(), ms);
+      }
+      if ((u.app_metadata as { force_password_reset?: boolean } | undefined)?.force_password_reset === true) {
+        forceReset.add(u.email.toLowerCase());
       }
     }
     if (users.length < 1000) break;
@@ -156,6 +167,9 @@ async function buildSignInMaps(): Promise<{ display: Map<string, string | null>;
     const signInMs = Date.parse(signIn);
     if (signInMs >= sentMs && signInMs - sentMs <= RECOVERY_WINDOW_MS) strict.set(email, null);
   });
+  // STRICT-only: a still-set force_password_reset flag means the human is
+  // pinned to /reset-password and has never completed a login (see header).
+  forceReset.forEach((email: string) => strict.set(email, null));
 
   if (polluted.length > 0) {
     // Display map only: best-effort fallback to legacy profiles.last_login for
