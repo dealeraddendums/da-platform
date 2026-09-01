@@ -825,3 +825,50 @@ export function subscriptionTierLabel(accountType: string | null | undefined): s
   const trimmed = accountType.split(" $")[0].trim();
   return SUBSCRIPTION_TIER_LABELS[trimmed] ?? "Free";
 }
+
+// ── Fleet billing summary (super_admin Billing mini-dashboard) ───────────────
+// GET /reports/summary on da-billing — mrr is the same run-rate the BI tab's
+// gross-billable call reports; past_due uses the billing-status print-lock
+// aging per customer. Cached in-module for 5 minutes (same idiom as the
+// pricing cache above); returns null on ANY failure — misconfigured key,
+// network error, non-200, bad shape — so the Billing page renders a degraded
+// "open da-billing directly" state instead of erroring. Never throws.
+
+export interface BillingSummary {
+  mrr: number;
+  active_customers: number;
+  setup_mode_customers: number;
+  past_due: { count: number; outstanding_total: number };
+  invoices_this_month: { generated: number; sent: number; paid: number };
+}
+
+let summaryCache: { fetchedAt: number; summary: BillingSummary } | null = null;
+const SUMMARY_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export async function getBillingSummary(): Promise<BillingSummary | null> {
+  const now = Date.now();
+  if (summaryCache && now - summaryCache.fetchedAt < SUMMARY_TTL_MS) {
+    return summaryCache.summary;
+  }
+  if (!billingConfigured()) return null;
+  try {
+    const res = await fetch(`${BASE}/reports/summary`, {
+      headers: authHeaders(),
+      cache: "no-store", // module cache above owns freshness
+      signal: AbortSignal.timeout(5000), // page must render even if da-billing hangs
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as BillingSummary;
+    if (
+      typeof data?.mrr !== "number" ||
+      typeof data?.past_due?.count !== "number" ||
+      typeof data?.invoices_this_month?.generated !== "number"
+    ) {
+      return null;
+    }
+    summaryCache = { fetchedAt: now, summary: data };
+    return data;
+  } catch {
+    return null;
+  }
+}
