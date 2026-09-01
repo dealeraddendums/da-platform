@@ -31,7 +31,39 @@ type FlaggedVehicle = {
   date_added: string;
 };
 
-type SubTab = "status" | "overrides" | "flagged";
+type SubTab = "status" | "overrides" | "flagged" | "usage";
+
+type UsageTopDealer = {
+  dealer_id: string;
+  dealer_name?: string;
+  decode_count: number;
+  success_count: number;
+  top_source: string | null;
+  last_decode_at: string | null;
+};
+
+type UsageResponse = {
+  days: number;
+  daily: { day: string; count: number; successes: number }[];
+  summary: {
+    last7: number;
+    last30: number;
+    success30: number;
+    top_source_30: string | null;
+    first_at: string | null;
+  };
+  top_dealers: UsageTopDealer[];
+};
+
+const SOURCE_LABEL: Record<string, string> = {
+  override: "Override",
+  pattern: "Local pattern",
+  vpic: "Live vPIC",
+  dealer_vehicles: "Prior entry",
+  wmi_partial: "WMI only",
+  failed: "Failed",
+  vpic_direct: "Mobile vPIC",
+};
 
 const INPUT_STYLE: React.CSSProperties = {
   width: "100%", height: 36, border: "1px solid #e0e0e0",
@@ -62,14 +94,14 @@ export default function DecoderPage() {
       <div className="mb-5">
         <h1 className="text-xl font-semibold" style={{ color: "var(--text-inverse)" }}>VIN Decoder Management</h1>
         <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.6)" }}>
-          NHTSA vPIC database, admin overrides, and flagged decodes
+          NHTSA vPIC database, admin overrides, flagged decodes, and usage stats
         </p>
       </div>
 
       {/* Sub-tabs */}
       <div className="card overflow-hidden">
         <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-          {(["status", "overrides", "flagged"] as SubTab[]).map((t) => (
+          {(["status", "overrides", "flagged", "usage"] as SubTab[]).map((t) => (
             <button key={t} onClick={() => setSubTab(t)}
               style={{
                 padding: "10px 20px", border: "none", background: "none", fontSize: 13,
@@ -78,7 +110,7 @@ export default function DecoderPage() {
                 borderBottom: subTab === t ? "2px solid #1976d2" : "2px solid transparent",
                 textTransform: "capitalize",
               }}>
-              {t === "status" ? "Database Status" : t === "overrides" ? "Overrides" : "Flagged Decodes"}
+              {t === "status" ? "Database Status" : t === "overrides" ? "Overrides" : t === "flagged" ? "Flagged Decodes" : "Usage"}
             </button>
           ))}
         </div>
@@ -87,6 +119,7 @@ export default function DecoderPage() {
           {subTab === "status" && <StatusTab />}
           {subTab === "overrides" && <OverridesTab />}
           {subTab === "flagged" && <FlaggedTab />}
+          {subTab === "usage" && <UsageTab />}
         </div>
       </div>
     </div>
@@ -445,6 +478,163 @@ function FlaggedTab() {
                     Create Override
                   </button>
                 </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ── Usage Tab ─────────────────────────────────────────────────────────────────
+
+function UsageTab() {
+  const [data, setData] = useState<UsageResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(60);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await fetch(`/api/admin/decoder-usage?days=${days}`);
+    if (res.ok) setData(await res.json());
+    setLoading(false);
+  }, [days]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading && !data) return <p style={{ color: "var(--text-muted)", fontSize: 14 }}>Loading...</p>;
+  if (!data) return <p style={{ color: "var(--text-muted)", fontSize: 14 }}>Failed to load usage stats.</p>;
+
+  const { summary, top_dealers: topDealers } = data;
+  const successRate30 = summary.last30 > 0 ? Math.round((summary.success30 / summary.last30) * 100) : null;
+
+  const summaryCards = [
+    { label: "Decodes — Last 7 Days", value: summary.last7.toLocaleString() },
+    { label: "Decodes — Last 30 Days", value: summary.last30.toLocaleString() },
+    { label: "Success Rate (30d)", value: successRate30 != null ? `${successRate30}%` : "—" },
+    { label: "Top Source (30d)", value: summary.top_source_30 ? (SOURCE_LABEL[summary.top_source_30] ?? summary.top_source_30) : "—" },
+  ];
+
+  // Build a continuous day axis (zero-filled) for the chart.
+  const byDay = new Map(data.daily.map((d) => [d.day, d]));
+  const chartDays: { day: string; count: number; successes: number }[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const dt = new Date();
+    dt.setDate(dt.getDate() - i);
+    const key = dt.toISOString().slice(0, 10);
+    const row = byDay.get(key);
+    chartDays.push({ day: key, count: row?.count ?? 0, successes: row?.successes ?? 0 });
+  }
+  const maxCount = Math.max(1, ...chartDays.map((d) => d.count));
+
+  // Inline SVG bar chart — deliberately no chart dependency for one graph.
+  const W = 900, H = 160, PAD = 4;
+  const barW = (W - PAD * 2) / chartDays.length;
+
+  const trackingBegan = summary.first_at
+    ? new Date(summary.first_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+    : null;
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+          VIN decode activity across the web Add Vehicle modal and the mobile scanner.
+          {trackingBegan
+            ? ` Usage tracking began ${trackingBegan} — no earlier data exists.`
+            : " Usage tracking just went live — stats accrue from here forward."}
+        </p>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[30, 60, 90].map((d) => (
+            <button key={d} onClick={() => setDays(d)}
+              style={{
+                height: 30, padding: "0 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                borderRadius: 4, border: "1px solid " + (days === d ? "#1976d2" : "#e0e0e0"),
+                background: days === d ? "#1976d2" : "#fff",
+                color: days === d ? "#fff" : "var(--text-secondary)",
+              }}>
+              {d}d
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
+        {summaryCards.map((c) => (
+          <div key={c.label} style={{ background: "var(--bg-subtle)", border: "1px solid var(--border)", borderRadius: 6, padding: "12px 16px" }}>
+            <p style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 4 }}>{c.label}</p>
+            <p style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>{c.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Usage over time */}
+      <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 10 }}>
+        Usage Over Time (last {days} days)
+      </p>
+      <div style={{ background: "var(--bg-subtle)", border: "1px solid var(--border)", borderRadius: 6, padding: 16, marginBottom: 24 }}>
+        {summary.last30 === 0 && chartDays.every((d) => d.count === 0) ? (
+          <p style={{ fontSize: 13, color: "var(--text-muted)", margin: 0 }}>No decodes recorded yet.</p>
+        ) : (
+          <>
+            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Daily decode counts">
+              {chartDays.map((d, i) => {
+                const h = Math.round((d.count / maxCount) * (H - 24));
+                return (
+                  <rect key={d.day}
+                    x={PAD + i * barW + barW * 0.15} y={H - h}
+                    width={Math.max(1, barW * 0.7)} height={Math.max(d.count > 0 ? 2 : 0, h)}
+                    fill="#1976d2" rx={1}>
+                    <title>{`${d.day}: ${d.count} decode${d.count === 1 ? "" : "s"} (${d.successes} ok)`}</title>
+                  </rect>
+                );
+              })}
+            </svg>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{chartDays[0]?.day}</span>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>peak {maxCount.toLocaleString()}/day</span>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{chartDays[chartDays.length - 1]?.day}</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Top 5 dealers */}
+      <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 10 }}>
+        Top 5 Dealers (last 30 days)
+      </p>
+      {topDealers.length === 0 ? (
+        <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
+          — No dealer-attributed decodes in the last 30 days yet.
+        </p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
+              {["Dealer", "Decodes", "Success Rate", "Most-Common Source", "Last Decode"].map((h) => (
+                <th key={h} className="text-left px-3 py-2" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {topDealers.map((d, i) => (
+              <tr key={d.dealer_id} style={{ borderBottom: i < topDealers.length - 1 ? "1px solid var(--border)" : "none" }}>
+                <td className="px-3 py-2.5">
+                  <span className="font-medium" style={{ color: "var(--text-primary)" }}>{d.dealer_name ?? d.dealer_id}</span>
+                  <span className="text-xs font-mono" style={{ color: "var(--text-muted)", marginLeft: 8 }}>{d.dealer_id}</span>
+                </td>
+                <td className="px-3 py-2.5 font-medium" style={{ color: "var(--text-primary)" }}>{d.decode_count.toLocaleString()}</td>
+                <td className="px-3 py-2.5" style={{ color: "var(--text-secondary)" }}>
+                  {d.decode_count > 0 ? `${Math.round((d.success_count / d.decode_count) * 100)}%` : "—"}
+                </td>
+                <td className="px-3 py-2.5">
+                  <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 20, background: "#e3f2fd", color: "#1565c0" }}>
+                    {d.top_source ? (SOURCE_LABEL[d.top_source] ?? d.top_source) : "—"}
+                  </span>
+                </td>
+                <td className="px-3 py-2.5 text-xs" style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtDate(d.last_decode_at)}</td>
               </tr>
             ))}
           </tbody>

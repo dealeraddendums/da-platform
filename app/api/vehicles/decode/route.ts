@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { decodeVin } from "@/lib/vin-decoder";
+import { logVinDecode } from "@/lib/vin-decode-log";
 
 /**
  * GET /api/vehicles/decode?vin=
@@ -15,7 +16,6 @@ import { decodeVin } from "@/lib/vin-decoder";
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
-  void claims;
 
   const vin = (req.nextUrl.searchParams.get("vin") ?? "").trim().toUpperCase();
   if (!vin) {
@@ -25,7 +25,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "VIN must be exactly 17 characters" }, { status: 422 });
   }
 
+  const started = Date.now();
   const result = await decodeVin(vin);
+
+  // Usage logging (migration 151) — fire-and-forget, never affects the decode.
+  // success = a real decode stage answered; wmi_partial/failed are misses.
+  logVinDecode(
+    claims,
+    vin,
+    result.resolved_by,
+    result.resolved_by !== "failed" && result.resolved_by !== "wmi_partial",
+    Date.now() - started,
+  );
 
   if (result.decode_flagged) {
     console.log(`[vin-decode] flagged: ${vin} source=${result.source} confidence=${result.confidence}`);

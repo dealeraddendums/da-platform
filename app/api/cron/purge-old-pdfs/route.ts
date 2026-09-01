@@ -90,6 +90,21 @@ async function runPurgeJob(): Promise<void> {
   } catch (err) {
     console.error("[purge-old-pdfs] fortellis_api_log purge error:", err instanceof Error ? err.message : err);
   }
+
+  // VIN decode usage logs (migration 151): keep 24 months.
+  try {
+    const decodeCutoff = new Date();
+    decodeCutoff.setMonth(decodeCutoff.getMonth() - 24);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: decErr } = await (admin as any)
+      .from("vin_decode_log")
+      .delete()
+      .lt("at", decodeCutoff.toISOString());
+    if (decErr) console.error("[purge-old-pdfs] vin_decode_log purge failed:", decErr.message);
+    else console.log("[purge-old-pdfs] vin_decode_log rows older than 24 months purged");
+  } catch (err) {
+    console.error("[purge-old-pdfs] vin_decode_log purge error:", err instanceof Error ? err.message : err);
+  }
 }
 
 /**

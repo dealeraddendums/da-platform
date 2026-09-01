@@ -20,6 +20,13 @@ export type DecodeResult = {
   source: 'override' | 'nhtsa' | 'dealer_vehicles' | 'partial';
   decode_flagged: boolean;
   confidence: 'high' | 'medium' | 'low';
+  /**
+   * Granular resolution stage for usage logging (migration 151). `source` is
+   * coarser ('nhtsa' = pattern OR live vPIC, 'partial' = WMI hit OR nothing)
+   * and is consumed by dealer_vehicles.decode_source / the Flagged tab, so it
+   * stays untouched.
+   */
+  resolved_by: 'override' | 'pattern' | 'vpic' | 'dealer_vehicles' | 'wmi_partial' | 'failed';
 };
 
 function buildEngine(raw: Record<string, string>): string | null {
@@ -58,6 +65,7 @@ async function liveNhtsaDecode(vin: string): Promise<DecodeResult | null> {
       source: 'nhtsa',
       decode_flagged: false,
       confidence: 'high',
+      resolved_by: 'vpic',
     };
   } catch {
     return null;
@@ -178,6 +186,7 @@ async function resolveVin(vin: string): Promise<DecodeResult> {
         source: 'override',
         decode_flagged: false,
         confidence: 'high',
+        resolved_by: 'override',
       };
     }
   }
@@ -214,6 +223,7 @@ async function resolveVin(vin: string): Promise<DecodeResult> {
       source: 'nhtsa',
       decode_flagged: false,
       confidence: 'high',
+      resolved_by: 'pattern',
     };
   }
 
@@ -248,6 +258,7 @@ async function resolveVin(vin: string): Promise<DecodeResult> {
       source: 'dealer_vehicles',
       decode_flagged: true,
       confidence: 'medium',
+      resolved_by: 'dealer_vehicles',
     };
   }
 
@@ -270,7 +281,7 @@ async function resolveVin(vin: string): Promise<DecodeResult> {
       model: null, trim: null, body_style: null,
       engine: null, transmission: null, drivetrain: null,
       fuel_type: null, doors: null, cmpg: null, hmpg: null,
-      source: 'partial', decode_flagged: true, confidence: 'low',
+      source: 'partial', decode_flagged: true, confidence: 'low', resolved_by: 'wmi_partial',
     };
   }
 
@@ -280,6 +291,6 @@ async function resolveVin(vin: string): Promise<DecodeResult> {
     trim: null, body_style: null, engine: null,
     transmission: null, drivetrain: null, fuel_type: null, doors: null,
     cmpg: null, hmpg: null,
-    source: 'partial', decode_flagged: true, confidence: 'low',
+    source: 'partial', decode_flagged: true, confidence: 'low', resolved_by: 'failed',
   };
 }
