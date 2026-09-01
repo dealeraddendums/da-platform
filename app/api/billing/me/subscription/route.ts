@@ -29,6 +29,20 @@ const ACCOUNT_TYPE_FOR_TIER: Record<string, string> = {
   "sub-auto-dms": "Automatic DMS",
 };
 
+// Extract da-billing's real reason from a thrown BillingError (its .body is
+// da-billing's JSON, e.g. the duplicate-dealer guard's "Dealer 'X' is already
+// on group template for customer Y…"). Falls back to the Error message —
+// callers surface this to the UI instead of the old bare "HTTP 500".
+function billingErrorMessage(err: unknown): string {
+  if (err && typeof err === "object" && "body" in err && typeof (err as { body: unknown }).body === "string") {
+    try {
+      const b = JSON.parse((err as { body: string }).body) as { message?: string; error?: string };
+      if (b.message || b.error) return [b.error, b.message].filter(Boolean).join(": ");
+    } catch { /* non-JSON body — fall through */ }
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
  * PATCH /api/billing/me/subscription
  * Body: { tier: "manual" | "auto-web" | "auto-dms" }  (or full product names)
@@ -84,33 +98,28 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   let dealerTextId: string | null = null;
   if (claims.role === "dealer_admin") {
     dealerTextId = claims.dealer_id;
-  } else if (claims.role === "group_admin" && claims.dealer_id) {
-    // group_admin managing a member dealer's billing while switched in: honor the
-    // active dealer (claims.dealer_id) with a defensive group re-check, so the
-    // dealer-context Billing tab works without a ?dealer_id= param.
+  } else if (claims.role === "group_admin") {
+    // The EXPLICIT ?dealer_id= param wins over claims.dealer_id: the group
+    // Member Dealers Plan control always names its target, while
+    // claims.dealer_id is whatever dealer the admin last switched into — a
+    // stale active dealer here silently retargeted the plan change to the
+    // WRONG dealer (found 2026-09-01 diagnosing Battleground Kia). The
+    // param-less claims.dealer_id path stays for the switched-in Billing tab.
+    const target = req.nextUrl.searchParams.get("dealer_id") || claims.dealer_id;
+    if (!target) return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
     const { data: chk } = await admin
       .from("dealers")
       .select("group_id")
-      .eq("dealer_id", claims.dealer_id)
+      .eq("dealer_id", target)
       .maybeSingle<{ group_id: string | null }>();
     if (!chk || chk.group_id !== claims.group_id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    dealerTextId = claims.dealer_id;
+    dealerTextId = target;
   } else {
     const param = req.nextUrl.searchParams.get("dealer_id");
     if (!param) return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
     dealerTextId = param;
-    if (claims.role === "group_admin") {
-      const { data: chk } = await admin
-        .from("dealers")
-        .select("group_id")
-        .eq("dealer_id", dealerTextId)
-        .maybeSingle<{ group_id: string | null }>();
-      if (!chk || chk.group_id !== claims.group_id) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-    }
   }
   if (!dealerTextId) return NextResponse.json({ error: "No dealer assigned" }, { status: 403 });
 
@@ -172,6 +181,31 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     const grp = grpForBranch;
     const newAccountType = ACCOUNT_TYPE_FOR_TIER[descriptor.key];
     const wasPaying = wasPayingEarly;
+
+    // Swap the member's line on the GROUP template FIRST, by reusing the
+    // canonical cascades: unassign strips ALL `{internal_id}::` lines
+    // (idempotent), assign re-adds at the NEW plan (accountTypeOverride —
+    // the dealer row still carries the OLD plan at this point, deliberately:
+    // if da-billing rejects the template write, nothing has changed and the
+    // real reason is returned instead of the old bare 500 with a half-flipped
+    // dealer row — the 2026-09-01 Battleground Kia / Lou Sohb class). A
+    // legacy group with no da-billing customer gets only the account_type
+    // change — its billing still lives on 4.0.
+    if (grp?.billing_customer_id) {
+      const { cascadeOnGroupUnassign, cascadeOnGroupAssign } = await import("@/lib/group-billing-cascade");
+      try {
+        await cascadeOnGroupUnassign({ dealerUuid: dealer.id, groupId: dealer.group_id });
+        await cascadeOnGroupAssign({ dealerUuid: dealer.id, groupId: dealer.group_id, accountTypeOverride: newAccountType });
+      } catch (err) {
+        const msg = billingErrorMessage(err);
+        console.error(`[subscription] group-billed plan change failed for ${dealer.name} (${dealerTextId}): ${msg}`);
+        return NextResponse.json(
+          { error: `Billing template update failed: ${msg}` },
+          { status: 409 },
+        );
+      }
+    }
+
     // Flip the plan on the dealer row (the Plan column + print gate + HubSpot
     // read this). Conversions also stamp the funnel date.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -193,18 +227,6 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       })
       .eq("id", dealer.id);
     if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
-
-    // Swap the member's line on the GROUP template by reusing the canonical
-    // cascades: unassign strips ALL `{internal_id}::` lines (idempotent),
-    // assign re-adds at the NEW plan (reads the fresh account_type; creates
-    // the group customer/template if needed; fires the discount sync + the
-    // migration_log surface row). A legacy group with no da-billing customer
-    // gets only the account_type change — its billing still lives on 4.0.
-    if (grp?.billing_customer_id) {
-      const { cascadeOnGroupUnassign, cascadeOnGroupAssign } = await import("@/lib/group-billing-cascade");
-      await cascadeOnGroupUnassign({ dealerUuid: dealer.id, groupId: dealer.group_id });
-      await cascadeOnGroupAssign({ dealerUuid: dealer.id, groupId: dealer.group_id });
-    }
 
     // Audit — a group-billed plan change moves money without a super_admin.
     const { fireWrite } = await import("@/lib/db");
@@ -348,7 +370,11 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         .update({ billing_customer_id: null, template_id: null })
         .eq("id", dealer.id);
     }
-    throw err;
+    // Surface da-billing's real reason (e.g. the duplicate-dealer guard)
+    // instead of rethrowing into a body-less 500 the UI can't explain.
+    const msg = billingErrorMessage(err);
+    console.error(`[subscription] template write failed for ${dealer.name} (${dealerTextId}): ${msg}`);
+    return NextResponse.json({ error: `Billing template update failed: ${msg}` }, { status: 409 });
   }
 
   // Conversion (dealer was NOT already on a paid tier) → flip Trial/expired →

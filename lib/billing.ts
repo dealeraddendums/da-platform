@@ -762,7 +762,15 @@ const SUBSCRIPTION_TIERS: Record<string, SubscriptionDescriptor> = {
  */
 export function subscriptionDescriptorFor(accountType: string | null | undefined): SubscriptionDescriptor | null {
   if (!accountType) return null;
-  const a = accountType.trim().toLowerCase();
+  // Legacy 4.0 custom-priced plans carry the price IN the account_type string
+  // ("Automatic Web $120", "Automatic Web $135" — Aurora ACCOUNT_TYPE, synced
+  // verbatim). Strip a trailing $-amount so those resolve to their base tier:
+  // they ARE paying plans (treating them as unknown made every plan change
+  // look like a Trial conversion — wrong converted_at stamp + a spurious
+  // feed-provider gate — and made cascades silently skip their billing line).
+  // The custom PRICE itself lives on the 4.0/FreshBooks side only; da-billing
+  // lines always bill at the canonical tier rate.
+  const a = accountType.trim().toLowerCase().replace(/\s*\$\s*\d+(?:\.\d{1,2})?$/, "");
   if (a === "manual" || a === "monthly subscription manual" || a === "sub-manual") {
     return SUBSCRIPTION_TIERS["sub-manual"];
   }

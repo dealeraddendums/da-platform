@@ -101,6 +101,11 @@ async function ensureGroupCustomer(
 export async function cascadeOnGroupAssign(args: {
   dealerUuid: string;
   groupId: string;
+  /** Resolve the subscription line from THIS plan instead of the dealer row's
+   *  current account_type — lets a plan-change route add the NEW plan's line
+   *  BEFORE it mutates the dealer row (no partial state if da-billing rejects
+   *  the template write). */
+  accountTypeOverride?: string;
 }): Promise<void> {
   const admin = createAdminSupabaseClient();
   const [{ data: dealer }, { data: group }] = await Promise.all([
@@ -143,10 +148,11 @@ export async function cascadeOnGroupAssign(args: {
   }
 
   // Resolve productId + display name only. Price is owned by da-billing.
-  const descriptor = subscriptionDescriptorFor(dealer.account_type);
+  const effectiveAccountType = args.accountTypeOverride ?? dealer.account_type;
+  const descriptor = subscriptionDescriptorFor(effectiveAccountType);
   if (!descriptor) {
     console.warn(
-      `[cascadeOnGroupAssign] dealer ${dealer.id} (${dealer.name}) account_type "${dealer.account_type ?? "null"}" did not resolve to a subscription descriptor — skipping appendToTemplate for group ${group.id}. da-billing requires a "sub-*" productId on every template.`,
+      `[cascadeOnGroupAssign] dealer ${dealer.id} (${dealer.name}) account_type "${effectiveAccountType ?? "null"}" did not resolve to a subscription descriptor — skipping appendToTemplate for group ${group.id}. da-billing requires a "sub-*" productId on every template.`,
     );
     return;
   }
