@@ -4,7 +4,7 @@ import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildAccountReadyEmail, buildPasswordResetEmail } from "@/lib/invite-email";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
-import { lastSignInByEmail } from "@/lib/last-sign-in";
+import { lastSignInByEmailStrict } from "@/lib/last-sign-in";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin:       "Super Admin",
@@ -82,8 +82,12 @@ export async function POST(
     orgName = group?.name ?? null;
   }
 
-  // Invite vs reset: has this user ever signed in?
-  const lastSignIn = await lastSignInByEmail();
+  // Invite vs reset: has this user ever signed in? STRICT — an impersonation
+  // mint, a consumed recovery link or a 4.0-era Aurora last_login would
+  // otherwise send "reset your password" copy to someone who has never had a
+  // working 5.0 login and actually needs the setup flow. Both modes deliver a
+  // usable setup code, so erring toward "invite" is harmless.
+  const lastSignIn = await lastSignInByEmailStrict();
   const hasSignedIn = !!lastSignIn.get(email.toLowerCase());
   const mode: "invite" | "reset" = hasSignedIn ? "reset" : "invite";
 
