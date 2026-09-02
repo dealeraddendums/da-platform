@@ -114,12 +114,19 @@ for (const g of groups) {
   const actual = actualCustomer.get(g.id);
   const bci = g.billing_customer_id;
   const resolves = bci ? customers.has(bci) : null;
+  // Where the lines actually live matters as much as whether the pointer
+  // resolves: if the holder is a NON-group customer, the whole group is
+  // being billed through one member dealer's standalone account.
+  const actualIsGroupCustomer = actual ? Boolean(customers.get(actual)?.isGroup) : null;
   if (bci && !resolves) {
     report.A.push({ group: decode(g.name), groupId: g.id, billing_customer_id: bci, state: "MISSING",
-      actual, actualName: label(customers.get(actual)), groupBilledMembers: billed.length });
+      actual, actualName: label(customers.get(actual)), actualIsGroupCustomer, groupBilledMembers: billed.length });
   } else if (actual && bci !== actual) {
     report.A.push({ group: decode(g.name), groupId: g.id, billing_customer_id: bci, state: bci ? "EXISTS-BUT-WRONG" : "NULL",
-      actual, actualName: label(customers.get(actual)), groupBilledMembers: billed.length });
+      actual, actualName: label(customers.get(actual)), actualIsGroupCustomer, groupBilledMembers: billed.length });
+  } else if (actual && actualIsGroupCustomer === false) {
+    report.A.push({ group: decode(g.name), groupId: g.id, billing_customer_id: bci, state: "BILLED-VIA-STANDALONE",
+      actual, actualName: label(customers.get(actual)), actualIsGroupCustomer, groupBilledMembers: billed.length });
   }
 }
 
@@ -179,7 +186,8 @@ const head = (k, title) => console.log(`\n${"=".repeat(78)}\n${k}. ${title}  —
 head("A", "groups whose billing_customer_id is wrong (cascades write to the wrong place)");
 for (const r of report.A.sort((a, b) => b.groupBilledMembers - a.groupBilledMembers)) {
   console.log(`  ${r.group.padEnd(38)} platform=${r.billing_customer_id ?? "null"} [${r.state}]`);
-  console.log(`  ${"".padEnd(38)} actual  =${r.actual} [${r.actualName}]  group-billed members=${r.groupBilledMembers}`);
+  const warn = r.actualIsGroupCustomer === false ? "  <-- holder is a STANDALONE (non-group) customer" : "";
+  console.log(`  ${"".padEnd(38)} actual  =${r.actual} [${r.actualName}]  group-billed members=${r.groupBilledMembers}${warn}`);
 }
 
 head("B", "group-billed dealers billed OUTSIDE their group's customer");
