@@ -4,7 +4,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
 import { PageHeader } from "@/components/PageHeader";
-import { getBillingSummary, type BillingSummary } from "@/lib/billing";
+import {
+  getBillingSummary,
+  getPaymentsByPeriod,
+  type BillingSummary,
+  type PaymentsByPeriod,
+} from "@/lib/billing";
+import { PeriodPicker } from "./PeriodPicker";
 
 export const metadata = { title: "Billing — DA Platform" };
 
@@ -14,6 +20,13 @@ export const metadata = { title: "Billing — DA Platform" };
 // legacy side, computed nightly by the ETL box into
 // admin_settings.fb_billing_summary), plus combined totals. Either source
 // missing degrades to a notice — the page always renders.
+//
+// Third section: "Payments Received by Period" — the month's cash bucketed
+// 1–7 / 8–14 / 15–21 / 22–EOM by PAYMENT date with a month-to-date running
+// total, FreshBooks beside da-billing. da-billing computes any month live
+// (/reports/payments-by-period); FreshBooks arrives as a per-month nightly
+// snapshot from the ETL box (admin_settings.fb_payments_by_period_{YYYY-MM}),
+// because da-platform has no FreshBooks access at all.
 
 const BILLING_URL = "https://billing.dealeraddendums.com";
 
@@ -37,6 +50,28 @@ const SECTION_LABEL = {
 
 const RED = "#d32f2f";
 const AMBER = "#f57c00";
+const EM_DASH = "—";
+
+// Payments-by-period table cells: money right-aligned, tabular figures so the
+// running-total column reads as a column of numbers rather than ragged text.
+const TH = {
+  padding: "10px 14px",
+  fontSize: 11,
+  fontWeight: 600,
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.06em",
+  color: "var(--text-muted)",
+  textAlign: "right" as const,
+  whiteSpace: "nowrap" as const,
+};
+
+const TD = {
+  padding: "10px 14px",
+  textAlign: "right" as const,
+  fontVariantNumeric: "tabular-nums" as const,
+  color: "var(--text-primary)",
+  whiteSpace: "nowrap" as const,
+};
 
 function usd(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
@@ -82,6 +117,60 @@ async function getFbSummary(admin: ReturnType<typeof createAdminSupabaseClient>)
   } catch {
     return null;
   }
+}
+
+// ── FreshBooks payments-by-period snapshot (per-month, from the ETL box) ────
+
+interface FbPeriodBucket {
+  key: string;
+  label: string;
+  start_day: number;
+  end_day: number;
+  net: number;
+  payment_count: number;
+}
+
+interface FbPaymentsByPeriod {
+  month: string;
+  buckets: FbPeriodBucket[];
+  total: { net: number; payment_count: number };
+  from_credit: { count: number; amount: number };
+  partial: boolean;
+  computed_at: string;
+}
+
+async function getFbPayments(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  month: string,
+): Promise<FbPaymentsByPeriod | null> {
+  try {
+    const { data } = await admin
+      .from("admin_settings")
+      .select("value")
+      .eq("key", `fb_payments_by_period_${month}`)
+      .maybeSingle<{ value: string }>();
+    if (!data?.value) return null;
+    const parsed = JSON.parse(data.value) as FbPaymentsByPeriod;
+    if (!Array.isArray(parsed?.buckets) || parsed.buckets.length !== 4) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** The last `count` months, newest first, as { value: "2026-08", label: "August 2026" }. */
+function monthOptions(count: number, now: Date = new Date()): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = [];
+  const cursor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  for (let i = 0; i < count; i++) {
+    const value = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`;
+    out.push({
+      value,
+      label: cursor.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }),
+    });
+    cursor.setUTCMonth(cursor.getUTCMonth() - 1);
+  }
+  return out;
 }
 
 // ── Building blocks ──────────────────────────────────────────────────────────
@@ -139,7 +228,11 @@ function OpenBillingButton() {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-export default async function BillingPage() {
+export default async function BillingPage({
+  searchParams,
+}: {
+  searchParams?: { period?: string };
+}) {
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect("/login");
@@ -150,10 +243,41 @@ export default async function BillingPage() {
   const role = profile?.role ?? (session.user.app_metadata as Record<string, unknown>)?.role;
   if (role !== "super_admin") redirect("/dashboard");
 
-  const [da, fb]: [BillingSummary | null, FbSummary | null] = await Promise.all([
+  // Payments-by-period month: ?period=YYYY-MM, defaulting to the current month.
+  // Bounded to the picker's own list so a hand-typed param can't ask for a
+  // month with no FreshBooks snapshot behind it.
+  const periodMonths = monthOptions(24);
+  const requested = (searchParams?.period ?? "").trim();
+  const period = periodMonths.some((m) => m.value === requested) ? requested : periodMonths[0].value;
+
+  const [da, fb, daPayments, fbPayments]: [
+    BillingSummary | null,
+    FbSummary | null,
+    PaymentsByPeriod | null,
+    FbPaymentsByPeriod | null,
+  ] = await Promise.all([
     getBillingSummary(),
     getFbSummary(admin),
+    getPaymentsByPeriod(period),
+    getFbPayments(admin, period),
   ]);
+
+  // One row per window. A missing source contributes nothing to Combined and
+  // renders "—" in its own column, so a degraded half never reads as $0 cash.
+  const periodLabel = periodMonths.find((m) => m.value === period)!.label;
+  let running = 0;
+  const periodRows = (daPayments?.buckets ?? fbPayments?.buckets ?? []).map((b, i) => {
+    const daNet = daPayments ? daPayments.buckets[i].net : null;
+    const fbNet = fbPayments ? fbPayments.buckets[i].net : null;
+    const combined = (daNet ?? 0) + (fbNet ?? 0);
+    running += combined;
+    return { label: b.label, daNet, fbNet, combined, running };
+  });
+  const fbPayComputedAt = fbPayments ? new Date(fbPayments.computed_at) : null;
+  const fbPayAsOf = fbPayComputedAt
+    ? fbPayComputedAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" }) + " PT"
+    : null;
+  const fbPayStale = !!(fbPayComputedAt && Date.now() - fbPayComputedAt.getTime() > FB_STALE_MS);
 
   const fbComputedAt = fb ? new Date(fb.computed_at) : null;
   const fbStale = !!(fbComputedAt && Date.now() - fbComputedAt.getTime() > FB_STALE_MS);
@@ -241,6 +365,80 @@ export default async function BillingPage() {
                 is unaffected.
               </>
             }
+          />
+        )}
+      </section>
+
+      {/* ── PAYMENTS RECEIVED BY PERIOD ─────────────────────────────────── */}
+      <section className="mb-8">
+        <div className="flex items-center justify-between flex-wrap gap-3" style={{ marginBottom: 10 }}>
+          <p style={{ ...SECTION_LABEL, margin: 0 }}>Payments Received by Period</p>
+          <PeriodPicker value={period} months={periodMonths} />
+        </div>
+
+        {periodRows.length > 0 ? (
+          <>
+            <div className="card" style={{ padding: 0, overflowX: "auto" }}>
+              <table className="w-full text-sm" style={{ borderCollapse: "collapse", minWidth: 560 }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #e0e0e0" }}>
+                    <th style={{ ...TH, textAlign: "left" }}>Period</th>
+                    <th style={TH}>FreshBooks</th>
+                    <th style={TH}>DA Billing</th>
+                    <th style={TH}>Combined</th>
+                    <th style={TH}>Running total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {periodRows.map((r) => (
+                    <tr key={r.label} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                      <td style={{ ...TD, textAlign: "left", fontWeight: 500 }}>{r.label}</td>
+                      <td style={TD}>{r.fbNet === null ? EM_DASH : usd(r.fbNet)}</td>
+                      <td style={TD}>{r.daNet === null ? EM_DASH : usd(r.daNet)}</td>
+                      <td style={TD}>{usd(r.combined)}</td>
+                      <td style={{ ...TD, color: "var(--text-muted)" }}>{usd(r.running)}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ borderTop: "2px solid #e0e0e0" }}>
+                    <td style={{ ...TD, textAlign: "left", fontWeight: 700 }}>Total</td>
+                    <td style={{ ...TD, fontWeight: 700 }}>
+                      {fbPayments ? usd(fbPayments.total.net) : EM_DASH}
+                    </td>
+                    <td style={{ ...TD, fontWeight: 700 }}>
+                      {daPayments ? usd(daPayments.total.net) : EM_DASH}
+                    </td>
+                    <td style={{ ...TD, fontWeight: 700 }}>
+                      {usd((fbPayments?.total.net ?? 0) + (daPayments?.total.net ?? 0))}
+                    </td>
+                    <td style={{ ...TD, fontWeight: 700 }}>
+                      {usd(periodRows[periodRows.length - 1].running)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+              Bucketed by the day the money was <strong>received</strong>, not the invoice date
+              {daPayments ? " (DA Billing day boundaries in Eastern, the billing business timezone)" : ""}.
+              {daPayments && daPayments.total.refunds > 0
+                ? ` Net of ${usd(daPayments.total.refunds)} refunded on DA Billing (${daPayments.total.refund_count} invoice${daPayments.total.refund_count === 1 ? "" : "s"}).`
+                : ""}
+              {fbPayments && fbPayments.from_credit.count > 0
+                ? ` Includes ${usd(fbPayments.from_credit.amount)} of FreshBooks account credit applied to invoices (${fbPayments.from_credit.count}) — counted so the total matches FreshBooks' own payments list.`
+                : ""}
+            </p>
+            <p className="text-xs mt-1" style={{ color: fbPayStale ? AMBER : "var(--text-muted)" }}>
+              {fbPayments
+                ? `${fbPayStale ? "⚠ Stale — " : ""}FreshBooks as of ${fbPayAsOf} (nightly snapshot from the ETL box)`
+                : `No FreshBooks snapshot for ${periodLabel} yet — it lands after the next nightly ETL run`}
+              {daPayments ? " · DA Billing is live." : " · DA Billing unreachable — see below."}
+            </p>
+          </>
+        ) : (
+          <DegradedCard
+            title={`No payment data for ${periodLabel}`}
+            body="Neither da-billing nor the FreshBooks nightly snapshot could be read for this month. DA Billing figures are live; the FreshBooks half is computed by the nightly ETL run."
           />
         )}
       </section>

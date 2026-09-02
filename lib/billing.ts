@@ -880,3 +880,65 @@ export async function getBillingSummary(): Promise<BillingSummary | null> {
     return null;
   }
 }
+
+// ── Payments received by period (Billing page card) ──────────────────────────
+// GET /reports/payments-by-period?month=YYYY-MM on da-billing — the month's
+// payments bucketed 1–7 / 8–14 / 15–21 / 22–EOM by the day the money was
+// RECEIVED (invoice.paidAt), day boundaries in America/New_York (the billing
+// business timezone the invoice cron already runs on). Net of refunds, which
+// da-billing buckets by refundedAt. No money math here — da-billing owns it.
+//
+// Cached per month for 5 minutes, same idiom as getBillingSummary. Returns
+// null on ANY failure so the Billing page degrades to a notice instead of
+// erroring. Never throws.
+
+export interface PaymentsPeriodBucket {
+  key: string;
+  label: string;
+  start_day: number;
+  end_day: number;
+  gross: number;
+  refunds: number;
+  net: number;
+  payment_count: number;
+  refund_count: number;
+}
+
+export interface PaymentsByPeriod {
+  month: string;
+  timezone: string;
+  buckets: PaymentsPeriodBucket[];
+  total: {
+    gross: number;
+    refunds: number;
+    net: number;
+    payment_count: number;
+    refund_count: number;
+  };
+}
+
+const paymentsCache = new Map<string, { fetchedAt: number; data: PaymentsByPeriod }>();
+
+export async function getPaymentsByPeriod(month: string): Promise<PaymentsByPeriod | null> {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
+  const now = Date.now();
+  const hit = paymentsCache.get(month);
+  if (hit && now - hit.fetchedAt < SUMMARY_TTL_MS) return hit.data;
+  if (!billingConfigured()) return null;
+  try {
+    const res = await fetch(`${BASE}/reports/payments-by-period?month=${encodeURIComponent(month)}`, {
+      headers: authHeaders(),
+      cache: "no-store", // module cache above owns freshness
+      signal: AbortSignal.timeout(5000), // page must render even if da-billing hangs
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as PaymentsByPeriod;
+    if (!Array.isArray(data?.buckets) || data.buckets.length !== 4 || typeof data?.total?.net !== "number") {
+      return null;
+    }
+    paymentsCache.set(month, { fetchedAt: now, data });
+    return data;
+  } catch {
+    return null;
+  }
+}
