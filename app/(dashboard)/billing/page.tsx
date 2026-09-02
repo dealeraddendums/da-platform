@@ -277,7 +277,10 @@ export default async function BillingPage({
   const fbPayAsOf = fbPayComputedAt
     ? fbPayComputedAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" }) + " PT"
     : null;
-  const fbPayStale = !!(fbPayComputedAt && Date.now() - fbPayComputedAt.getTime() > FB_STALE_MS);
+  // Staleness only means something while the month is still in progress —
+  // `partial` is false once the month has closed, and a settled snapshot is
+  // final, not stale, however long ago it was computed.
+  const fbPayStale = !!(fbPayments?.partial && fbPayComputedAt && Date.now() - fbPayComputedAt.getTime() > FB_STALE_MS);
 
   const fbComputedAt = fb ? new Date(fb.computed_at) : null;
   const fbStale = !!(fbComputedAt && Date.now() - fbComputedAt.getTime() > FB_STALE_MS);
@@ -430,7 +433,9 @@ export default async function BillingPage({
             </p>
             <p className="text-xs mt-1" style={{ color: fbPayStale ? AMBER : "var(--text-muted)" }}>
               {fbPayments
-                ? `${fbPayStale ? "⚠ Stale — " : ""}FreshBooks as of ${fbPayAsOf} (nightly snapshot from the ETL box)`
+                ? fbPayments.partial
+                  ? `${fbPayStale ? "⚠ Stale — " : ""}FreshBooks as of ${fbPayAsOf} — ${periodLabel} is still in progress, refreshed by the nightly ETL run`
+                  : `FreshBooks final for ${periodLabel} (snapshot taken ${fbPayAsOf})`
                 : `No FreshBooks snapshot for ${periodLabel} yet — it lands after the next nightly ETL run`}
               {daPayments ? " · DA Billing is live." : " · DA Billing unreachable — see below."}
             </p>
