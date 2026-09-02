@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import type { DealerVehicleRow } from "@/lib/db";
 import { FUEL_RULE_OPTIONS } from "@/lib/fuel-rule";
 
@@ -63,11 +63,9 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  // Persistent modals (2026-09-02): no Escape-to-close and no backdrop-click
+  // dismissal — this modal closes only via its × / Cancel buttons, so an
+  // accidental click or keypress cannot discard in-progress edits.
 
   function f(k: keyof typeof form) {
     return (
@@ -105,7 +103,7 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
 
   return (
     <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000 }} />
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000 }} />
       <div style={{
         position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
         background: "#fff", borderRadius: 6, zIndex: 1001,

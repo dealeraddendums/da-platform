@@ -2820,13 +2820,17 @@ function EpSection({ children }: { children: React.ReactNode }) {
   return <div style={{ padding: '11px 13px', borderBottom: '1px solid #e0e0e0' }}>{children}</div>;
 }
 
+// Persistent modals (2026-09-02): the backdrop is inert — a Builder modal closes
+// only via an explicit control (the header ×, Cancel, or a save/pick action), so
+// an accidental click outside can't discard in-progress work.
 function Modal({ onClose, title, children }: { onClose: () => void; title: string; children: React.ReactNode }) {
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ background: '#fff', borderRadius: 6, width: 520, boxShadow: '0 8px 32px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
-        <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #e0e0e0', background: '#2a2b3c' }}>
+        <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #e0e0e0', background: '#2a2b3c', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ fontSize: 16, fontWeight: 600, color: '#fff' }}>{title}</div>
+          <button type="button" onClick={onClose} aria-label="Close"
+            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.75)', fontSize: 22, lineHeight: 1, cursor: 'pointer', padding: '0 2px' }}>×</button>
         </div>
         {children}
       </div>

@@ -251,7 +251,6 @@ function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClos
   return (
     <div
       style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div style={{ background: "#fff", borderRadius: 6, width: 520, maxWidth: "100%", maxHeight: "calc(100vh - 48px)", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
         {children}

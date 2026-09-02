@@ -2082,7 +2082,6 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
         {closeStep !== null && (
           <div
             style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
-            onClick={e => { if (e.target === e.currentTarget && closeStep !== "closing") setCloseStep(null); }}
           >
             <div style={{ background: "#fff", borderRadius: 6, width: 460, maxWidth: "94vw", overflow: "hidden", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
               <div style={{ padding: "14px 18px", background: "#2a2b3c", display: "flex", justifyContent: "space-between", alignItems: "center" }}>

@@ -111,7 +111,7 @@ export default function VehicleHistoryPanel({ vehicleId, stockNumber, onClose }:
 
   return (
     <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 1000 }} />
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 1000 }} />
       <div style={{
         position: "fixed", top: 0, right: 0, bottom: 0,
         width: "min(420px, 96vw)", background: "#fff", zIndex: 1001,

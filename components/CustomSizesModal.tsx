@@ -93,7 +93,6 @@ export default function CustomSizesModal({ dealerId, initialSizes, onUpdate, onC
     <>
       <div
         style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center" }}
-        onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       >
         <div style={{ background: "#fff", borderRadius: 6, width: 580, maxWidth: "94vw", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
 

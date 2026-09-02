@@ -390,7 +390,7 @@ export default function FeedsClient() {
 
       {/* ── Edit / Create modal ── */}
       {editOpen && (
-        <div style={modalShell} onClick={() => !savingFeed && setEditOpen(false)}>
+        <div style={modalShell}>
           <div style={modalCard} onClick={(e) => e.stopPropagation()}>
             <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>{editId ? "Edit Feed Company" : "New Feed Company"}</h2>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -460,7 +460,7 @@ export default function FeedsClient() {
 
       {/* ── Dealers modal ── */}
       {dealersFor && (
-        <div style={modalShell} onClick={() => setDealersFor(null)}>
+        <div style={modalShell}>
           <div style={{ ...modalCard, maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
             <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{dealersFor.name} — Dealers</h2>
             <p style={{ fontSize: 12, color: "#78828c", marginBottom: 16 }}>
@@ -548,7 +548,7 @@ export default function FeedsClient() {
 
       {/* ── Custom Rules manager ── */}
       {rulesOpen && (
-        <div style={modalShell} onClick={() => setRulesOpen(false)}>
+        <div style={modalShell}>
           <div style={{ ...modalCard, maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
               <h2 style={{ fontSize: 16, fontWeight: 600 }}>Custom Rules</h2>
@@ -604,7 +604,7 @@ export default function FeedsClient() {
 
       {/* ── Rule editor ── */}
       {ruleEdit !== null && (
-        <div style={{ ...modalShell, zIndex: 210 }} onClick={() => !ruleSaving && setRuleEdit(null)}>
+        <div style={{ ...modalShell, zIndex: 210 }}>
           <div style={modalCard} onClick={(e) => e.stopPropagation()}>
             <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{ruleEdit === "new" ? "New Custom Rule" : "Edit Custom Rule"}</h2>
             {ruleEdit !== "new" && (ruleEdit as ExclusionRule).used_by.length > 0 && (

@@ -100,7 +100,7 @@ export default function ProductImportExport({ endpoint, onImported }: {
       </div>
 
       {preview && counts && (
-        <div onClick={(e) => { if (e.target === e.currentTarget) setPreview(null); }}
+        <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 24, overflowY: "auto" }}>
           <div style={{ background: "#fff", borderRadius: 8, width: 720, maxWidth: "100%", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", maxHeight: "85vh" }}>
             <div style={{ padding: "14px 20px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>

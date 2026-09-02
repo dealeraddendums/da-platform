@@ -47,7 +47,6 @@ export default function AddCustomSizeModal({ dealerId, onSave, onClose }: Props)
     <>
       <div
         style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center" }}
-        onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       >
         <div style={{ background: "#fff", borderRadius: 6, width: 440, maxWidth: "94vw", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
 

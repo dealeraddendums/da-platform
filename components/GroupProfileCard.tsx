@@ -1608,7 +1608,7 @@ function MemberPlanCell({ dealer, canEdit, onChanged }: {
 
   const feedModalEl = feedModal ? (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) setFeedModal(null); }}>
+    >
       <div style={{ background: "#fff", borderRadius: 6, border: "1px solid #e0e0e0", width: 420, maxWidth: "92vw", padding: 20, textAlign: "left" }}>
         <p className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
           Feed details for {decodeHtmlEntities(dealer.name)}

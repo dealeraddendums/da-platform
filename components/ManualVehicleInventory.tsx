@@ -674,7 +674,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
       {/* Archive modal (super_admin only) */}
       {showArchive && (
         <>
-          <div onClick={() => setShowArchive(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000 }} />
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000 }} />
           <div style={{
             position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
             background: "#fff", borderRadius: 6, zIndex: 1001, width: "min(880px, 96vw)",
@@ -751,7 +751,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
       {/* Delete confirmation modal */}
       {showDeleteConfirm && (
         <>
-          <div onClick={() => setShowDeleteConfirm(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000 }} />
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000 }} />
           <div style={{
             position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
             background: "#fff", borderRadius: 6, zIndex: 1001, width: "min(420px, 96vw)",

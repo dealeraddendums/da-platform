@@ -505,7 +505,6 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
       {pwUser && canSetPassword && (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
-          onClick={(e) => { if (e.target === e.currentTarget && !pwSaving) setPwUser(null); }}
         >
           <form
             onSubmit={(e) => void submitSetPassword(e)}

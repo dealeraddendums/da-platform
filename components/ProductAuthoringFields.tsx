@@ -43,7 +43,7 @@ const PRICE_CODES: [string, string][] = [
 function PriceHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 2000 }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 2000 }}>
       <div
         style={{ position: "absolute", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: 16, width: 320, boxShadow: "0 4px 20px rgba(0,0,0,0.12)", top: "50%", left: "50%", transform: "translate(-50%,-50%)" }}
         onClick={(e) => e.stopPropagation()}

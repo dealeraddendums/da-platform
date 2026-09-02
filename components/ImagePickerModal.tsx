@@ -104,7 +104,6 @@ export default function ImagePickerModal({ bucket, title, onSelect, onClose }: I
   return (
     <div
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div style={{ background: "#fff", borderRadius: 8, width: 700, maxHeight: "82vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 8px 32px rgba(0,0,0,.22)" }}>
         {/* Header */}

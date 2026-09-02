@@ -147,7 +147,6 @@ export default function AssignProductModal({ groupId, product, onClose, onSaved 
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 20, overflowY: "auto" }}
     >
       <div className="card" style={{ width: 520, maxWidth: "100%", display: "flex", flexDirection: "column" }}>

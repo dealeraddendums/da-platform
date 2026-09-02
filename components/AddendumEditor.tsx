@@ -1025,7 +1025,6 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
         background: "rgba(0,0,0,0.45)",
         display: "flex", alignItems: "center", justifyContent: "center",
       }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
         className="card"

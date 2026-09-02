@@ -1127,7 +1127,7 @@ function InviteAdminsModal({ group, onClose }: { group: { id: string; name: stri
   }
 
   return (
-    <div style={modalOverlay} onClick={onClose}>
+    <div style={modalOverlay}>
       <div style={modalBox} onClick={(e) => e.stopPropagation()}>
         <div style={{ fontSize: 16, fontWeight: 700, color: NAVY, marginBottom: 4 }}>Invite admins — {group.name}</div>
         <p style={{ fontSize: 12, color: "#78828c", margin: "0 0 14px" }}>
@@ -1270,7 +1270,7 @@ function MigrateGroupModal({ group, memberRows, onClose, onMigrated }: {
   }
 
   return (
-    <div style={modalOverlay} onClick={result ? onMigrated : onClose}>
+    <div style={modalOverlay}>
       <div style={modalBox} onClick={(e) => e.stopPropagation()}>
         <div style={{ fontSize: 16, fontWeight: 700, color: NAVY, marginBottom: 4 }}>Migrate group — {group.name}</div>
         {!result && (

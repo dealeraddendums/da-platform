@@ -71,7 +71,6 @@ function DealerPickerModal({
   return (
     <div
       style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 80 }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div style={{ background: "#fff", borderRadius: 6, width: 480, maxWidth: "calc(100vw - 32px)", maxHeight: "60vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
         <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #e0e0e0" }}>

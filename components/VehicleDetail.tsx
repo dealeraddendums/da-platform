@@ -29,14 +29,8 @@ export default function VehicleDetail({ vehicle: initialVehicle, onClose }: Prop
   const options = parseOptions(vehicle.OPTIONS);
   const cond = vehicleCondition(vehicle);
 
-  // Close on Escape
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  // Persistent modals (2026-09-02): no Escape-to-close and no backdrop-click
+  // dismissal — the panel closes only via its × button.
 
   return (
     <div
@@ -50,7 +44,6 @@ export default function VehicleDetail({ vehicle: initialVehicle, onClose }: Prop
         justifyContent: "flex-end",
         padding: 0,
       }}
-      onClick={onClose}
     >
       {/* Slide-in panel */}
       <div

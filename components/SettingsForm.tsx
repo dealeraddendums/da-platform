@@ -1054,7 +1054,6 @@ function PrintHistorySection({ dealerId, collapsed, onToggle }: { dealerId: stri
       {manualOpen && (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
-          onClick={(e) => { if (e.target === e.currentTarget) setManualOpen(false); }}
         >
           <div style={{ background: "#fff", borderRadius: 6, width: "min(480px, 92vw)", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
@@ -1087,7 +1086,6 @@ function PrintHistorySection({ dealerId, collapsed, onToggle }: { dealerId: stri
       {open && (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
-          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
         >
           <div style={{ background: "#fff", borderRadius: 6, width: "min(480px, 92vw)", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>

@@ -148,7 +148,6 @@ export default function StarterLayoutsClient() {
       {deleteTarget && (
         <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
-          onClick={(e) => { if (e.target === e.currentTarget && !deleting) setDeleteId(null); }}
         >
           <div style={{ background: "#fff", borderRadius: 6, width: 440, maxWidth: "92vw", overflow: "hidden", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
             <div style={{ padding: "14px 18px", background: "#2a2b3c" }}>
