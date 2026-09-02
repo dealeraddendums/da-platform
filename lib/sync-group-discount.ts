@@ -19,7 +19,7 @@ import {
   billingConfigured,
   type BillingCustomerDetail,
 } from "@/lib/billing";
-import { calcGroupDiscountTier } from "@/lib/group-discount";
+import { calcGroupDiscountTier, isBillableAccountType } from "@/lib/group-discount";
 
 // The four values calcGroupDiscountTier can ever emit. Any
 // subscriptionDiscount that isn't one of these is, by definition, a
@@ -68,18 +68,34 @@ export async function syncGroupDiscount(groupId: string): Promise<void> {
       return;
     }
 
-    // 2. Count active dealers in the group.
-    const { count, error: countErr } = await admin
-      .from("dealers")
-      .select("id", { count: "exact", head: true })
-      .eq("group_id", groupId)
-      .eq("active", true);
-    if (countErr) {
-      console.error(`[group-discount] dealer count failed for group ${groupId}:`, countErr.message);
-      return;
+    // 2. Count the group's BILLABLE active dealers (see lib/group-discount.ts:
+    //    Free/Downgraded/Trial rooftops don't earn the volume discount).
+    //    Read account_type rather than counting rows so the billable test is
+    //    the one shared definition; page past PostgREST's 1000-row clamp so a
+    //    large group (Dealer General is ~190 members) is never undercounted.
+    const accountTypes: (string | null)[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error: pageErr } = await admin
+        .from("dealers")
+        .select("account_type")
+        .eq("group_id", groupId)
+        .eq("active", true)
+        .range(from, from + 999);
+      if (pageErr) {
+        console.error(`[group-discount] dealer count failed for group ${groupId}:`, pageErr.message);
+        return;
+      }
+      const rows = (data ?? []) as { account_type: string | null }[];
+      accountTypes.push(...rows.map(r => r.account_type));
+      if (rows.length < 1000) break;
     }
-    const dealerCount = count ?? 0;
+    const dealerCount = accountTypes.filter(isBillableAccountType).length;
     const newTier = calcGroupDiscountTier(dealerCount);
+    if (accountTypes.length !== dealerCount) {
+      console.log(
+        `[group-discount] group ${groupId}: ${accountTypes.length} active dealers, ${dealerCount} billable -> tier ${newTier}%`,
+      );
+    }
 
     // 3. Fetch current customer state.
     const customer = (await getCustomer(group.billing_customer_id)) as CustomerWithDiscount | null;

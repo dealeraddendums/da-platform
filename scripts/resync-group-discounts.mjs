@@ -9,6 +9,14 @@
 // NEW tiers (MUST match lib/group-discount.ts calcGroupDiscountTier):
 //   1 dealer (or empty) → 0 · 2–10 → 20 · 11–30 → 25 · 31+ → 30
 //
+// COUNT = BILLABLE dealers only (policy, Allan 2026-09-01): Free / Downgraded /
+// Trial rooftops don't earn the volume discount. Mirrors
+// lib/group-discount.ts isBillableAccountType — keep the two in lockstep.
+//
+// --paused-only  restricts writes to groups whose recurring template is paused
+//                or absent, so no LIVE group's next invoice moves without an
+//                explicit sign-off.
+//
 // SELECT for change ONLY groups where discountLocked=false AND current
 // subscriptionDiscount ∈ {0,10,20,25,30} (old ∪ new auto values). PRESERVE
 // everything else: locked groups, and truly-custom values not in that set
@@ -23,6 +31,7 @@ import { createClient } from "@supabase/supabase-js";
 import { writeFileSync } from "node:fs";
 
 const DRY = process.argv.includes("--dry-run");
+const PAUSED_ONLY = process.argv.includes("--paused-only");
 const BASE = "https://billing.dealeraddendums.com/api/v1";
 const API_KEY = process.env.BILLING_API_KEY;
 const BACKUP_DIR = process.env.RESYNC_BACKUP_DIR || "/var/www/da-platform/shared";
@@ -36,6 +45,25 @@ function calcGroupDiscountTier(n) {
   if (n <= 10) return 20;
   if (n <= 30) return 25;
   return 30;
+}
+
+// Keep in lockstep with lib/group-discount.ts isBillableAccountType.
+const NON_BILLABLE_ACCOUNT_TYPES = new Set(["free", "downgraded", "trial", "trial expired", "standard"]);
+function isBillableAccountType(accountType) {
+  const base = String(accountType ?? "").split(" $")[0].trim().toLowerCase();
+  if (!base) return false;
+  return !NON_BILLABLE_ACCOUNT_TYPES.has(base);
+}
+
+// A group's template is "live" when it exists AND active !== false. Absent
+// template = nothing bills = safe to write.
+async function templateIsLive(customerId) {
+  const res = await fetchRetry(`${BASE}/templates/customer/${encodeURIComponent(customerId)}`, {
+    headers: { "X-API-Key": API_KEY },
+  });
+  if (!res.ok) throw new Error(`getTemplate ${customerId}: HTTP ${res.status}`);
+  const t = (await res.json())?.template;
+  return Boolean(t && t.active);
 }
 
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -79,14 +107,23 @@ async function putDiscount(customerId, value) {
   return Number(after?.subscriptionDiscount ?? NaN);
 }
 
+// BILLABLE active dealers in the group. Reads account_type (rather than a
+// head-count) so the billable test is the shared definition, and pages past
+// PostgREST's 1000-row clamp.
 async function activeDealerCount(groupId) {
-  const { count, error } = await sb
-    .from("dealers")
-    .select("id", { count: "exact", head: true })
-    .eq("group_id", groupId)
-    .eq("active", true);
-  if (error) throw new Error(`dealer count ${groupId}: ${error.message}`);
-  return count ?? 0;
+  const types = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb
+      .from("dealers")
+      .select("account_type")
+      .eq("group_id", groupId)
+      .eq("active", true)
+      .range(from, from + 999);
+    if (error) throw new Error(`dealer count ${groupId}: ${error.message}`);
+    types.push(...(data || []).map((r) => r.account_type));
+    if (!data || data.length < 1000) break;
+  }
+  return types.filter(isBillableAccountType).length;
 }
 
 async function fetchAllGroups() {
@@ -129,6 +166,13 @@ async function fetchAllGroups() {
       if (locked) { rec.action = "preserve-locked"; rec.newDiscount = current; records.push(rec); continue; }
       if (!AUTO_OR_OLD.has(current)) { rec.action = "preserve-custom"; rec.newDiscount = current; records.push(rec); continue; }
       if (current === target) { rec.action = "unchanged"; records.push(rec); continue; }
+
+      if (PAUSED_ONLY && (await templateIsLive(g.billing_customer_id))) {
+        rec.action = `SKIP-LIVE (would be ${current}→${target}) — needs sign-off`;
+        rec.newDiscount = current;
+        records.push(rec);
+        continue;
+      }
 
       rec.action = `change ${current}→${target}`;
       if (!DRY) {
