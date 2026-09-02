@@ -378,6 +378,24 @@ export interface FeedCsvResult {
   csv: string;
   vehicleCount: number;
   dealerCount: number;
+  /**
+   * Per-dealer count of exported vehicles with no usable base price
+   * (`msrp` NULL or <= 0), which is exactly the set whose GRAND_TOTAL and
+   * SELLING_PRICE cells ship BLANK (see the hasBase guard in computeFields).
+   *
+   * Why this is reported rather than left implicit: on 2026-09-02 Homenet
+   * reported that dealer 17093 (Tuttle Click Ford Commercial) intermittently
+   * had no GRAND_TOTAL on any of its 46 vehicles. The export was behaving
+   * correctly — a blank beats a wrong number — but a whole dealer shipping
+   * priceless is an upstream feed-ingest failure, and nothing anywhere said so.
+   * runFeedPush turns a fully-priceless dealer into a loud log line + alert.
+   */
+  pricelessByDealer: Array<{
+    dealerId: string;
+    dealerName: string;
+    vehicles: number;
+    priceless: number;
+  }>;
 }
 
 export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
@@ -434,12 +452,15 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
 
   const rows: string[][] = [mappings.map((m) => m.recipientColumn)];
   let vehicleCount = 0;
+  const pricelessByDealer: FeedCsvResult["pricelessByDealer"] = [];
 
   for (const fd of feedDealers ?? []) {
     const dealer = fd.dealers;
     if (!dealer) continue;
     const dealerTextId = dealer.dealer_id;
     const ctx = { feedDealerId: fd.feed_dealer_id, dealerTextId };
+    let dealerVehicles = 0;
+    let dealerPriceless = 0;
 
     // 1. Vehicles for this dealer (paginated; feed scope per include_vehicles).
     const vehicles = await fetchAllRows<Dv>((from, to) => {
@@ -682,8 +703,21 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
         return "";
       }));
       vehicleCount++;
+      dealerVehicles++;
+      // Same test computeFields uses for `hasBase` — keep the two in lockstep.
+      const baseMsrp = typeof dv.msrp === "number" ? dv.msrp : parseFloat(String(dv.msrp ?? "")) || 0;
+      if (!(baseMsrp > 0)) dealerPriceless++;
+    }
+
+    if (dealerPriceless > 0) {
+      pricelessByDealer.push({
+        dealerId: dealerTextId,
+        dealerName: dealer.name,
+        vehicles: dealerVehicles,
+        priceless: dealerPriceless,
+      });
     }
   }
 
-  return { csv: toCsv(rows), vehicleCount, dealerCount: (feedDealers ?? []).length };
+  return { csv: toCsv(rows), vehicleCount, dealerCount: (feedDealers ?? []).length, pricelessByDealer };
 }
