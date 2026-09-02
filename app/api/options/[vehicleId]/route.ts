@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { getGroupOptionsForDealer, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows, libraryNameSet, pruneOrphanedDefaultRows } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import type { VehicleOptionRow } from "@/lib/db";
 
@@ -234,6 +234,8 @@ const libRowToRulesRow = (rule: DealerLibRow) => ({
 type SavedRow = {
   option_name: string;
   source?: string | null;
+  /** addendum_library.id this snapshot tracks (migration 152). */
+  default_id?: string | null;
   required?: boolean | null;
   sort_order?: number | null;
   created_at?: string | null;
@@ -263,9 +265,16 @@ function hydrateSavedAgainstLibrary<T extends SavedRow>(
   vehicle: import("@/lib/vehicles").VehicleRow | undefined,
 ) {
   const liveRequired = buildLiveRequiredByName(lib);
+  // A library-tracked (source="default") row shows the library's CURRENT name,
+  // resolved by default_id (migration 152) — so a library rename reaches the
+  // editor exactly as it reaches the PDF, and the two never disagree. Manual
+  // rows keep their own name (ffb214d).
+  const nameById = libraryNameById(lib as unknown as Array<{ id?: unknown; option_name?: string | null }>);
   const withLiveType = rows.map(r => {
-    const live = liveRequired.get(normalizeOptionName(r.option_name));
-    return live === undefined ? r : { ...r, required: live };
+    const name = liveOptionName(r as { option_name: string; source?: string | null; default_id?: string | null }, nameById);
+    const live = liveRequired.get(normalizeOptionName(name));
+    const renamed = name !== r.option_name ? { ...r, option_name: name } : r;
+    return live === undefined ? renamed : { ...renamed, required: live };
   });
 
   if (!vehicle) return withLiveType;
@@ -357,6 +366,7 @@ export async function GET(
       // matched cascade below.
       const lib = await loadDealerLibrary(admin, effectiveDealerId);
       const libNames = libraryNameSet(lib);
+      const libIds = libraryIdSet(lib as unknown as Array<{ id?: unknown }>);
 
       // Check for saved options keyed by this vehicleId
       const { data: saved } = await admin
@@ -365,7 +375,7 @@ export async function GET(
         .eq("vehicle_id", vid)
         .eq("dealer_id", effectiveDealerId)
         .order("sort_order", { ascending: true });
-      const savedLive = pruneOrphanedDefaultRows((saved ?? []) as SavedRow[], libNames);
+      const savedLive = pruneOrphanedDefaultRows((saved ?? []) as SavedRow[], libNames, libIds);
 
       if (savedLive.length > 0) {
         const hydrated = hydrateSavedAgainstLibrary(lib, savedLive, vehicleForRules);
@@ -396,7 +406,7 @@ export async function GET(
           .eq("vehicle_id", "0")
           .eq("dealer_id", effectiveDealerId)
           .order("sort_order", { ascending: true });
-        const legacyLive = pruneOrphanedDefaultRows((legacySaved ?? []) as SavedRow[], libNames);
+        const legacyLive = pruneOrphanedDefaultRows((legacySaved ?? []) as SavedRow[], libNames, libIds);
 
         if (legacyLive.length > 0) {
           const hydrated = hydrateSavedAgainstLibrary(lib, legacyLive, vehicleForRules);
@@ -439,7 +449,7 @@ export async function GET(
 
     if (saved && saved.length > 0) {
       const lib = await loadDealerLibrary(admin, effectiveDealerId);
-      const savedLive = pruneOrphanedDefaultRows(saved as SavedRow[], libraryNameSet(lib));
+      const savedLive = pruneOrphanedDefaultRows(saved as SavedRow[], libraryNameSet(lib), libraryIdSet(lib as unknown as Array<{ id?: unknown }>));
       if (savedLive.length > 0) {
         const hydrated = hydrateSavedAgainstLibrary(lib, savedLive, vehicleForRulesFallback);
         return NextResponse.json({ data: hydrated, groupOptions, source: "saved", alwaysShowCents });
@@ -512,18 +522,35 @@ export async function POST(
     // that way at the single write choke point. Rows whose name still matches
     // a library product keep source="default" and stay subject to library
     // rules — the deleted-product prune is untouched.
-    const libNames = effectiveDealerId
-      ? libraryNameSet(
-          ((await admin
+    const saveLib = effectiveDealerId
+      ? (((await admin
             .from("addendum_library")
-            .select("option_name")
-            .eq("dealer_id", effectiveDealerId)).data ?? []) as Array<{ option_name?: string | null }>,
-        )
-      : new Set<string>();
+            .select("id, option_name")
+            .eq("dealer_id", effectiveDealerId)).data ?? []) as Array<{ id?: unknown; option_name?: string | null }>)
+      : [];
+    const libNames = libraryNameSet(saveLib);
     const effectiveSource = (o: OptionInput): "default" | "manual" => {
       const claimed = o.source === "default" ? "default" : "manual";
       if (claimed === "default" && !libNames.has(normalizeOptionName(o.option_name))) return "manual";
       return claimed;
+    };
+    // Stamp the stable library identity (migration 152) on library-tracked rows
+    // so a later library RENAME still resolves them instead of orphaning them.
+    // Only when the name resolves to exactly ONE library row — an ambiguous name
+    // (the same product listed twice) stays NULL and keeps using the name path,
+    // which already works for it.
+    const libIdsByName = new Map<string, string[]>();
+    for (const l of saveLib) {
+      if (l.id == null) continue;
+      const k = normalizeOptionName(l.option_name);
+      const arr = libIdsByName.get(k) ?? [];
+      arr.push(String(l.id));
+      libIdsByName.set(k, arr);
+    }
+    const resolveDefaultId = (o: OptionInput): string | null => {
+      if (effectiveSource(o) !== "default") return null;
+      const ids = libIdsByName.get(normalizeOptionName(o.option_name));
+      return ids && ids.length === 1 ? ids[0] : null;
     };
 
     // Manual vehicle path (UUID or legacy '0')
@@ -544,10 +571,12 @@ export async function POST(
         description: o.description ?? null,
         sort_order: o.sort_order ?? i,
         source: effectiveSource(o),
+        default_id: resolveDefaultId(o),
         required: o.required !== false,
       }));
       const { data, error: insertErr } = inserts.length > 0
-        ? await admin.from("vehicle_options").insert(inserts).select("*")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? await (admin as any).from("vehicle_options").insert(inserts).select("*")
         : { data: [] as VehicleOptionRow[], error: null };
       if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 });
       // Stamp the explicit-save marker (migration 148) so an EMPTY save is
@@ -580,11 +609,13 @@ export async function POST(
       description: o.description ?? null,
       sort_order: o.sort_order ?? i,
       source: effectiveSource(o),
+      default_id: resolveDefaultId(o),
       required: o.required !== false,
     }));
 
     const { data, error: insertErr } = inserts.length > 0
-      ? await admin.from("vehicle_options").insert(inserts).select("*")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? await (admin as any).from("vehicle_options").insert(inserts).select("*")
       : { data: [] as VehicleOptionRow[], error: null };
 
     if (insertErr) {

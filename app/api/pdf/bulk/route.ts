@@ -14,7 +14,7 @@ import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-sa
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { useService as usePdfService, renderBulkViaService, type BulkItem, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, libraryNameSet, pruneOrphanedDefaultRows } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { enforceCanPrint } from "@/lib/print-eligibility";
 import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
@@ -491,6 +491,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           const { data: lib } = await admin
             .from("addendum_library")
             .select([
+              "id",
               "option_name", "item_price", "description", "applies_to",
               "ad_types", "ad_type",
               "makes", "makes_not", "models", "models_not", "trims", "trims_not",
@@ -508,16 +509,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           console.log(`[BULK]   library_fetched dealer_id=${dv.dealer_id} total=${lib?.length ?? 0}`);
         }
         const libNames = libraryNameSet(libCache.get(dv.dealer_id)! as unknown as Array<{ option_name?: string | null }>);
+        // Stable library identity (migration 152) — see pdf/generate.
+        const libIds = libraryIdSet(libCache.get(dv.dealer_id)! as unknown as Array<{ id?: unknown }>);
+        // The vehicle_options reads below are cast (default_id is not in the
+        // generated types yet), so name the row shape they used to infer.
+        type BulkSavedRow = {
+          option_name: string; option_price?: string | null; description?: string | null;
+          required?: boolean | null; source?: string | null; default_id?: string | null;
+          created_at?: string | null; updated_at?: string | null;
+        };
 
         // 1. Saved options keyed to this vehicle's UUID
-        const { data: savedOptsRaw, error: savedOptsErr } = await admin
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: savedOptsRaw, error: savedOptsErr } = await (admin as any)
           .from("vehicle_options")
-          .select("option_name, option_price, description, required, source, created_at, updated_at")
+          // default_id is not in the generated types yet (migration 152).
+          .select("option_name, option_price, description, required, source, default_id, created_at, updated_at")
           .eq("vehicle_id", vehicleId)
           .eq("dealer_id", dv.dealer_id)
           .eq("active", true)
           .order("sort_order");
-        const savedOpts = pruneOrphanedDefaultRows(savedOptsRaw ?? [], libNames);
+        const savedOpts = pruneOrphanedDefaultRows((savedOptsRaw ?? []) as BulkSavedRow[], libNames, libIds);
 
         console.log(`[BULK]   uuid_lookup vehicle_id=${vehicleId} dealer_id=${dv.dealer_id} err=${savedOptsErr?.message ?? "none"} count=${savedOptsRaw?.length ?? 0} live=${savedOpts.length}`);
 
@@ -540,14 +552,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           effectiveOptions = [];
         } else {
           // 2. Legacy '0' sentinel (options saved before per-vehicle UUID migration)
-          const { data: legacyOptsRaw, error: legacyOptsErr } = await admin
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { data: legacyOptsRaw, error: legacyOptsErr } = await (admin as any)
             .from("vehicle_options")
-            .select("option_name, option_price, description, required, source, created_at, updated_at")
+            .select("option_name, option_price, description, required, source, default_id, created_at, updated_at")
             .eq("vehicle_id", "0")
             .eq("dealer_id", dv.dealer_id)
             .eq("active", true)
             .order("sort_order");
-          const legacyOpts = pruneOrphanedDefaultRows(legacyOptsRaw ?? [], libNames);
+          const legacyOpts = pruneOrphanedDefaultRows((legacyOptsRaw ?? []) as BulkSavedRow[], libNames, libIds);
 
           console.log(`[BULK]   legacy_lookup vehicle_id=0 dealer_id=${dv.dealer_id} err=${legacyOptsErr?.message ?? "none"} count=${legacyOptsRaw?.length ?? 0} live=${legacyOpts.length}`);
 
@@ -602,6 +615,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             const { data: lib } = await admin
               .from("addendum_library")
               .select([
+                "id",
                 "option_name", "item_price", "description",
                 "required", "created_at", "separator_above", "separator_below", "spaces",
                 "applies_to", "ad_types",
@@ -660,11 +674,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             if (existingRules) existingRules.push(bulkRuleRow);
             else libRuleByName.set(name, [bulkRuleRow]);
           }
+          const bulkNameById = libraryNameById(dealerLib as unknown as Array<{ id?: unknown; option_name?: string | null }>);
           effectiveOptions = effectiveOptions.map(o => {
-            const key = normalizeOptionName(o.option_name);
+            // Library-tracked rows render the library's CURRENT name (parity
+            // with pdf/generate, so bulk and single print identically).
+            const name = liveOptionName(o as unknown as { option_name: string; source?: string | null; default_id?: string | null }, bulkNameById);
+            const key = normalizeOptionName(name);
             const live = liveRequired.get(key);
             return {
               ...o,
+              option_name: name,
               // Live library type wins over the value cached at save time;
               // the saved flag only applies to custom one-offs with no
               // library row.
@@ -750,12 +769,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const bulkLegacyPresent = optionsSource === "library" && effectiveFiltered.length > 0
           ? await hasLegacyAddendumData(admin, dv.dealer_id, dv.vin ?? null)
           : false;
+        // source was HARDCODED "default" here, which quietly undid ffb214d: a
+        // bulk print of a vehicle carrying a per-vehicle-renamed row re-saved it
+        // as "default", and the next read pruned it as an orphan. Preserve
+        // whatever the rendered row actually is, and carry its library identity
+        // (migration 152) so the re-save does not blank that either.
         const saveOptions: SaveOption[] = (bulkLegacyPresent ? freshLibOptions : [...effectiveFiltered, ...freshLibOptions]).map(o => ({
           option_name: o.option_name,
           option_price: o.option_price ?? "NC",
           description: o.description ?? null,
           required: o.required !== false,
-          source: "default",
+          source: (o as { source?: string }).source === "manual" ? "manual" : "default",
+          default_id: (o as { default_id?: string | null }).default_id
+            ?? ((o as { id?: unknown }).id != null ? String((o as { id?: unknown }).id) : null),
         }));
 
         console.log(`[BULK]   options_result source=${optionsSource} count=${options.length} names=[${options.map(o => o.option_name).join(", ")}]`);

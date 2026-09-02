@@ -19,7 +19,7 @@ import {
   LAYOUT_INFOSHEET,
   makeWidget,
 } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows, libraryNameSet, pruneOrphanedDefaultRows } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-save";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
@@ -245,6 +245,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     type SavedOptRow = any; // select("*") rows — same loose shape the sites below always consumed
     const libNames = libraryNameSet(dealerLib);
+    // Stable library identity (migration 152) — a renamed library product still
+    // resolves by id, so its saved snapshots survive the prune and render the
+    // library's CURRENT name.
+    const libIds = libraryIdSet(dealerLib);
+    const libNameById = libraryNameById(dealerLib);
     const { data: uuidRows } = await admin
       .from("vehicle_options")
       .select("*")
@@ -252,7 +257,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .eq("dealer_id", dv.dealer_id)
       .order("sort_order");
     let optionRows: SavedOptRow[] = pruneOrphanedDefaultRows(
-      (uuidRows ?? []) as Array<{ option_name: string; source?: string | null }>, libNames);
+      (uuidRows ?? []) as Array<{ option_name: string; source?: string | null; default_id?: string | null }>, libNames, libIds);
 
     if (optionRows.length === 0 && !optionsExplicitlySaved) {
       const { data: legacyRows } = await admin
@@ -262,7 +267,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .eq("dealer_id", dv.dealer_id)
         .order("sort_order");
       optionRows = pruneOrphanedDefaultRows(
-        (legacyRows ?? []) as Array<{ option_name: string; source?: string | null }>, libNames);
+        (legacyRows ?? []) as Array<{ option_name: string; source?: string | null; default_id?: string | null }>, libNames, libIds);
     }
 
     const disclaimers = await getGroupDisclaimers(textDealerId, dealer?.state ?? null, docType);
@@ -338,11 +343,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       : false;
 
     const savedFilteredMapped = savedFiltered.map(r => {
-      const key = normalizeOptionName(r.option_name as string);
+      // Library-tracked rows render the library's CURRENT name (so a rename
+      // propagates); manual rows keep their own. Every library-side lookup
+      // below keys off that resolved name, not the possibly-stale saved one.
+      const name = liveOptionName(r as { option_name: string; source?: string | null; default_id?: string | null }, libNameById);
+      const key = normalizeOptionName(name);
       const layout = libLayoutMap[key];
       const live = liveRequired.get(key);
       return {
         ...r,
+        option_name: name,
         description: r.description ?? libDescMap[key] ?? null,
         // Live library type wins over the value cached at save time; the
         // saved flag only applies to custom one-offs with no library row.
@@ -405,6 +415,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         description: (r.description as string | null) ?? null,
         required: (r.required as boolean | undefined) !== false,
         source: ((r as { source?: string }).source) ?? "default",
+        // Carry the library identity through the print-confirm re-save
+        // (migration 152) so it is not blanked back to name matching.
+        default_id: (r as { default_id?: string | null }).default_id ?? null,
       })),
       ...freshLibMapped.map(r => ({
         option_name: r.option_name,
@@ -412,6 +425,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         description: r.description,
         required: r.required,
         source: "default",
+        default_id: (r as { id?: unknown }).id != null ? String((r as { id?: unknown }).id) : null,
       })),
       ...(legacyAddendumPresent ? [] : seededMapped.map(r => ({
         option_name: r.option_name,
@@ -419,6 +433,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         description: r.description,
         required: r.required,
         source: "default",
+        default_id: (r as { default_id?: string | null }).default_id ?? null,
       }))),
     ];
 

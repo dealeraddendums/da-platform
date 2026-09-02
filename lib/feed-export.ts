@@ -25,6 +25,9 @@ import {
   parseOptionPriceValue,
   isPipeExcludedPrice,
   libraryNameSet,
+  libraryIdSet,
+  libraryNameById,
+  liveOptionName,
   pruneOrphanedDefaultRows,
 } from "@/lib/options-engine";
 
@@ -498,7 +501,7 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
     for (const ids of chunk(vehicleIds, 200)) {
       const opts = await fetchAllRows<Dv>((from, to) => admin
         .from("vehicle_options")
-        .select("vehicle_id, option_name, option_price, source, active, created_at, updated_at")
+        .select("vehicle_id, option_name, option_price, source, default_id, active, created_at, updated_at")
         .in("vehicle_id", ids)
         .eq("active", true)
         .range(from, to));
@@ -588,13 +591,22 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
     // deleted must not export (same prune as the print paths — Jenkins
     // Traverse 2026-08-31). Manual one-offs are kept.
     const libNames = libraryNameSet(libRows as Array<{ option_name?: string | null }>);
+    // Stable library identity (migration 152) — parity with the print paths:
+    // a renamed library product keeps exporting (by id) and exports under its
+    // CURRENT name; a deleted one still drops out.
+    const libIds = libraryIdSet(libRows as Array<{ id?: unknown }>);
+    const libNameById = libraryNameById(libRows as Array<{ id?: unknown; option_name?: string | null }>);
 
     for (const dv of vehicles) {
       const rulesVehicle = toRulesVehicle(dv, dealerTextId);
       const saved = pruneOrphanedDefaultRows(
-        (savedByVehicle.get(String(dv.id)) ?? []) as Array<Dv & { option_name: string; source?: string | null }>,
+        (savedByVehicle.get(String(dv.id)) ?? []) as Array<Dv & { option_name: string; source?: string | null; default_id?: string | null }>,
         libNames,
-      );
+        libIds,
+      ).map((r) => {
+        const name = liveOptionName(r as { option_name: string; source?: string | null; default_id?: string | null }, libNameById);
+        return name !== r.option_name ? { ...r, option_name: name } : r;
+      });
 
       const savedFiltered = saved.filter((r) =>
         savedRowSurvivesLibraryRules(

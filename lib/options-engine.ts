@@ -376,11 +376,72 @@ export function libraryNameSet(lib: Array<{ option_name?: string | null }>): Set
  * behaves exactly like never-saved (falls through to the current-library
  * seed) instead of rendering ghosts.
  */
-export function pruneOrphanedDefaultRows<T extends { option_name: string; source?: string | null }>(
+export function pruneOrphanedDefaultRows<T extends { option_name: string; source?: string | null; default_id?: string | null }>(
   rows: T[],
   libraryNames: Set<string>,
+  libraryIds?: Set<string>,
 ): T[] {
-  return rows.filter(r => r.source === "manual" || libraryNames.has(normalizeOptionName(r.option_name)));
+  return rows.filter(r => {
+    if (r.source === "manual") return true;
+    // default_id (migration 152) is the STABLE identity. Name matching could
+    // not tell a library RENAME from a library DELETE, so renaming a product
+    // silently pruned it off every vehicle that had already saved it (64
+    // Dickson City Hyundai vehicles lost a $4,995 line). With the id: a renamed
+    // product still resolves, a deleted one does not.
+    const did = r.default_id ?? null;
+    if (did && libraryIds) return libraryIds.has(did);
+    // No id (legacy row, or a name that matched several library rows so the
+    // backfill could not disambiguate) -> the original name check.
+    return libraryNames.has(normalizeOptionName(r.option_name));
+  });
+}
+
+/** Live library ids for a dealer — what pruneOrphanedDefaultRows checks a saved
+ *  row's default_id against. Build it from the same library array the call site
+ *  already fetched for its name set, so the two stay in lockstep. */
+export function libraryIdSet(lib: Array<{ id?: unknown }>): Set<string> {
+  const s = new Set<string>();
+  for (const r of lib) if (r.id != null) s.add(String(r.id));
+  return s;
+}
+
+/**
+ * Current library name per library id.
+ *
+ * A `source="default"` row is a library-tracked snapshot, so it should print the
+ * library's CURRENT name — that is what makes a library rename propagate to
+ * vehicles that saved the old name (Dickson City's "ADVANTAGE PACKAGE" ->
+ * "VALUE PACKAGE") instead of freezing stale text. `source="manual"` rows are
+ * operator-authored per-vehicle content and keep their own name (ffb214d).
+ *
+ * NOTE — deliberately name-only, NOT price. Price stays on the saved snapshot:
+ * 263 active default rows fleet-wide carry a price that differs from their
+ * library product, and spot-checking them showed deliberate per-vehicle
+ * overrides (Sharp Automotive "ASSIST STEPS" $1,030.72 vs library $197.95;
+ * American Luxury Coach negotiating $32,990 against a $34,990 list). Making
+ * price live would silently rewrite the printed price on those vehicles in both
+ * directions. The editor's price field is the intended way to change a price.
+ */
+export function libraryNameById(lib: Array<{ id?: unknown; option_name?: string | null }>): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const r of lib) {
+    if (r.id == null || r.option_name == null) continue;
+    const id = String(r.id);
+    if (!m.has(id)) m.set(id, String(r.option_name));
+  }
+  return m;
+}
+
+/** The name a saved row should render under: the library's current name for a
+ *  library-tracked (`default`) row that still resolves by id, else its own. */
+export function liveOptionName(
+  row: { option_name: string; source?: string | null; default_id?: string | null },
+  nameById: Map<string, string>,
+): string {
+  if (row.source === "manual") return row.option_name;
+  const did = row.default_id ?? null;
+  if (!did) return row.option_name;
+  return nameById.get(did) ?? row.option_name;
 }
 
 export function savedRowSurvivesLibraryRules(rules: RulesRow[], vehicle: VehicleRow, savedName?: string | null): boolean {
