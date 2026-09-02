@@ -488,6 +488,44 @@ export async function POST(
     const effectiveDealerId = claims.impersonating_dealer_id ?? claims.dealer_id;
     const admin = createAdminSupabaseClient();
 
+    // ── source coercion: a per-vehicle edit has no library identity ──────────
+    //
+    // `source` is the ONLY identity a vehicle_options row carries: "default" =
+    // a snapshot of a library product (matched by NAME — there is no
+    // default_id column), "manual" = operator-authored per-vehicle content.
+    // pruneOrphanedDefaultRows drops a "default" row whose name is no longer in
+    // the dealer's library, because that means the library product was deleted
+    // and the snapshot must not keep printing (Jenkins Chevrolet 2026-08-31,
+    // $80,108 of phantom required products on a live addendum).
+    //
+    // But "Edit Product -> Save for this vehicle" RENAMES a library-sourced row
+    // while leaving source="default". The renamed row then matches no library
+    // product, so the prune reads it as a deleted-product orphan and drops it
+    // from the PDF and from the next editor read — while the editor's local
+    // state (seeded from this route's insert response, which is not pruned)
+    // kept showing it. That is the American Luxury Coach report: a renamed
+    // $34,990 upfitter package vanished from the print and the asking price
+    // fell back to bare MSRP, with the editor still showing both.
+    //
+    // A renamed row is, by the definition above, exactly "manual": operator-
+    // authored per-vehicle content with no library identity. So classify it
+    // that way at the single write choke point. Rows whose name still matches
+    // a library product keep source="default" and stay subject to library
+    // rules — the deleted-product prune is untouched.
+    const libNames = effectiveDealerId
+      ? libraryNameSet(
+          ((await admin
+            .from("addendum_library")
+            .select("option_name")
+            .eq("dealer_id", effectiveDealerId)).data ?? []) as Array<{ option_name?: string | null }>,
+        )
+      : new Set<string>();
+    const effectiveSource = (o: OptionInput): "default" | "manual" => {
+      const claimed = o.source === "default" ? "default" : "manual";
+      if (claimed === "default" && !libNames.has(normalizeOptionName(o.option_name))) return "manual";
+      return claimed;
+    };
+
     // Manual vehicle path (UUID or legacy '0')
     if (isManual(vid)) {
       if (!effectiveDealerId) {
@@ -505,7 +543,7 @@ export async function POST(
         option_price: o.option_price ?? "NC",
         description: o.description ?? null,
         sort_order: o.sort_order ?? i,
-        source: o.source ?? "manual",
+        source: effectiveSource(o),
         required: o.required !== false,
       }));
       const { data, error: insertErr } = inserts.length > 0
@@ -541,7 +579,7 @@ export async function POST(
       option_price: o.option_price ?? "NC",
       description: o.description ?? null,
       sort_order: o.sort_order ?? i,
-      source: o.source ?? "manual",
+      source: effectiveSource(o),
       required: o.required !== false,
     }));
 
