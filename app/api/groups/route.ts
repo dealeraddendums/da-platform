@@ -272,6 +272,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         phone: contactPhone,
         address: addr,
         state: stateField,
+        internalId: groupInternalId,
         isGroup: true,
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

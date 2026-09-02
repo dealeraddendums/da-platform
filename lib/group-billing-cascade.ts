@@ -55,6 +55,7 @@ interface DealerSnap {
 interface GroupSnap {
   id: string;
   name: string;
+  internal_id: string | null;
   billing_customer_id: string | null;
   billing_id: string | null;
 }
@@ -132,6 +133,7 @@ async function ensureGroupCustomer(
   const created = await createCustomer({
     name: group.name,
     company: group.name,
+    internalId: group.internal_id ?? undefined,
     isGroup: true,
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -170,7 +172,7 @@ export async function cascadeOnGroupAssign(args: {
       .maybeSingle<DealerSnap>(),
     admin
       .from("groups")
-      .select("id, name, billing_customer_id, billing_id")
+      .select("id, name, internal_id, billing_customer_id, billing_id")
       .eq("id", args.groupId)
       .maybeSingle<GroupSnap>(),
   ]);

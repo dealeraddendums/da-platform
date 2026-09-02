@@ -59,7 +59,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
   const { data: group } = await admin
     .from("groups")
     .select(
-      "id, name, billing_customer_id, billing_id, " +
+      "id, name, internal_id, billing_customer_id, billing_id, " +
       "primary_contact, primary_contact_email, " +
       "billing_contact, billing_email, billing_phone, " +
       "billing_address, billing_city, billing_state, billing_zip, billing_country, " +
@@ -69,6 +69,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     .maybeSingle<{
       id: string;
       name: string;
+      internal_id: string | null;
       billing_customer_id: string | null;
       billing_id: string | null;
       primary_contact: string | null;
@@ -156,6 +157,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       phone,
       address,
       state: stateF,
+      internalId: group.internal_id ?? undefined,
       isGroup: true,
     });
 

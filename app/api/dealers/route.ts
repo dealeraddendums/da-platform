@@ -74,6 +74,7 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
         address: args.address,
         phone: args.phone,
         state: args.state,
+        internalId: args.dealerInternalId,
         isGroup: false,
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

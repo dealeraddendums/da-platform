@@ -60,6 +60,12 @@ export interface BillingCustomerInput {
   phone?: string;
   state?: string;
   isGroup?: boolean;
+  /** The dealer's / group's `internal_id`. da-billing stores it on the customer
+   *  and uses it to resolve group-billed membership (the "G" badge) against the
+   *  `{internal_id}::{name}` line descriptions we write on group templates.
+   *  Without it da-billing falls back to matching the dealer NAME, which breaks
+   *  silently on a rename. Always pass it when it is known. */
+  internalId?: string;
   /** Billing lifecycle on create. Omit for the default ('setup' — invoices
    *  generate but email is held until go-live, used for migration onboarding);
    *  pass 'active' only when the dealer is paying now and must be billed
@@ -86,6 +92,7 @@ export async function createCustomer(input: BillingCustomerInput): Promise<Billi
       phone: input.phone,
       state: input.state,
       isGroup: input.isGroup ?? false,
+      ...(input.internalId ? { internalId: input.internalId } : {}),
       // Only sent when explicitly provided; omitted => da-billing defaults to
       // 'setup' (migration onboarding). Self-pay upgrade paths pass 'active'.
       ...(input.billingState ? { billingState: input.billingState } : {}),

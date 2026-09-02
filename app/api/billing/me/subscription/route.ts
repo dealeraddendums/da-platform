@@ -288,6 +288,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         phone: dealer.phone ?? undefined,
         address: dealer.address ?? undefined,
         state: dealer.state ?? undefined,
+        internalId: dealer.internal_id ?? undefined,
         isGroup: false,
         // Self-serve subscription: dealer is paying now → bill immediately.
         billingState: "active",

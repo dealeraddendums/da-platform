@@ -173,7 +173,13 @@ async function setDealerTier(
     } else {
       // Self-pay Trial→paid upgrade: the dealer is paying now, so bill
       // immediately (not held in setup). billingState:'active' => cron emails.
-      const cust = await createCustomer({ name: dealer.name, company: dealer.name, isGroup: false, billingState: "active" });
+      const cust = await createCustomer({
+        name: dealer.name,
+        company: dealer.name,
+        internalId: dealer.internal_id ?? undefined,
+        isGroup: false,
+        billingState: "active",
+      });
       key = cust.id;
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -37,7 +37,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
   const { data: dealer } = await admin
     .from("dealers")
     .select(
-      "id, dealer_id, name, billing_customer_id, billing_id, primary_contact, primary_contact_email, " +
+      "id, dealer_id, name, internal_id, billing_customer_id, billing_id, primary_contact, primary_contact_email, " +
       "phone, address, city, state, zip, country"
     )
     .eq("id", params.dealerId)
@@ -45,6 +45,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       id: string;
       dealer_id: string;
       name: string;
+      internal_id: string | null;
       billing_customer_id: string | null;
       billing_id: string | null;
       primary_contact: string | null;
@@ -112,6 +113,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       phone: dealer.phone ?? undefined,
       address: dealer.address ?? undefined,
       state: dealer.state ?? undefined,
+      internalId: dealer.internal_id ?? undefined,
       isGroup: false,
     });
 
