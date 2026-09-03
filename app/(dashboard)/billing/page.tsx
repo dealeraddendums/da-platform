@@ -30,21 +30,27 @@ export const metadata = { title: "Billing — DA Platform" };
 
 const BILLING_URL = "https://billing.dealeraddendums.com";
 
+// Sits inside a white .card — var(--text-muted) (#78828c) is ~4.4:1 on white,
+// borderline for bold uppercase text at this size. Darkened for reliable AA
+// contrast without touching the shared --text-muted token used elsewhere.
 const STAT_LABEL = {
   fontSize: 11,
   fontWeight: 600,
   textTransform: "uppercase" as const,
   letterSpacing: "0.06em",
-  color: "var(--text-muted)",
+  color: "#5b6472",
   marginBottom: 6,
 };
 
+// Renders directly on the page's blue background (--bg-app: #3a6897), not on
+// a white card — var(--text-muted) is a gray tuned for white backgrounds and
+// was nearly unreadable here (medium gray on medium blue). Light tint instead.
 const SECTION_LABEL = {
   fontSize: 12,
   fontWeight: 700,
   textTransform: "uppercase" as const,
   letterSpacing: "0.08em",
-  color: "var(--text-muted)",
+  color: "rgba(255, 255, 255, 0.85)",
   margin: "0 0 10px",
 };
 
@@ -60,7 +66,7 @@ const TH = {
   fontWeight: 600,
   textTransform: "uppercase" as const,
   letterSpacing: "0.06em",
-  color: "var(--text-muted)",
+  color: "#5b6472",
   textAlign: "right" as const,
   whiteSpace: "nowrap" as const,
 };
