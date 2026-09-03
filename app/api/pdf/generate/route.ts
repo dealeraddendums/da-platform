@@ -470,6 +470,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         dealerTextId: dv.dealer_id,
         docType,
         condition: dv.condition,
+        make: dv.make,
         settings: settings as Record<string, unknown> | null,
       });
       savedTemplateWidgets = resolved.widgets;
@@ -478,7 +479,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (resolved.bgUrl) savedTemplateBgUrl = resolved.bgUrl;
       if (typeof resolved.fontScale === "number") savedTemplateFontScale = resolved.fontScale;
       if (resolved.paperSizeStr) savedTemplatePaperSize = resolved.paperSizeStr as PaperSize;
-      console.log(`[pdf/generate] template source=${resolved.source} id=${resolved.templateId ?? "none"} group=${resolved.isGroup}`);
+      console.log(`[pdf/generate] template source=${resolved.source}${resolved.makeKey ? ` make=${resolved.makeKey}` : ""} id=${resolved.templateId ?? "none"} group=${resolved.isGroup}`);
     }
 
     // ── Resolve custom paper size dimensions ──────────────────────────────────

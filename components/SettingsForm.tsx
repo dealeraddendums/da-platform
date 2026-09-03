@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import MakeOverrides from "@/components/MakeOverrides";
 import type { DealerSettingsRow, TemplateRow, UserRole, BuyersGuideDefaults } from "@/lib/db";
 import BuyersGuideAlignment from "@/components/BuyersGuideAlignment";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
@@ -736,6 +737,13 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
                   No {docTab} templates saved yet. Create them in the Builder.
                 </p>
               )}
+              {/* Per-make overrides (migration 153) — Genesis prints Genesis, etc. */}
+              <MakeOverrides
+                docType={docTab === "addendum" ? "addendum" : "infosheet"}
+                dealerId={dealerId ?? null}
+                templates={templates as unknown as Array<{ id: string; name: string; document_type: string; source?: string }>}
+                readOnly={templatesAreLocked}
+              />
             </>
           )}
 

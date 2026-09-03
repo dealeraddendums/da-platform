@@ -311,6 +311,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           dealerTextId: dv.dealer_id,
           docType,
           condition: dv.condition,
+          make: dv.make,
           settings: dealerSettings as Record<string, unknown> | null,
           cache: templateResolverCache,
         });
@@ -320,7 +321,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const templateFontScale = resolved.fontScale;
         const templatePaperSizeStr = resolved.paperSizeStr;
         const templateRestylerAttrPos = resolved.restylerAttrPos;
-        console.log(`[BULK]   template source=${resolved.source} id=${resolved.templateId ?? "none"} group=${templateIsGroup}`);
+        console.log(`[BULK]   template source=${resolved.source}${resolved.makeKey ? ` make=${resolved.makeKey}` : ""} id=${resolved.templateId ?? "none"} group=${templateIsGroup}`);
 
         // ── Effective paper size ─────────────────────────────────────────────
         // Each vehicle's OWN template width wins — same precedence as

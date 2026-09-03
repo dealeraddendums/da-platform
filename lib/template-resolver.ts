@@ -23,6 +23,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Widget } from "@/components/builder/types";
+import { pickByMake } from "@/lib/make-key";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = SupabaseClient<any, any, any>;
@@ -45,7 +46,9 @@ export interface ResolvedTemplate {
   paperSizeStr?: string;
   restylerAttrPos: { x?: unknown; y?: unknown } | null;
   /** Which rung of the cascade produced this — for logging/diagnostics only. */
-  source: "condition_default" | "infosheet_fallback" | "blank_starter" | "none";
+  source: "make_override" | "condition_default" | "infosheet_fallback" | "blank_starter" | "none";
+  /** The make override that won, when one did (for logging). */
+  makeKey?: string;
   templateId: string | null;
 }
 
@@ -53,9 +56,18 @@ export interface ResolvedTemplate {
  *  Single-vehicle callers can pass nothing — behaviour is identical, just uncached. */
 export interface TemplateResolverCache {
   byKey: Map<string, { widgets: Widget[] | null; meta: TemplateMeta }>;
+  /** Per-dealer make overrides, fetched once per batch. */
+  overridesByDealer: Map<string, MakeOverrideRow[]>;
 }
 export function createTemplateResolverCache(): TemplateResolverCache {
-  return { byKey: new Map() };
+  return { byKey: new Map(), overridesByDealer: new Map() };
+}
+
+export interface MakeOverrideRow {
+  make_key: string;
+  condition: string;
+  doc_type: string;
+  template_id: string;
 }
 
 function parseTemplateJson(json: Record<string, unknown> | null | undefined): { widgets: Widget[] | null; meta: TemplateMeta } {
@@ -120,11 +132,13 @@ export interface ResolveTemplateArgs {
    *  from it anyway). null = no settings row, which is the case for ~84% of
    *  dealers — the fallbacks below still apply. */
   settings: Record<string, unknown> | null;
+  /** dealer_vehicles.make — drives the per-make override rung (migration 153). */
+  make?: string | null;
   cache?: TemplateResolverCache;
 }
 
 export async function resolveTemplate(admin: Admin, args: ResolveTemplateArgs): Promise<ResolvedTemplate> {
-  const { dealerTextId, docType, condition, settings, cache } = args;
+  const { dealerTextId, docType, condition, settings, make, cache } = args;
 
   const condKey = condition === "New" ? "new" : condition === "Used" ? "used" : "cpo";
   const docKey = docType === "buyer_guide" ? "buyersguide" : docType;
@@ -133,9 +147,51 @@ export async function resolveTemplate(admin: Admin, args: ResolveTemplateArgs): 
   const meta: TemplateMeta = {};
   let templateId: string | null = null;
   let source: ResolvedTemplate["source"] = "none";
+  let makeKeyUsed: string | undefined;
+
+  // 0 — per-make override (migration 153). Checked BEFORE the condition
+  // defaults so a Genesis vehicle on a Hyundai+Genesis rooftop prints Genesis
+  // branding. An exact-condition rule beats a condition='any' rule; among
+  // matching makes the longest key wins (see pickByMake). Buyer's guides never
+  // reach here with a template, so overrides are addendum/infosheet only.
+  if (docType !== "buyer_guide") {
+    // Cache key includes docType because the query filters on it.
+    const ovKey = `${dealerTextId}|${docType}`;
+    let overrides = cache?.overridesByDealer.get(ovKey);
+    if (!overrides) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (admin as any)
+        .from("template_make_overrides")
+        .select("make_key, condition, doc_type, template_id")
+        .eq("dealer_id", dealerTextId)
+        .eq("doc_type", docType) as { data: MakeOverrideRow[] | null };
+      overrides = data ?? [];
+      cache?.overridesByDealer.set(ovKey, overrides);
+    }
+    const forDoc = overrides.filter(o => o.doc_type === docType);
+    const hit = pickByMake(forDoc.filter(o => o.condition === condKey), make)
+             ?? pickByMake(forDoc.filter(o => o.condition === "any"), make);
+    if (hit) {
+      const loaded = await loadTemplateById(admin, hit.template_id, cache);
+      if (loaded.widgets) {
+        // Only take the override when it actually yields widgets — a deleted or
+        // empty override template must fall through to the dealer's normal
+        // default rather than printing nothing.
+        widgets = loaded.widgets;
+        if (loaded.meta.bgUrl) meta.bgUrl = loaded.meta.bgUrl;
+        if (typeof loaded.meta.fontScale === "number") meta.fontScale = loaded.meta.fontScale;
+        if (loaded.meta.paperSizeStr) meta.paperSizeStr = loaded.meta.paperSizeStr;
+        if (loaded.meta.restylerAttrPos) meta.restylerAttrPos = loaded.meta.restylerAttrPos;
+        meta.isGroup = loaded.meta.isGroup === true;
+        templateId = hit.template_id;
+        source = "make_override";
+        makeKeyUsed = hit.make_key;
+      }
+    }
+  }
 
   // 1 + 2 — the configured default for this condition, else any condition.
-  if (settings) {
+  if (!widgets && settings) {
     templateId = (settings[`default_${docKey}_${condKey}`] as string | null)
       ?? (settings[`default_${docKey}_new`] as string | null)
       ?? (settings[`default_${docKey}_used`] as string | null)
@@ -223,5 +279,6 @@ export async function resolveTemplate(admin: Admin, args: ResolveTemplateArgs): 
     restylerAttrPos: meta.restylerAttrPos ?? null,
     source,
     templateId,
+    makeKey: makeKeyUsed,
   };
 }
