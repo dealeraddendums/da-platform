@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { makeKey } from "@/lib/make-key";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerTemplateAssignmentRow, GroupTemplateRow } from "@/lib/db";
@@ -59,12 +60,12 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { template_id?: string; dealer_ids?: string[]; dealer_editable?: boolean; set_as_default?: "new" | "used" | "both" | "neither" };
+  let body: { template_id?: string; dealer_ids?: string[]; dealer_editable?: boolean; set_as_default?: "new" | "used" | "both" | "neither"; make?: string | null };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { template_id, dealer_ids, dealer_editable = false, set_as_default = "neither" } = body;
+  const { template_id, dealer_ids, dealer_editable = false, set_as_default = "neither", make = null } = body;
   if (!template_id) return NextResponse.json({ error: "template_id required" }, { status: 400 });
   if (!dealer_ids?.length) return NextResponse.json({ error: "dealer_ids required" }, { status: 400 });
 
@@ -170,6 +171,33 @@ export async function POST(
   // columns here: they still carry an FK to templates(id), so a group-template
   // id is rejected — that FK violation used to kill this entire upsert
   // silently, which is why "Set as default" never took effect.
+  // Brand override (migration 153): when a make is supplied, this assignment
+  // means "vehicles of THIS make print this group template" rather than
+  // "this is the dealer's default". Group-managed rooftops are 22 of the 33
+  // mixed-make dealers, so the group side needs the same lever as Settings.
+  // The dealer's normal defaults are deliberately left untouched.
+  if (make) {
+    const makeKeyValue = makeKey(String(make));
+    if (!makeKeyValue) return NextResponse.json({ error: "Make must contain at least one letter or digit" }, { status: 400 });
+    const condition = set_as_default === "new" ? "new" : set_as_default === "used" ? "used" : "any";
+    const overrideRows = dealer_ids
+      .map((uuid: string) => uuidToText.get(uuid))
+      .filter((textId: string | undefined): textId is string => !!textId)
+      .map((textId: string) => ({
+        dealer_id: textId, make_key: makeKeyValue, condition, doc_type: "addendum", template_id: tpl.id,
+      }));
+    if (overrideRows.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: ovErr } = await (admin as any)
+        .from("template_make_overrides")
+        .upsert(overrideRows, { onConflict: "dealer_id,make_key,condition,doc_type" });
+      if (ovErr) {
+        return NextResponse.json({ error: `Assigned, but setting the brand override failed: ${ovErr.message}` }, { status: 500 });
+      }
+    }
+    return NextResponse.json({ ok: true, assigned: dealer_ids.length, make_key: makeKeyValue, condition });
+  }
+
   if (set_as_default !== "neither") {
     const settingsUpdates = dealer_ids
       .map((uuid) => uuidToText.get(uuid))

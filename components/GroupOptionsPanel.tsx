@@ -1291,6 +1291,8 @@ function TemplatesTab({ groupId }: { groupId: string }) {
   const [assigning, setAssigning] = useState(false);
   const [assignSuccess, setAssignSuccess] = useState(false);
   const [setDefaultFor, setSetDefaultFor] = useState<"new" | "used" | "both" | "neither">("neither");
+  // Brand override (migration 153) — blank means "set the normal default".
+  const [assignMake, setAssignMake] = useState("");
 
   const vehicleTypeOpts = ["New", "Used", "CPO"];
 
@@ -1401,6 +1403,7 @@ function TemplatesTab({ groupId }: { groupId: string }) {
         dealer_ids: Array.from(selectedDealers),
         dealer_editable: dealerEditable,
         set_as_default: setDefaultFor,
+        make: assignMake.trim() || null,
       }),
     });
     if (res.ok) {
@@ -1599,15 +1602,37 @@ function TemplatesTab({ groupId }: { groupId: string }) {
                   </label>
                 </div>
                 <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
-                  <p className="text-xs font-semibold mb-2" style={{ color: "var(--text-muted)" }}>SET AS DEFAULT ADDENDUM TEMPLATE</p>
+                  <p className="text-xs font-semibold mb-2" style={{ color: "var(--text-muted)" }}>BRAND OVERRIDE (OPTIONAL)</p>
+                  <input
+                    className="input text-sm w-full"
+                    style={{ height: 34 }}
+                    list="da-make-suggestions"
+                    placeholder="e.g. Genesis — leave blank to set the normal default"
+                    value={assignMake}
+                    onChange={(e) => setAssignMake(e.target.value)}
+                  />
+                  <datalist id="da-make-suggestions">
+                    <option value="Genesis" /><option value="Land Rover" /><option value="Jaguar" />
+                    <option value="Mini" /><option value="BMW" /><option value="Hyundai" />
+                  </datalist>
+                  <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                    {assignMake.trim()
+                      ? `Only ${assignMake.trim()} vehicles at the selected dealers will print this template. Their normal defaults are left unchanged.`
+                      : "Fill this in to brand ONE make (e.g. Genesis on a Hyundai rooftop) instead of changing the dealer's default."}
+                  </p>
+                </div>
+                <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+                  <p className="text-xs font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+                    {assignMake.trim() ? "APPLY THE BRAND OVERRIDE TO" : "SET AS DEFAULT ADDENDUM TEMPLATE"}
+                  </p>
                   {(["new", "used", "both", "neither"] as const).map((opt) => (
                     <label key={opt} className="flex items-center gap-2 cursor-pointer mb-1">
                       <input type="radio" checked={setDefaultFor === opt} onChange={() => setSetDefaultFor(opt)} />
                       <span className="text-sm">
                         {opt === "new" && "New vehicles only"}
                         {opt === "used" && "Used vehicles only"}
-                        {opt === "both" && "Both new and used"}
-                        {opt === "neither" && "Don't change dealer defaults"}
+                        {opt === "both" && (assignMake.trim() ? "All conditions" : "Both new and used")}
+                        {opt === "neither" && (assignMake.trim() ? "All conditions" : "Don't change dealer defaults")}
                       </span>
                     </label>
                   ))}
