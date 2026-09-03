@@ -64,11 +64,24 @@ export default function OtpCodeForm({
     if (verifyErr) {
       verifyErr = (await supabase.auth.verifyOtp({ email: cleanEmail, token: code, type: "magiclink" })).error;
     }
+    // Report the attempt so it lands in auth_events. The verify happens in the
+    // browser via supabase-js, so no server route sees the outcome — without
+    // this, a failed sign-in leaves no trace anywhere. Fire-and-forget: the
+    // report must never block or fail a login.
+    const report = (result: "success" | "failure", detail?: string) =>
+      void fetch("/api/auth/event", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "otp_verify", result, email: cleanEmail, detail }),
+        keepalive: true,
+      }).catch(() => {});
+
     if (verifyErr) {
+      report("failure", "invalid or expired code");
       setError("That code is invalid or expired. Request a new one below.");
       setLoading(false);
       return;
     }
+    report("success");
 
     // Ensure the session is established (cookies written) before handing off.
     await supabase.auth.getSession();

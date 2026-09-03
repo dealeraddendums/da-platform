@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { recordAuthEvent } from "@/lib/auth-events";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import { fireProfileSync } from "@/lib/sync-hubspot";
@@ -196,6 +197,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Password path: the client signs in with the password it just set — no token
   // needed (and issuing one here then setting a password would invalidate it).
   if (usingPassword) {
+    recordAuthEvent({ event: "invite_accept", result: "success", email: inv.email, req });
     return NextResponse.json({ ok: true, email: inv.email });
   }
 
@@ -206,6 +208,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     email: inv.email,
   });
   if (!linkData?.properties?.hashed_token) {
+    recordAuthEvent({ event: "invite_accept", result: "success", email: inv.email, detail: "manual login required", req });
     return NextResponse.json({ ok: true, manualLogin: true });
   }
   return NextResponse.json({

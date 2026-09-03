@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { recordAuthEvent } from "@/lib/auth-events";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { sendOtpCode } from "@/lib/migration-invite";
 import { rateLimit } from "@/lib/rate-limit";
@@ -50,8 +51,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Per-email throttle: silently drop (still { ok: true }) so a hammered email
   // neither leaks nor gets spammed.
   if (!rateLimit(`otp-login-email:${email}`, 3, 5 * 60_000)) {
+    recordAuthEvent({ event: "otp_code_requested", result: "failure", email, detail: "per-email throttle", req });
     return NextResponse.json({ ok: true });
   }
+
+  // A sign-in code was asked for. This is NOT a login — the verify happens
+  // client-side and reports separately as otp_verify — but it is the signal the
+  // 2026-09-03 investigation had to reconstruct from Mandrill, so record it.
+  // Logged regardless of whether the address turns out to exist, because the
+  // route's response is deliberately non-enumerable either way.
+  recordAuthEvent({ event: "otp_code_requested", result: "success", email, req });
 
   try {
     const admin = createAdminSupabaseClient();

@@ -109,6 +109,24 @@ async function runPurgeJob(): Promise<void> {
     console.error("[purge-old-pdfs] fortellis_api_log purge error:", err instanceof Error ? err.message : err);
   }
 
+  // Auth events (migration 155): keep 180 days. Long enough to answer "did this
+  // account ever sign in, and from where" for an incident found months later —
+  // the question the 2026-09-03 forensics could not answer — and short enough
+  // that we aren't hoarding IP/user-agent data indefinitely.
+  try {
+    const authCutoff = new Date();
+    authCutoff.setDate(authCutoff.getDate() - 180);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: aeErr } = await (admin as any)
+      .from("auth_events")
+      .delete()
+      .lt("at", authCutoff.toISOString());
+    if (aeErr) console.error("[purge-old-pdfs] auth_events purge failed:", aeErr.message);
+    else console.log("[purge-old-pdfs] auth_events rows older than 180 days purged");
+  } catch (err) {
+    console.error("[purge-old-pdfs] auth_events purge error:", err instanceof Error ? err.message : err);
+  }
+
   // VIN decode usage logs (migration 151): keep 24 months.
   try {
     const decodeCutoff = new Date();

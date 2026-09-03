@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { recordAuthEvent } from "@/lib/auth-events";
 import { verifyAuthenticationResponse } from "@simplewebauthn/server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { createAdminSupabaseClient } from "@/lib/db";
@@ -53,6 +54,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   if (!passkey) {
     await admin.from("passkey_challenges").delete().eq("id", challengeId);
+    recordAuthEvent({ event: "passkey_verify", result: "failure", detail: "credential not recognised", req });
     return NextResponse.json({ error: "Passkey not found for this device" }, { status: 401 });
   }
 
@@ -73,6 +75,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   } catch (e) {
     await admin.from("passkey_challenges").delete().eq("id", challengeId);
+    recordAuthEvent({
+      event: "passkey_verify", result: "failure", userId: passkey.user_id,
+      detail: `webauthn error: ${e instanceof Error ? e.message : "unknown"}`.slice(0, 200), req,
+    });
     return NextResponse.json(
       { error: "Authentication failed: " + (e instanceof Error ? e.message : "Unknown") },
       { status: 400 }
@@ -82,6 +88,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   await admin.from("passkey_challenges").delete().eq("id", challengeId);
 
   if (!verification.verified) {
+    recordAuthEvent({ event: "passkey_verify", result: "failure", userId: passkey.user_id, detail: "assertion not verified", req });
     return NextResponse.json({ error: "Authentication verification failed" }, { status: 401 });
   }
 
@@ -115,12 +122,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .eq("dealer_id", profile.dealer_id)
       .maybeSingle<{ active: boolean }>();
     if (dealerRow && dealerRow.active === false) {
+      recordAuthEvent({
+        event: "passkey_verify", result: "failure", email: user.email, userId: passkey.user_id,
+        detail: `dealer ${profile.dealer_id} inactive`, req,
+      });
       return NextResponse.json(
         { error: "This dealer account is inactive. Contact support to restore access." },
         { status: 403 },
       );
     }
   }
+
+  // Verified, user resolved, dealer active — this IS the login. Recorded before
+  // the session exchange so a mint failure still leaves a trail of the attempt.
+  recordAuthEvent({ event: "passkey_verify", result: "success", email: user.email, userId: passkey.user_id, req });
 
   // Generate a magic link token and immediately exchange it server-side for a session
   const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
