@@ -1,23 +1,37 @@
-import { NextRequest, NextResponse } from "next/server";
-import { rateLimit } from "@/lib/rate-limit";
-import {
-  createTrialDealer,
-  createTrialGroup,
-  createAdminUserWithInvite,
-  selfServeDuplicateExists,
-  type Attribution,
-} from "@/lib/provisioning";
-import { hubspotConfigured, upsertObject } from "@/lib/hubspot";
-
-// Server-to-server only. The marketing site's /api/leads calls this with a
-// shared X-API-Key after it verifies Turnstile + saves the marketing_lead. The
-// browser never reaches this endpoint. Creates a Trial dealer (or group) +
-// admin user, fires the existing HubSpot reliable-create + passkey invite, and
-// returns the new id so marketing can store it on the lead row.
+// Server-to-server only. The marketing site's /api/leads/confirm calls this with
+// a shared X-API-Key AFTER Turnstile passed AND the applicant clicked the
+// email-confirmation link. The browser never reaches this endpoint.
 //
-// STOP-for-review feature: provisions real Trial accounts + writes HubSpot.
+// ── The gate (added 2026-09-03 after two fake overnight trials auto-provisioned)
+// Layers run cheapest-first, and EVERY outcome is written to
+// self_serve_signups (migration 154) so overnight abuse volume is visible:
+//
+//   Layer 1  field sanity → per-IP rate limit (shared DB ledger) → disposable
+//            domain / no-MX  ....................  lib/signup-guard.ts
+//   Layer 2  business hours, 5 AM–9 PM Pacific, DST-safe  ..  lib/signup-guard.ts
+//   Layer 3  AI legitimacy verdict  .............  lib/signup-legitimacy.ts
+//
+// Only a confident "legit" auto-provisions. suspicious / fake / AI-error all
+// land in the review queue — we fail to a human, never to auto-allow.
+//
+// Layer 0 (email confirmation before any of this) lives on the marketing side:
+// the lead is saved on submit, and this endpoint is only called once the
+// address has proven it can receive mail.
+//
+// SCOPE: this is the PUBLIC path only. super_admin / group-admin dealer creation
+// (POST /api/dealers) and existing-user logins are untouched by all of it.
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "node:crypto";
+import { createAdminSupabaseClient } from "@/lib/db";
+import { selfServeDuplicateExists, type Attribution } from "@/lib/provisioning";
+import {
+  fieldSanity, ipRateLimitExceeded, isDisposableDomain, domainHasMx,
+  isWithinSignupHours, pacificHour, AFTER_HOURS_MESSAGE, IP_LIMIT, IP_WINDOW_MINUTES,
+} from "@/lib/signup-guard";
+import { evaluateSignupLegitimacy, shouldAutoProvision, type LegitimacyVerdict } from "@/lib/signup-legitimacy";
+import { provisionSelfServe, type SelfServeInput } from "@/lib/self-serve-provision";
+import { sendReviewRequestEmail } from "@/lib/self-serve-review-email";
 
 interface Body {
   name?: string;
@@ -30,6 +44,23 @@ interface Body {
   attribution?: Attribution;
 }
 
+const PENDING_MESSAGE =
+  "Thanks — we're reviewing your details and will activate your account shortly.";
+
+/** One row per attempt: the audit log, the review queue, and the rate-limit ledger. */
+async function logDecision(fields: Record<string, unknown>): Promise<string | null> {
+  const admin = createAdminSupabaseClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (admin as any)
+    .from("self_serve_signups").insert(fields).select("id").single();
+  if (error) {
+    // Never fail a signup because logging failed — but say so loudly.
+    console.error("[self-serve] decision log insert failed:", error.message);
+    return null;
+  }
+  return data?.id ?? null;
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── Auth: shared secret, no user session ──────────────────────────────────
   const configuredKey = process.env.SELF_SERVE_API_KEY;
@@ -39,12 +70,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   if (req.headers.get("x-api-key") !== configuredKey) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // ── Defensive rate-limit (real gate is the key + Turnstile upstream) ──────
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  if (!rateLimit(`self-serve:${ip}`, 30, 60_000)) {
-    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
   }
 
   let body: Body;
@@ -61,84 +86,121 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const zip = body.zip?.trim() || null;
   const accountKind: "single" | "group" = body.accountKind === "group" ? "group" : "single";
   const attribution = body.attribution ?? null;
+  // The applicant's browser IP, forwarded by the marketing site (which sits
+  // directly on EC2 and therefore sees the real client address).
+  const sourceIp = req.headers.get("x-signup-client-ip")?.trim()
+    || req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    || null;
 
   if (!name || !email || !dealership) {
     return NextResponse.json({ error: "name, email, and dealership are required" }, { status: 400 });
   }
-  if (!EMAIL_RE.test(email)) {
-    return NextResponse.json({ error: "invalid email" }, { status: 400 });
-  }
-  // For a group the org name is groupName when given, else the dealership field.
   const groupName = (body.groupName?.trim() || dealership);
   const entityName = accountKind === "group" ? groupName : dealership;
 
-  // ── Duplicate guard ───────────────────────────────────────────────────────
+  const common = {
+    email, contact_name: name, dealership, phone, zip,
+    account_kind: accountKind, group_name: accountKind === "group" ? groupName : null,
+    attribution, source_ip: sourceIp,
+  };
+
+  // ── Layer 1a — field sanity ───────────────────────────────────────────────
+  const sanity = fieldSanity({ email, name, dealership, zip });
+  if (!sanity.ok) {
+    await logDecision({ ...common, decision: "blocked_invalid", decision_reason: sanity.reason });
+    return NextResponse.json({ error: sanity.reason }, { status: 400 });
+  }
+
+  const admin = createAdminSupabaseClient();
+
+  // ── Duplicate guard (unchanged behaviour: an existing account is a no-op) ──
   try {
     if (await selfServeDuplicateExists({ email, name: entityName, kind: accountKind })) {
       return NextResponse.json({ ok: true, existing: true });
     }
   } catch (err) {
     console.error("[self-serve] duplicate check failed:", err instanceof Error ? err.message : err);
-    // Fail safe: if the dup check itself errors, don't risk a duplicate create.
     return NextResponse.json({ error: "Signup temporarily unavailable" }, { status: 503 });
   }
 
-  try {
-    if (accountKind === "group") {
-      const { groupId } = await createTrialGroup({
-        groupName, contactName: name, email, phone, zip, attribution,
-      });
-      await createAdminUserWithInvite({
-        email, fullName: name, phone, role: "group_admin",
-        groupId, entityName: groupName,
-      });
-      void pushAttributionToHubspot(email, attribution);
-      return NextResponse.json({ ok: true, kind: "group", group_id: groupId }, { status: 201 });
-    }
+  // ── Layer 1b — per-IP rate limit, shared state ────────────────────────────
+  const { exceeded, recent } = await ipRateLimitExceeded(admin, sourceIp);
+  if (exceeded) {
+    await logDecision({
+      ...common, decision: "blocked_ratelimit",
+      decision_reason: `${recent} attempts from ${sourceIp} in the last ${IP_WINDOW_MINUTES}m (limit ${IP_LIMIT})`,
+    });
+    console.warn(`[self-serve] BLOCKED ratelimit ip=${sourceIp} recent=${recent} email=${email}`);
+    return NextResponse.json({ error: "Too many signup attempts — please try again later." }, { status: 429 });
+  }
 
-    const { dealerUuid, dealerId } = await createTrialDealer({
-      dealership, contactName: name, email, phone, zip, attribution,
+  // ── Layer 1c — disposable domain / undeliverable domain ───────────────────
+  if (isDisposableDomain(email)) {
+    await logDecision({ ...common, decision: "blocked_domain", decision_reason: "disposable email domain" });
+    console.warn(`[self-serve] BLOCKED disposable-domain email=${email}`);
+    return NextResponse.json({ error: "Please sign up with your dealership email address." }, { status: 400 });
+  }
+  const mx = await domainHasMx(email);
+  if (!mx.ok) {
+    await logDecision({ ...common, decision: "blocked_domain", decision_reason: "email domain has no MX record" });
+    console.warn(`[self-serve] BLOCKED no-MX email=${email}`);
+    return NextResponse.json({ error: "That email domain can't receive mail — please check the address." }, { status: 400 });
+  }
+
+  // ── Layer 2 — business hours (Pacific, DST-safe) ──────────────────────────
+  if (!isWithinSignupHours()) {
+    await logDecision({
+      ...common, decision: "blocked_afterhours",
+      decision_reason: `attempted at ${pacificHour()}:00 Pacific (open 5–21)`,
     });
-    await createAdminUserWithInvite({
-      email, fullName: name, phone, role: "dealer_admin",
-      dealerTextId: dealerId, entityName: dealership,
+    console.warn(`[self-serve] BLOCKED after-hours hour=${pacificHour()}PT email=${email} dealership="${dealership}"`);
+    return NextResponse.json({ error: AFTER_HOURS_MESSAGE, afterHours: true }, { status: 403 });
+  }
+
+  // ── Layer 3 — AI legitimacy ───────────────────────────────────────────────
+  const verdict: LegitimacyVerdict = await evaluateSignupLegitimacy({
+    email, name, dealership, zip, phone, accountKind,
+    groupName: accountKind === "group" ? groupName : null,
+  });
+  const aiFields = {
+    ai_verdict: verdict.verdict, ai_confidence: verdict.confidence,
+    ai_reasons: verdict.reasons, ai_model: verdict.model, ai_ms: verdict.ms,
+  };
+  const input: SelfServeInput = { name, email, dealership, phone, zip, accountKind, groupName, attribution };
+
+  // ── Held for human review ─────────────────────────────────────────────────
+  if (!shouldAutoProvision(verdict)) {
+    const reviewToken = randomBytes(32).toString("hex");
+    const rowId = await logDecision({
+      ...common, ...aiFields, decision: "pending_review",
+      decision_reason: verdict.verdict === "error"
+        ? "AI evaluation unavailable — held for review (fail-safe)"
+        : `AI verdict ${verdict.verdict} (confidence ${verdict.confidence})`,
+      review_token: reviewToken,
     });
-    void pushAttributionToHubspot(email, attribution);
-    return NextResponse.json({ ok: true, kind: "single", dealer_id: dealerId, dealer_uuid: dealerUuid }, { status: 201 });
+    console.warn(`[self-serve] QUEUED verdict=${verdict.verdict} conf=${verdict.confidence} email=${email} dealership="${dealership}" reasons=${JSON.stringify(verdict.reasons)}`);
+    if (rowId) {
+      void sendReviewRequestEmail({ rowId, reviewToken, input, verdict });
+    }
+    return NextResponse.json({ ok: true, pending: true, message: PENDING_MESSAGE }, { status: 202 });
+  }
+
+  // ── Auto-provision (legit, confident) ─────────────────────────────────────
+  try {
+    const result = await provisionSelfServe(input);
+    const rowId = await logDecision({
+      ...common, ...aiFields, decision: "provisioned",
+      decision_reason: `AI verdict legit (confidence ${verdict.confidence})`,
+      ...(result.kind === "group" ? { group_id: result.groupId } : { dealer_id: result.dealerId, dealer_uuid: result.dealerUuid }),
+    });
+    void rowId;
+    console.log(`[self-serve] PROVISIONED conf=${verdict.confidence} email=${email} dealership="${dealership}"`);
+    return result.kind === "group"
+      ? NextResponse.json({ ok: true, kind: "group", group_id: result.groupId }, { status: 201 })
+      : NextResponse.json({ ok: true, kind: "single", dealer_id: result.dealerId, dealer_uuid: result.dealerUuid }, { status: 201 });
   } catch (err) {
     console.error("[self-serve] provisioning failed:", err instanceof Error ? err.message : err);
+    await logDecision({ ...common, ...aiFields, decision: "blocked_invalid", decision_reason: `provisioning failed: ${err instanceof Error ? err.message : "unknown"}` });
     return NextResponse.json({ error: "Provisioning failed" }, { status: 500 });
   }
-}
-
-/**
- * Best-effort: stamp the acquisition source onto the HubSpot Contact as custom
- * properties. GATED OFF by default (HUBSPOT_ATTRIBUTION_ENABLED=1) because the
- * portal must have the matching custom contact properties first — otherwise
- * HubSpot 400s on unknown properties. The acquisition source is always stored
- * durably on the dealer/group row (jsonb), so this is purely additive. Isolated
- * fire-and-forget — never affects provisioning or the onboarding-trigger sync.
- */
-function pushAttributionToHubspot(email: string, attribution: Attribution): void {
-  if (process.env.HUBSPOT_ATTRIBUTION_ENABLED !== "1") return;
-  if (!hubspotConfigured() || !attribution) return;
-  const props: Record<string, string | null> = {};
-  for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "referrer", "landing_page"]) {
-    if (attribution[k] != null) props[k] = attribution[k];
-  }
-  if (Object.keys(props).length === 0) return;
-  void (async () => {
-    try {
-      await upsertObject({
-        object: "contacts",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        properties: { email, ...props } as any,
-        existingHubspotId: null,
-        searchProperty: "email",
-        searchValue: email,
-      });
-    } catch (err) {
-      console.error("[self-serve] HubSpot attribution push failed (non-fatal):", err instanceof Error ? err.message : err);
-    }
-  })();
 }
