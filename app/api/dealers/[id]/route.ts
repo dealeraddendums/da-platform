@@ -9,7 +9,8 @@ import { archiveCustomer, unarchiveCustomer, billingConfigured, updateCustomer, 
 import { fireAndForget } from "@/lib/billing-sync";
 import { fireDealerSync, fireDealerReliable } from "@/lib/sync-hubspot";
 import { fireConversionWebhook } from "@/lib/marketing-webhook";
-import { normalizeSubscriptionType, isPayingAccount } from "@/lib/hubspot";
+import { normalizeSubscriptionType, isPayingAccount, archiveObject, hubspotConfigured } from "@/lib/hubspot";
+import { boxConfigured, deleteFolderIfEmpty } from "@/lib/box";
 import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 import { fireSuperAdminGroupAssignCascade } from "@/lib/group-billing-cascade";
 import { applyDealerSubscriptionChange, type SubscriptionBillingResult } from "@/lib/billing-subscription";
@@ -608,9 +609,14 @@ export async function DELETE(
   // delete completes.
   const { data: dealer, error: loadErr } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, is_test, billing_customer_id, internal_id")
+    .select("id, dealer_id, name, is_test, billing_customer_id, internal_id, hubspot_company_id, hubspot_primary_contact_id, box_folder_id")
     .eq("id", params.id)
-    .maybeSingle<{ id: string; dealer_id: string; name: string; is_test: boolean; billing_customer_id: string | null; internal_id: string | null }>();
+    .maybeSingle<{
+      id: string; dealer_id: string; name: string; is_test: boolean;
+      billing_customer_id: string | null; internal_id: string | null;
+      hubspot_company_id: string | null; hubspot_primary_contact_id: string | null;
+      box_folder_id: string | null;
+    }>();
 
   if (loadErr) return NextResponse.json({ error: loadErr.message }, { status: 500 });
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
@@ -627,7 +633,9 @@ export async function DELETE(
     admin.from("addendum_data").select("id", { count: "exact", head: true }).eq("dealer_id", dealer.id),
     admin.from("print_history").select("id", { count: "exact", head: true }).eq("dealer_id", dealer.dealer_id),
     admin.from("vehicle_options").select("id", { count: "exact", head: true }).eq("dealer_id", dealer.dealer_id),
-    admin.from("profiles").select("id").eq("dealer_id", dealer.dealer_id),
+    // hubspot_contact_id is read here because the profiles rows are about to be
+    // deleted — after that the CRM contact ids are unrecoverable.
+    admin.from("profiles").select("id, email, hubspot_contact_id").eq("dealer_id", dealer.dealer_id),
   ]);
   const counts = {
     vehicles: vehiclesC.count ?? 0,
@@ -637,6 +645,9 @@ export async function DELETE(
     users: usersRes.data?.length ?? 0,
   };
   const userIds = (usersRes.data ?? []).map(r => r.id as string);
+  const userContactIds = (usersRes.data ?? [])
+    .map(r => (r as { hubspot_contact_id?: string | null }).hubspot_contact_id)
+    .filter((v): v is string => Boolean(v));
 
   // ── Delete dealer-scoped auth users (profiles cascade via auth FK) ───────
   // Use Supabase admin auth API rather than DELETE from profiles directly so
@@ -695,6 +706,80 @@ export async function DELETE(
     }
   }
 
+  // ── HubSpot + Box cleanup ────────────────────────────────────────────────
+  // Both artifacts are created fire-and-forget on dealer/user creation and,
+  // until now, had no delete counterpart — so every deleted dealer left behind
+  // a CRM Company, its users' Contacts, and a Box folder. The 2026-09-03 fake
+  // trials left exactly that: two Companies, two Contacts (one still being
+  // touched by a sync AFTER its dealer was gone) and two folders in /Dealers.
+  //
+  // Awaited rather than fire-and-forget, unlike the da-billing archive above:
+  // this is a super_admin action where a second of latency is free, and an
+  // awaited call is the only way the audit row and the response can state what
+  // actually happened instead of "queued". Each call is individually caught and
+  // bounded — a HubSpot or Box outage must never fail a delete whose rows are
+  // already gone. The route refuses any dealer without is_test, so this only
+  // ever runs against test accounts.
+  const cleanup: {
+    hubspot_company: string;
+    hubspot_contacts: { id: string; result: string }[];
+    box_folder: string;
+  } = { hubspot_company: "skipped", hubspot_contacts: [], box_folder: "skipped" };
+
+  const CLEANUP_TIMEOUT_MS = 10_000;
+  const bounded = async <T,>(label: string, fn: () => Promise<T>): Promise<T | { error: string }> => {
+    try {
+      return await Promise.race([
+        fn(),
+        new Promise<never>((_, rej) =>
+          setTimeout(() => rej(new Error(`${label} timed out after ${CLEANUP_TIMEOUT_MS}ms`)), CLEANUP_TIMEOUT_MS),
+        ),
+      ]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[dealer DELETE] ${label} failed:`, msg);
+      return { error: msg };
+    }
+  };
+
+  if (hubspotConfigured()) {
+    // The dealer's own primary-contact id is included alongside the users' —
+    // a self-serve signup's lead contact is created before any profile exists,
+    // so it is only reachable through dealers.hubspot_primary_contact_id.
+    const contactIds = Array.from(new Set([
+      ...userContactIds,
+      ...(dealer.hubspot_primary_contact_id ? [dealer.hubspot_primary_contact_id] : []),
+    ]));
+    for (const cid of contactIds) {
+      const r = await bounded(`HubSpot contact ${cid} archive`, () => archiveObject("contacts", cid));
+      cleanup.hubspot_contacts.push({
+        id: cid,
+        result: "error" in r ? "error" : r.archived ? "archived" : "already_gone",
+      });
+    }
+    if (dealer.hubspot_company_id) {
+      const r = await bounded(
+        `HubSpot company ${dealer.hubspot_company_id} archive`,
+        () => archiveObject("companies", dealer.hubspot_company_id!),
+      );
+      cleanup.hubspot_company = "error" in r ? "error" : r.archived ? "archived" : "already_gone";
+      if (cleanup.hubspot_company !== "error") {
+        console.log(`[dealer DELETE] HubSpot company ${dealer.hubspot_company_id}: ${cleanup.hubspot_company}`);
+      }
+    }
+  }
+
+  if (dealer.box_folder_id && boxConfigured()) {
+    const r = await bounded(
+      `Box folder ${dealer.box_folder_id} delete`,
+      () => deleteFolderIfEmpty(dealer.box_folder_id!),
+    );
+    cleanup.box_folder = "error" in r ? "error" : r.result;
+    if (cleanup.box_folder !== "error") {
+      console.log(`[dealer DELETE] Box folder ${dealer.box_folder_id}: ${cleanup.box_folder}`);
+    }
+  }
+
   // ── Audit log (best-effort — don't fail the response if it errors) ───────
   try {
     await admin.from("admin_audit").insert({
@@ -705,6 +790,7 @@ export async function DELETE(
         dealer_name: dealer.name,
         dealer_uuid: dealer.id,
         counts: { ...counts, users_deleted: usersDeleted },
+        cleanup,
       },
     });
   } catch (auditErr) {
@@ -718,6 +804,7 @@ export async function DELETE(
       dealer_id: dealer.dealer_id,
       ...counts,
       users_deleted: usersDeleted,
+      cleanup,
     },
   });
 }

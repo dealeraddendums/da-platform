@@ -207,3 +207,36 @@ export async function createGroupFolder(groupName: string): Promise<string> {
   const parentId = await ensureParentFolder(GROUPS_PARENT_NAME);
   return createOrReuseChild(client, parentId, name);
 }
+
+/**
+ * Delete a dealer/group folder, but ONLY when it is empty.
+ *
+ * The counterpart to createDealerFolder, which fires on every dealer/group
+ * create. Without it, deleting a dealer left its Box folder behind — the
+ * 2026-09-03 fake trials left "alice victim" and "bob" orphaned in /Dealers.
+ *
+ * Refuses to delete a folder with contents: a dealer's folder may hold real
+ * documents someone else put there, and recursive deletion is not a side effect
+ * a dealer-delete should be able to cause. A non-empty folder is reported so an
+ * operator can decide.
+ *
+ * Returns what happened rather than throwing on the ordinary outcomes; callers
+ * run this fire-and-forget.
+ */
+export async function deleteFolderIfEmpty(
+  folderId: string,
+): Promise<{ result: "deleted" | "not_empty" | "not_found" | "unconfigured"; items?: number }> {
+  const client = getClient();
+  if (!client) return { result: "unconfigured" };
+  try {
+    const page: any = await client.folders.getFolderItems(folderId, { limit: 100, fields: ["id", "name", "type"] });
+    const items = (page?.entries ?? []).length;
+    if (items > 0) return { result: "not_empty", items };
+    await client.folders.deleteFolderById(folderId);
+    return { result: "deleted", items: 0 };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/404|not.?found/i.test(msg)) return { result: "not_found" };
+    throw err;
+  }
+}

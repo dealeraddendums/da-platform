@@ -169,6 +169,32 @@ export async function associateContactToCompany(contactId: string, companyId: st
   }
 }
 
+/**
+ * Archive a CRM object (HubSpot's DELETE is a soft archive — recoverable from
+ * the portal's recycling bin for ~90 days).
+ *
+ * Added because dealer deletion used to leave its HubSpot records behind:
+ * `fireDealerSync` creates a Company on every dealer create and a Contact on
+ * every user create, with no delete counterpart. The 2026-09-03 fake trials
+ * left two Companies and two Contacts orphaned that way — one Company was even
+ * touched by a sync AFTER its dealer was gone — and the orphans then pollute the
+ * CRM and the BI trial funnel.
+ *
+ * A 404 is treated as success: already archived, merged away, or never created
+ * is the desired end state either way.
+ */
+export async function archiveObject(
+  object: "contacts" | "companies",
+  id: string,
+): Promise<{ archived: boolean; status: number }> {
+  const res = await fetch(`${BASE}/objects/${object}/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (res.ok || res.status === 404) return { archived: res.ok, status: res.status };
+  throw new HubspotError(res.status, `archiveObject ${object}/${id} ${res.status}`, await readBody(res));
+}
+
 // ── Plan-tier mapping (dealer.account_type → subscription_type enum) ──
 
 const SUBSCRIPTION_TYPE_MAP: Record<string, string> = {
