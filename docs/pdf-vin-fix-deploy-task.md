@@ -1,5 +1,6 @@
 # Claude Code Task — Deploy the per-vehicle `{VIN}.pdf` bulk fix
 
+> Canonical in-repo copy (also mirrored at the DA-Platform-Suite root during planning).
 > Paste this whole file into a Claude Code session running against the DA repos.
 > Owner: Allan. Planning/diagnosis done in the claude.ai session 2026-05-30.
 > Run Steps 1–4 autonomously end-to-end — each step has its own verify command,
@@ -35,11 +36,12 @@ Uncommitted working-tree changes from the planning session:
 - `app/api/pdf/bulk/route.ts` — per-vehicle self-heal upload from the merged PDF
 - `CLAUDE-da-platform.md` — PDF Naming + Phase 10b notes
 - `scripts/backfill-flat-vin-pdfs.mjs` — one-time nested→flat backfill (used in Step 4)
+- `docs/pdf-vin-fix-deploy-task.md` — this runbook (so it travels to the box)
 
 ```bash
 cd /var/www/da-platform     # or your local clone
-git status                  # confirm the 4 files above
-git add lib/s3-upload.ts app/api/pdf/bulk/route.ts CLAUDE-da-platform.md scripts/backfill-flat-vin-pdfs.mjs
+git status                  # confirm the 5 files above
+git add lib/s3-upload.ts app/api/pdf/bulk/route.ts CLAUDE-da-platform.md scripts/backfill-flat-vin-pdfs.mjs docs/pdf-vin-fix-deploy-task.md
 git commit -m "PDF: flat {VIN}.pdf keys (overwrite) + bulk self-heal upload + nested-key backfill script"
 git push origin main
 ```
