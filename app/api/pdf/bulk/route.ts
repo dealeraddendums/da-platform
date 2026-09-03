@@ -7,6 +7,7 @@ import { isRestylerGroup } from "@/lib/restyler";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/record-print";
 import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-save";
+import { resolveTemplate, createTemplateResolverCache } from "@/lib/template-resolver";
 // buildBuyersGuidePdf is pdf-lib only (no Puppeteer). The bulk
 // buyer_guide branch still renders it locally; if we ever want it on
 // the PDF service too, the single buyers-guide route's pattern shows
@@ -181,8 +182,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const restylerCache = new Map<string, boolean>();
 
   const dealerSettingsCache = new Map<string, DealerSettingsRow | null>();
-  const templateCache = new Map<string, Widget[] | null>();
-  const templateMetaCache = new Map<string, { bgUrl?: string; fontScale?: number; paperSizeStr?: string; isGroup?: boolean; restylerAttrPos?: { x?: unknown; y?: unknown } | null }>();
+  // Template fetches are memoized inside the shared resolver now.
+  const templateResolverCache = createTemplateResolverCache();
   const libCache = new Map<string, LibRow[]>();
 
   // No local Chrome on da-platform after Phase E.2. Service-mode loop
@@ -303,130 +304,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const aiEnabled = (dealerSettings as Record<string, unknown> | null)?.ai_content_default as boolean ?? true;
 
         // ── Default template ─────────────────────────────────────────────────
-        let templateWidgets: Widget[] | null = null;
-        let templateIsGroup = false;
-        let templateBgUrl: string | undefined;
-        let templateFontScale: number | undefined;
-        let templatePaperSizeStr: string | undefined;
-        let templateRestylerAttrPos: { x?: unknown; y?: unknown } | null = null;
-
-        if (dealerSettings) {
-          const condKey = dv.condition === "New" ? "new" : dv.condition === "Used" ? "used" : "cpo";
-          const docKey = docType; // "addendum" | "infosheet" — buyer_guide handled above
-          const col = `default_${docKey}_${condKey}`;
-          const ds = dealerSettings as Record<string, unknown>;
-          const templateId = (ds[col] as string | null)
-            ?? (ds[`default_${docKey}_new`] as string | null)
-            ?? (ds[`default_${docKey}_used`] as string | null)
-            ?? (ds[`default_${docKey}_cpo`] as string | null);
-
-          if (templateId) {
-            if (!templateCache.has(templateId)) {
-              // Default may be either a dealer template or a group_template
-              // (migration 065 drops the FK). Try templates first, fall back
-              // to group_templates so a group-template default still prints.
-              let tmpl: { template_json: Record<string, unknown> } | null = null;
-              let tmplIsGroup = false;
-              const ownRes = await admin
-                .from("templates")
-                .select("template_json")
-                .eq("id", templateId)
-                .maybeSingle<{ template_json: Record<string, unknown> }>();
-              tmpl = ownRes.data;
-              if (!tmpl) {
-                const grpRes = await admin
-                  .from("group_templates")
-                  .select("template_json")
-                  .eq("id", templateId)
-                  .maybeSingle<{ template_json: Record<string, unknown> }>();
-                tmpl = grpRes.data;
-                if (tmpl) tmplIsGroup = true;
-              }
-              if (tmpl?.template_json) {
-                const tj = tmpl.template_json as {
-                  widgets?: Record<string, Widget>;
-                  bgUrl?: string; fontScale?: number; paperSize?: string;
-                  restylerAttrPos?: { x?: unknown; y?: unknown } | null;
-                };
-                templateCache.set(templateId, tj.widgets ? Object.values(tj.widgets) : null);
-                templateMetaCache.set(templateId, {
-                  bgUrl: tj.bgUrl, fontScale: tj.fontScale, paperSizeStr: tj.paperSize, isGroup: tmplIsGroup,
-                  restylerAttrPos: tj.restylerAttrPos ?? null,
-                });
-              } else {
-                templateCache.set(templateId, null);
-              }
-            }
-            templateWidgets = templateCache.get(templateId) ?? null;
-            const meta = templateMetaCache.get(templateId);
-            templateIsGroup = meta?.isGroup === true;
-            templateBgUrl = meta?.bgUrl;
-            templateFontScale = meta?.fontScale;
-            templatePaperSizeStr = meta?.paperSizeStr;
-            templateRestylerAttrPos = meta?.restylerAttrPos ?? null;
-          }
-        }
-
-        // Fallback: if no default infosheet template configured, use any active infosheet template (cached per dealer)
-        if (!templateWidgets && docType === 'infosheet') {
-          const fallbackKey = `any_infosheet_${dv.dealer_id}`;
-          if (!templateCache.has(fallbackKey)) {
-            const { data: ft } = await admin
-              .from("templates")
-              .select("template_json")
-              .eq("dealer_id", dv.dealer_id)
-              .eq("document_type", "infosheet")
-              .eq("is_active", true)
-              .order("updated_at", { ascending: false })
-              .limit(1)
-              .maybeSingle<{ template_json: Record<string, unknown> }>();
-            if (ft?.template_json) {
-              const ftj = ft.template_json as { widgets?: Record<string, Widget>; bgUrl?: string; fontScale?: number; paperSize?: string; restylerAttrPos?: { x?: unknown; y?: unknown } | null };
-              templateCache.set(fallbackKey, ftj.widgets ? Object.values(ftj.widgets) : null);
-              templateMetaCache.set(fallbackKey, { bgUrl: ftj.bgUrl, fontScale: ftj.fontScale, paperSizeStr: ftj.paperSize, restylerAttrPos: ftj.restylerAttrPos ?? null });
-            } else {
-              templateCache.set(fallbackKey, null);
-            }
-          }
-          templateWidgets = templateCache.get(fallbackKey) ?? null;
-          if (templateWidgets) {
-            const meta = templateMetaCache.get(fallbackKey);
-            if (meta) { templateBgUrl = meta.bgUrl; templateFontScale = meta.fontScale; if (meta.paperSizeStr) templatePaperSizeStr = meta.paperSizeStr; templateRestylerAttrPos = meta.restylerAttrPos ?? null; }
-          }
-        }
-
-        // Fallback: no dealer/group default addendum template — bootstrap from
-        // the SuperAdmin blank-default starter (same as Builder first-open and
-        // "+ New → Blank"), routed through templateWidgets so it gets the same
-        // live-price/dealer normalization a saved template gets. Mirrors the
-        // single-vehicle pdf/generate route. Cached globally (platform starter).
-        if (!templateWidgets && docType === "addendum") {
-          const blankKey = "blank_default_starter";
-          if (!templateCache.has(blankKey)) {
-            // starter_templates isn't in the generated Database types yet; cast
-            // like the /api/starter-templates routes do.
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const sdb = admin as any;
-            const { data: bs } = await sdb
-              .from("starter_templates")
-              .select("template_json")
-              .eq("is_blank_default", true)
-              .limit(1)
-              .maybeSingle() as { data: { template_json: Record<string, unknown> } | null };
-            if (bs?.template_json) {
-              const btj = bs.template_json as { widgets?: Record<string, Widget>; bgUrl?: string; fontScale?: number; paperSize?: string };
-              templateCache.set(blankKey, btj.widgets ? Object.values(btj.widgets) : null);
-              templateMetaCache.set(blankKey, { bgUrl: btj.bgUrl, fontScale: btj.fontScale, paperSizeStr: btj.paperSize });
-            } else {
-              templateCache.set(blankKey, null);
-            }
-          }
-          templateWidgets = templateCache.get(blankKey) ?? null;
-          if (templateWidgets) {
-            const meta = templateMetaCache.get(blankKey);
-            if (meta) { templateBgUrl = meta.bgUrl; templateFontScale = meta.fontScale; if (meta.paperSizeStr) templatePaperSizeStr = meta.paperSizeStr; }
-          }
-        }
+        // Shared with pdf/generate via lib/template-resolver.ts so single print
+        // and bulk print can never resolve differently. The per-request cache
+        // preserves the old behaviour of fetching each template once per batch.
+        const resolved = await resolveTemplate(admin, {
+          dealerTextId: dv.dealer_id,
+          docType,
+          condition: dv.condition,
+          settings: dealerSettings as Record<string, unknown> | null,
+          cache: templateResolverCache,
+        });
+        const templateWidgets: Widget[] | null = resolved.widgets;
+        const templateIsGroup = resolved.isGroup;
+        const templateBgUrl = resolved.bgUrl;
+        const templateFontScale = resolved.fontScale;
+        const templatePaperSizeStr = resolved.paperSizeStr;
+        const templateRestylerAttrPos = resolved.restylerAttrPos;
+        console.log(`[BULK]   template source=${resolved.source} id=${resolved.templateId ?? "none"} group=${templateIsGroup}`);
 
         // ── Effective paper size ─────────────────────────────────────────────
         // Each vehicle's OWN template width wins — same precedence as

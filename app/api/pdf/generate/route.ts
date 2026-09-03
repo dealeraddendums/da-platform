@@ -21,6 +21,7 @@ import {
 } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-save";
+import { resolveTemplate } from "@/lib/template-resolver";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
 import QRCode from "qrcode";
@@ -460,122 +461,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .eq("dealer_id", dv.dealer_id)
         .maybeSingle<DealerSettingsRow>();
 
-      if (settings) {
-        aiEnabled = settings.ai_content_default ?? true;
-        const condKey = dv.condition === "New" ? "new" : dv.condition === "Used" ? "used" : "cpo";
-        const docKey = docType === "buyer_guide" ? "buyersguide" : docType;
-        const col = `default_${docKey}_${condKey}` as keyof DealerSettingsRow;
-        // Fallback: if no template set for this specific condition, try any condition for this doc type.
-        // Prevents falling back to LAYOUT_INFOSHEET defaults when the user saved a template for a
-        // different condition (e.g., saved for "new" but printing a "used" vehicle).
-        const templateId = (settings[col] as string | null)
-          ?? (settings[`default_${docKey}_new`] as string | null)
-          ?? (settings[`default_${docKey}_used`] as string | null)
-          ?? (settings[`default_${docKey}_cpo`] as string | null);
+      if (settings) aiEnabled = settings.ai_content_default ?? true;
 
-        if (templateId) {
-          // The selected default may be a dealer template OR a group
-          // template — dealer_settings.default_* no longer FK-references
-          // a specific table (migration 065). Try templates first, then
-          // fall through to group_templates.
-          let tmpl: { template_json: Record<string, unknown> } | null = null;
-          const ownRes = await admin
-            .from("templates")
-            .select("template_json")
-            .eq("id", templateId)
-            .maybeSingle<{ template_json: Record<string, unknown> }>();
-          tmpl = ownRes.data;
-          if (!tmpl) {
-            const grpRes = await admin
-              .from("group_templates")
-              .select("template_json")
-              .eq("id", templateId)
-              .maybeSingle<{ template_json: Record<string, unknown> }>();
-            tmpl = grpRes.data;
-            if (tmpl) savedTemplateIsGroup = true;
-          }
-
-          if (tmpl?.template_json) {
-            const tj = tmpl.template_json as {
-              widgets?: Record<string, Widget>;
-              bgUrl?: string;
-              fontScale?: number;
-              paperSize?: string;
-              restylerAttrPos?: { x?: unknown; y?: unknown } | null;
-            };
-            if (tj.widgets && Object.keys(tj.widgets).length > 0) {
-              savedTemplateWidgets = Object.values(tj.widgets);
-            }
-            if (tj.restylerAttrPos) savedRestylerAttrPos = tj.restylerAttrPos;
-            if (tj.bgUrl) savedTemplateBgUrl = tj.bgUrl;
-            if (typeof tj.fontScale === "number") savedTemplateFontScale = tj.fontScale;
-            if (tj.paperSize) savedTemplatePaperSize = tj.paperSize as PaperSize;
-          }
-        }
-      }
-
-      // Fallback: if no default infosheet template configured in dealer_settings, use any active infosheet template
-      if (!savedTemplateWidgets && docType === 'infosheet') {
-        const { data: fallbackTmpl } = await admin
-          .from("templates")
-          .select("template_json")
-          .eq("dealer_id", dv.dealer_id)
-          .eq("document_type", "infosheet")
-          .eq("is_active", true)
-          .order("updated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle<{ template_json: Record<string, unknown> }>();
-
-        if (fallbackTmpl?.template_json) {
-          const ftj = fallbackTmpl.template_json as {
-            widgets?: Record<string, Widget>;
-            bgUrl?: string;
-            fontScale?: number;
-            paperSize?: string;
-            restylerAttrPos?: { x?: unknown; y?: unknown } | null;
-          };
-          if (ftj.widgets && Object.keys(ftj.widgets).length > 0) {
-            savedTemplateWidgets = Object.values(ftj.widgets);
-          }
-          if (ftj.restylerAttrPos) savedRestylerAttrPos = ftj.restylerAttrPos;
-          if (ftj.bgUrl) savedTemplateBgUrl = ftj.bgUrl;
-          if (typeof ftj.fontScale === "number") savedTemplateFontScale = ftj.fontScale;
-          if (ftj.paperSize) savedTemplatePaperSize = ftj.paperSize as PaperSize;
-        }
-      }
-
-      // Fallback: no dealer/group default addendum template configured —
-      // bootstrap from the SuperAdmin blank-default starter (the same layout
-      // the Builder applies on first open and "+ New → Blank"), so Print Now
-      // matches the Builder instead of the legacy hardcoded LAYOUT defaults.
-      // Routed through savedTemplateWidgets so it gets the identical live-price
-      // / dealer-logo / address normalization a real saved template gets.
-      if (!savedTemplateWidgets && docType === "addendum") {
-        // starter_templates isn't in the generated Database types yet; cast like
-        // the /api/starter-templates routes do.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sdb = admin as any;
-        const { data: blankStarter } = await sdb
-          .from("starter_templates")
-          .select("template_json")
-          .eq("is_blank_default", true)
-          .limit(1)
-          .maybeSingle() as { data: { template_json: Record<string, unknown> } | null };
-        if (blankStarter?.template_json) {
-          const btj = blankStarter.template_json as {
-            widgets?: Record<string, Widget>;
-            bgUrl?: string;
-            fontScale?: number;
-            paperSize?: string;
-          };
-          if (btj.widgets && Object.keys(btj.widgets).length > 0) {
-            savedTemplateWidgets = Object.values(btj.widgets);
-          }
-          if (btj.bgUrl) savedTemplateBgUrl = btj.bgUrl;
-          if (typeof btj.fontScale === "number") savedTemplateFontScale = btj.fontScale;
-          if (btj.paperSize) savedTemplatePaperSize = btj.paperSize as PaperSize;
-        }
-      }
+      // Template selection lives in lib/template-resolver.ts — ONE implementation
+      // shared with pdf/bulk, so Print Now, the print screen, bulk print and both
+      // mobile print paths can never brand a vehicle differently.
+      const resolved = await resolveTemplate(admin, {
+        dealerTextId: dv.dealer_id,
+        docType,
+        condition: dv.condition,
+        settings: settings as Record<string, unknown> | null,
+      });
+      savedTemplateWidgets = resolved.widgets;
+      savedTemplateIsGroup = resolved.isGroup;
+      savedRestylerAttrPos = resolved.restylerAttrPos;
+      if (resolved.bgUrl) savedTemplateBgUrl = resolved.bgUrl;
+      if (typeof resolved.fontScale === "number") savedTemplateFontScale = resolved.fontScale;
+      if (resolved.paperSizeStr) savedTemplatePaperSize = resolved.paperSizeStr as PaperSize;
+      console.log(`[pdf/generate] template source=${resolved.source} id=${resolved.templateId ?? "none"} group=${resolved.isGroup}`);
     }
 
     // ── Resolve custom paper size dimensions ──────────────────────────────────
