@@ -7,6 +7,8 @@ import type { GroupRow, GroupUpdate } from "@/lib/db";
 import { billingConfigured, updateCustomer } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
 import { invalidateBrandCache } from "@/lib/brand";
+import { archiveObject, hubspotConfigured } from "@/lib/hubspot";
+import { boxConfigured, deleteFolderIfEmpty } from "@/lib/box";
 
 // state must be one of the US_STATES codes (or empty). Upper-cased first so
 // legacy clients sending "tx" still pass; full names are rejected (the forms
@@ -233,9 +235,12 @@ export async function DELETE(
 
   const { data: group, error: loadErr } = await admin
     .from("groups")
-    .select("id, name, is_test")
+    .select("id, name, is_test, hubspot_company_id, box_folder_id")
     .eq("id", params.id)
-    .maybeSingle<{ id: string; name: string; is_test: boolean }>();
+    .maybeSingle<{
+      id: string; name: string; is_test: boolean;
+      hubspot_company_id: string | null; box_folder_id: string | null;
+    }>();
   if (loadErr) return NextResponse.json({ error: loadErr.message }, { status: 500 });
   if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
   if (!group.is_test) {
@@ -250,7 +255,9 @@ export async function DELETE(
     admin.from("dealers").select("id", { count: "exact", head: true }).eq("group_id", group.id),
     admin.from("group_templates").select("id", { count: "exact", head: true }).eq("group_id", group.id),
     admin.from("group_options").select("id", { count: "exact", head: true }).eq("group_id", group.id),
-    admin.from("profiles").select("id").eq("group_id", group.id),
+    // hubspot_contact_id is read now because these profiles are about to be
+    // deleted — after that the CRM contact ids are unrecoverable.
+    admin.from("profiles").select("id, hubspot_contact_id").eq("group_id", group.id),
   ]);
   const counts = {
     member_dealers: dealersC.count ?? 0,
@@ -259,6 +266,9 @@ export async function DELETE(
     users: usersRes.data?.length ?? 0,
   };
   const userIds = (usersRes.data ?? []).map(r => r.id as string);
+  const userContactIds = (usersRes.data ?? [])
+    .map(r => (r as { hubspot_contact_id?: string | null }).hubspot_contact_id)
+    .filter((v): v is string => Boolean(v));
 
   // ── Delete group-scoped auth users (profiles cascade via auth FK) ──────────
   let usersDeleted = 0;
@@ -280,6 +290,66 @@ export async function DELETE(
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
 
+  // ── HubSpot + Box cleanup ─────────────────────────────────────────────────
+  // Groups get the same pair of external artifacts dealers do — a HubSpot
+  // Company (Dealer Group type) and a Box folder under /Groups — and, like the
+  // dealer path, deletion used to leave both behind. Same shape as the dealer
+  // route: awaited so the audit row states the real outcome, individually
+  // caught and bounded so a CRM or Box outage can't fail a delete whose rows
+  // are already gone. Only runs on is_test groups (refused above).
+  const cleanup: {
+    hubspot_company: string;
+    hubspot_contacts: { id: string; result: string }[];
+    box_folder: string;
+  } = { hubspot_company: "skipped", hubspot_contacts: [], box_folder: "skipped" };
+
+  const CLEANUP_TIMEOUT_MS = 10_000;
+  const bounded = async <T,>(label: string, fn: () => Promise<T>): Promise<T | { error: string }> => {
+    try {
+      return await Promise.race([
+        fn(),
+        new Promise<never>((_, rej) =>
+          setTimeout(() => rej(new Error(`${label} timed out after ${CLEANUP_TIMEOUT_MS}ms`)), CLEANUP_TIMEOUT_MS),
+        ),
+      ]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[group DELETE] ${label} failed:`, msg);
+      return { error: msg };
+    }
+  };
+
+  if (hubspotConfigured()) {
+    for (const cid of Array.from(new Set(userContactIds))) {
+      const r = await bounded(`HubSpot contact ${cid} archive`, () => archiveObject("contacts", cid));
+      cleanup.hubspot_contacts.push({
+        id: cid,
+        result: "error" in r ? "error" : r.archived ? "archived" : "already_gone",
+      });
+    }
+    if (group.hubspot_company_id) {
+      const r = await bounded(
+        `HubSpot company ${group.hubspot_company_id} archive`,
+        () => archiveObject("companies", group.hubspot_company_id!),
+      );
+      cleanup.hubspot_company = "error" in r ? "error" : r.archived ? "archived" : "already_gone";
+      if (cleanup.hubspot_company !== "error") {
+        console.log(`[group DELETE] HubSpot company ${group.hubspot_company_id}: ${cleanup.hubspot_company}`);
+      }
+    }
+  }
+
+  if (group.box_folder_id && boxConfigured()) {
+    const r = await bounded(
+      `Box folder ${group.box_folder_id} delete`,
+      () => deleteFolderIfEmpty(group.box_folder_id!),
+    );
+    cleanup.box_folder = "error" in r ? "error" : r.result;
+    if (cleanup.box_folder !== "error") {
+      console.log(`[group DELETE] Box folder ${group.box_folder_id}: ${cleanup.box_folder}`);
+    }
+  }
+
   // ── Audit log (best-effort) ───────────────────────────────────────────────
   try {
     await admin.from("admin_audit").insert({
@@ -290,6 +360,7 @@ export async function DELETE(
         group_name: group.name,
         group_uuid: group.id,
         counts: { ...counts, users_deleted: usersDeleted },
+        cleanup,
       },
     });
   } catch (auditErr) {
@@ -303,6 +374,7 @@ export async function DELETE(
       group_id: group.id,
       ...counts,
       users_deleted: usersDeleted,
+      cleanup,
     },
   });
 }
