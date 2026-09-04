@@ -268,6 +268,18 @@ export function computeReadiness(
   // and the readiness counts all derive from this one flag.
   if (d.is_native === true) { eligible = false; eligibleReason = 'created on 5.0 — nothing to migrate'; }
   else if (d.migration_status === 'migrated') { eligible = false; eligibleReason = 'already migrated'; }
+  // Trials are not migrated (Allan, 2026-09-04). A dealer still on a trial has
+  // not committed to the platform, so it does not belong in a migration wave —
+  // it either converts and becomes a migration candidate, or it lapses.
+  // Uses the same isTrialTrackAccount() the billing gate above uses, so
+  // "what counts as a trial" has ONE definition here: literal 'Trial',
+  // the legacy 'Trial Expired' label, and the ' $NNN' custom-price suffix forms.
+  // NOTE: that helper also treats a NULL account_type as trial-track. No
+  // eligible dealer has a NULL account_type today (checked 2026-09-04, 0 of
+  // 1668), so this has no live effect — but if rows ever appear with the field
+  // unset they will read as trials and drop out of the queue rather than
+  // silently joining it.
+  else if (isTrialTrackAccount(d.account_type)) { eligible = false; eligibleReason = 'trial account — trials are not migrated'; }
   // Deactivated dealers (e.g. Dealer General rooftops out of the paid+active
   // scope, 2026-07-14) never migrate — blocks wave-send and claim-next too.
   else if (d.active === false) { eligible = false; eligibleReason = 'deactivated dealer'; }
