@@ -257,7 +257,17 @@ export function computeReadiness(
   const hasSelfServeContact = present(d.primary_contact_email) || ctx.hasDealerAdmin;
   let eligible = true;
   let eligibleReason = 'eligible';
-  if (d.migration_status === 'migrated') { eligible = false; eligibleReason = d.is_native === true ? 'created on 5.0 — nothing to migrate' : 'already migrated'; }
+  // A 5.0-NATIVE dealer was created on this platform and has no 4.0 account to
+  // move — it is never a migration candidate. This must be checked BEFORE
+  // migration_status: natives keep the default status 'legacy' (nothing flips
+  // them to 'migrated' at creation), so gating the native reason on
+  // `migration_status === 'migrated'` — as this did until 2026-09-04 — left
+  // every legacy-status native reading `eligible: true`. They then counted in
+  // the "unassigned eligible" pool and were handed out by Claim next 25.
+  // Fixing it here fixes every consumer at once: claim-next, assign, send-wave
+  // and the readiness counts all derive from this one flag.
+  if (d.is_native === true) { eligible = false; eligibleReason = 'created on 5.0 — nothing to migrate'; }
+  else if (d.migration_status === 'migrated') { eligible = false; eligibleReason = 'already migrated'; }
   // Deactivated dealers (e.g. Dealer General rooftops out of the paid+active
   // scope, 2026-07-14) never migrate — blocks wave-send and claim-next too.
   else if (d.active === false) { eligible = false; eligibleReason = 'deactivated dealer'; }
