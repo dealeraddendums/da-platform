@@ -339,45 +339,6 @@ export default async function BillingPage({
         )}
       </section>
 
-      {/* ── DA BILLING (live, 5-min cached) ─────────────────────────────── */}
-      <section className="mb-8">
-        <p style={SECTION_LABEL}>DA Billing — live</p>
-        {da ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard label="Monthly Recurring Revenue" value={usd(da.mrr)} note="Live, non-paused subscriptions" />
-            <StatCard
-              label="Active Customers"
-              value={da.active_customers.toLocaleString()}
-              note={`${da.setup_mode_customers.toLocaleString()} more in Setup Mode`}
-            />
-            <StatCard
-              label="Past Due"
-              value={da.past_due.count.toLocaleString()}
-              note={da.past_due.count > 0 ? `${usd(da.past_due.outstanding_total)} outstanding` : "No past-due accounts"}
-              accent={da.past_due.count > 0}
-            />
-            <StatCard
-              label="Invoices This Month"
-              value={da.invoices_this_month.generated.toLocaleString()}
-              note={`${da.invoices_this_month.sent.toLocaleString()} sent · ${da.invoices_this_month.paid.toLocaleString()} paid`}
-            />
-          </div>
-        ) : (
-          <DegradedCard
-            title="DA Billing unreachable — open it directly"
-            body={
-              <>
-                The summary couldn&apos;t be loaded right now. The full billing app at{" "}
-                <a href={BILLING_URL} target="_blank" rel="noopener noreferrer" style={{ color: "#1976d2" }}>
-                  billing.dealeraddendums.com
-                </a>{" "}
-                is unaffected.
-              </>
-            }
-          />
-        )}
-      </section>
-
       {/* ── PAYMENTS RECEIVED BY PERIOD ─────────────────────────────────── */}
       <section className="mb-8">
         <div className="flex items-center justify-between flex-wrap gap-3" style={{ marginBottom: 10 }}>
@@ -450,6 +411,45 @@ export default async function BillingPage({
           <DegradedCard
             title={`No payment data for ${periodLabel}`}
             body="Neither da-billing nor the FreshBooks nightly snapshot could be read for this month. DA Billing figures are live; the FreshBooks half is computed by the nightly ETL run."
+          />
+        )}
+      </section>
+
+      {/* ── DA BILLING (live, 5-min cached) ─────────────────────────────── */}
+      <section className="mb-8">
+        <p style={SECTION_LABEL}>DA Billing — live</p>
+        {da ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard label="Monthly Recurring Revenue" value={usd(da.mrr)} note="Live, non-paused subscriptions" />
+            <StatCard
+              label="Active Customers"
+              value={da.active_customers.toLocaleString()}
+              note={`${da.setup_mode_customers.toLocaleString()} more in Setup Mode`}
+            />
+            <StatCard
+              label="Past Due"
+              value={da.past_due.count.toLocaleString()}
+              note={da.past_due.count > 0 ? `${usd(da.past_due.outstanding_total)} outstanding` : "No past-due accounts"}
+              accent={da.past_due.count > 0}
+            />
+            <StatCard
+              label="Invoices This Month"
+              value={da.invoices_this_month.generated.toLocaleString()}
+              note={`${da.invoices_this_month.sent.toLocaleString()} sent · ${da.invoices_this_month.paid.toLocaleString()} paid`}
+            />
+          </div>
+        ) : (
+          <DegradedCard
+            title="DA Billing unreachable — open it directly"
+            body={
+              <>
+                The summary couldn&apos;t be loaded right now. The full billing app at{" "}
+                <a href={BILLING_URL} target="_blank" rel="noopener noreferrer" style={{ color: "#1976d2" }}>
+                  billing.dealeraddendums.com
+                </a>{" "}
+                is unaffected.
+              </>
+            }
           />
         )}
       </section>
