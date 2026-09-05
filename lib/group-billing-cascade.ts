@@ -12,7 +12,7 @@
 
 import { createAdminSupabaseClient } from "@/lib/db";
 import {
-  appendToTemplate,
+  appendToTemplateStagedIfNew,
   archiveCustomer,
   createCustomer,
   customerExists,
@@ -262,7 +262,18 @@ export async function cascadeOnGroupAssign(args: {
   // ── Step 2: append the dealer's subscription line to the group
   //           template. Safe to do now that the dealer template no
   //           longer holds the same internal_id::name line. ───────────
-  await appendToTemplate(groupCustomerId, newLines);
+  //
+  // If the group has no template yet, this mints one — and a new template is
+  // born LIVE, invoicing tonight. That is not a safe default here: this
+  // cascade fires for any group-billed dealer added to any group, including
+  // groups still wholly billed in FreshBooks. Stage the first one paused and
+  // let the cutover activate it. (Acrisure, 2026-09-05.)
+  const { createdPaused } = await appendToTemplateStagedIfNew(groupCustomerId, newLines);
+  if (createdPaused) {
+    console.warn(
+      `[cascadeOnGroupAssign] created group ${group.id} (${group.name})'s FIRST da-billing template — staged PAUSED so it cannot invoice before the group is cut over. Activate it at cutover.`,
+    );
+  }
 
   // Mirror the group's billing_customer_id into groups.template_id so the
   // platform has a single column to check for "this group has an active
@@ -284,7 +295,7 @@ export async function cascadeOnGroupAssign(args: {
     dealer_id: dealer.id,
     event: "group_billing_line_added",
     billing_customer_id: groupCustomerId,
-    notes: `group-billing cascade: added "${subscriptionName}" (${descriptor.key}) to ${group.name}'s template, tagged ${dealer.internal_id}::${dealer.name}`,
+    notes: `group-billing cascade: added "${subscriptionName}" (${descriptor.key}) to ${group.name}'s template, tagged ${dealer.internal_id}::${dealer.name}${createdPaused ? " — this was the group's FIRST template and was created PAUSED; activate it when the group is cut over from FreshBooks" : ""}`,
   }), "migration_log group_billing_line_added");
 
   // Member count changed — recompute the group's auto-discount tier
@@ -486,7 +497,12 @@ export async function cascadeSuperAdminGroupAssign(args: {
         }
       }
     }
-    await appendToTemplate(group.billing_customer_id, [subLine]);
+    const { createdPaused } = await appendToTemplateStagedIfNew(group.billing_customer_id, [subLine]);
+    if (createdPaused) {
+      console.warn(
+        `[cascadeSuperAdminGroupAssign] created group ${group.id} (${group.name})'s FIRST da-billing template — staged PAUSED so it cannot invoice before the group is cut over.`,
+      );
+    }
     // template_id mirrors the customer key by platform convention.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (admin as any)
@@ -505,7 +521,12 @@ export async function cascadeSuperAdminGroupAssign(args: {
       quantity: 1,
       lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
     };
-    await appendToTemplate(group.billing_customer_id, [subLine, labelsLine]);
+    const { createdPaused } = await appendToTemplateStagedIfNew(group.billing_customer_id, [subLine, labelsLine]);
+    if (createdPaused) {
+      console.warn(
+        `[cascadeSuperAdminGroupAssign] created group ${group.id} (${group.name})'s FIRST da-billing template — staged PAUSED so it cannot invoice before the group is cut over.`,
+      );
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (admin as any)
       .from("dealers")

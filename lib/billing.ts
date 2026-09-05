@@ -436,6 +436,10 @@ export interface CreateTemplateInput {
   products: BillingProduct[];
   nextInvoiceDate?: string;
   scheduleInterval?: "monthly" | "yearly";
+  /** `false` creates the template PAUSED. da-billing otherwise creates it live
+   *  with nextInvoiceDate = tonight 23:00 ET, i.e. billing on the next cron
+   *  run — wrong for a template that is only being staged ahead of a cutover. */
+  active?: boolean;
 }
 
 /**
@@ -451,6 +455,7 @@ export async function createTemplate(input: CreateTemplateInput): Promise<void> 
       products: input.products,
       nextInvoiceDate: input.nextInvoiceDate,
       scheduleInterval: input.scheduleInterval ?? "monthly",
+      ...(input.active === false ? { active: false } : {}),
     }),
   });
   if (!res.ok) throw new BillingError(res.status, `createTemplate ${res.status}`, await readBody(res));
@@ -482,6 +487,40 @@ export async function appendToTemplate(customerId: string, products: BillingProd
     return;
   }
   await putTemplate(customerId, [...current.products, ...products]);
+}
+
+/**
+ * Append products, but when this is the customer's FIRST template, create it
+ * PAUSED rather than live.
+ *
+ * A brand-new template is born active with nextInvoiceDate = tonight 23:00 ET,
+ * so creating one bills on the very next cron run. For the group-billing
+ * cascade that is exactly wrong: the cascade fires whenever a group-billed
+ * dealer is added to a group, including groups that have not been cut over to
+ * da-billing at all and are still invoiced in FreshBooks. On 2026-09-05 adding
+ * one rooftop to Acrisure minted that group's first template, live, hours
+ * before the cron — while FreshBooks was billing all seven of its rooftops
+ * $945/mo on the same day. Nothing had been lost; something had been wrongly
+ * switched on.
+ *
+ * Appending to a template that already exists is unchanged: that group is
+ * already live (or already deliberately paused) and the caller must not flip
+ * its state as a side effect of adding a member.
+ *
+ * Returns true when the template was created paused, so the caller can
+ * say so in its audit trail.
+ */
+export async function appendToTemplateStagedIfNew(
+  customerId: string,
+  products: BillingProduct[],
+): Promise<{ createdPaused: boolean }> {
+  const current = await getTemplate(customerId);
+  if (!current) {
+    await createTemplate({ customerId, products, active: false });
+    return { createdPaused: true };
+  }
+  await putTemplate(customerId, [...current.products, ...products]);
+  return { createdPaused: false };
 }
 
 /**
