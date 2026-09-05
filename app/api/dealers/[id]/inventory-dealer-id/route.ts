@@ -80,6 +80,13 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
   // vehicle_options / print_history / addendum_library / profiles AND sets both
   // text ids to newId — atomically, in one DB transaction. If already drifted,
   // it updates inventory_dealer_id only (and warns), leaving dealer_id alone.
+  // Feed status MUST be read before the cascade. cascade_dealer_id_change()
+  // re-keys fortellis_dealers (migration 156), so a lookup by the old text id
+  // afterwards finds no roster row and the config signal silently disappears.
+  // It failed safe (toward keep-active) but reported the wrong reason; reading
+  // it here describes the dealer as it actually was at rename time.
+  const feedStatus = await getDealerFeedStatus(admin, dealer.dealer_id, dealer.inventory_dealer_id);
+
   let syncResult;
   try {
     syncResult = await applyInventoryDealerIdChange(admin, dealer, newId);
@@ -121,7 +128,6 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
   // does not.
   let vehiclesDeactivated = 0;
   let vehiclesRekeyed = 0;
-  const feedStatus = await getDealerFeedStatus(admin, dealer.dealer_id, oldId);
 
   // Only touch inventory when the rename actually moved the key the vehicles
   // are filed under. On a drifted dealer (dealer_id != inventory_dealer_id) the
