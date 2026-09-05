@@ -15,7 +15,9 @@ import { sendMandrillEmail } from "@/lib/mandrill";
  * calendar month (or ?month=YYYY-MM to override), uploads a copy to S3 for
  * the record, and emails the .xlsx to billing@chromedata.com via Mandrill.
  * Pass ?dry_run=1 to build and inspect the dealer list without sending or
- * archiving anything.
+ * archiving anything. Any failure — and any zero-dealer result — emails an
+ * alert to support@/allan@ rather than failing silently; ?allow_empty=1
+ * overrides the zero-dealer block.
  *
  * Auth: x-cron-secret header must match CRON_SECRET. The Reports page
  * manual-trigger button calls the same route through the regular session,
@@ -31,7 +33,59 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "ChromeData report failed";
     console.error("[chromedata-usage-report] uncaught:", err);
+    // A dry run is a human action with the error on screen — no alert needed.
+    if (req.nextUrl.searchParams.get("dry_run") !== "1") {
+      const month = req.nextUrl.searchParams.get("month") ?? "(previous month)";
+      await alertReportFailure(`build failed for ${month}`, `
+  <p>The report could not be built, so no email or S3 archive was produced.</p>
+  <p><strong>Error:</strong> <code>${escapeHtml(msg)}</code></p>
+  <p>The most likely cause is the <strong>ETL box being unreachable</strong>
+  (<code>etl.migration.dealeraddendums.com</code>). It supplies the 4.0 / Aurora half of the report —
+  da-platform has no Aurora access of its own — and the builder deliberately fails rather than
+  emailing a 5.0-only partial. Check that the box is up and <code>da-legacy-etl</code> is running
+  under PM2, then re-run.</p>`);
+    }
     return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+/** Minimal escaping for error text interpolated into the alert email. */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Alert the team that the report did NOT reach ChromeData.
+ *
+ * Every failure path here is otherwise silent: the monthly EasyCron job is the
+ * only caller, nobody watches its HTTP status, and the deadline is the 10th. A
+ * failed send looks exactly like a successful one from the outside — which is
+ * how "Locations reported: 0" went out unnoticed in the first place.
+ *
+ * Never throws: an alert that fails must not turn one problem into two, and the
+ * caller still returns a non-2xx so EasyCron records the failure.
+ */
+async function alertReportFailure(subject: string, bodyHtml: string): Promise<void> {
+  try {
+    await sendMandrillEmail({
+      subject: `⚠️ ChromeData usage report — ${subject}`,
+      from_email: "billing@dealeraddendums.com",
+      from_name: "DealerAddendums Billing",
+      to: [
+        { email: "support@dealeraddendums.com", name: "DealerAddendums Support", type: "to" },
+        { email: "allan@dealeraddendums.com", name: "Allan Tone", type: "cc" },
+      ],
+      html: `<div style="font-family: Roboto, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 24px; color: #333; line-height: 1.6;">
+  <p><strong>Nothing was sent to ChromeData.</strong></p>
+  ${bodyHtml}
+  <p style="color:#666; font-size: 13px;">Contract #9310 reports are due by the 10th. Re-run from
+  Reports → ChromeData Usage Report, or
+  <code>POST /api/cron/chromedata-usage-report?month=YYYY-MM</code> with the cron secret. Add
+  <code>&amp;dry_run=1</code> first to inspect the dealer list without sending.</p>
+</div>`,
+    });
+  } catch (err) {
+    console.error("[chromedata-usage-report] failure alert could not be sent:", err);
   }
 }
 
@@ -75,6 +129,28 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       // can be opened and checked before a send.
       xlsx_base64: report.xlsxBuffer.toString("base64"),
     });
+  }
+
+  // ── Refuse to send an empty report unattended ────────────────────────────
+  // This is the original incident, generalised: the builder returned zero rows
+  // and the cron cheerfully emailed ChromeData "Locations reported: 0". At ~44
+  // qualifying dealers, a drop to zero is a system failure (a broken join, an
+  // empty ETL response), not a business reality — so it stops here and pages a
+  // human instead. ?allow_empty=1 forces the send if a month genuinely has none.
+  if (report.rows.length === 0 && req.nextUrl.searchParams.get("allow_empty") !== "1") {
+    await alertReportFailure(`zero dealers for ${report.monthLabel} — send blocked`, `
+  <p>The report built successfully but contained <strong>zero dealers</strong>, so the send was
+  blocked rather than reporting "Locations reported: 0" to ChromeData.</p>
+  <p>Check both halves: the 4.0 branch (ETL box <code>/chromedata-usage</code>, which supplies
+  almost every qualifying dealer) and the 5.0 branch. Run with <code>&amp;dry_run=1</code> to see
+  what the builder found.</p>
+  <p>If the month legitimately has no qualifying dealers, re-run with
+  <code>&amp;allow_empty=1</code> to send it anyway.</p>`);
+    return NextResponse.json({
+      error: "Report contained zero dealers — send blocked. Re-run with allow_empty=1 to override.",
+      month: report.month,
+      dealers: 0,
+    }, { status: 409 });
   }
 
   // ── Upload a copy to S3 (us-west-1 dealer-addendums bucket) ──────────────
@@ -138,8 +214,14 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       }],
     });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown";
+    await alertReportFailure(`email delivery failed for ${report.monthLabel}`, `
+  <p>The report built correctly (<strong>${report.rows.length}</strong> dealers) but Mandrill
+  rejected the send, so ChromeData never received it.</p>
+  <p><strong>Error:</strong> <code>${escapeHtml(msg)}</code></p>
+  ${s3Key ? `<p>The workbook was archived to S3 at <code>${escapeHtml(s3Key)}</code> and can be sent by hand if needed.</p>` : ""}`);
     return NextResponse.json({
-      error: `Email delivery failed: ${err instanceof Error ? err.message : "unknown"}`,
+      error: `Email delivery failed: ${msg}`,
       dealers: report.rows.length,
       file: report.filename,
       s3_key: s3Key,
