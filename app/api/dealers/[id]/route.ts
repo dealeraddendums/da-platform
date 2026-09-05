@@ -7,7 +7,7 @@ import { authorizeDealerAction } from "@/lib/dealer-authz";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { archiveCustomer, unarchiveCustomer, billingConfigured, updateCustomer, getTemplate, putTemplate } from "@/lib/billing";
 import { fireAndForget } from "@/lib/billing-sync";
-import { fireDealerSync, fireDealerReliable } from "@/lib/sync-hubspot";
+import { fireDealerSync, fireDealerReliable, fireAccountPurposeChange } from "@/lib/sync-hubspot";
 import { fireConversionWebhook } from "@/lib/marketing-webhook";
 import { normalizeSubscriptionType, isPayingAccount, archiveObject, hubspotConfigured } from "@/lib/hubspot";
 import { boxConfigured, deleteFolderIfEmpty } from "@/lib/box";
@@ -254,12 +254,13 @@ export async function PATCH(
   let prevName: string | null = null;
   let prevAccountType: string | null = null;
   let prevSubscriptionBilledTo: string | null = null;
+  let prevAccountPurpose: string | null = null;
   // Snapshot runs whenever active, group_id, name, account_type, OR
   // subscription_billed_to is being touched.
-  if (typeof patch.active === "boolean" || patch.group_id !== undefined || typeof patch.name === "string" || patchAny.account_type !== undefined || patch.subscription_billed_to !== undefined) {
+  if (typeof patch.active === "boolean" || patch.group_id !== undefined || typeof patch.name === "string" || patchAny.account_type !== undefined || patch.subscription_billed_to !== undefined || patchAny.account_purpose !== undefined) {
     const { data: snap } = await admin
       .from("dealers")
-      .select("active, billing_customer_id, internal_id, group_id, name, account_type, subscription_billed_to")
+      .select("active, billing_customer_id, internal_id, group_id, name, account_type, subscription_billed_to, account_purpose")
       .eq("id", dealerUuid)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .maybeSingle<any>();
@@ -271,6 +272,7 @@ export async function PATCH(
     prevName = snap?.name ?? null;
     prevAccountType = snap?.account_type ?? null;
     prevSubscriptionBilledTo = snap?.subscription_billed_to ?? null;
+    prevAccountPurpose = snap?.account_purpose ?? null;
   }
 
   // inventory_dealer_id change must keep dealer_id in sync. Route it through the
@@ -541,6 +543,15 @@ export async function PATCH(
     }
   } else {
     fireDealerSync(dealerUuid);
+  }
+
+  // Account Purpose flip — keep the CRM holding only real dealers.
+  // Real → Test/Sales Demo archives the Company + Contacts (recoverable) and
+  // clears the stored ids; Test/Sales Demo → Real creates them. Runs after the
+  // branch above, which is now a no-op for a non-real dealer since
+  // syncDealerToHubspot gates on purpose.
+  if (patchAny.account_purpose !== undefined && prevAccountPurpose !== patchAny.account_purpose) {
+    fireAccountPurposeChange(dealerUuid, String(patchAny.account_purpose));
   }
 
   return NextResponse.json({ data: data as DealerRow, billing });

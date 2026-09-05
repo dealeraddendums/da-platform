@@ -11,16 +11,17 @@
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import {
-  hubspotConfigured,
-  upsertObject,
-  associateContactToCompany,
-  LIFECYCLE,
-  INDUSTRY,
   COMPANY_TYPE,
-  normalizeSubscriptionType,
-  isPayingAccount,
   DedupSkipError,
   HubspotError,
+  INDUSTRY,
+  LIFECYCLE,
+  archiveObject,
+  associateContactToCompany,
+  hubspotConfigured,
+  isPayingAccount,
+  normalizeSubscriptionType,
+  upsertObject,
 } from "@/lib/hubspot";
 import { isOverAllowance, isFreeAccountType, hasActiveTrialOverride } from "@/lib/print-eligibility";
 import { printedVehicleCount } from "@/lib/print-counts";
@@ -402,6 +403,40 @@ export async function syncDealerPrimaryContact(
   }
 }
 
+/**
+ * Is this dealer a REAL account (as opposed to Test / Sales Demo)?
+ *
+ * The Account Purpose UI promises Test & Sales Demo dealers are "excluded from
+ * BI/billing/HubSpot". BI and billing honoured that via the derived
+ * `is_test` flag; HubSpot did not — every test/sales-demo dealer minted a real
+ * CRM Company (and Contact) and only got cleaned up on delete. This is the
+ * gate that makes the HubSpot half of the promise true.
+ *
+ * Reads `account_purpose` with `is_test` as the fallback, because
+ * account_purpose was added later and older rows may only carry is_test. The
+ * server keeps them consistent (is_test = account_purpose <> 'real') on both
+ * the create and PATCH paths.
+ *
+ * Returns true when the dealer cannot be found, so a lookup failure never
+ * silently suppresses a legitimate sync.
+ */
+export async function isRealAccountDealer(dealerId: string): Promise<boolean> {
+  try {
+    const admin = createAdminSupabaseClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data } = await (admin as any)
+      .from("dealers")
+      .select("account_purpose, is_test")
+      .eq("id", dealerId)
+      .maybeSingle() as { data: { account_purpose?: string | null; is_test?: boolean | null } | null };
+    if (!data) return true;
+    if (data.account_purpose != null) return data.account_purpose === "real";
+    return data.is_test !== true;
+  } catch {
+    return true;
+  }
+}
+
 export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?: string | null }): Promise<void> {
   if (!hubspotConfigured()) return;
   const admin = createAdminSupabaseClient();
@@ -413,7 +448,7 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: dealer } = await (admin as any)
       .from("dealers")
-      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, feed_authorized_name, feed_authorized_email, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, hubspot_primary_contact_id, created_at, downgraded_at, trial_ends_at, trial_prints_cap")
+      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, feed_authorized_name, feed_authorized_email, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, hubspot_primary_contact_id, created_at, downgraded_at, trial_ends_at, trial_prints_cap, account_purpose, is_test")
       .eq("id", dealerId)
       .maybeSingle() as { data: DealerForHubspot | null };
     if (!dealer) return;
@@ -423,6 +458,20 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
     // but this keeps the create path safe if one ever appears.
     if (!dealer.name || dealer.name.trim() === "") {
       console.warn(`[sync-hubspot] skipping dealer ${dealer.id} — no name`);
+      return;
+    }
+
+    // Account Purpose gate: Test / Sales Demo dealers never reach the CRM.
+    // This is the single choke point — every dealer HubSpot write (create,
+    // edit, id-change, extend-trial, and the reliable retry path) funnels
+    // through this function, so gating here covers all of them.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const purpose = (dealer as any).account_purpose as string | null | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const isTest = (dealer as any).is_test as boolean | null | undefined;
+    const real = purpose != null ? purpose === "real" : isTest !== true;
+    if (!real) {
+      console.log(`[sync-hubspot] skipping dealer ${dealer.id} (${dealer.name}) — account_purpose=${purpose ?? (isTest ? "test (via is_test)" : "unknown")}; Test/Sales Demo are excluded from HubSpot`);
       return;
     }
 
@@ -569,6 +618,26 @@ export async function syncProfileToHubspot(profileId: string): Promise<void> {
       .maybeSingle<ProfileForHubspot>();
     if (!profile) return;
 
+    // Account Purpose gate for CONTACTS: a user belonging to a Test / Sales
+    // Demo dealer must not create a HubSpot Contact either. Resolved via the
+    // profile's text dealer_id (profiles.dealer_id is the dealers.dealer_id
+    // text key, not the UUID).
+    if (profile.dealer_id) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: owner } = await (admin as any)
+        .from("dealers")
+        .select("id, name, account_purpose, is_test")
+        .eq("dealer_id", profile.dealer_id)
+        .maybeSingle() as { data: { id: string; name: string | null; account_purpose?: string | null; is_test?: boolean | null } | null };
+      if (owner) {
+        const ownerReal = owner.account_purpose != null ? owner.account_purpose === "real" : owner.is_test !== true;
+        if (!ownerReal) {
+          console.log(`[sync-hubspot] skipping profile ${profile.id} (${profile.email}) — dealer ${owner.name ?? profile.dealer_id} is Test/Sales Demo, excluded from HubSpot`);
+          return;
+        }
+      }
+    }
+
     // Resolve the Company this contact belongs under (dealer by text id, else
     // group by uuid): its name for the `company` text property, plus uuid +
     // stored HubSpot id for the contact↔company association below.
@@ -697,6 +766,15 @@ ready.</p>`,
  */
 export async function syncDealerReliable(dealerId: string, context: string, opts?: { sourceForm?: string | null }): Promise<string | null> {
   if (!hubspotConfigured()) return null;
+  // Test / Sales Demo dealers are excluded from HubSpot, so there is nothing to
+  // retry and nothing has failed. Checked BEFORE the loop on purpose: the loop
+  // confirms success by reading hubspot_company_id back, so a skipped sync
+  // would otherwise burn 3 attempts and then Mandrill-alert support@ about a
+  // "failure" on every single test-dealer create.
+  if (!(await isRealAccountDealer(dealerId))) {
+    console.log(`[sync-hubspot] ${context}: skipping dealer ${dealerId} — Test/Sales Demo excluded from HubSpot`);
+    return null;
+  }
   let lastError = "";
   for (let attempt = 1; attempt <= RELIABLE_MAX_ATTEMPTS; attempt++) {
     try {
@@ -752,6 +830,87 @@ export function fireDealerReliable(dealerId: string, context: string): void {
 }
 
 // ── Fire-and-forget convenience wrappers (call from route handlers) ─────────
+
+/**
+ * Account Purpose was changed on an existing dealer — reconcile the CRM so it
+ * only ever holds real dealers.
+ *
+ *   → 'test' / 'sales_demo' : archive the Company and its primary Contact and
+ *                             clear the stored ids, so a later flip back to
+ *                             Real creates fresh records instead of PATCHing
+ *                             archived ones.
+ *   → 'real'                : create the records (reliable path).
+ *
+ * Archive is HubSpot's recoverable soft-delete (the same `archiveObject` the
+ * dealer-delete cleanup uses), so nothing is destroyed — a mis-flag is undone
+ * by flipping back, which creates a new record, or by restoring in HubSpot.
+ *
+ * Each call is individually caught: a CRM outage must never fail the operator's
+ * purpose change, which is a platform-side edit.
+ */
+export async function applyAccountPurposeToHubspot(dealerUuid: string, newPurpose: string): Promise<void> {
+  if (!hubspotConfigured()) return;
+  const becomingReal = newPurpose === "real";
+  if (becomingReal) {
+    void syncDealerReliable(dealerUuid, "account purpose changed to Real");
+    return;
+  }
+  try {
+    const admin = createAdminSupabaseClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: dealer } = await (admin as any)
+      .from("dealers")
+      .select("id, dealer_id, name, hubspot_company_id, hubspot_primary_contact_id")
+      .eq("id", dealerUuid)
+      .maybeSingle() as { data: { id: string; dealer_id: string; name: string | null; hubspot_company_id: string | null; hubspot_primary_contact_id: string | null } | null };
+    if (!dealer) return;
+
+    // Contacts for this dealer's users, plus the stored primary.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: profs } = await (admin as any)
+      .from("profiles")
+      .select("id, hubspot_contact_id")
+      .eq("dealer_id", dealer.dealer_id) as { data: Array<{ id: string; hubspot_contact_id: string | null }> | null };
+
+    const contactIds = new Set<string>();
+    if (dealer.hubspot_primary_contact_id) contactIds.add(dealer.hubspot_primary_contact_id);
+    for (const pr of profs ?? []) if (pr.hubspot_contact_id) contactIds.add(pr.hubspot_contact_id);
+
+    for (const cid of Array.from(contactIds)) {
+      try { await archiveObject("contacts", cid); }
+      catch (err) { console.error(`[sync-hubspot] archive contact ${cid} failed:`, err instanceof Error ? err.message : err); }
+    }
+    if (dealer.hubspot_company_id) {
+      try { await archiveObject("companies", dealer.hubspot_company_id); }
+      catch (err) { console.error(`[sync-hubspot] archive company ${dealer.hubspot_company_id} failed:`, err instanceof Error ? err.message : err); }
+    }
+
+    // Clear the ids so nothing later PATCHes an archived record.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any).from("dealers")
+        .update({ hubspot_company_id: null, hubspot_primary_contact_id: null })
+        .eq("id", dealerUuid);
+      if ((profs ?? []).some(pr => pr.hubspot_contact_id)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any).from("profiles")
+          .update({ hubspot_contact_id: null })
+          .eq("dealer_id", dealer.dealer_id);
+      }
+    } catch (err) {
+      console.error("[sync-hubspot] clearing hubspot ids failed:", err instanceof Error ? err.message : err);
+    }
+
+    console.log(`[sync-hubspot] dealer ${dealer.name ?? dealerUuid} flipped to ${newPurpose} — archived 1 company + ${contactIds.size} contact(s)`);
+  } catch (err) {
+    console.error("[sync-hubspot] applyAccountPurposeToHubspot failed:", err instanceof Error ? err.message : err);
+  }
+}
+
+/** Fire-and-forget wrapper for the purpose-flip reconcile. */
+export function fireAccountPurposeChange(dealerUuid: string, newPurpose: string): void {
+  void applyAccountPurposeToHubspot(dealerUuid, newPurpose);
+}
 
 export function fireDealerSync(dealerId: string): void { void syncDealerToHubspot(dealerId); }
 export function fireGroupSync(groupId: string, sourceForm?: string | null): void  { void syncGroupToHubspot(groupId, { sourceForm }); }
