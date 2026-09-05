@@ -71,6 +71,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         template_name: r.template_name,
         platform: r.platform,
       })),
+      // The exact workbook that would have been attached, so the sheet itself
+      // can be opened and checked before a send.
+      xlsx_base64: report.xlsxBuffer.toString("base64"),
     });
   }
 
