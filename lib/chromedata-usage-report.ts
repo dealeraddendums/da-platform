@@ -1,17 +1,35 @@
 // Monthly ChromeData usage report builder.
 //
-// Finds dealers who (a) have a saved template containing the Vehicle Photo
-// widget, (b) printed > 10 addendums in the reported month, (c) are active
-// + paid + not flagged as a test account, then emits an .xlsx file matching
-// the ChromeData billing template (Contract #9310). Used by both the
-// monthly cron job and the manual-trigger button on the Reports page.
+// Finds dealers who (a) print with the Vehicle Photo widget, (b) printed > 10
+// vehicles in the reported month, (c) are active + paid + not a test/demo
+// account, then emits an .xlsx file matching the ChromeData billing template
+// (Contract #9310). Used by both the monthly cron job and the manual-trigger
+// button on the Reports page.
+//
+// CROSS-PLATFORM (2026-09-05). The first automated run reported "Locations
+// reported: 0" because this builder only looked at 5.0 (Supabase) — and the
+// dealers actually printing with vehicle photos are overwhelmingly still on
+// 4.0, where the usage lives in Aurora. The report is now the UNION of:
+//
+//   • the 4.0 / Aurora branch — fetched from the ETL box's read-only
+//     POST /chromedata-usage (da-platform has no network path to Aurora; its
+//     AURORA_HOST env still names a decommissioned blue/green cluster), and
+//   • the 5.0 / Supabase branch below,
+//
+// deduped so a dealer that exists on both platforms is counted exactly once.
+// Both branches use the same > 10 threshold, the same half-open month window,
+// and the same test/demo name exclusion.
 
 import ExcelJS from "exceljs";
 import { createAdminSupabaseClient } from "@/lib/db";
 
 const CONTRACT_NUMBER = "9310";
 const PRINT_THRESHOLD = 10;
-const EXCLUSION_RE = /(test|allan)/i;
+// "demo" added 2026-09-05 — STARSHIELD DEMO ACCOUNT and Millennium Dealer
+// Services DEMO Account are 4.0 demo rooftops that qualify on prints and must
+// never be billed to ChromeData. Applied to BOTH platforms' dealer names
+// (Aurora has no is_test flag, so the name is the cross-platform filter).
+const EXCLUSION_RE = /(test|demo|allan)/i;
 
 // Token strings we look for inside templates.template_json / group_templates.
 // Both formats are valid: the new bare 'vehiclephoto' type and the legacy
@@ -24,9 +42,25 @@ const VEHICLEPHOTO_TOKENS = [
 
 interface DealerReportRow {
   template_name: string;
-  internal_id: string;
+  /**
+   * The dealer identifier printed in ChromeData's "Dealer ID" column. This is
+   * the Aurora-style DEALER_ID on both platforms (4.0: dealer_dim.DEALER_ID;
+   * 5.0: dealers.inventory_dealer_id, which is the same value) so the sheet
+   * keeps one ID convention — matching every report sent before this one.
+   */
+  dealer_id: string;
   dealer_name: string;
   print_count: number;
+  /** Which platform this dealer's usage was counted on. */
+  platform: "4.0" | "5.0";
+}
+
+/** One row as returned by the ETL box's read-only /chromedata-usage endpoint. */
+interface LegacyUsageRow {
+  dealer_id: string;
+  dealer_name: string;
+  account_type: string | null;
+  template_name: string;
 }
 
 export interface ChromeReportResult {
@@ -93,6 +127,62 @@ export function resolveReportMonth(override?: string | null, now: Date = new Dat
 }
 
 /**
+ * Fetch the 4.0 (Aurora) half of the report from the ETL box.
+ *
+ * da-platform cannot talk to Aurora directly: its AURORA_* env still names a
+ * decommissioned blue/green cluster endpoint and, even with the live reader
+ * hostname, the us-west-1 app box has no route to the legacy VPC's private
+ * RDS address. The ETL box already holds read-only Aurora credentials and
+ * already exposes X-API-Key machine endpoints to da-platform (/sync,
+ * /freshbooks/recurring-pause), so the query lives there and we consume rows.
+ *
+ * This THROWS on any failure rather than degrading to a 5.0-only report: a
+ * partial number sent to a vendor is worse than no send, and an under-count is
+ * exactly the failure this whole fix exists to correct.
+ */
+async function fetchLegacyUsageRows(monthStart: string, monthEnd: string): Promise<LegacyUsageRow[]> {
+  const etlUrl = process.env.ETL_SYNC_URL;
+  const etlKey = process.env.ETL_SYNC_API_KEY;
+  if (!etlUrl || !etlKey) {
+    throw new Error(
+      "ETL_SYNC_URL / ETL_SYNC_API_KEY not configured — the 4.0 half of the ChromeData report cannot be built.",
+    );
+  }
+  const controller = new AbortController();
+  // The Aurora query carries a correlated per-dealer COUNT over
+  // dealer_inventory; it runs in seconds today but is not cheap.
+  const timer = setTimeout(() => controller.abort(), 300_000);
+  let res: Response;
+  try {
+    res = await fetch(`${etlUrl.replace(/\/$/, "")}/chromedata-usage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": etlKey },
+      body: JSON.stringify({ month_start: monthStart, month_end_exclusive: monthEnd }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    throw new Error(`ETL /chromedata-usage request failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    throw new Error(`ETL /chromedata-usage returned HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  }
+  const json = (await res.json()) as { rows?: LegacyUsageRow[] };
+  if (!Array.isArray(json.rows)) {
+    throw new Error("ETL /chromedata-usage returned no rows array");
+  }
+  return json.rows;
+}
+
+/**
+ * Normalise a dealer identifier for cross-platform matching. Aurora
+ * DEALER_IDs and Supabase dealer_id/inventory_dealer_id are the same values
+ * but drift in case and padding ("SURF CITY NISSAN", "mp23083").
+ */
+const normId = (v: string | null | undefined): string => (v ?? "").trim().toUpperCase();
+
+/**
  * Build the full report for a given month. Returns the data rows + the
  * Excel buffer ready to attach to email / upload to S3.
  */
@@ -104,7 +194,13 @@ export async function buildChromeDataReport(monthOverride?: string | null): Prom
   // template_json is jsonb and Supabase JS doesn't expose ::text casts via
   // PostgREST. Templates are bounded (~hundreds across the platform), so
   // pull them all and grep client-side.
-  const dealerTemplateMatches = new Map<string, string>(); // dealer_id (uuid) → template name
+  //
+  // NOTE: templates.dealer_id is the TEXT dealer key (FK → dealers.dealer_id),
+  // NOT the dealers.id UUID. This map is therefore keyed by the text id and
+  // looked up with dealer.dealer_id in step 4. Keying it by UUID (as the
+  // original did) meant the dealer-level branch never matched a single dealer
+  // — only the group branch ever contributed.
+  const dealerTemplateMatches = new Map<string, string>(); // dealers.dealer_id (text) → template name
   let from = 0;
   while (true) {
     const { data, error } = await admin
@@ -118,10 +214,10 @@ export async function buildChromeDataReport(monthOverride?: string | null): Prom
       const txt = JSON.stringify(t.template_json ?? {});
       if (!templateUsesVehiclePhoto(txt)) continue;
       // The first matching template wins for the report's "Template Name"
-      // column. Could also collect all and pick the most recently updated —
-      // ChromeData just wants ONE line per dealer, so first-wins is fine.
-      if (t.dealer_id && !dealerTemplateMatches.has(t.dealer_id as string)) {
-        dealerTemplateMatches.set(t.dealer_id as string, (t.name as string) ?? "(unnamed)");
+      // column. ChromeData just wants ONE line per dealer, so first-wins is fine.
+      const key = normId(t.dealer_id as string | null);
+      if (key && !dealerTemplateMatches.has(key)) {
+        dealerTemplateMatches.set(key, (t.name as string) ?? "(unnamed)");
       }
     }
     if (rows.length < 1000) break;
@@ -154,20 +250,20 @@ export async function buildChromeDataReport(monthOverride?: string | null): Prom
   // ── 3. Load all qualifying-by-eligibility dealers ────────────────────────
   // active + paid + not test + name doesn't match exclusion regex
   const dealers: Array<{
-    id: string; dealer_id: string; internal_id: string | null;
+    id: string; dealer_id: string; inventory_dealer_id: string | null;
     name: string; group_id: string | null;
   }> = [];
   from = 0;
   while (true) {
     const { data, error } = await admin
       .from("dealers")
-      .select("id, dealer_id, internal_id, name, group_id, active, is_test, account_type")
+      .select("id, dealer_id, inventory_dealer_id, name, group_id, active, is_test, account_type")
       .eq("active", true)
       .range(from, from + 999);
     if (error) throw new Error(`dealers fetch failed: ${error.message}`);
     const rows = data ?? [];
     for (const d of rows) {
-      const r = d as { id: string; dealer_id: string; internal_id: string | null; name: string;
+      const r = d as { id: string; dealer_id: string; inventory_dealer_id: string | null; name: string;
                        group_id: string | null; active: boolean; is_test: boolean | null;
                        account_type: string | null };
       if (r.is_test === true) continue;
@@ -175,7 +271,7 @@ export async function buildChromeDataReport(monthOverride?: string | null): Prom
       if (!accountType || accountType === "Free" || accountType === "Trial") continue;
       if (EXCLUSION_RE.test(r.name ?? "")) continue;
       dealers.push({
-        id: r.id, dealer_id: r.dealer_id, internal_id: r.internal_id,
+        id: r.id, dealer_id: r.dealer_id, inventory_dealer_id: r.inventory_dealer_id,
         name: r.name, group_id: r.group_id,
       });
     }
@@ -187,16 +283,17 @@ export async function buildChromeDataReport(monthOverride?: string | null): Prom
   //      the Vehicle Photo widget, attaching the matched template name.
   const candidates: Array<DealerReportRow & { dealer_text_id: string }> = [];
   for (const d of dealers) {
-    let templateName = dealerTemplateMatches.get(d.id);
+    let templateName = dealerTemplateMatches.get(normId(d.dealer_id));
     if (!templateName && d.group_id) {
       templateName = groupTemplateMatches.get(d.group_id);
     }
     if (!templateName) continue;
     candidates.push({
       template_name: templateName,
-      internal_id: d.internal_id ?? d.dealer_id,
+      dealer_id: d.inventory_dealer_id ?? d.dealer_id,
       dealer_name: d.name,
       print_count: 0,
+      platform: "5.0",
       dealer_text_id: d.dealer_id,
     });
   }
@@ -238,15 +335,50 @@ export async function buildChromeDataReport(monthOverride?: string | null): Prom
     }
   }
 
-  // ── 6. Apply the > 10 prints threshold + sort alphabetically ─────────────
-  const finalRows: DealerReportRow[] = candidates
+  // ── 6. Apply the > 10 prints threshold to the 5.0 side ───────────────────
+  const platformRows: DealerReportRow[] = candidates
     .filter(c => c.print_count > PRINT_THRESHOLD)
-    .map(({ template_name, internal_id, dealer_name, print_count }) => ({
-      template_name, internal_id, dealer_name, print_count,
-    }))
-    .sort((a, b) => a.dealer_name.localeCompare(b.dealer_name));
+    .map(({ template_name, dealer_id, dealer_name, print_count, platform }) => ({
+      template_name, dealer_id, dealer_name, print_count, platform,
+    }));
 
-  // ── 7. Build the .xlsx ───────────────────────────────────────────────────
+  // Every identifier the 5.0 side already accounts for. A migrated dealer can
+  // exist in both dealer_dim and dealers; both its text id and its inventory
+  // id go in so an Aurora DEALER_ID matches whichever convention it uses.
+  const claimedBy50 = new Set<string>();
+  for (const c of candidates) {
+    if (c.print_count <= PRINT_THRESHOLD) continue;
+    claimedBy50.add(normId(c.dealer_text_id));
+    claimedBy50.add(normId(c.dealer_id));
+  }
+
+  // ── 7. Fold in the 4.0 (Aurora) side, deduped ────────────────────────────
+  // The ETL box returns one row per (dealer, template) and already applies the
+  // active / paid / > 10-prints / vehicle_image gates. Collapse to one row per
+  // dealer, drop test+demo names, and skip anyone the 5.0 side already claimed.
+  const legacyRows = await fetchLegacyUsageRows(m.monthStart, m.monthEnd);
+  const legacyByDealer = new Map<string, DealerReportRow>();
+  for (const r of legacyRows) {
+    const key = normId(r.dealer_id);
+    if (!key) continue;
+    if (EXCLUSION_RE.test(r.dealer_name ?? "")) continue;
+    if (claimedBy50.has(key)) continue;         // counted on 5.0 — never twice
+    if (legacyByDealer.has(key)) continue;      // first template name wins
+    legacyByDealer.set(key, {
+      template_name: r.template_name || "(unnamed)",
+      dealer_id: r.dealer_id,
+      dealer_name: r.dealer_name,
+      // The 4.0 branch qualifies on a > 10 count computed in SQL; the exact
+      // number is not reported to ChromeData (the sheet has no count column).
+      print_count: PRINT_THRESHOLD + 1,
+      platform: "4.0",
+    });
+  }
+
+  // ── 8. Union + sort alphabetically by dealership name ────────────────────
+  const finalRows: DealerReportRow[] = [...platformRows, ...Array.from(legacyByDealer.values())]
+    .sort((a, b) => a.dealer_name.trim().localeCompare(b.dealer_name.trim()));
+  // ── 9. Build the .xlsx ───────────────────────────────────────────────────
   const xlsxBuffer = await renderXlsx(m, finalRows);
   const filename = `ChromeData_Usage_${m.month.replace("-", "_")}.xlsx`;
   return { ...m, rows: finalRows, xlsxBuffer, filename };
@@ -269,7 +401,7 @@ export async function buildChromeDataReport(monthOverride?: string | null): Prom
  *   Row 10: Template Name | Dealer ID | Dealership Name
  *   Row 11+: data rows, sorted alphabetically by dealership name
  *
- * Dealer ID is stored as a number when the internal_id is purely numeric
+ * Dealer ID is stored as a number when the dealer id is purely numeric
  * (matches the existing template where IDs like 269, 1616 are right-aligned
  * integers). Falls back to a string for MP-style codes.
  */
@@ -291,7 +423,7 @@ async function renderXlsx(m: { monthStart: string; monthLabel: string }, rows: D
   for (const r of rows) {
     // ChromeData's sample has Dealer ID as a right-aligned integer when it
     // is purely numeric; preserve that. MP-style codes stay as strings.
-    const idValue: string | number = /^\d+$/.test(r.internal_id) ? Number(r.internal_id) : r.internal_id;
+    const idValue: string | number = /^\d+$/.test(r.dealer_id) ? Number(r.dealer_id) : r.dealer_id;
     ws.addRow([r.template_name, idValue, r.dealer_name]);
   }
 

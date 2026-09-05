@@ -14,6 +14,8 @@ import { sendMandrillEmail } from "@/lib/mandrill";
  * Builds the monthly ChromeData vehicle-image usage report for the previous
  * calendar month (or ?month=YYYY-MM to override), uploads a copy to S3 for
  * the record, and emails the .xlsx to billing@chromedata.com via Mandrill.
+ * Pass ?dry_run=1 to build and inspect the dealer list without sending or
+ * archiving anything.
  *
  * Auth: x-cron-secret header must match CRON_SECRET. The Reports page
  * manual-trigger button calls the same route through the regular session,
@@ -49,6 +51,29 @@ async function handle(req: NextRequest): Promise<NextResponse> {
   const monthOverride = req.nextUrl.searchParams.get("month");
   const report = await buildChromeDataReport(monthOverride);
 
+  // ?dry_run=1 — build the report and return the dealer list WITHOUT emailing
+  // ChromeData or archiving to S3. Added 2026-09-05 after the first automated
+  // run emailed a wrong number ("Locations reported: 0"): the count is now
+  // eyeballed before anything leaves the building.
+  if (req.nextUrl.searchParams.get("dry_run") === "1") {
+    return NextResponse.json({
+      dry_run: true,
+      month: report.month,
+      dealers: report.rows.length,
+      file: report.filename,
+      by_platform: {
+        "4.0": report.rows.filter(r => r.platform === "4.0").length,
+        "5.0": report.rows.filter(r => r.platform === "5.0").length,
+      },
+      rows: report.rows.map(r => ({
+        dealer_name: r.dealer_name,
+        dealer_id: r.dealer_id,
+        template_name: r.template_name,
+        platform: r.platform,
+      })),
+    });
+  }
+
   // ── Upload a copy to S3 (us-west-1 dealer-addendums bucket) ──────────────
   let s3Key: string | null = null;
   try {
@@ -77,9 +102,16 @@ async function handle(req: NextRequest): Promise<NextResponse> {
   const firstDayPretty = new Date(report.monthStart + "T00:00:00Z")
     .toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
+  // ?supersedes=1 — flags this send as a correction of an earlier email for the
+  // same month, so ChromeData knows which figure to bill from.
+  const supersedes = req.nextUrl.searchParams.get("supersedes") === "1";
+  const supersedesLine = supersedes
+    ? `<p><strong>This corrected report supersedes the version sent earlier today for ${report.monthLabel}.</strong></p>`
+    : "";
+
   try {
     await sendMandrillEmail({
-      subject: `DealerAddendums — ChromeData Usage Report — ${report.monthLabel}`,
+      subject: `DealerAddendums — ChromeData Usage Report — ${report.monthLabel}${supersedes ? " (corrected)" : ""}`,
       from_email: "billing@dealeraddendums.com",
       from_name: "DealerAddendums Billing",
       to: [
@@ -87,6 +119,7 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         { email: "support@dealeraddendums.com", name: "DealerAddendums Support", type: "cc" },
       ],
       html: `<div style="font-family: Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; color: #333; line-height: 1.6;">
+  ${supersedesLine}
   <p>Please find attached the DealerAddendums vehicle image usage report for <strong>${report.monthLabel}</strong>.</p>
   <p>
     Contract: <strong>#9310</strong><br>
