@@ -661,6 +661,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     claims.role === "super_admin" && typeof rawPurpose === "string" && VALID_PURPOSE.has(rawPurpose)
       ? (rawPurpose as "real" | "test" | "sales_demo")
       : "real";
+  // Billing exclusion for Test / Sales Demo, mirroring what the Account Purpose
+  // UI has always promised ("excluded from BI/billing/HubSpot") and what BI and
+  // (since 5d3a22c) HubSpot already do.
+  //
+  // Uses the local value rather than lib/sync-hubspot's isRealAccountDealer():
+  // that helper exists for paths that only hold a dealer id and must re-read the
+  // row, whereas here we are the code that just decided the purpose, so the
+  // local value is authoritative and cannot race a concurrent edit. It mirrors
+  // the same semantics — only "real" is real — and inherits the safe default
+  // above: anything other than an explicit super_admin test/sales_demo choice is
+  // "real", so a normal create is never accidentally gated out of billing.
+  const isRealAccount = accountPurpose === "real";
 
   const admin = createAdminSupabaseClient();
 
@@ -778,7 +790,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // store onto group billing so the cascade below adds its template line.
   // Trial stores and restyler groups never reach this (guards above/below).
   if (createdDealerGroupId && !hasLegacyBilling && !isTrialCreate && !isRestylerStore
-      && subscriptionBilledTo !== "group") {
+      && isRealAccount && subscriptionBilledTo !== "group") {
     try {
       const [{ data: grpRow }, { count: groupBilledMembers }] = await Promise.all([
         admin.from("groups").select("billing_customer_id").eq("id", createdDealerGroupId).maybeSingle<{ billing_customer_id: string | null }>(),
@@ -802,7 +814,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  if (!hasLegacyBilling && !isTrialCreate && !isRestylerStore) {
+  // isRealAccount is an ADDITIONAL exclusion alongside the existing legacy /
+  // Trial / restyler guards, not a replacement for any of them. It covers BOTH
+  // branches below, because a group template line is a billing write too — a
+  // test store dropped into a group would otherwise still be charged for.
+  if (!hasLegacyBilling && !isTrialCreate && !isRestylerStore && isRealAccount) {
     if (subscriptionBilledTo === "group" && createdDealerGroupId) {
       // Group owns the subscription line. Cascade adds a tagged line
       // item to the group's template (creating the template + customer
@@ -822,6 +838,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         state: (rest.state as string | null) ?? undefined,
       });
     }
+  }
+
+  if (!isRealAccount) {
+    console.log(`[dealers POST] ${createdDealerId} (${name.trim()}) account_purpose=${accountPurpose} — skipping da-billing customer/template (Test & Sales Demo are excluded from billing)`);
   }
 
   // Phase 14a — HubSpot Company upsert. Uses the RELIABLE variant
