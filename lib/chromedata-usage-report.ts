@@ -19,6 +19,23 @@
 // deduped so a dealer that exists on both platforms is counted exactly once.
 // Both branches use the same > 10 threshold, the same half-open month window,
 // and the same test/demo name exclusion.
+//
+// ⬜ KNOWN ASYMMETRY between the two branches — revisit when 5.0 volume grows.
+// The 4.0 branch qualifies a dealer only when their SELECTED addendum style
+// (template_data.ADDENDUM_STYLE) resolves to their own template_builder row
+// with STOCK_SELECT='vehicle_image'. The 5.0 branch below is looser: a dealer
+// qualifies if ANY of their active templates — or any active template of their
+// group — contains the widget, whether or not it is the template they actually
+// print with. So a 5.0 dealer who authored a vehicle-photo template months ago
+// and never made it a default still counts.
+//
+// This is harmless today (August 2026: exactly ONE dealer qualifies on 5.0),
+// but it over-reports as dealers migrate. The unification is to gate the 5.0
+// side on dealer_settings.default_addendum_* (and the group template that
+// resolves through lib/template-resolver.ts) rather than on template existence
+// — i.e. "the template this dealer actually prints with uses vehicle_image",
+// matching the 4.0 semantic. Deliberately NOT changed here: tightening it is a
+// billing-facing behavior change and belongs in its own reviewed pass.
 
 import ExcelJS from "exceljs";
 import { createAdminSupabaseClient } from "@/lib/db";
