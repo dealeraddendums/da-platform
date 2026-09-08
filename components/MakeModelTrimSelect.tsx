@@ -73,6 +73,7 @@ export default function MakeModelTrimSelect({
   const [trimFree, setTrimFree] = useState(false);
 
   const modelTokens = splitCsv(model);
+  const trimTokens = splitCsv(trim);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,16 +149,19 @@ export default function MakeModelTrimSelect({
     setTrimFree(false);
     onChange({ make, model: "", trim: "" });
   }
-  function selectTrim(rawValue: string) {
-    if (rawValue === ENTER) {
-      setTrimFree(true);
-      onChange({ make, model, trim: "" });
-      return;
-    }
+  function toggleTrim(name: string) {
+    const next = trimTokens.some(t => t.toLowerCase() === name.toLowerCase())
+      ? trimTokens.filter(t => t.toLowerCase() !== name.toLowerCase())
+      : [...trimTokens, name];
+    onChange({ make, model, trim: next.join(",") });
+  }
+  function clearTrims() {
     setTrimFree(false);
-    const id = rawValue ? parseInt(rawValue, 10) : NaN;
-    const t = trims.find(x => x.id === id);
-    onChange({ make, model, trim: t?.name ?? "" });
+    onChange({ make, model, trim: "" });
+  }
+  function enterTrimFree() {
+    setTrimFree(true);
+    onChange({ make, model, trim: "" });
   }
 
   // Three sources for "free-text mode":
@@ -174,10 +178,15 @@ export default function MakeModelTrimSelect({
     modelFree ? "free"
     : modelTokens.length === 0 ? (makeMode === "empty" ? "empty" : (models.length === 0 && makeMode === "select" ? "free" : "empty"))
     : (allModelsMatched ? "select" : "free");
+  const matchedTrims = trimTokens.map(
+    t => trims.find(x => x.name.toLowerCase() === t.toLowerCase()) ?? null,
+  );
+  const allTrimsMatched = trimTokens.length > 0 && trims.length > 0 && matchedTrims.every(Boolean);
+
   const trimMode: "select" | "free" | "empty" =
     trimFree ? "free"
-    : !trim ? (modelMode === "empty" ? "empty" : (singleModelId != null && trims.length === 0 && modelMode === "select" ? "free" : "empty"))
-    : (trims.find(t => t.name.toLowerCase() === trim.trim().toLowerCase()) ? "select" : "free");
+    : trimTokens.length === 0 ? (modelMode === "empty" ? "empty" : (singleModelId != null && trims.length === 0 && modelMode === "select" ? "free" : "empty"))
+    : (allTrimsMatched ? "select" : "free");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -239,7 +248,7 @@ export default function MakeModelTrimSelect({
         {trimMode === "free" ? (
           <FreeTextRevert
             value={trim}
-            placeholder="Enter trim"
+            placeholder="Enter trim (comma-separate for several)"
             disabled={modelTokens.length === 0}
             onChange={(v) => onChange({ make, model, trim: v })}
             onRevert={() => {
@@ -248,17 +257,18 @@ export default function MakeModelTrimSelect({
             }}
           />
         ) : (
-          <select
-            value={trim ? (trims.find(t => t.name.toLowerCase() === trim.trim().toLowerCase())?.id ?? "") : ""}
-            onChange={(e) => selectTrim(e.target.value)}
+          <MultiCheckDropdown
             disabled={singleModelId == null || modelMode === "empty"}
             title={modelTokens.length > 1 ? "Trim rules apply to a single model — select exactly one model to pick trims" : undefined}
-            style={{ ...inp, opacity: singleModelId == null ? 0.5 : 1 }}
-          >
-            <option value="">All trims</option>
-            {trims.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            <option value={ENTER}>— Enter Trim —</option>
-          </select>
+            allLabel="All trims"
+            summaryUnit="trims"
+            options={trims.map(t => t.name)}
+            selected={trimTokens}
+            onToggle={toggleTrim}
+            onClear={clearTrims}
+            onEnterFree={enterTrimFree}
+            enterLabel="— Enter Trim —"
+          />
         )}
       </Row>
     </div>
@@ -283,10 +293,12 @@ function Row({ label, right, children }: { label: string; right?: React.ReactNod
  * "N models" (many).
  */
 function MultiCheckDropdown({
-  disabled, allLabel, options, selected, onToggle, onClear, onEnterFree, enterLabel,
+  disabled, title, allLabel, summaryUnit = "models", options, selected, onToggle, onClear, onEnterFree, enterLabel,
 }: {
   disabled?: boolean;
+  title?: string;
   allLabel: string;
+  summaryUnit?: string;
   options: string[];
   selected: string[];
   onToggle: (name: string) => void;
@@ -310,13 +322,14 @@ function MultiCheckDropdown({
   const summary =
     selected.length === 0 ? allLabel
     : selected.length <= 3 ? selected.join(", ")
-    : `${selected.length} models`;
+    : `${selected.length} ${summaryUnit}`;
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <button
         type="button"
         disabled={disabled}
+        title={title}
         onClick={() => setOpen(o => !o)}
         style={{
           ...inp, textAlign: "left", cursor: disabled ? "default" : "pointer",
