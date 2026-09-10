@@ -8,6 +8,7 @@ import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/
 import { getBuyersGuidePdfBytes } from "@/lib/buyers-guide-storage";
 import type { BgKey } from "@/lib/buyers-guide-constants";
 import JSZip from "jszip";
+import { PDFDocument } from "pdf-lib";
 
 /**
  * POST /api/pdf/buyers-guide
@@ -36,13 +37,17 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     vehicleId: string;
     language?: 'en' | 'es';
     both?: boolean;
+    /** With both=true: return ONE merged PDF (EN front+back, then ES
+     *  front+back) instead of a two-file ZIP, so the client can route it
+     *  through the normal print-preview flow rather than downloading. */
+    merge?: boolean;
     warranty?: Partial<BuyersGuideDefaults>;
   };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { vehicleId, language = 'en', both = false, warranty: warrantyOverrides } = body;
+  const { vehicleId, language = 'en', both = false, merge = false, warranty: warrantyOverrides } = body;
   if (!vehicleId) return NextResponse.json({ error: "vehicleId required" }, { status: 400 });
 
   const admin = createAdminSupabaseClient();
@@ -176,9 +181,35 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
       generateOneLang('es', esKey),
     ]);
     const zipToken = await stashPrint(enKey);
+    const base = `${dv.make ?? 'vehicle'}_${dv.year ?? ''}_buyers_guide`.replace(/\s+/g, '_');
+
+    if (merge) {
+      // One PDF: EN front+back, then ES front+back. pdf-lib is already a
+      // dependency here (it renders these guides), so the merge is local —
+      // no da-pdf-service change and no new package. Both languages come from
+      // the identical generateOneLang() calls the ZIP uses, so every modal
+      // option (warranty, dealer email, complaints contact, custom
+      // backgrounds, service contract) applies to both exactly as before.
+      const merged = await PDFDocument.create();
+      for (const buf of [enBuffer, esBuffer]) {
+        const src = await PDFDocument.load(buf);
+        const pages = await merged.copyPages(src, src.getPageIndices());
+        for (const page of pages) merged.addPage(page);
+      }
+      const mergedBytes = await merged.save();
+      return new NextResponse(Buffer.from(mergedBytes) as unknown as BodyInit, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          // inline, not attachment: this response feeds the print preview.
+          "Content-Disposition": `inline; filename="${base}_en_es.pdf"`,
+          "Content-Length": String(mergedBytes.byteLength),
+          ...(zipToken ? { "X-Print-Token": zipToken } : {}),
+        },
+      });
+    }
 
     const zip = new JSZip();
-    const base = `${dv.make ?? 'vehicle'}_${dv.year ?? ''}_buyers_guide`.replace(/\s+/g, '_');
     zip.file(`${base}_english.pdf`, enBuffer);
     zip.file(`${base}_spanish.pdf`, esBuffer);
     const zipBuffer = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });

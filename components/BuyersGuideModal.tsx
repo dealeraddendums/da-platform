@@ -89,20 +89,28 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
     });
   }
 
-  async function generate(both = false) {
+  /**
+   * mode:
+   *   "single" — the selected language, into the preview (unchanged)
+   *   "zip"    — both languages as a downloaded ZIP (unchanged)
+   *   "merged" — both languages as ONE PDF into the preview, so "Send to
+   *              Printer" gives a print dialog instead of a download
+   */
+  async function generate(mode: "single" | "zip" | "merged" = "single") {
+    const both = mode !== "single";
     setGenerating(true);
     setGenError(null);
     setPdfUrl(null);
     setBlobUrl(null);
     try {
-      const body = { vehicleId: dealerVehicleId, language, both, warranty };
+      const body = { vehicleId: dealerVehicleId, language, both, merge: mode === "merged", warranty };
       const res = await fetch("/api/pdf/buyers-guide", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
 
-      if (both) {
+      if (mode === "zip") {
         if (!res.ok) throw new Error("Generation failed");
         // The ZIP path downloads immediately — that IS the print action, so
         // record it right away.
@@ -247,7 +255,7 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
             {!generating && !genError && !blobUrl && (
               <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 }}>
                 <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Configure options on the left, then generate.</p>
-                <button className="btn btn-primary" style={{ height: 36, padding: "0 20px" }} onClick={() => void generate(false)} disabled={generating}>
+                <button className="btn btn-primary" style={{ height: 36, padding: "0 20px" }} onClick={() => void generate("single")} disabled={generating}>
                   Generate PDF
                 </button>
               </div>
@@ -260,8 +268,14 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
 
         {/* Footer */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--border)", flexShrink: 0, background: "var(--bg-subtle)" }}>
-          <button onClick={() => void generate(true)} disabled={generating} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
+          <button onClick={() => void generate("zip")} disabled={generating} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
             Generate Both (EN + ES) → ZIP
+          </button>
+          {/* Same generation path as the ZIP button — only the delivery
+              differs: one merged PDF into the preview, so Send to Printer
+              raises a print dialog instead of downloading two files. */}
+          <button onClick={() => void generate("merged")} disabled={generating} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
+            Print Both (EN + ES)
           </button>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={onClose} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
@@ -284,7 +298,7 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
                 </button>
               </>
             )}
-            <button className="btn btn-primary" onClick={() => void generate(false)} disabled={generating} style={{ height: 36, padding: "0 16px" }}>
+            <button className="btn btn-primary" onClick={() => void generate("single")} disabled={generating} style={{ height: 36, padding: "0 16px" }}>
               {blobUrl ? "Regenerate" : "Generate PDF"}
             </button>
           </div>

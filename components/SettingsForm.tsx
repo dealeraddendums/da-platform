@@ -443,6 +443,18 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
               <label className="label">Dealer Email (optional)</label>
               <input className="input w-full" type="email" value={settings.buyers_guide_defaults?.dealer_email ?? ""} onChange={e => setBgDefaults("dealer_email", e.target.value)} placeholder="sales@dealer.com" />
             </div>
+            {/* Saved alongside Dealer Email in the same buyers_guide_defaults
+                JSON, so the Buyer's Guide modal — which loads that whole object
+                — pre-fills it with no extra plumbing. Fills the
+                "FOR COMPLAINTS AFTER SALE, CONTACT:" line on the back of both
+                the EN and ES guides. */}
+            <div className="mb-4">
+              <label className="label">For Complaints After Sale, Contact (optional)</label>
+              <input className="input w-full" value={settings.buyers_guide_defaults?.complaints_contact ?? ""} onChange={e => setBgDefaults("complaints_contact", e.target.value)} placeholder="Jane Doe, (555) 555-1212, complaints@dealer.com" />
+              <p className="text-xs" style={{ color: "var(--text-muted)", marginTop: 4 }}>
+                Pre-fills the Buyer&apos;s Guide screen. You can still change it for a single guide there without altering this default.
+              </p>
+            </div>
             <hr style={{ margin: "0 0 14px", border: "none", borderTop: "1px solid var(--border)" }} />
           </>
         )}
