@@ -527,6 +527,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .map(t => {
           const id = "w" + nid++;
           const w = makeWidget(t, id, undefined, undefined, undefined, undefined, isInfosheet);
+          // This layout is CODE-GENERATED, not authored — the dealer has no
+          // template, so nobody chose a content source for it. makeWidget
+          // defaults aiMode to 'db' (the Builder's display default), and since
+          // b98eff6 a 'db' widget renders database content or an empty section,
+          // never AI. For a dealer who has never built an infosheet that meant
+          // the account-level AI setting appeared to do nothing and the sheet
+          // printed blank whenever the feed carried no description/options
+          // (Envision Ford of Oxnard, 2026-09-10).
+          //
+          // b98eff6 exists to respect a HUMAN's explicit DB choice; a
+          // placeholder widget expresses no choice at all, so seed it from the
+          // dealer's own default instead. Authored templates keep the
+          // per-widget toggle as the sole authority — unchanged.
+          if (t === "description" || t === "features") {
+            w.d = { ...w.d, aiMode: aiEnabled ? "ai" : "db" };
+          }
           if (t === "msrp" && vehicleData.MSRP) {
             const msrp = parseFloat(vehicleData.MSRP);
             if (!isNaN(msrp)) w.d = { ...w.d, value: `$${msrp.toLocaleString()}` };
