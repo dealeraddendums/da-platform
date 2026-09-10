@@ -22,6 +22,7 @@ import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
 import QRCode from "qrcode";
 import { PDFDocument } from "pdf-lib";
 import type { Widget, PaperSize } from "@/components/builder/types";
+import { vehicleConditionFields, resolveVehicleCondition } from "@/lib/vehicles";
 
 type LibRow = Record<string, unknown>;
 
@@ -310,7 +311,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const resolved = await resolveTemplate(admin, {
           dealerTextId: dv.dealer_id,
           docType,
-          condition: dv.condition,
+          condition: resolveVehicleCondition(dv),
           make: dv.make,
           settings: dealerSettings as Record<string, unknown> | null,
           cache: templateResolverCache,
@@ -471,7 +472,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           } else {
             // 3. Library matching rules per vehicle (library already cached above)
             const dealerLib = libCache.get(dv.dealer_id)!;
-            const vehicleCond = dv.condition === "New" ? "New" : dv.condition === "Used" ? "Used" : "CPO";
+            // Shared resolver: honors the certified flag and normalizes case.
+            // Previously "anything but New/Used" fell through to CPO, so
+            // feed-cased "NEW"/"USED" rows matched CPO product rules.
+            const vehicleCond = resolveVehicleCondition(dv);
             effectiveOptions = dealerLib
               .filter(r => {
                 const appliesTo = (r.applies_to as string) ?? "all";
@@ -605,7 +609,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           DATE_IN_STOCK: dv.date_added, STATUS: "1" as const,
           MSRP: dv.msrp != null ? String(dv.msrp) : null,
           NEW_USED: dv.condition === "Used" ? "Used" : "New",
-          CERTIFIED: dv.condition === "CPO" ? "Yes" : "No",
+          CERTIFIED: vehicleConditionFields(dv).CERTIFIED,
           OPTIONS: null, PHOTOS: null, DESCRIPTION: dv.description ?? null,
           PRINT_STATUS: "0" as const, HMPG: dv.hmpg ?? null, CMPG: dv.cmpg ?? null, MPG: dv.mpg ?? null,
         };

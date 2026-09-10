@@ -62,6 +62,11 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     "body_style", "exterior_color", "interior_color", "engine",
     "transmission", "drivetrain", "fuel", "mileage", "msrp", "condition", "status",
     "description", "options", "cmpg", "hmpg",
+    // `certified` is editable alongside `condition` so the Certified state is
+    // written as one pair. Sending only one of the two is what left rows
+    // half-set: the modal used to store condition='Certified' and never touch
+    // the flag, producing a third shape (9 rows) that no reader recognised.
+    "certified",
   ];
 
   const update: Record<string, unknown> = {};

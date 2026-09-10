@@ -9,6 +9,7 @@ import PdfBuildingOverlay from "./PdfBuildingOverlay";
 import VehicleHistoryPanel from "./VehicleHistoryPanel";
 import type { DealerVehicleRow, DealerVehicleArchiveRow } from "@/lib/db";
 import Pager from "@/components/Pager";
+import { resolveVehicleCondition } from "@/lib/vehicles";
 
 type Props = {
   dealerId: string;
@@ -595,7 +596,10 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
                       <td className="px-3 py-2">
                         <span className="font-mono text-xs" style={{ color: "var(--text-secondary)" }}>{v.vin ?? "—"}</span>
                       </td>
-                      <td className="px-3 py-2">{conditionBadge(v.condition)}</td>
+                      {/* Resolved, not the raw column: a CPO vehicle is stored as
+                          condition='Used' + certified flag, so the raw value
+                          rendered "Used" for every certified vehicle. */}
+                      <td className="px-3 py-2">{conditionBadge(resolveVehicleCondition(v) === "CPO" ? "Certified" : resolveVehicleCondition(v))}</td>
                       <td className="px-3 py-2 text-xs" style={{ color: "var(--text-secondary)" }}>{fmt(v.msrp)}</td>
                       <td className="px-3 py-2 text-xs" style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtDate(v.date_added)}</td>
                       <td className="px-3 py-2">

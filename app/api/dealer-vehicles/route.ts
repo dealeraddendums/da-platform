@@ -3,6 +3,13 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerVehicleInsert, DealerVehicleRow, VehicleAuditLogInsert } from "@/lib/db";
 
+// Affirmative `certified` values. Mirrors CERTIFIED_AFFIRMATIVE / isCertified()
+// in lib/vehicles.ts — this filter runs inside the database, so it cannot call
+// the TS helper. Change the two together.
+const CERTIFIED_AFFIRMATIVE_VALUES = [
+  "yes", "y", "true", "t", "1", "x", "certified", "cert", "cpo",
+];
+
 const PER_PAGE_DEFAULT = 15;
 const PER_PAGE_MAX = 9999;
 
@@ -65,7 +72,30 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   if (status !== "all") query = query.eq("status", status);
-  if (condition !== "all") query = query.ilike("condition", condition);
+  // Condition filter — New / Used / Certified are mutually exclusive.
+  //
+  // A CPO vehicle is stored as condition='Used' with a certified flag (no feed
+  // writes condition='CPO'), so `ilike("condition", "certified")` matched
+  // nothing and the Certified filter returned zero rows. Buckets now:
+  //   certified -> the certified flag asserts certification (any condition)
+  //   used      -> condition~used AND NOT certified   (so CPO is not also Used)
+  //   new       -> condition~new  AND NOT certified
+  // The affirmative list mirrors isCertified() in lib/vehicles.ts — kept in
+  // sync deliberately, because PostgREST cannot call our TS helper.
+  if (condition !== "all") {
+    const cond = condition.trim().toLowerCase();
+    if (cond === "certified" || cond === "cpo") {
+      query = query.in("certified", CERTIFIED_AFFIRMATIVE_VALUES);
+    } else {
+      // NOT certified: a NULL never satisfies `not.in`, so the null case has to
+      // be OR'd in explicitly or every certified-is-null row would vanish from
+      // the New and Used buckets.
+      const notCertified = CERTIFIED_AFFIRMATIVE_VALUES.map(v => `"${v}"`).join(",");
+      query = query
+        .ilike("condition", cond)
+        .or(`certified.is.null,certified.not.in.(${notCertified})`);
+    }
+  }
   if (q) {
     const yearNum = parseInt(q, 10);
     const yearClause = (!isNaN(yearNum) && yearNum >= 1900 && yearNum <= 2099) ? `,year.eq.${yearNum}` : "";

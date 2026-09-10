@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { vehicleConditionFields } from "@/lib/vehicles";
 
 // Legacy: required key + username + optional dealer + optional type.
 // New: Supabase JWT; dealer scoped by role; pass ?dealer= to override (super_admin only).
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     MILEAGE: r.mileage ? String(r.mileage) : null,
     DATE_IN_STOCK: r.date_added,
     MSRP: r.msrp ? String(r.msrp) : null,
-    NEW_USED: r.condition === "Used" ? "Used" : "New",
+    NEW_USED: vehicleConditionFields(r).NEW_USED,
     STATUS: r.status === "active" ? "1" : "0",
   }));
 

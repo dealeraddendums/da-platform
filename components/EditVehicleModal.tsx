@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { DealerVehicleRow } from "@/lib/db";
 import { FUEL_RULE_OPTIONS } from "@/lib/fuel-rule";
+import { resolveVehicleCondition } from "@/lib/vehicles";
 
 type Props = {
   vehicle: DealerVehicleRow;
@@ -27,6 +28,21 @@ const LABEL_STYLE: React.CSSProperties = {
 };
 
 const CONDITIONS = ["New", "Used", "Certified"];
+
+// The dropdown is the single control for the New/Used/Certified state, which is
+// stored across TWO columns: `condition` and `certified`. Certified Pre-Owned
+// arrives from every feed as condition='Used' PLUS a certified flag, so that is
+// the shape written here too — a hand-edited CPO vehicle is then
+// indistinguishable from a feed-ingested one everywhere downstream.
+//
+// Previously the dropdown wrote condition='Certified' and never touched the
+// flag, which no reader recognised (see resolveVehicleCondition in
+// lib/vehicles.ts).
+function conditionToColumns(sel: string): { condition: string; certified: string } {
+  return sel === "Certified"
+    ? { condition: "Used", certified: "true" }
+    : { condition: sel, certified: "false" };
+}
 
 function AiBadge() {
   return (
@@ -58,7 +74,9 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
     msrp: vehicle.msrp ? String(vehicle.msrp) : "",
     cmpg: vehicle.cmpg ?? "",
     hmpg: vehicle.hmpg ?? "",
-    condition: vehicle.condition,
+    // Reflect the RESOLVED state, so a feed-ingested CPO vehicle
+    // (condition='Used' + certified='true') opens showing "Certified".
+    condition: resolveVehicleCondition(vehicle) === "CPO" ? "Certified" : (vehicle.condition ?? "New"),
   });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -87,6 +105,10 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
+        // Expand the single dropdown into the two columns it owns, so the row
+        // can never end up half-set (Certified without the flag, or a stale
+        // flag left behind after switching to New/Used).
+        ...conditionToColumns(form.condition),
         year: form.year ? parseInt(form.year, 10) : null,
         mileage: form.mileage ? parseInt(form.mileage, 10) : 0,
         msrp: form.msrp ? parseFloat(form.msrp) : null,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { vehicleConditionFields } from "@/lib/vehicles";
 
 const PER_PAGE_DEFAULT = 50;
 const PER_PAGE_MAX = 200;
@@ -88,7 +89,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     } else if (conditionParam === "used") {
       query = query.eq("condition", "Used");
     } else if (conditionParam === "cpo") {
-      query = query.eq("condition", "CPO");
+      // No feed writes condition='CPO' — a CPO vehicle is condition='Used'
+      // plus a certified flag — so the old eq("condition","CPO") matched
+      // nothing. Match the flag instead (list mirrors isCertified()).
+      query = query.or('certified.in.("yes","y","true","t","1","x","certified","cert","cpo")');
     }
 
     if (q) {
@@ -134,7 +138,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       MILEAGE: r.mileage ? String(r.mileage) : null,
       MSRP: r.msrp ? String(r.msrp) : null,
       NEW_USED: r.condition === "Used" ? "Used" : "New",
-      CERTIFIED: r.condition === "CPO" ? "Yes" : "No",
+      CERTIFIED: vehicleConditionFields(r).CERTIFIED,
       STATUS: r.status === "active" ? "1" : "0",
       DATE_IN_STOCK: r.date_added,
       supabase_printed: printedSet.has(r.id as string),

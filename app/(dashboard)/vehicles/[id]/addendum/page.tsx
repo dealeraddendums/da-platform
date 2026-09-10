@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
 import { resolveSessionProfile } from "@/lib/profile-session";
 import type { VehicleRow } from "@/lib/vehicles";
+import { vehicleConditionFields } from "@/lib/vehicles";
 import AddendumEditor from "@/components/AddendumEditor";
 
 export const metadata = { title: "Addendum — DA Platform" };
@@ -72,7 +73,7 @@ export default async function AddendumPage({
     STATUS: "1",
     MSRP: dv.msrp ? String(dv.msrp) : null,
     NEW_USED: dv.condition === "Used" ? "Used" : "New",
-    CERTIFIED: dv.condition === "CPO" ? "Yes" : "No",
+    CERTIFIED: vehicleConditionFields(dv).CERTIFIED,
     OPTIONS: null,
     PHOTOS: null,
     DESCRIPTION: dv.description ?? null,

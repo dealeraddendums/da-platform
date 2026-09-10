@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { getGroupOptionsForDealer, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { syncAddendumItems } from "@/lib/sync-addendum-items";
 import type { VehicleOptionRow } from "@/lib/db";
+import { vehicleConditionFields } from "@/lib/vehicles";
 
 type Params = { params: { vehicleId: string } };
 
@@ -114,8 +115,7 @@ async function loadVehicleForRules(
     DATE_IN_STOCK: null,
     STATUS: "1" as const,
     MSRP: v.msrp != null ? String(v.msrp) : null,
-    NEW_USED: v.condition === "Used" ? "Used" : "New",
-    CERTIFIED: v.condition === "CPO" ? "Yes" : "No",
+    ...vehicleConditionFields(v),
     OPTIONS: null,
     PHOTOS: null,
     DESCRIPTION: null,

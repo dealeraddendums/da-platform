@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server';
 import { decodeVin } from '@/lib/vinquery';
 import { generateVehicleContent } from '@/lib/ai-content';
-import { vehicleCondition } from '@/lib/vehicles';
+import { vehicleCondition, vehicleConditionFields } from '@/lib/vehicles';
 import type { VehicleRow } from '@/lib/vehicles';
 
 export async function GET(request: Request) {
@@ -97,7 +97,7 @@ async function generateContent(
           MILEAGE: row.mileage ? String(row.mileage) : null,
           MSRP: row.msrp ? String(row.msrp) : null,
           NEW_USED: row.condition === 'Used' ? 'Used' : 'New',
-          CERTIFIED: row.condition === 'CPO' ? 'Yes' : 'No',
+          CERTIFIED: vehicleConditionFields(row).CERTIFIED,
         }
       : {};
 

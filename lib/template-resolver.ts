@@ -24,6 +24,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Widget } from "@/components/builder/types";
 import { pickByMake } from "@/lib/make-key";
+import { resolveVehicleCondition } from "@/lib/vehicles";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = SupabaseClient<any, any, any>;
@@ -126,7 +127,9 @@ async function loadTemplateById(
 export interface ResolveTemplateArgs {
   dealerTextId: string;
   docType: TemplateDocType;
-  /** dealer_vehicles.condition — "New" | "Used" | "CPO" (anything else = cpo). */
+  /** The vehicle's RESOLVED condition. Callers pass
+   *  resolveVehicleCondition(dv) so the certified flag is honored; this is
+   *  normalized again below so a raw column value can never resolve wrongly. */
   condition: string | null | undefined;
   /** The dealer_settings row the caller already fetched (it needs other columns
    *  from it anyway). null = no settings row, which is the case for ~84% of
@@ -140,7 +143,13 @@ export interface ResolveTemplateArgs {
 export async function resolveTemplate(admin: Admin, args: ResolveTemplateArgs): Promise<ResolvedTemplate> {
   const { dealerTextId, docType, condition, settings, make, cache } = args;
 
-  const condKey = condition === "New" ? "new" : condition === "Used" ? "used" : "cpo";
+  // Normalized through the shared resolver rather than compared literally.
+  // The old expression was `=== "New" ? new : === "Used" ? used : cpo`, so the
+  // 11,724 active rows stored as "NEW" and 445 as "USED" fell through to CPO
+  // and silently picked up CPO template overrides.
+  const condKey = resolveVehicleCondition({ condition }) === "New" ? "new"
+    : resolveVehicleCondition({ condition }) === "Used" ? "used"
+    : "cpo";
   const docKey = docType === "buyer_guide" ? "buyersguide" : docType;
 
   let widgets: Widget[] | null = null;

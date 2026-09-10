@@ -6,6 +6,7 @@ import { verifyGhostToken } from "@/lib/ghost";
 import AddendumEditor from "@/components/AddendumEditor";
 import VehicleHistoryButton from "@/components/VehicleHistoryButton";
 import type { VehicleRow } from "@/lib/vehicles";
+import { vehicleConditionFields } from "@/lib/vehicles";
 
 export const metadata = { title: "Addendum — DA Platform" };
 
@@ -72,7 +73,7 @@ export default async function DealerVehicleAddendumPage({
     STATUS: "1",
     MSRP: dv.msrp ? String(dv.msrp) : null,
     NEW_USED: dv.condition === "Used" ? "Used" : "New",
-    CERTIFIED: dv.condition === "CPO" ? "Yes" : "No",
+    CERTIFIED: vehicleConditionFields(dv).CERTIFIED,
     OPTIONS: null,
     PHOTOS: null,
     DESCRIPTION: null,

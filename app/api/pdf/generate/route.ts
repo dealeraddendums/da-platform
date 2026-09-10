@@ -26,6 +26,7 @@ import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
 import QRCode from "qrcode";
 import type { Widget, PaperSize } from "@/components/builder/types";
+import { vehicleConditionFields, resolveVehicleCondition } from "@/lib/vehicles";
 
 /**
  * POST /api/pdf/generate
@@ -295,7 +296,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       STATUS: "1" as const,
       MSRP: dv.msrp != null ? String(dv.msrp) : null,
       NEW_USED: dv.condition === "Used" ? "Used" : "New",
-      CERTIFIED: dv.condition === "CPO" ? "Yes" : "No",
+      CERTIFIED: vehicleConditionFields(dv).CERTIFIED,
       OPTIONS: null,
       PHOTOS: null,
       DESCRIPTION: dv.description,
@@ -469,7 +470,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const resolved = await resolveTemplate(admin, {
         dealerTextId: dv.dealer_id,
         docType,
-        condition: dv.condition,
+        condition: resolveVehicleCondition(dv),
         make: dv.make,
         settings: settings as Record<string, unknown> | null,
       });
