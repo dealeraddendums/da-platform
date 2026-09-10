@@ -496,10 +496,17 @@ export function renderW(type: string, d: D, fontScale: number): string {
       ? '<span style="font-size:8px;background:#e3f2fd;color:#1976d2;padding:1px 6px;border-radius:8px;font-weight:700;margin-left:5px">AI</span>'
       : '<span style="font-size:8px;background:#f0f0f0;color:#78828c;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:5px">DB</span>';
     const items = (d.items as Array<[string, string]>) || [['Feature', 'Feature']];
+    // Grid lines removed (2026-09-10) — the rules are kept as `transparent`
+    // rather than deleted so the geometry is byte-identical: each row border
+    // contributed 1px of height and the wrapper border 1px of inset, so
+    // dropping the declarations outright would pull every row up by 1px each
+    // (compounding down the table) and shift the block 1px left. Widget boxes
+    // here are ground-truthed, and `overflow:hidden` means a few px of drift
+    // can clip the last row. Same table, no visible lines, nothing moves.
     const rows = items.map(p =>
-      `<div style="display:flex"><div style="flex:1;font-size:${sz}px;color:#1a1916;padding:1.5px 4px 1.5px 0;border-bottom:1px solid #ececec;line-height:1.4">${p[0] || ''}</div><div style="flex:1;font-size:${sz}px;color:#1a1916;padding:1.5px 0 1.5px 4px;border-bottom:1px solid #ececec;border-left:1px solid #ececec;line-height:1.4">${p[1] || ''}</div></div>`
+      `<div style="display:flex"><div style="flex:1;font-size:${sz}px;color:#1a1916;padding:1.5px 4px 1.5px 0;border-bottom:1px solid transparent;line-height:1.4">${p[0] || ''}</div><div style="flex:1;font-size:${sz}px;color:#1a1916;padding:1.5px 0 1.5px 4px;border-bottom:1px solid transparent;border-left:1px solid transparent;line-height:1.4">${p[1] || ''}</div></div>`
     ).join('');
-    return `<div style="padding:3px 0;height:100%;box-sizing:border-box;overflow:hidden"><div style="font-size:8px;font-weight:700;color:#78828c;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;display:flex;align-items:center">Features / Options${badge}</div><div style="border:1px solid #e0e0e0;border-radius:2px;overflow:hidden">${rows}</div></div>`;
+    return `<div style="padding:3px 0;height:100%;box-sizing:border-box;overflow:hidden"><div style="font-size:8px;font-weight:700;color:#78828c;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;display:flex;align-items:center">Features / Options${badge}</div><div style="border:1px solid transparent;border-radius:2px;overflow:hidden">${rows}</div></div>`;
   }
 
   // MPG — two numbers (city + highway) positioned over the EPA fuel-graphic
