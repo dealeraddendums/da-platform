@@ -175,10 +175,33 @@ async function getPrintCounts(admin: ReturnType<typeof createAdminSupabaseClient
   // so both sides of the split and the dealer Dashboard share one definition:
   // distinct vehicles with an addendum printed. (Trial caps/HubSpot keep the
   // all-doc-types printedVehicleCount policy.)
-  const [lifetimeRes, recentRes] = await Promise.all([
-    admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).eq("document_type", "addendum").limit(50000),
-    admin.from("print_history").select("dealer_id, vehicle_id").in("dealer_id", dealerIds).eq("document_type", "addendum").gte("created_at", thirtyDaysAgo).limit(10000),
-  ]);
+  // PostgREST caps every response at 1000 rows regardless of .limit(), so the
+  // old .limit(50000)/.limit(10000) silently truncated: a page of dealers with
+  // more than 1000 addendum prints between them had its Lifetime Prints, Last
+  // 30 Days and 5.0-split numbers all cut short, and which dealers lost counts
+  // depended on row order. Verified live — a .limit(50000) read returned
+  // exactly 1000 rows. Page with .range() instead (same fix lib/print-counts.ts
+  // already carries).
+  type PrintRow = { dealer_id: string; vehicle_id: string | null };
+  const pageAll = async (since?: string): Promise<PrintRow[]> => {
+    const PAGE = 1000;
+    const out: PrintRow[] = [];
+    for (let from = 0; ; from += PAGE) {
+      let q = admin
+        .from("print_history")
+        .select("dealer_id, vehicle_id")
+        .in("dealer_id", dealerIds)
+        .eq("document_type", "addendum");
+      if (since) q = q.gte("created_at", since);
+      // Deterministic order so page boundaries can't drop or repeat a row.
+      const { data, error } = await q.order("id", { ascending: true }).range(from, from + PAGE - 1);
+      if (error) throw new Error(`print counts: ${error.message}`);
+      const rows = (data ?? []) as PrintRow[];
+      out.push(...rows);
+      if (rows.length < PAGE) return out;
+    }
+  };
+  const [lifetimeRows, recentRows] = await Promise.all([pageAll(), pageAll(thirtyDaysAgo)]);
   // DISTINCT vehicles per dealer, not rows — a row is logged per vehicle per
   // PDF generation, so reprints inflate row counts (multiprint-qa Issue B).
   const dedupe = (rows: Array<{ dealer_id: string; vehicle_id: string | null }> | null) => {
@@ -192,7 +215,7 @@ async function getPrintCounts(admin: ReturnType<typeof createAdminSupabaseClient
     sets.forEach((s, d) => { counts[d] = s.size; });
     return counts;
   };
-  return { lifetime: dedupe(lifetimeRes.data), recent: dedupe(recentRes.data) };
+  return { lifetime: dedupe(lifetimeRows), recent: dedupe(recentRows) };
 }
 
 // hubspot_company_id is stored directly in the Supabase dealers table.
@@ -516,7 +539,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         case "last_30_prints":
           return (printMap.get(a.dealer_id) ?? 0) - (printMap.get(b.dealer_id) ?? 0);
         case "split_40": {
-          const c = (a.last30 ?? 0) - (b.last30 ?? 0);
+          // Sort on the same number the column renders, or a native would sort
+          // by a 4.0 figure it does not display.
+          const forty = (r: KeyRow) => (r.is_native ? 0 : (r.last30 ?? 0));
+          const c = forty(a) - forty(b);
           return c !== 0 ? c : (printMap.get(a.dealer_id) ?? 0) - (printMap.get(b.dealer_id) ?? 0);
         }
         default:
@@ -573,7 +599,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     last_30_prints: recent[d.dealer_id as string] ?? 0,
     // 4.0-side print activity (Aurora dealer_dim.LAST30, refreshed nightly for
     // every dealer incl. migrated since 9200df6 — dual-printing is real).
-    last30_40: (d.last30 as number | null) ?? 0,
+    //
+    // Zero for 5.0-NATIVE dealers. They have no 4.0 account, so their 4.0 count
+    // is 0 by definition — but dealers.last30 does not hold 0 for them, because
+    // the HubSpot computed cron overwrites that column with the dealer's own
+    // 5.0 print count whenever migration_status='migrated' (which natives carry
+    // too). Rendering it unguarded made the 4.0 side mirror the 5.0 side:
+    // Uvalde Chevrolet, 5.0-native with 48 prints, showed 48/48.
+    //
+    // is_native is the right discriminator, not migration_status — natives are
+    // stamped 'migrated' at creation, so that field cannot separate them from
+    // dealers who genuinely moved off 4.0.
+    last30_40: (d.is_native as boolean | null) ? 0 : ((d.last30 as number | null) ?? 0),
     hubspot_company_id: hubspotMap[d.inventory_dealer_id as string] ?? null,
     has_users: dealersWithUsers.has(d.dealer_id as string),
     tags: tagMap[d.id as string] ?? [],
