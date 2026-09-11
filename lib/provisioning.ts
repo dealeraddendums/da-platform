@@ -121,9 +121,13 @@ export async function createTrialDealer(input: {
   await seedTrialSampleData(data.dealer_id as string);
 
   // Staff notification — fire-and-forget.
+  // Subject prefixes across the three self-serve trial notifications are
+  // deliberately distinct and stable — "Form Submitted" / "Account Created" /
+  // "Needs Review" — because they are what Allan's mail rules filter on. Do not
+  // reword the leading phrase.
   notifySupport(
-    `New Trial Signup: ${input.dealership}`,
-    `<p><strong>New trial account created on DA Platform.</strong></p>
+    `New Trial — Account Created: ${input.dealership}`,
+    `<p><strong>A trial account was created and provisioned.</strong> The dealer confirmed their email and the account is live on DA Platform.</p>
 <table style="font-family:sans-serif;font-size:14px;border-collapse:collapse">
   <tr><td style="padding:4px 12px 4px 0;color:#666">Dealership</td><td><strong>${input.dealership}</strong></td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Contact</td><td>${input.contactName} &lt;${input.email}&gt;</td></tr>

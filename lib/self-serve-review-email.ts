@@ -49,14 +49,17 @@ export async function sendReviewRequestEmail(args: {
 
   try {
     await sendMandrillEmail({
-      subject: `Trial signup held for review — ${input.dealership} (${badge.text})`,
+      // "Needs Review" is the stable phrase Allan's mail rules filter on —
+      // matching the "Form Submitted" / "Account Created" notifications. The
+      // risk badge stays, after the dealership.
+      subject: `New Trial — Needs Review: ${input.dealership} (${badge.text})`,
       from_email: "noreply@dealeraddendums.com",
       from_name: "DealerAddendums",
       to: RECIPIENTS,
       html:
         `<div style="font-family:Roboto,Arial,sans-serif;max-width:600px">
           <p style="display:inline-block;padding:4px 10px;border-radius:3px;font-weight:700;font-size:12px;background:${badge.bg};color:${badge.fg}">${badge.text}</p>
-          <p>A self-serve trial signup was <strong>not auto-provisioned</strong> and is waiting for a decision.</p>
+          <p><strong>A trial signup needs manual review.</strong> It was not auto-provisioned and is waiting for a decision.</p>
           <table style="border-collapse:collapse;font-size:14px;margin:12px 0">
             ${rows.map(([k, v]) => `<tr><td style="padding:3px 12px 3px 0;color:#666">${esc(k)}</td><td style="padding:3px 0"><strong>${esc(v)}</strong></td></tr>`).join("")}
           </table>
