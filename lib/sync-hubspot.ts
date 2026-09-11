@@ -51,6 +51,9 @@ interface DealerForHubspot {
   feed_authorized_name: string | null;
   feed_authorized_email: string | null;
   last30: number | null;
+  prints_last_30_v5: number | null;
+  is_native: boolean | null;
+  migration_status: string | null;
   billing_street: string | null;
   billing_city: string | null;
   billing_state: string | null;
@@ -93,6 +96,26 @@ interface ProfileForHubspot {
   group_id: string | null;
   hubspot_contact_id: string | null;
   active: boolean | null;
+}
+
+/** Whether this dealer's print activity lives on 5.0 (prints_last_30_v5) or
+ *  4.0 (last30, mirroring Aurora). Mirrors the sync-hubspot-computed cron's
+ *  isNewPlatform, widened with is_native and the ga_ prefix so a
+ *  group-created native is not mistaken for a legacy dealer. */
+function printsLast30For(d: {
+  last30: number | null;
+  prints_last_30_v5?: number | null;
+  is_native?: boolean | null;
+  migration_status?: string | null;
+  dealer_id?: string | null;
+}): number | null {
+  const id = d.dealer_id ?? "";
+  const onV5 =
+    d.is_native === true ||
+    d.migration_status === "migrated" ||
+    id.startsWith("ss_") ||
+    id.startsWith("ga_");
+  return onV5 ? (d.prints_last_30_v5 ?? null) : (d.last30 ?? null);
 }
 
 function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, groupId: string | null, lifetimePrints: number): Record<string, string | number | null> {
@@ -187,10 +210,18 @@ function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, 
     feed_contact_name:  d.feed_authorized_name,
     feed_contact_email: d.feed_authorized_email,
 
-    // Activity — dealers.last30 is refreshed nightly by the computed cron
-    // (distinct vehicles from print_history, rolling 30 days); 12mo +
-    // dealers_in_group come from the cron too.
-    prints_last_30: d.last30 ?? null,
+    // Activity — which column holds this dealer's print activity depends on
+    // which platform they print on.
+    //
+    // A dealer live on 5.0 has their count in prints_last_30_v5 (migration
+    // 157), refreshed by the computed cron from print_history. A legacy dealer
+    // still prints on 4.0, so their activity is last30, mirroring Aurora
+    // dealer_dim.LAST30.
+    //
+    // Reading last30 for everyone was the bug: between cron runs an
+    // event-driven push sent whichever value last30 happened to hold, which for
+    // a migrated dealer flips across the 08:00 cron / 11:00 ETL boundary.
+    prints_last_30: printsLast30For(d),
 
     // Lifecycle — paying ? Customer : Dealer Trial. Trial → Trial Expired
     // transitions are handled by the daily cron in 14b.
@@ -448,7 +479,7 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: dealer } = await (admin as any)
       .from("dealers")
-      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, feed_authorized_name, feed_authorized_email, last30, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, hubspot_primary_contact_id, created_at, downgraded_at, trial_ends_at, trial_prints_cap, account_purpose, is_test")
+      .select("id, dealer_id, name, address, city, state, zip, country, phone, primary_contact, primary_contact_email, inventory_dealer_id, billing_customer_id, internal_id, group_id, account_type, sub_billing_to, inventory_provider, inventory_provider_is_dms, feed_authorized_name, feed_authorized_email, last30, prints_last_30_v5, is_native, migration_status, billing_street, billing_city, billing_state, billing_zip, billing_to, hubspot_company_id, hubspot_primary_contact_id, created_at, downgraded_at, trial_ends_at, trial_prints_cap, account_purpose, is_test")
       .eq("id", dealerId)
       .maybeSingle() as { data: DealerForHubspot | null };
     if (!dealer) return;

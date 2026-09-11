@@ -94,13 +94,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // query silently refreshed only the first 1000 every night).
     // `as any` because Supabase types don't know about downgraded_at yet
     // (migration 083). Runtime is fine; only TS is stale.
-    type DealerRow = { id: string; dealer_id: string; account_type: string | null; created_at: string | null; last30: number | null; hubspot_company_id: string; group_id: string | null; downgraded_at: string | null; migration_status: string | null; trial_ends_at: string | null; trial_prints_cap: number | null };
+    type DealerRow = { id: string; dealer_id: string; account_type: string | null; created_at: string | null; last30: number | null; prints_last_30_v5: number | null; hubspot_company_id: string; group_id: string | null; downgraded_at: string | null; migration_status: string | null; trial_ends_at: string | null; trial_prints_cap: number | null };
     const dealers: DealerRow[] = [];
     for (let from = 0; ; from += 1000) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: page } = await (admin as any)
         .from("dealers")
-        .select("id, dealer_id, account_type, created_at, last30, hubspot_company_id, group_id, downgraded_at, migration_status, trial_ends_at, trial_prints_cap")
+        .select("id, dealer_id, account_type, created_at, last30, prints_last_30_v5, hubspot_company_id, group_id, downgraded_at, migration_status, trial_ends_at, trial_prints_cap")
         .not("hubspot_company_id", "is", null)
         .eq("active", true)
         .order("id", { ascending: true })
@@ -121,22 +121,47 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const prints12 = await printedVehicleCount(admin, { dealerId: d.dealer_id, since: twelveMonthsAgo });
         const prints30 = await printedVehicleCount(admin, { dealerId: d.dealer_id, since: thirtyDaysAgo });
 
-        // Keep dealers.last30 in step with the same computation — it feeds
-        // the dealers-list UI and the event-driven HubSpot pushes between
-        // cron runs.
+        // Cache the 5.0 last-30 count so the event-driven HubSpot pushes
+        // between cron runs have a number to send.
         //
-        // ⚠️ ONLY for new-platform dealers (migrated / ss_ self-serve). last30 is
+        // ⚠️ ONLY for new-platform dealers (migrated / ss_ self-serve). This is
         // computed from print_history, which records NEW-platform prints only.
         // Legacy dealers still print on the legacy platform, so their real
         // activity lives in Aurora dealer_dim.LAST30 (imported via import-dealers).
         // Writing the new-platform count (0) for them would clobber that — which
         // is exactly what zeroed ~1000 dealers when the cron was paginated
-        // (498740e, 2026-06-25) and started reaching all dealers. DA Pulse reads
-        // last30 for ALL dealers, so we must not overwrite legacy values here.
+        // (498740e, 2026-06-25) and started reaching all dealers.
         const isNewPlatform = d.migration_status === "migrated" || d.dealer_id.startsWith("ss_");
-        if (isNewPlatform && (d.last30 ?? 0) !== prints30) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (admin as any).from("dealers").update({ last30: prints30 }).eq("id", d.id);
+        if (isNewPlatform) {
+          const patch: Record<string, number> = {};
+          // The 5.0 cache's own column (migration 157). lib/sync-hubspot.ts
+          // reads THIS for 5.0 dealers, so prints_last_30 is right on an
+          // event-driven push instead of whatever last30 last held.
+          if ((d.prints_last_30_v5 ?? null) !== prints30) patch.prints_last_30_v5 = prints30;
+
+          // last30 is ALSO still written, deliberately, even though it means
+          // "Aurora 4.0 activity" everywhere else and this overwrites it.
+          //
+          // DA Pulse reads da-platform.dealers.last30 directly and gates on it
+          // in four places — sync_pvr (last30>=20), sync_vehicles (>=1),
+          // sync_nightly (>0), and sync_vitals, which explicitly falls back to
+          // it "for dealers not yet in Aurora", i.e. 5.0 natives. Dropping this
+          // write would silently remove every 5.0-native dealer from Pulse
+          // reporting (10 active natives clear the PVR threshold today purely
+          // on their 5.0 count, LAX CDJR at 292 and Winter Haven Honda at 231
+          // among them).
+          //
+          // ⬜ TO RETIRE THIS: move those four Pulse gates onto
+          // prints_last_30_v5 (or greatest of the two) first, then delete these
+          // two lines. Only then does last30 become pure Aurora and the
+          // migrated-dealer 4.0 figure stop oscillating between the 08:00 cron
+          // and the 11:00 ETL.
+          if ((d.last30 ?? 0) !== prints30) patch.last30 = prints30;
+
+          if (Object.keys(patch).length) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (admin as any).from("dealers").update(patch).eq("id", d.id);
+          }
         }
 
         // Lifecycle precedence mirrors lib/sync-hubspot.ts dealerCompanyProperties
