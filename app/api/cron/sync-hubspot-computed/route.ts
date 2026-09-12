@@ -139,24 +139,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           // event-driven push instead of whatever last30 last held.
           if ((d.prints_last_30_v5 ?? null) !== prints30) patch.prints_last_30_v5 = prints30;
 
-          // last30 is ALSO still written, deliberately, even though it means
-          // "Aurora 4.0 activity" everywhere else and this overwrites it.
+          // last30 is deliberately NOT written here any more (2026-09-12).
           //
-          // DA Pulse reads da-platform.dealers.last30 directly and gates on it
-          // in four places — sync_pvr (last30>=20), sync_vehicles (>=1),
-          // sync_nightly (>0), and sync_vitals, which explicitly falls back to
-          // it "for dealers not yet in Aurora", i.e. 5.0 natives. Dropping this
-          // write would silently remove every 5.0-native dealer from Pulse
-          // reporting (10 active natives clear the PVR threshold today purely
-          // on their 5.0 count, LAX CDJR at 292 and Winter Haven Honda at 231
-          // among them).
+          // It means "Aurora dealer_dim.LAST30" — 4.0 print activity, written
+          // nightly by ETL Job 1 — and this cron used to overwrite it with the
+          // 5.0 count, so the two fought ~3h apart and a migrated dealer's 4.0
+          // figure oscillated through the day. The 5.0 count now lives only in
+          // prints_last_30_v5 above.
           //
-          // ⬜ TO RETIRE THIS: move those four Pulse gates onto
-          // prints_last_30_v5 (or greatest of the two) first, then delete these
-          // two lines. Only then does last30 become pure Aurora and the
-          // migrated-dealer 4.0 figure stop oscillating between the 08:00 cron
-          // and the 11:00 ETL.
-          if ((d.last30 ?? 0) !== prints30) patch.last30 = prints30;
+          // The write could only be removed once DA Pulse stopped depending on
+          // it: Pulse reads da-platform.dealers.last30 directly and gated
+          // 5.0-native dealers in purely by accident, because the clobber put
+          // their 5.0 count there. sync_vehicles.php now gates on
+          // or=(last30.gte.1,prints_last_30_v5.gte.1) instead, and the pvr /
+          // nightly / vitals last30 dependencies were removed separately.
+          // Re-introducing this write would put the oscillation back.
 
           if (Object.keys(patch).length) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
