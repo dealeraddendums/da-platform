@@ -15,6 +15,7 @@ import {
 } from "@/lib/billing";
 import { isOverAllowance, TRIAL_DAYS_CAP, TRIAL_PRINTS_CAP } from "@/lib/print-eligibility";
 import { printedVehicleCount } from "@/lib/print-counts";
+import { getDealerFeedStatus } from "@/lib/dealer-feed-status";
 
 interface SubscriptionInfo {
   productId: string | null;
@@ -65,6 +66,18 @@ interface BillingMeResponse {
    *  dealer_admin+; group-billed → group_admin/super_admin only (a grant on
    *  the group customer lifts the lock for every member store). */
   extensionRequestAllowed?: boolean;
+  /** Existing-inventory-feed state, for the Automatic tiers' authorization step.
+   *  hasLiveFeed === true means inventory is already arriving (a configured
+   *  ingest roster row, or feed-owned rows in dealer_vehicles), so there is no
+   *  NEW feed connection to authorize — the Change Plan UI skips the Authorized
+   *  Contact fields. `provider` is the descriptive name on the dealer row
+   *  (pre-selects the dropdown); it is deliberately NOT a liveness signal —
+   *  see lib/dealer-feed-status.ts. */
+  feed?: {
+    hasLiveFeed: boolean;
+    provider: string | null;
+    providerIsDms: boolean;
+  };
   notes?: string;
 }
 
@@ -164,13 +177,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminSupabaseClient();
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, name, billing_customer_id, internal_id, created_at, subscription_billed_to, group_id, account_type, trial_ends_at, trial_prints_cap")
+    .select("id, name, billing_customer_id, internal_id, created_at, subscription_billed_to, group_id, account_type, trial_ends_at, trial_prints_cap, inventory_dealer_id, inventory_provider, inventory_provider_is_dms")
     .eq("dealer_id", resolved.dealerTextId)
     .maybeSingle<{
       id: string; name: string; billing_customer_id: string | null; internal_id: string | null;
       created_at: string | null; subscription_billed_to: "dealer" | "group" | null;
       group_id: string | null; account_type: string | null;
       trial_ends_at: string | null; trial_prints_cap: number | null;
+      inventory_dealer_id: string | null; inventory_provider: string | null;
+      inventory_provider_is_dms: boolean | null;
     }>();
 
   if (!dealer) {
@@ -237,7 +252,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(payload);
   }
 
+  // ── Existing inventory feed ───────────────────────────────────────────────
+  // The Automatic tiers' Authorized Contact fields exist to authorize a NEW
+  // feed connection. A dealership whose inventory is already arriving (the
+  // common migration case) has nothing left to authorize, so the Change Plan
+  // UI reads this to drop those fields. Canonical detector — the same one the
+  // inventory-ID rename uses; fails safe to hasLiveFeed=false, which merely
+  // means the dealer is asked for the contact as before.
+  // Kicked off here, awaited at each exit — it runs alongside the da-billing
+  // round-trips on the hot path instead of adding to them.
+  const feedPromise = getDealerFeedStatus(admin, resolved.dealerTextId, dealer.inventory_dealer_id)
+    .then((st) => ({
+      hasLiveFeed: st.hasLiveFeed,
+      provider: dealer.inventory_provider?.trim() || null,
+      providerIsDms: dealer.inventory_provider_is_dms === true,
+    }));
+
   if (!billingConfigured()) {
+    const feed = await feedPromise;
     const payload: BillingMeResponse = {
       dealer: {
         id: dealer.id,
@@ -250,6 +282,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       invoices: [],
       outstandingAmount: 0,
       trial,
+      feed,
       notes: "Billing API not configured",
     };
     return NextResponse.json(payload);
@@ -259,6 +292,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // (legacy migrated dealers). Without either we can't talk to da-billing.
   const customerKey = dealer.billing_customer_id ?? dealer.internal_id;
   if (!customerKey) {
+    const feed = await feedPromise;
     const payload: BillingMeResponse = {
       dealer: {
         id: dealer.id,
@@ -271,12 +305,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       invoices: [],
       outstandingAmount: 0,
       trial,
+      feed,
       notes: "No billing customer yet for this dealer",
     };
     return NextResponse.json(payload);
   }
 
-  const [template, pricing, invoiceResult, billingStatus] = await Promise.all([
+  const [template, pricing, invoiceResult, billingStatus, feed] = await Promise.all([
     getTemplate(customerKey).catch((err) => {
       console.error("[billing/me] getTemplate failed:", err instanceof Error ? err.message : err);
       return null;
@@ -294,6 +329,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       console.error("[billing/me] getBillingStatus failed:", err instanceof Error ? err.message : err);
       return null;
     }),
+    feedPromise,
   ]);
 
   let subscription: SubscriptionInfo | null = null;
@@ -319,6 +355,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     invoices: invoiceResult.invoices,
     outstandingAmount: invoiceResult.outstandingAmount,
     trial,
+    feed,
     billedBy: "self",
     extension: billingStatus?.extension ?? null,
     // Self-billed: dealer_admin and up may request; dealer_user may not.

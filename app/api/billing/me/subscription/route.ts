@@ -78,15 +78,20 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Billing API not configured" }, { status: 500 });
   }
 
-  let body: { tier?: string; feedProvider?: string; feedAuthorizedName?: string; feedAuthorizedEmail?: string };
+  let body: { tier?: string; feedProvider?: string; feedAuthorizedName?: string; feedAuthorizedEmail?: string; feedExisting?: boolean };
   try { body = await req.json() as typeof body; }
   catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }
   const tier = body.tier?.trim();
   if (!tier) return NextResponse.json({ error: "tier required" }, { status: 400 });
 
-  const feedProvider        = body.feedProvider?.trim() || null;
-  const feedAuthorizedName  = body.feedAuthorizedName?.trim() || null;
-  const feedAuthorizedEmail = body.feedAuthorizedEmail?.trim().toLowerCase() || null;
+  const feedProviderIn      = body.feedProvider?.trim() || null;
+  // The dealership already has an inventory feed flowing, so there is no NEW
+  // connection to authorize: the caller sends no Authorized Contact, and we
+  // must not record one (recording it is what hands ops/HubSpot a feed-setup
+  // request — see the feed-contact write below).
+  const feedExisting        = body.feedExisting === true;
+  const feedAuthorizedName  = feedExisting ? null : (body.feedAuthorizedName?.trim() || null);
+  const feedAuthorizedEmail = feedExisting ? null : (body.feedAuthorizedEmail?.trim().toLowerCase() || null);
 
   const descriptor = subscriptionDescriptorFor(tier);
   if (!descriptor) {
@@ -125,7 +130,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, name, internal_id, billing_customer_id, billing_id, legacy_id, account_type, primary_contact, primary_contact_email, phone, address, state, group_id, subscription_billed_to")
+    .select("id, name, internal_id, billing_customer_id, billing_id, legacy_id, account_type, primary_contact, primary_contact_email, phone, address, state, group_id, subscription_billed_to, inventory_dealer_id, inventory_provider")
     .eq("dealer_id", dealerTextId)
     .maybeSingle<{
       id: string; name: string; internal_id: string | null; billing_customer_id: string | null;
@@ -133,6 +138,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       primary_contact: string | null; primary_contact_email: string | null;
       phone: string | null; address: string | null; state: string | null;
       group_id: string | null; subscription_billed_to: string | null;
+      inventory_dealer_id: string | null; inventory_provider: string | null;
     }>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
   if (!dealer.internal_id) {
@@ -146,15 +152,24 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   // the console sync (relaxed 2026-08-25 for the group-admin plan controls).
   // Contacts made OPTIONAL 2026-08-27 (Allan): only the provider is required —
   // the authorized name/email can be added later on the dealer profile.
-  if (
-    !wasPayingEarly
-    && (descriptor.key === "sub-auto-web" || descriptor.key === "sub-auto-dms")
-    && !feedProvider
-  ) {
-    return NextResponse.json(
-      { error: "Feed provider is required for Automatic subscriptions." },
-      { status: 400 },
-    );
+  const isAutoTier = descriptor.key === "sub-auto-web" || descriptor.key === "sub-auto-dms";
+  let feedProvider = feedProviderIn;
+  if (!wasPayingEarly && isAutoTier && !feedProvider) {
+    // A dealership that is ALREADY fed (migration case) has its provider on
+    // file; requiring it to be re-picked blocks a plan change for no gain.
+    // Only the live-feed check unlocks the fallback — a feed-less dealer still
+    // has to name its provider, because that is a real new feed setup.
+    const { getDealerFeedStatus } = await import("@/lib/dealer-feed-status");
+    const status = await getDealerFeedStatus(admin, dealerTextId, dealer.inventory_dealer_id);
+    const onFile = dealer.inventory_provider?.trim() || null;
+    if (status.hasLiveFeed && onFile) {
+      feedProvider = onFile;
+    } else {
+      return NextResponse.json(
+        { error: "Feed provider is required for Automatic subscriptions." },
+        { status: 400 },
+      );
+    }
   }
 
   // Restyler-group stores never get per-store subscriptions — the group bills

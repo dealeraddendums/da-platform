@@ -1646,6 +1646,10 @@ interface BillingMeData {
   groupPastDue?: boolean;
   extension?: { active: boolean; protectedUntil: string | null; lastRequestedAt: string | null; nextEligibleAt: string | null; canRequest: boolean } | null;
   extensionRequestAllowed?: boolean;
+  /** Existing-inventory-feed state from /api/billing/me. hasLiveFeed === true
+   *  means inventory is already arriving, so an Automatic tier isn't setting up
+   *  a NEW feed connection and the Authorized Contact step is skipped. */
+  feed?: { hasLiveFeed: boolean; provider: string | null; providerIsDms: boolean };
   notes?: string;
 }
 
@@ -1756,9 +1760,26 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
   const [feedAuthName, setFeedAuthName] = useState("");
   const [feedAuthEmail, setFeedAuthEmail] = useState("");
   const [feedFormError, setFeedFormError] = useState<string | null>(null);
+  // "This dealership already has a feed" — no NEW connection to authorize, so
+  // the Authorized Contact fields drop out. Auto-checked when /api/billing/me
+  // detects a live feed; the operator can also set it by hand for a dealer the
+  // detector can't see (an off-platform ETL2 job with no rows yet, say).
+  const [feedSkipAuth, setFeedSkipAuth] = useState(false);
+  const [feedSkipTouched, setFeedSkipTouched] = useState(false);
 
   const refresh = useCallbackFetch(setData, setLoading, setError);
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // Seed the Auto-tier feed form from the dealer's own record: pre-select the
+  // provider already on file, and start with authorization skipped when the
+  // dealership is already being fed (nothing new to authorize). An explicit
+  // operator toggle wins from then on.
+  const detectedFeed = data?.feed;
+  useEffect(() => {
+    if (!detectedFeed) return;
+    setFeedProvider((cur) => cur || (detectedFeed.provider ?? ""));
+    if (!feedSkipTouched) setFeedSkipAuth(detectedFeed.hasLiveFeed === true);
+  }, [detectedFeed, feedSkipTouched]);
 
   async function closeAccount() {
     setCloseStep("closing");
@@ -1787,7 +1808,7 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
 
   async function changeTier(
     tier: { key: string; productKey: string; name: string },
-    feed?: { provider: string; authorizedName: string; authorizedEmail: string; isDms: boolean },
+    feed?: { provider: string; authorizedName: string; authorizedEmail: string; isDms: boolean; existingFeed: boolean },
   ) {
     setSavingTier(tier.key);
     setToast(null);
@@ -1801,8 +1822,12 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
           tier: tier.productKey,
           ...(feed && {
             feedProvider:        feed.provider,
-            feedAuthorizedName:  feed.authorizedName,
-            feedAuthorizedEmail: feed.authorizedEmail,
+            // Skipping authorization sends NO contact — the server then records
+            // none, which is what keeps a second feed-setup request from being
+            // raised for a dealership that is already fed.
+            ...(feed.existingFeed
+              ? { feedExisting: true }
+              : { feedAuthorizedName: feed.authorizedName, feedAuthorizedEmail: feed.authorizedEmail }),
           }),
         }),
       });
@@ -1817,6 +1842,7 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
       setFeedProvider("");
       setFeedAuthName("");
       setFeedAuthEmail("");
+      setFeedSkipTouched(false);
       await refresh();
     } finally {
       setSavingTier(null);
@@ -1970,10 +1996,34 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
                                 <option key={p} value={p}>{p}</option>
                               ))}
                             </select>
-                            <label style={feedLabelStyle}>Authorized Contact Name</label>
-                            <input type="text" value={feedAuthName} onChange={e => setFeedAuthName(e.target.value)} placeholder="Full name of person approving feed access" style={feedInputStyle} />
-                            <label style={feedLabelStyle}>Authorized Contact Email</label>
-                            <input type="email" value={feedAuthEmail} onChange={e => setFeedAuthEmail(e.target.value)} placeholder="email@dealership.com" style={feedInputStyle} />
+                            {/* The Authorized Contact authorizes a NEW feed
+                                connection. A dealership already receiving
+                                inventory has nothing left to authorize, so the
+                                fields give way to a note. Auto-checked from the
+                                live-feed detection; also settable by hand. */}
+                            <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 12, fontSize: 12, color: "#55595c", cursor: "pointer" }}>
+                              <input
+                                type="checkbox"
+                                checked={feedSkipAuth}
+                                onChange={e => { setFeedSkipTouched(true); setFeedSkipAuth(e.target.checked); }}
+                                style={{ marginTop: 2 }}
+                              />
+                              <span>Already has an inventory feed — skip authorization</span>
+                            </label>
+                            {feedSkipAuth ? (
+                              <div style={{ marginTop: 8, padding: "8px 12px", background: "#e8f5e9", border: "1px solid #c8e6c9", borderRadius: 4, fontSize: 12, color: "#2e7d32", lineHeight: 1.5 }}>
+                                {data.feed?.hasLiveFeed
+                                  ? <>This dealership already has an active inventory feed{data.feed.provider ? <> (<strong>{data.feed.provider}</strong>)</> : null} — no new authorization needed.</>
+                                  : <>No new feed connection will be set up, so an authorized contact isn&rsquo;t needed.</>}
+                              </div>
+                            ) : (
+                              <>
+                                <label style={feedLabelStyle}>Authorized Contact Name</label>
+                                <input type="text" value={feedAuthName} onChange={e => setFeedAuthName(e.target.value)} placeholder="Full name of person approving feed access" style={feedInputStyle} />
+                                <label style={feedLabelStyle}>Authorized Contact Email</label>
+                                <input type="email" value={feedAuthEmail} onChange={e => setFeedAuthEmail(e.target.value)} placeholder="email@dealership.com" style={feedInputStyle} />
+                              </>
+                            )}
                           </>
                         )}
                         {feedFormError && <div style={{ color: "#c62828", fontSize: 12, marginBottom: 8, marginTop: 10 }}>{feedFormError}</div>}
@@ -1983,14 +2033,17 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
                               setFeedFormError(null);
                               if (isAuto) {
                                 if (!feedProvider) { setFeedFormError("Please select a provider."); return; }
-                                if (!feedAuthName.trim()) { setFeedFormError("Authorized contact name is required."); return; }
-                                if (!feedAuthEmail.trim() || !feedAuthEmail.includes("@")) { setFeedFormError("A valid authorized contact email is required."); return; }
+                                if (!feedSkipAuth) {
+                                  if (!feedAuthName.trim()) { setFeedFormError("Authorized contact name is required."); return; }
+                                  if (!feedAuthEmail.trim() || !feedAuthEmail.includes("@")) { setFeedFormError("A valid authorized contact email is required."); return; }
+                                }
                               }
                               await changeTier(tier, isAuto ? {
                                 provider: feedProvider,
                                 authorizedName: feedAuthName,
                                 authorizedEmail: feedAuthEmail,
                                 isDms: tier.key === "auto-dms",
+                                existingFeed: feedSkipAuth,
                               } : undefined);
                             }}
                             disabled={savingTier === tier.key}
