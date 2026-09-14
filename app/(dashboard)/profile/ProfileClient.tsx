@@ -1653,10 +1653,16 @@ interface BillingMeData {
   notes?: string;
 }
 
-const SUBSCRIPTION_TIERS: Array<{ key: string; productKey: string; name: string; description: string }> = [
+// `descriptionNoAuth` is used when the Authorized Contact step is skipped: the
+// standard blurb's "requires ... approval from an authorized contact" sentence
+// is about setting up a NEW connection, and contradicts the skip note when the
+// dealership is already fed.
+const SUBSCRIPTION_TIERS: Array<{ key: string; productKey: string; name: string; description: string; descriptionNoAuth?: string }> = [
   { key: "manual",    productKey: "sub-manual",   name: "Monthly Subscription Manual",        description: "You manage addendum options for each vehicle manually, one at a time. Best for lower-volume lots or dealers who prefer direct control over every addendum." },
-  { key: "auto-web",  productKey: "sub-auto-web", name: "Monthly Subscription Automatic Web", description: "Your vehicle inventory is pulled automatically from your website inventory feed provider. Addendums stay in sync as vehicles are added, updated, or sold. Requires your feed provider info and approval from someone at your dealership authorized to set up the connection." },
-  { key: "auto-dms",  productKey: "sub-auto-dms", name: "Monthly Subscription Automatic DMS", description: "DA Platform connects directly to your Dealer Management System for the fastest, most reliable inventory sync. Addendums update automatically as your DMS changes. Requires your DMS provider info and approval from an authorized contact at your dealership." },
+  { key: "auto-web",  productKey: "sub-auto-web", name: "Monthly Subscription Automatic Web", description: "Your vehicle inventory is pulled automatically from your website inventory feed provider. Addendums stay in sync as vehicles are added, updated, or sold. Requires your feed provider info and approval from someone at your dealership authorized to set up the connection.",
+    descriptionNoAuth: "Your vehicle inventory is pulled automatically from your website inventory feed provider. Addendums stay in sync as vehicles are added, updated, or sold." },
+  { key: "auto-dms",  productKey: "sub-auto-dms", name: "Monthly Subscription Automatic DMS", description: "DA Platform connects directly to your Dealer Management System for the fastest, most reliable inventory sync. Addendums update automatically as your DMS changes. Requires your DMS provider info and approval from an authorized contact at your dealership.",
+    descriptionNoAuth: "DA Platform connects directly to your Dealer Management System for the fastest, most reliable inventory sync. Addendums update automatically as your DMS changes." },
 ];
 
 // Provider option lists come from the canonical lib/inventory-providers.ts
@@ -1986,7 +1992,9 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
                     </button>
                     {isSelected && (
                       <div style={{ borderLeft: "3px solid #1976d2", marginLeft: 0, padding: "14px 16px", background: "#f8f9fb", borderRadius: "0 0 6px 6px", marginBottom: 8 }}>
-                        <p style={{ fontSize: 13, color: "#444", lineHeight: 1.6, margin: "0 0 12px" }}>{tier.description}</p>
+                        <p style={{ fontSize: 13, color: "#444", lineHeight: 1.6, margin: "0 0 12px" }}>
+                          {isAuto && feedSkipAuth && tier.descriptionNoAuth ? tier.descriptionNoAuth : tier.description}
+                        </p>
                         {isAuto && (
                           <>
                             <label style={feedLabelStyle}>{tier.key === "auto-dms" ? "DMS Provider" : "Inventory Provider"}</label>
