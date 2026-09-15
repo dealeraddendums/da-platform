@@ -187,11 +187,43 @@ export const REVIEW_THRESHOLD = 0.35;
 
 export type EnrichmentStatus = "confirmed" | "needs_review" | "no_match" | "error";
 
-/** First five digits of a US zip ("94107-1234" → "94107"). */
+/**
+ * The 5-digit US zip in a string, or null when there isn't a credible one.
+ *
+ * Accepts a bare 5-digit zip, ZIP+4 in either form ("94107-1234" / "941071234"),
+ * and a zip embedded in a formatted address ("… Anniston, AL 36207, USA").
+ *
+ * REFUSES malformed digit runs (6, 7 or 8 digits) instead of truncating them.
+ * Found in real data 2026-09-15: Oxmoor Hyundai's `dealers.zip` is "402299" —
+ * a typo'd 40299. Taking the first five gave "40229", a valid-LOOKING but wrong
+ * zip, which then failed to match Google's correct 40299 and produced a note
+ * blaming Google ("is in zip 40299, not 40229"). There is no safe way to know
+ * which digit was doubled, so the honest answer is "no usable zip" — which
+ * routes to no_match with a note that points at our own data instead.
+ *
+ * When several 5-digit runs are present (a 5-digit street number plus a zip),
+ * the LAST one wins: US addresses put the zip at the end.
+ */
 export function zip5(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  const m = String(raw).match(/\d{5}/);
-  return m ? m[0] : null;
+  const s = String(raw);
+
+  // ZIP+4 with a separator is unambiguous — take the leading five.
+  const plus4 = s.match(/(\d{5})[-\s](\d{4})(?!\d)/);
+  if (plus4) return plus4[1];
+
+  const runs = s.match(/\d+/g);
+  if (!runs) return null;
+
+  const fives = runs.filter(r => r.length === 5);
+  if (fives.length > 0) return fives[fives.length - 1];
+
+  // Unseparated ZIP+4.
+  const nines = runs.filter(r => r.length === 9);
+  if (nines.length > 0) return nines[nines.length - 1].slice(0, 5);
+
+  // 6/7/8 digits = a typo. Refuse rather than guess (see above).
+  return null;
 }
 
 /**

@@ -29,7 +29,8 @@ import {
   buildDealershipQuery, placesConfigured, searchDealership, type PlaceCandidate,
 } from "@/lib/enrichment/places";
 import {
-  classify, groupDomainFromEmail, nameSimilarity, zip5, type EnrichmentStatus,
+  classify, groupDomainFromEmail, nameSimilarity, zip5, REVIEW_THRESHOLD,
+  type EnrichmentStatus,
 } from "@/lib/enrichment/name-match";
 
 export interface EnrichInput {
@@ -114,7 +115,9 @@ export async function lookupEnrichment(
       ? "signup had no usable zip, so no candidate could be confirmed"
       : !best.zipMatches
         ? `best candidate "${best.c.name}" is in zip ${best.c.zip ?? "?"}, not ${signupZip}`
-        : `best candidate "${best.c.name}" scored ${best.nameScore.toFixed(2)} on name (below ${0.5})`;
+        // Read the constant, never a literal — a hardcoded 0.5 here silently
+        // lied to operators the moment the floor moved to 0.35.
+        : `best candidate "${best.c.name}" scored ${best.nameScore.toFixed(2)} on name (below the ${REVIEW_THRESHOLD} review floor)`;
     return empty("no_match", why, best.nameScore);
   }
 

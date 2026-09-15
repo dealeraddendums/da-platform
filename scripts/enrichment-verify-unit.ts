@@ -126,8 +126,22 @@ check("the review floor constant is 0.35", REVIEW_THRESHOLD === 0.35, String(REV
 // ── 4. Zip + group domain ───────────────────────────────────────────────────
 console.log("\n4. Zip parsing + group domain");
 check("zip5 takes the 5-digit prefix of a ZIP+4", zip5("94107-1234") === "94107");
+check("zip5 handles an unseparated ZIP+4", zip5("941071234") === "94107", String(zip5("941071234")));
 check("zip5 of null is null", zip5(null) === null);
 check("zip5 ignores surrounding text", zip5("Springfield, IL 62704, USA") === "62704");
+check("zip5 takes the LAST 5-run (5-digit street number + zip)",
+  zip5("12345 Main St, Springfield, IL 62704") === "62704",
+  String(zip5("12345 Main St, Springfield, IL 62704")));
+// Real data, 2026-09-15: Oxmoor Hyundai's dealers.zip is "402299" (typo'd
+// 40299). Truncating to "40229" produced a valid-looking WRONG zip and a note
+// that blamed Google. A malformed run must be unusable.
+check("zip5 REFUSES a 6-digit typo instead of truncating it", zip5("402299") === null,
+  String(zip5("402299")));
+check("zip5 refuses 7- and 8-digit runs too",
+  zip5("4022991") === null && zip5("40229912") === null,
+  `${zip5("4022991")} / ${zip5("40229912")}`);
+check("a malformed zip means no candidate can be confirmed",
+  classify(1.0, false) === "no_match");
 check("group domain from a dealer address",
   groupDomainFromEmail("gm@sunnykinghonda.com") === "sunnykinghonda.com");
 check("gmail is ignored", groupDomainFromEmail("someone@gmail.com") === null);
