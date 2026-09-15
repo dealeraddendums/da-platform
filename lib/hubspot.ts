@@ -345,6 +345,48 @@ async function updateObject(
 }
 
 /**
+ * Read selected properties off an existing object. Returns null on 404 (the
+ * record was deleted or merged away in the portal) so callers can skip rather
+ * than treat a gone record as an error.
+ *
+ * Exists for fill-the-blanks callers (enrichment): to avoid clobbering a good
+ * CRM value with a worse guessed one you have to know what is already there.
+ */
+export async function getObjectProperties(
+  object: "companies" | "contacts",
+  hubspotId: string,
+  props: string[],
+): Promise<Record<string, string | null> | null> {
+  const qs = props.length ? `?properties=${props.map(encodeURIComponent).join(",")}` : "";
+  const res = await fetch(`${BASE}/objects/${object}/${encodeURIComponent(hubspotId)}${qs}`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new HubspotError(res.status, `read ${object}/${hubspotId} ${res.status}`, await readBody(res));
+  }
+  const json = await res.json() as HubspotObject;
+  return json.properties ?? {};
+}
+
+/**
+ * PATCH properties onto an object we already have the id for. Thin export of
+ * the private updateObject so additive writers (enrichment) don't reimplement
+ * auth/error handling — DA Platform stays the sole HubSpot writer, through
+ * this file.
+ *
+ * Creates nothing, searches for nothing: no stored id, no write.
+ */
+export async function patchObjectProperties(
+  object: "companies" | "contacts",
+  hubspotId: string,
+  properties: CompanyProperties,
+): Promise<void> {
+  await updateObject(object, hubspotId, properties);
+}
+
+/**
  * Pre-create dedup probe — look up a HubSpot Company that matches by
  * exact name + phone but **doesn't** carry our own-key (`platformid`
  * for dealers, `groupid` for groups). A hit means: an unlinked

@@ -28,6 +28,40 @@ interface Row {
   review_token: string | null;
   reviewed_by: string | null;
   dealer_id: string | null;
+  dealer_uuid: string | null;
+}
+
+/** Enrichment finding for a provisioned signup (migration 158), joined by dealer_uuid. */
+interface EnrichRow {
+  dealer_uuid: string;
+  enrichment_status: string;
+  enrichment_name_score: number | null;
+  matched_name: string | null;
+  notes: string | null;
+}
+
+const ENRICH_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
+  confirmed:    { bg: "#e8f5e9", fg: "#2e7d32", label: "Confirmed" },
+  needs_review: { bg: "#fff8e1", fg: "#7a5c00", label: "Needs review" },
+  no_match:     { bg: "#fafafa", fg: "#616161", label: "No match" },
+  error:        { bg: "#ffebee", fg: "#b71c1c", label: "Lookup failed" },
+};
+
+/** Google-Places enrichment outcome for this signup's dealer, if any. */
+function EnrichBadge({ row }: { row: EnrichRow | undefined }) {
+  if (!row) return <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>;
+  const s = ENRICH_STYLE[row.enrichment_status]
+    ?? { bg: "#fafafa", fg: "#616161", label: row.enrichment_status };
+  const score = row.enrichment_name_score != null ? Number(row.enrichment_name_score).toFixed(2) : null;
+  return (
+    <span
+      title={[row.matched_name && `Google: ${row.matched_name}`, score && `name score ${score}`, row.notes]
+        .filter(Boolean).join(" · ")}
+      style={{ background: s.bg, color: s.fg, fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 3, whiteSpace: "nowrap" }}
+    >
+      {s.label}{score && row.enrichment_status !== "no_match" ? ` ${score}` : ""}
+    </span>
+  );
 }
 
 const DECISION_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
@@ -70,6 +104,23 @@ export default async function TrialSignupsPage() {
   const all = rows ?? [];
   const pending = all.filter((r) => r.decision === "pending_review");
 
+  // Enrichment findings for the dealers these signups provisioned (migration
+  // 158). Read-only: this page decides nothing about enrichment, it just saves
+  // an operator a trip into HubSpot to see whether the Google lookup landed.
+  // Tolerates the table not existing yet (deploy ordering) — `?? []`.
+  const dealerUuids = all.map((r) => r.dealer_uuid).filter((v): v is string => !!v);
+  let enrichBy: Record<string, EnrichRow> = {};
+  if (dealerUuids.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: enrichRows } = await (admin as any)
+      .from("dealer_enrichment")
+      .select("dealer_uuid, enrichment_status, enrichment_name_score, matched_name, notes")
+      .in("dealer_uuid", dealerUuids) as { data: EnrichRow[] | null };
+    enrichBy = Object.fromEntries((enrichRows ?? []).map((e) => [e.dealer_uuid, e]));
+  }
+  const enrichCounts = Object.values(enrichBy)
+    .reduce<Record<string, number>>((acc, e) => { acc[e.enrichment_status] = (acc[e.enrichment_status] ?? 0) + 1; return acc; }, {});
+
   // Last 7 days by decision, for the "is this happening a lot?" question.
   const weekAgo = Date.now() - 7 * 86400_000;
   const counts = all.filter((r) => new Date(r.created_at).getTime() > weekAgo)
@@ -101,6 +152,25 @@ export default async function TrialSignupsPage() {
           </div>
         )}
       </div>
+
+      {Object.keys(enrichCounts).length > 0 && (
+        <div className="card mb-4" style={{ padding: 16 }}>
+          <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+            Address/phone enrichment — signups shown below
+          </p>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            {Object.entries(enrichCounts).sort((a, b) => b[1] - a[1]).map(([st, n]) => (
+              <span key={st} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <EnrichBadge row={{ dealer_uuid: "", enrichment_status: st, enrichment_name_score: null, matched_name: null, notes: null }} />
+                <strong style={{ fontSize: 14 }}>{n}</strong>
+              </span>
+            ))}
+          </div>
+          <p className="text-xs" style={{ color: "var(--text-muted)", marginTop: 8 }}>
+            Looked up in Google Places after provisioning. <strong>Needs review</strong> = the address matched the signup ZIP but the listing carries a different name (a bought or renamed store looks exactly like this) — verify before anyone calls. Only <strong>confirmed</strong> findings fill a dealer&apos;s blank address/phone.
+          </p>
+        </div>
+      )}
 
       {pending.length > 0 && (
         <div className="card mb-4" style={{ padding: 0, overflow: "hidden" }}>
@@ -141,7 +211,7 @@ export default async function TrialSignupsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}>
-                {["When (PT)", "Decision", "Dealership", "Email", "AI", "Why", "IP"].map((h) => (
+                {["When (PT)", "Decision", "Dealership", "Email", "AI", "Enrichment", "Why", "IP"].map((h) => (
                   <th key={h} className="px-3 py-2" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", fontWeight: 600 }}>{h}</th>
                 ))}
               </tr>
@@ -154,6 +224,7 @@ export default async function TrialSignupsPage() {
                   <td className="px-3 py-2">{r.dealership ?? "—"}{r.dealer_id && <span style={{ color: "var(--text-muted)", fontSize: 11 }}> · {r.dealer_id}</span>}</td>
                   <td className="px-3 py-2" style={{ fontSize: 12 }}>{r.email}</td>
                   <td className="px-3 py-2" style={{ fontSize: 12 }}>{r.ai_verdict ?? "—"}{r.ai_confidence != null && ` ${r.ai_confidence}`}</td>
+                  <td className="px-3 py-2"><EnrichBadge row={r.dealer_uuid ? enrichBy[r.dealer_uuid] : undefined} /></td>
                   <td className="px-3 py-2" style={{ fontSize: 12, color: "var(--text-muted)", maxWidth: 260 }}>{r.decision_reason ?? "—"}</td>
                   <td className="px-3 py-2" style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{r.source_ip ?? "—"}</td>
                 </tr>

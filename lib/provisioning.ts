@@ -16,6 +16,7 @@ import { sendPasskeyInvite } from "@/lib/migration-invite";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { boxConfigured, createDealerFolder, createGroupFolder } from "@/lib/box";
 import { fireAndForget } from "@/lib/billing-sync";
+import { fireDealerEnrichment } from "@/lib/enrichment/dealerEnrich";
 
 const SUPPORT_EMAIL = process.env.SUPPORT_NOTIFICATION_EMAIL ?? "support@dealeraddendums.com";
 
@@ -119,6 +120,27 @@ export async function createTrialDealer(input: {
   // Seed sample data so the fresh standalone trial isn't an empty account.
   // Self-guarded (Trial + group_id NULL + not-yet-seeded) and never throws.
   await seedTrialSampleData(data.dealer_id as string);
+
+  // Google Places enrichment — fire-and-forget, NOT awaited.
+  //
+  // A self-serve signup gives us a name, a zip and an email; phone and street
+  // address are almost always blank, so sales has nothing to dial. This looks
+  // the dealership up, records the finding in `dealer_enrichment`, fills the
+  // dealer's BLANK fields when it is confident, and PATCHes the HubSpot company
+  // the create sync just linked above.
+  //
+  // Placed here (after syncDealerCreateReliable) deliberately: that call is
+  // awaited, so `hubspot_company_id` is already stored and enrichment can PATCH
+  // the real company instead of finding nothing and deferring a pass.
+  //
+  // Never awaited and never throws — signup must not slow down or fail because
+  // Google was slow. No-ops with a warning when GOOGLE_PLACES_API_KEY is unset.
+  fireDealerEnrichment({
+    dealerUuid: data.id as string,
+    dealershipName: input.dealership,
+    zip: input.zip ?? null,
+    contactEmail: input.email,
+  });
 
   // Staff notification — fire-and-forget.
   // Subject prefixes across the three self-serve trial notifications are
