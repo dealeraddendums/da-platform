@@ -12,6 +12,22 @@
  * how many. ALWAYS --dry-run first: it performs the same Places lookups (so the
  * cost is identical) but writes nothing, which is how you see what would change.
  *
+ * ⚠️ ALLAN'S DECISION, 2026-09-15: DO NOT run a fleet-wide backfill of the
+ * existing trial dealers and dealers. Enrichment is for NEW signups only — the
+ * signup hook handles those automatically. That leaves this script with two
+ * legitimate uses, both narrow and both deliberate:
+ *
+ *   1. RETRY a new signup whose lookup failed (quota, outage, timeout). Those
+ *      land as enrichment_status='error' and are the one status this script
+ *      always re-attempts:
+ *        npx tsx scripts/backfill-dealer-enrichment.ts --dealer=<uuid>
+ *   2. A one-off, explicitly-scoped run if a batch of signups arrived while the
+ *      API key was missing.
+ *
+ * Running it with no --dealer and no --limit would sweep every eligible active
+ * Trial dealer, which is exactly the fleet-wide backfill that was declined.
+ * Don't, unless Allan asks for it.
+ *
  * Flags:
  *   --dry-run          score + report, no writes (Supabase or HubSpot)
  *   --limit=N          stop after N dealers (default: no limit)
