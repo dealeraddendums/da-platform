@@ -90,21 +90,21 @@ check("exact name + zip match → confirmed",
 check("renamed store + zip match → needs_review (a human vets it)",
   statusOf("Jones Ford", "Smith Ford", true) === "needs_review",
   statusOf("Jones Ford", "Smith Ford", true));
-// ⚠️ THRESHOLD TENSION, documented deliberately rather than papered over.
-// The spec asks for two things that don't quite meet: the review band is
-// "0.5–0.8", but it also says a listing under a NEW GROUP NAME at the right zip
-// "must land in needs_review". A rename that keeps only the franchise word
-// ("Bob Jones Ford" → "Springfield Ford") shares 1 of 3 tokens and scores 0.40,
-// which the 0.5 floor sends to no_match. These two tests pin the CURRENT
-// behavior (spec numbers as written) so a future threshold change is a visible,
-// deliberate edit rather than a silent drift. Lowering REVIEW_THRESHOLD to ~0.35
-// is the one-line change that would move this case to needs_review.
-check("rename keeping only the franchise word scores 0.40 (below the 0.5 floor)",
+// The review floor was lowered 0.50 → 0.35 (Allan, 2026-09-15) precisely so the
+// case below reaches a human instead of being discarded: a FULL rebrand keeps
+// only the franchise word, shares 1 of 3 tokens, and scores 0.40. These stay
+// pinned so a future threshold move is a visible, deliberate edit.
+check("full rebrand keeping only the franchise word scores 0.40",
   score("Bob Jones Ford", "Springfield Ford") === 0.4,
   String(score("Bob Jones Ford", "Springfield Ford")));
-check("…so at the 0.5 floor it lands in no_match, not needs_review",
-  statusOf("Bob Jones Ford", "Springfield Ford", true) === "no_match",
+check("…and at the 0.35 floor that now reaches needs_review, not no_match",
+  statusOf("Bob Jones Ford", "Springfield Ford", true) === "needs_review",
   statusOf("Bob Jones Ford", "Springfield Ford", true));
+// The new floor still has to hold against genuine noise.
+check("an unrelated business at the right zip stays below the 0.35 floor",
+  score("Bob Jones Ford", "Elite Auto Sales") < REVIEW_THRESHOLD
+    && statusOf("Bob Jones Ford", "Elite Auto Sales", true) === "no_match",
+  `score ${score("Bob Jones Ford", "Elite Auto Sales")} → ${statusOf("Bob Jones Ford", "Elite Auto Sales", true)}`);
 check("partial rebrand DOES reach needs_review (Sunny King Honda ↔ King Automotive Honda)",
   statusOf("Sunny King Honda", "King Automotive Honda", true) === "needs_review",
   `${statusOf("Sunny King Honda", "King Automotive Honda", true)} (score ${score("Sunny King Honda", "King Automotive Honda")})`);
@@ -119,8 +119,9 @@ check("zip match alone (garbage name) is never accepted",
   statusOf("Sunny King Honda", "Joe's Taqueria", true));
 check("0.8 is inclusive for confirmed", classify(0.8, true) === "confirmed");
 check("just under 0.8 is needs_review", classify(0.799, true) === "needs_review");
-check("0.5 is inclusive for needs_review", classify(0.5, true) === "needs_review");
-check("just under 0.5 is no_match", classify(0.499, true) === "no_match");
+check("0.35 is inclusive for needs_review", classify(0.35, true) === "needs_review");
+check("just under 0.35 is no_match", classify(0.349, true) === "no_match");
+check("the review floor constant is 0.35", REVIEW_THRESHOLD === 0.35, String(REVIEW_THRESHOLD));
 
 // ── 4. Zip + group domain ───────────────────────────────────────────────────
 console.log("\n4. Zip parsing + group domain");
@@ -214,8 +215,8 @@ async function main(): Promise<void> {
     renamed.status);
   check("needs_review carries an explanation for the operator",
     !!renamed.notes && renamed.notes.includes("verify"), String(renamed.notes));
-  // A wholesale rebrand (franchise word only) falls under the floor — see the
-  // threshold-tension note above. Nothing is written anywhere in this case.
+  // A wholesale rebrand (franchise word only, 0.40) — the case the floor was
+  // lowered for. It must reach review WITH its data, not be discarded.
   const rebranded = await lookupEnrichment(
     { dealerUuid: "u1", dealershipName: "Bob Jones Ford", zip: "36201", contactEmail: null },
     async () => [place({
@@ -224,9 +225,22 @@ async function main(): Promise<void> {
       street: "5 Auto Row", city: "Anniston", state: "AL", zip: "36201", phone: "(256) 555-0111",
     })],
   );
-  check("full rebrand (franchise word only) → no_match at the current 0.5 floor",
-    rebranded.status === "no_match" && rebranded.street === null,
+  check("full rebrand (franchise word only) → needs_review at the 0.35 floor, data captured",
+    rebranded.status === "needs_review" && rebranded.street === "5 Auto Row" && rebranded.phone === "(256) 555-0111",
     rebranded.status);
+
+  // …and the floor still rejects an unrelated business sitting in the same zip.
+  const unrelated = await lookupEnrichment(
+    { dealerUuid: "u1", dealershipName: "Bob Jones Ford", zip: "36201", contactEmail: null },
+    async () => [place({
+      placeId: "ChIJ_unrelated", name: "Elite Auto Sales",
+      formattedAddress: "8 Other Way, Anniston, AL 36201, USA",
+      street: "8 Other Way", city: "Anniston", state: "AL", zip: "36201", phone: "(256) 555-0222",
+    })],
+  );
+  check("unrelated business at the right zip → no_match, nothing captured",
+    unrelated.status === "no_match" && unrelated.street === null,
+    unrelated.status);
 
   const noResults = await lookupEnrichment(
     { dealerUuid: "u1", dealershipName: "Nonexistent Motors", zip: "36201", contactEmail: null },

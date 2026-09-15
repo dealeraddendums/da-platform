@@ -171,7 +171,19 @@ export function nameSimilarity(signupName: string, candidateName: string): numbe
 }
 
 export const CONFIRM_THRESHOLD = 0.8;
-export const REVIEW_THRESHOLD = 0.5;
+/**
+ * Review floor, lowered 0.50 → 0.35 (Allan, 2026-09-15).
+ *
+ * At 0.50 a FULL rebrand fell through to no_match and was silently discarded:
+ * "Bob Jones Ford" → "Springfield Ford" keeps only the franchise word, shares 1
+ * of 3 tokens and scores 0.40. That is precisely the bought-and-renamed store
+ * the review queue exists for, so it now reaches a human instead of vanishing.
+ *
+ * 0.35 is still well clear of noise — an unrelated business shares no tokens
+ * and scores ~0 — and zip agreement is required regardless, so a low-scoring
+ * candidate at the wrong address is still no_match.
+ */
+export const REVIEW_THRESHOLD = 0.35;
 
 export type EnrichmentStatus = "confirmed" | "needs_review" | "no_match" | "error";
 
