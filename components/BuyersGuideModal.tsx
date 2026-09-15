@@ -18,6 +18,19 @@ const WARRANTY_LABELS: Record<string, string> = {
   limited: "Limited Warranty",
 };
 
+/** Which print buttons the footer offers. Saved per dealer in
+ *  dealer_settings.buyers_guide_defaults.print_mode; switchable here for a
+ *  single guide without touching the saved default. */
+type PrintMode = "single_sides" | "both_sides";
+
+const PRINT_MODE_LABELS: Record<PrintMode, string> = {
+  single_sides: "Print Single Sides",
+  both_sides: "Print Both Sides",
+};
+
+/** Which side(s) of the guide a generate call should hand back. */
+type Side = "all" | "front" | "back";
+
 const NON_DEALER = [
   { key: "mfr_new", label: "Manufacturer's new vehicle warranty still applies" },
   { key: "mfr_used", label: "Manufacturer's used vehicle warranty applies" },
@@ -28,6 +41,9 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
   const [loading, setLoading] = useState(true);
   const [warranty, setWarranty] = useState<BuyersGuideDefaults>({ warranty_type: "as_is" });
   const [language, setLanguage] = useState<"en" | "es">("en");
+  const [printMode, setPrintMode] = useState<PrintMode>("both_sides");
+  /** Side of the last generated preview — drives the download filename. */
+  const [side, setSide] = useState<Side>("all");
   const [generating, setGenerating] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -62,7 +78,16 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
     fetch("/api/settings")
       .then(r => r.json() as Promise<{ data?: { buyers_guide_defaults?: BuyersGuideDefaults | null } }>)
       .then(j => {
-        if (j.data?.buyers_guide_defaults) setWarranty({ ...j.data.buyers_guide_defaults });
+        const bg = j.data?.buyers_guide_defaults;
+        if (bg) {
+          setWarranty({ ...bg });
+          // Open in the dealer's saved print mode. Changing the toggle below
+          // only affects this guide — the saved default lives in Print
+          // Settings → Buyer's Guide.
+          if (bg.print_mode === "single_sides" || bg.print_mode === "both_sides") {
+            setPrintMode(bg.print_mode);
+          }
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -91,19 +116,32 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
 
   /**
    * mode:
-   *   "single" — the selected language, into the preview (unchanged)
+   *   "single" — one language, into the preview
    *   "zip"    — both languages as a downloaded ZIP (unchanged)
    *   "merged" — both languages as ONE PDF into the preview, so "Send to
    *              Printer" gives a print dialog instead of a download
+   *
+   * opts.lang overrides the Language dropdown (the per-language print buttons
+   * pass it explicitly, then move the dropdown to match so the preview label
+   * and the download filename stay truthful). opts.side asks the server for
+   * just the front or back page — every option on the left still applies, the
+   * render is the same full guide, only the returned PDF is trimmed.
    */
-  async function generate(mode: "single" | "zip" | "merged" = "single") {
+  async function generate(
+    mode: "single" | "zip" | "merged" = "single",
+    opts: { lang?: "en" | "es"; side?: Side } = {},
+  ) {
     const both = mode !== "single";
+    const lang = opts.lang ?? language;
+    const pages: Side = mode === "single" ? (opts.side ?? "all") : "all";
+    if (opts.lang && opts.lang !== language) setLanguage(opts.lang);
+    setSide(pages);
     setGenerating(true);
     setGenError(null);
     setPdfUrl(null);
     setBlobUrl(null);
     try {
-      const body = { vehicleId: dealerVehicleId, language, both, merge: mode === "merged", warranty };
+      const body = { vehicleId: dealerVehicleId, language: lang, both, merge: mode === "merged", pages, warranty };
       const res = await fetch("/api/pdf/buyers-guide", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -145,7 +183,16 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
     }
   }
 
-  const filename = `${vehicleName.replace(/[^a-zA-Z0-9]+/g, "_")}_Buyers_Guide_${language.toUpperCase()}.pdf`;
+  const sideSuffix = side === "all" ? "" : `_${side.toUpperCase()}`;
+  const filename = `${vehicleName.replace(/[^a-zA-Z0-9]+/g, "_")}_Buyers_Guide_${language.toUpperCase()}${sideSuffix}.pdf`;
+
+  // One style for every secondary footer button (the print-action group grew
+  // to four buttons in Single Sides mode).
+  const secondaryBtn: React.CSSProperties = {
+    height: 36, padding: "0 14px", background: "#fff", border: "1px solid var(--border)",
+    borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)",
+    whiteSpace: "nowrap",
+  };
 
   return (
     <div
@@ -167,6 +214,23 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
               <p className="text-xs" style={{ color: "var(--text-muted)" }}>Loading defaults…</p>
             ) : (
               <>
+                {/* Chooses which print buttons the footer shows. Seeded from
+                    the dealer's saved default; changing it here is for this
+                    guide only (the default lives in Print Settings). */}
+                <div className="mb-4">
+                  <label className="label">Print Mode</label>
+                  <select className="input w-full" value={printMode} onChange={e => setPrintMode(e.target.value as PrintMode)}>
+                    {(Object.keys(PRINT_MODE_LABELS) as PrintMode[]).map(m => (
+                      <option key={m} value={m}>{PRINT_MODE_LABELS[m]}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                    {printMode === "single_sides"
+                      ? "Prints one side at a time — front or back, per language."
+                      : "Prints the full guide — front and back together."}
+                  </p>
+                </div>
+
                 <div className="mb-4">
                   <label className="label">Language</label>
                   <select className="input w-full" value={language} onChange={e => setLanguage(e.target.value as "en" | "es")}>
@@ -267,17 +331,49 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
         </div>
 
         {/* Footer */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--border)", flexShrink: 0, background: "var(--bg-subtle)" }}>
-          <button onClick={() => void generate("zip")} disabled={generating} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
-            Generate Both (EN + ES) → ZIP
-          </button>
-          {/* Same generation path as the ZIP button — only the delivery
-              differs: one merged PDF into the preview, so Send to Printer
-              raises a print dialog instead of downloading two files. */}
-          <button onClick={() => void generate("merged")} disabled={generating} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
-            Print Both (EN + ES)
-          </button>
-          <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--border)", flexShrink: 0, background: "var(--bg-subtle)", flexWrap: "wrap" }}>
+          {/* Print actions. Every button here routes through the same
+              generate() → preview → "Send to Printer" flow; they differ only
+              in language and which side(s) of the guide come back. */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => void generate("zip")} disabled={generating} style={secondaryBtn}>
+              Generate Both (EN + ES) → ZIP
+            </button>
+
+            {printMode === "single_sides" ? (
+              <>
+                <button onClick={() => void generate("single", { lang: "es", side: "front" })} disabled={generating} style={secondaryBtn}>
+                  Print Front ES
+                </button>
+                <button onClick={() => void generate("single", { lang: "es", side: "back" })} disabled={generating} style={secondaryBtn}>
+                  Print Back ES
+                </button>
+                <button onClick={() => void generate("single", { lang: "en", side: "front" })} disabled={generating} style={secondaryBtn}>
+                  Print Front EN
+                </button>
+                <button onClick={() => void generate("single", { lang: "en", side: "back" })} disabled={generating} style={secondaryBtn}>
+                  Print Back EN
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => void generate("single", { lang: "es", side: "all" })} disabled={generating} style={secondaryBtn}>
+                  Print Spanish
+                </button>
+                {/* Same generation path as the ZIP button — only the delivery
+                    differs: one merged PDF into the preview, so Send to Printer
+                    raises a print dialog instead of downloading two files. */}
+                <button onClick={() => void generate("merged")} disabled={generating} style={secondaryBtn}>
+                  Print Both
+                </button>
+                <button onClick={() => void generate("single", { lang: "en", side: "all" })} disabled={generating} style={secondaryBtn}>
+                  Print English
+                </button>
+              </>
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
             <button onClick={onClose} style={{ height: 36, padding: "0 16px", background: "#fff", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
               Close
             </button>

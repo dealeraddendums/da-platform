@@ -508,6 +508,14 @@ export type BuyersGuideDefaults = {
    *  Drawn on the back page in the "FOR COMPLAINTS AFTER SALE, CONTACT:" slot
    *  of both EN and ES Buyer's Guides (same field on both). */
   complaints_contact?: string;
+  /** Which set of print buttons the Buyer's Guide screen opens with.
+   *  'both_sides'  (default) — Print Spanish / Print Both / Print English,
+   *                 each a full front+back guide.
+   *  'single_sides' — Print Front/Back per language, one page per print, for
+   *                 dealers who feed pre-cut or one-sided stock.
+   *  Display/workflow only: it never changes what a guide contains, and the
+   *  operator can switch modes for a single guide without saving. */
+  print_mode?: 'single_sides' | 'both_sides';
 };
 
 export type DealerCustomSizeRow = {

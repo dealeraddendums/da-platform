@@ -13,7 +13,7 @@ import { PDFDocument } from "pdf-lib";
 /**
  * POST /api/pdf/buyers-guide
  * Generates a 2-page FTC Buyer's Guide PDF using pdf-lib overlay on official FTC backgrounds.
- * Body: { vehicleId, language?, both?, warranty? }
+ * Body: { vehicleId, language?, both?, merge?, pages?, warranty? }
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
@@ -41,13 +41,21 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
      *  front+back) instead of a two-file ZIP, so the client can route it
      *  through the normal print-preview flow rather than downloading. */
     merge?: boolean;
+    /** Which side(s) of the guide to return. The render is always the full
+     *  front+back document (so the canonical {VIN}_buyers_guide.pdf in S3
+     *  stays complete); this only trims the PDF handed back to the browser:
+     *    'all'   (default) — front + back, today's behavior
+     *    'front' — page 1 only
+     *    'back'  — page 2 only
+     *  Single-language only; ignored with both=true. */
+    pages?: 'all' | 'front' | 'back';
     warranty?: Partial<BuyersGuideDefaults>;
   };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { vehicleId, language = 'en', both = false, merge = false, warranty: warrantyOverrides } = body;
+  const { vehicleId, language = 'en', both = false, merge = false, pages = 'all', warranty: warrantyOverrides } = body;
   if (!vehicleId) return NextResponse.json({ error: "vehicleId required" }, { status: 400 });
 
   const admin = createAdminSupabaseClient();
@@ -162,6 +170,26 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     return token;
   }
 
+  /**
+   * Trim a rendered guide to one side. The Buyer's Guide render is always
+   * exactly 2 pages — page 0 = front (the AS IS or IMPLIED ONLY variant that
+   * warranty_type selected), page 1 = back — for both the background-overlay
+   * and the pre-printed-label paths. Done here with pdf-lib rather than in
+   * da-pdf-service so the service keeps uploading the COMPLETE guide to
+   * {VIN}_buyers_guide.pdf (the dealer-website download link) while the
+   * operator prints a single side. Defensive: a doc without the expected page
+   * falls through whole rather than returning an empty PDF.
+   */
+  async function trimToSide(buf: Buffer, side: 'front' | 'back'): Promise<Buffer> {
+    const src = await PDFDocument.load(buf);
+    const idx = side === 'front' ? 0 : 1;
+    if (idx >= src.getPageCount()) return buf;
+    const out = await PDFDocument.create();
+    const [page] = await out.copyPages(src, [idx]);
+    out.addPage(page);
+    return Buffer.from(await out.save());
+  }
+
   // ── Generate ──────────────────────────────────────────────────────────────
   if (both) {
     // Compute keys up front so the service uploads to the canonical
@@ -232,7 +260,8 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     vin: dv.vin,
     docType: 'buyer_guide',
   });
-  const buffer = await generateOneLang(language, s3Key);
+  const rendered = await generateOneLang(language, s3Key);
+  const buffer = pages === 'all' ? rendered : await trimToSide(rendered, pages);
   const printToken = await stashPrint(s3Key);
   return new NextResponse(buffer as unknown as BodyInit, {
     status: 200,

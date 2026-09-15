@@ -396,6 +396,24 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
         {/* Warranty defaults — dealer_admin + admins only */}
         {canEdit && dealerId && (
           <>
+            {/* Which print buttons the Buyer's Guide screen opens with.
+                Lives in the same buyers_guide_defaults JSON as the warranty
+                fields, so the modal picks it up from its existing
+                GET /api/settings load with no extra plumbing. */}
+            <div className="mb-3">
+              <label className="label">Default Print Mode</label>
+              <select
+                className="input w-full"
+                value={settings.buyers_guide_defaults?.print_mode ?? "both_sides"}
+                onChange={e => setBgDefaults("print_mode", e.target.value as NonNullable<BuyersGuideDefaults["print_mode"]>)}
+              >
+                <option value="both_sides">Print Both Sides — front and back together</option>
+                <option value="single_sides">Print Single Sides — one side at a time</option>
+              </select>
+              <p className="text-xs" style={{ color: "var(--text-muted)", marginTop: 4 }}>
+                Which print buttons the Buyer&apos;s Guide screen opens with. Staff can still switch modes for a single guide there without changing this default.
+              </p>
+            </div>
             <div className="mb-3">
               <label className="label">Default Warranty Type</label>
               <select className="input w-full" value={settings.buyers_guide_defaults?.warranty_type ?? "as_is"} onChange={e => setBgDefaults("warranty_type", e.target.value as BuyersGuideDefaults["warranty_type"])}>
