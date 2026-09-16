@@ -48,6 +48,31 @@ export async function createConversationNote(args: {
 }
 
 /**
+ * Create a Note associated to a Company only (no contact) — used to log a
+ * billing event, e.g. a comped invoice, on the dealer/group's CRM record.
+ * Throws on failure (caller decides whether that's fatal). Default HubSpot
+ * association type id: note->company 190.
+ */
+export async function createCompanyNote(args: {
+  companyId: string;
+  body: string;
+}): Promise<{ id: string }> {
+  const res = await fetch(`${BASE}/objects/notes`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      properties: { hs_timestamp: new Date().toISOString(), hs_note_body: args.body.slice(0, 65000) },
+      associations: [
+        { to: { id: args.companyId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 190 }] },
+      ],
+    }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new HubspotError(res.status, `createCompanyNote ${res.status}`, text);
+  return { id: (JSON.parse(text) as { id: string }).id };
+}
+
+/**
  * Update an existing conversation Note's body (upsert path — captures
  * reopen-and-continue without creating a second note). Associations are
  * unchanged; we only refresh hs_note_body. Throws on failure.
