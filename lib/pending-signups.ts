@@ -169,11 +169,38 @@ export async function resendLeadConfirmation(
 ): Promise<{ ok: boolean; outcome: string; message: string }> {
   const mk = await fetchMarketing<{ ok: boolean; outcome: string; message: string }>(
     "/api/leads/pending-confirmation",
-    { method: "POST", body: JSON.stringify({ email }) },
+    { method: "POST", body: JSON.stringify({ action: "resend", email }) },
     8000, // sends an email
   );
   if (!mk) {
     return { ok: false, outcome: "unreachable", message: "Could not reach the marketing site to send it." };
+  }
+  return mk;
+}
+
+/**
+ * Dismiss a stuck lead — a duplicate of an existing customer, an internal test,
+ * junk. SOFT: marketing moves the lead's provision_status to 'dismissed' and
+ * clears its confirmation token; the row itself is kept in full.
+ *
+ * Clearing the token is the load-bearing half. Confirmation tokens have no
+ * expiry, so a dismissed lead still holding a live token could self-provision
+ * weeks later when someone finally clicks the old email.
+ *
+ * WHO dismissed and WHEN are recorded in admin_audit by the calling route —
+ * `marketing_leads` has no dismissed_at/dismissed_by column and adding one
+ * would be a migration on the marketing project.
+ */
+export async function dismissStuckLead(
+  args: { id?: string; email?: string; actor?: string },
+): Promise<{ ok: boolean; outcome: string; message: string }> {
+  const mk = await fetchMarketing<{ ok: boolean; outcome: string; message: string }>(
+    "/api/leads/pending-confirmation",
+    { method: "POST", body: JSON.stringify({ action: "dismiss", ...args }) },
+    8000,
+  );
+  if (!mk) {
+    return { ok: false, outcome: "unreachable", message: "Could not reach the marketing site to dismiss it." };
   }
   return mk;
 }
