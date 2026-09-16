@@ -8,6 +8,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
 import { PageHeader } from "@/components/PageHeader";
+import StuckLeadsPanel from "@/components/StuckLeadsPanel";
+import { getStuckLeads } from "@/lib/pending-signups";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Trial Signups — DA Platform" };
@@ -104,6 +106,11 @@ export default async function TrialSignupsPage() {
   const all = rows ?? [];
   const pending = all.filter((r) => r.decision === "pending_review");
 
+  // Bucket B: signups awaiting Layer 0 email confirmation. These rows live in
+  // the marketing app's project, so this is an HTTP read that fails soft — the
+  // page still renders the review queue if marketing is unreachable.
+  const stuck = await getStuckLeads();
+
   // Enrichment findings for the dealers these signups provisioned (migration
   // 158). Read-only: this page decides nothing about enrichment, it just saves
   // an operator a trip into HubSpot to see whether the Google lookup landed.
@@ -152,6 +159,12 @@ export default async function TrialSignupsPage() {
           </div>
         )}
       </div>
+
+      <StuckLeadsPanel
+        leads={stuck.leads}
+        available={stuck.available}
+        stuckAfterHours={stuck.stuckAfterHours}
+      />
 
       {Object.keys(enrichCounts).length > 0 && (
         <div className="card mb-4" style={{ padding: 16 }}>

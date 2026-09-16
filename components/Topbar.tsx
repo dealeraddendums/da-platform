@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { UserRole } from "@/lib/db";
 import { useBuilderBreadcrumb } from "@/contexts/BuilderBreadcrumb";
 import { rememberDealerReturnPath, takeDealerReturnPath } from "@/lib/dealer-return";
+import SignupAlertBadge from "@/components/SignupAlertBadge";
 
 const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super Admin",
@@ -239,8 +240,11 @@ export default function Topbar({ user }: Props) {
               )}
             </div>
           ) : (
-            /* Super admin: role badge + user name */
+            /* Super admin: signup alert + role badge + user name */
             <>
+              {/* Trial signups needing attention. super_admin only — the same
+                  gate as /admin/trial-signups; renders nothing at zero. */}
+              <SignupAlertBadge />
               <span
                 className="text-xs font-semibold px-2 py-1 rounded"
                 style={{
