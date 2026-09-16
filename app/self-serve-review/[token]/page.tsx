@@ -8,9 +8,16 @@
 //
 // The token in the URL is the authorisation, so support can act straight from
 // the inbox without a session; a signed-in super_admin is recorded by email.
+// That is why this page has NO session gate and must keep none — narrowing it
+// would break acting on a signup from the support inbox.
+//
+// The card body is the SAME component the admin modal renders
+// (components/SelfServeReviewCard), so approve/deny exists in one place. Only
+// the chrome differs: this standalone view has no queue around it, so there is
+// no Back/Next — just a Close that goes to the queue.
 
 import { createAdminSupabaseClient } from "@/lib/db";
-import ReviewActions from "./ReviewActions";
+import SelfServeReviewCard, { type ReviewRow } from "@/components/SelfServeReviewCard";
 
 interface GateRow {
   id: string;
@@ -55,64 +62,39 @@ export default async function SelfServeReviewPage({ params }: { params: { token:
           The signup has already been approved or denied, or the link was mistyped.
           Open <strong>Admin → Trial Signups</strong> to see the current queue.
         </p>
+        <a href="/admin/trial-signups"
+           style={{ display: "inline-flex", alignItems: "center", height: 34, padding: "0 16px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13, fontWeight: 600, color: "#333", textDecoration: "none" }}>
+          Go to the queue
+        </a>
       </div>,
     );
   }
 
-  const rows: Array<[string, string]> = [
-    ["Dealership", row.dealership ?? "—"],
-    ["Contact", row.contact_name ?? "—"],
-    ["Email", row.email],
-    ["ZIP", row.zip || "(not provided)"],
-    ["Phone", row.phone || "(not provided)"],
-    ["Account type", row.account_kind],
-    ["Source IP", row.source_ip || "(unknown)"],
-    ["Submitted", new Date(row.created_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles" }) + " PT"],
-  ];
-
   return shell(
     <div style={{ background: "#fff", border: "1px solid #e0e0e0", padding: 24 }}>
-      <p style={{ fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: "#888", margin: 0 }}>
-        Trial signup — held for review
-      </p>
-      <h1 style={{ fontSize: 22, margin: "6px 0 18px" }}>{row.dealership ?? row.email}</h1>
-
-      <table style={{ borderCollapse: "collapse", fontSize: 14, marginBottom: 18 }}>
-        <tbody>
-          {rows.map(([k, v]) => (
-            <tr key={k}>
-              <td style={{ padding: "3px 14px 3px 0", color: "#666" }}>{k}</td>
-              <td style={{ padding: "3px 0", fontWeight: 500 }}>{v}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <div style={{ background: "#fafafa", border: "1px solid #eee", padding: 14, marginBottom: 18 }}>
-        <p style={{ margin: 0, fontSize: 13 }}>
-          <strong>AI verdict:</strong> {row.ai_verdict ?? "—"}
-          {row.ai_confidence != null && <> (confidence {row.ai_confidence})</>}
-          {row.ai_model && <span style={{ color: "#888" }}> · {row.ai_model}</span>}
-        </p>
-        {Array.isArray(row.ai_reasons) && row.ai_reasons.length > 0 && (
-          <ul style={{ fontSize: 13, margin: "8px 0 0", paddingLeft: 20 }}>
-            {row.ai_reasons.map((r, i) => <li key={i}>{r}</li>)}
-          </ul>
-        )}
-        {row.decision_reason && (
-          <p style={{ margin: "8px 0 0", fontSize: 12, color: "#888" }}>{row.decision_reason}</p>
-        )}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: "#888", margin: 0 }}>
+            {row.decision === "pending_review" ? "Trial signup — held for review" : `Trial signup — ${row.decision}`}
+          </p>
+          <h1 style={{ fontSize: 22, margin: "6px 0 18px", overflowWrap: "anywhere" }}>{row.dealership ?? row.email}</h1>
+        </div>
+        {/* Close, even standalone: this used to be a dead end with no way back. */}
+        <a href="/admin/trial-signups" aria-label="Close" title="Close — back to the queue"
+           style={{ fontSize: 22, color: "#888", textDecoration: "none", lineHeight: 1, flexShrink: 0 }}>×</a>
       </div>
 
-      {row.decision === "pending_review" ? (
-        <ReviewActions token={params.token} dealership={row.dealership ?? row.email} />
-      ) : (
-        <p style={{ fontSize: 14, color: "#666" }}>
-          Already <strong>{row.decision}</strong>
-          {row.reviewed_by && <> by {row.reviewed_by}</>}
-          {row.reviewed_at && <> on {new Date(row.reviewed_at).toLocaleString()}</>}.
-        </p>
-      )}
+      <SelfServeReviewCard row={row as unknown as ReviewRow} />
+
+      <div style={{ marginTop: 20, paddingTop: 14, borderTop: "1px solid #eee" }}>
+        <a href="/admin/trial-signups"
+           style={{ display: "inline-flex", alignItems: "center", height: 34, padding: "0 16px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 13, fontWeight: 600, color: "#333", textDecoration: "none" }}>
+          Close
+        </a>
+        <span style={{ fontSize: 12, color: "#888", marginLeft: 10 }}>
+          Opened from a link — use the queue to page through the rest.
+        </span>
+      </div>
     </div>,
   );
 }
