@@ -2,8 +2,9 @@
 
 // /welcome sign-in form — one input, one button. Continue fires the existing
 // OTP flow (/api/auth/otp-login), which is already correct and non-enumerable
-// for every account state (existing account → sign-in code; pending
-// invitation → invite auto-resent with its setup code; unknown → silence).
+// for every account state (existing account → sign-in code; pending standard
+// invitation → reminder email, code untouched; unknown → silence). A pending
+// MIGRATION invitation answers with a /migrate redirect, which we follow.
 // Code entry happens inline (shared OtpCodeForm) so account-holders finish
 // sign-in right here and land on the dashboard.
 
@@ -34,11 +35,15 @@ export default function WelcomeForm({ initialEmail }: { initialEmail: string }) 
     setSending(true);
     const clean = email.trim().toLowerCase();
     try {
-      await fetch("/api/auth/otp-login", {
+      const res = await fetch("/api/auth/otp-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: clean }),
       });
+      // A pending MIGRATION invitation comes back with its /migrate link — the
+      // code already in their inbox works there, and no new one was minted.
+      const body = await res.json().catch(() => ({})) as { redirect?: string };
+      if (body.redirect && body.redirect.startsWith("/")) { router.push(body.redirect); return; }
     } catch {
       // otp-login always reports success; ignore transport errors and proceed
     }

@@ -62,6 +62,57 @@ export function buildInviteEmail(opts: {
 `;
 }
 
+// Reminder for an invitee who went to the SIGN-IN page instead of using their
+// invitation. Carries NO code — theirs is still live and re-issuing one would
+// kill the one already in their inbox (the "code expired within minutes" reports
+// of 2026-09-17). Only the hash is stored, so the code can't be reprinted; this
+// points them at the right flow and tells them which email to read.
+export function buildInviteReminderEmail(opts: {
+  firstName: string;
+  /** Dealer or group name the invitee is joining. */
+  orgName: string;
+  /** Setup page URL for their flow — /migrate?invite=… or /signup?invite=… */
+  inviteUrl: string;
+  /** Migration invites finish at /migrate; everything else at /signup. */
+  isMigration: boolean;
+}): string {
+  const what = opts.isMigration ? "move to Platform 5.0" : "set up your account";
+  return `
+<div style="font-family: Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; color: #333;">
+  <div style="margin-bottom: 24px;">
+    <img src="${APP_URL}/images/da-logo.png" alt="DA Platform" width="40" height="40" style="border-radius: 50%;" />
+  </div>
+  <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">You're almost set up</h2>
+  <p style="margin: 0 0 16px; color: #55595c;">Hi ${escapeHtml(opts.firstName)},</p>
+  <p style="margin: 0 0 16px; color: #55595c;">
+    It looks like you tried to sign in to <strong>${escapeHtml(opts.orgName)}</strong>, but your account
+    isn't set up yet — so there's no password or sign-in code for it. Use the button below to
+    ${escapeHtml(what)} instead.
+  </p>
+
+  <div style="background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; padding: 14px 16px; margin: 0 0 20px;">
+    <p style="margin: 0; color: #55595c; font-size: 14px;">
+      <strong>Your setup code hasn't changed.</strong> Use the 8-digit code from your
+      original invitation email — it still works. We haven't sent a new one.
+    </p>
+  </div>
+
+  <a href="${opts.inviteUrl}"
+     style="display: inline-block; background: #1976d2; color: #fff; text-decoration: none;
+            padding: 10px 24px; border-radius: 4px; font-weight: 600; font-size: 14px; margin: 0 0 24px;">
+    ${opts.isMigration ? "Continue Your Migration" : "Set Up Your Account"}
+  </a>
+  <p style="margin: 0 0 16px; color: #55595c; font-size: 13px;">
+    Can't find the invitation email? Check your spam folder, or ask your manager to resend it —
+    the regular sign-in page won't work until your account is set up.
+  </p>
+  <p style="color: #78828c; font-size: 12px; margin: 0;">
+    If you did not expect this email, you can safely ignore it — nothing happens until the code is entered.
+  </p>
+</div>
+`;
+}
+
 // Migration self-serve invite (Phase 13a). Same scanner-proof one-time CODE +
 // inert link pattern as buildInviteEmail, but the copy is a soft "you're
 // invited to 5.0" pitch — both platforms run side by side until the 4.0

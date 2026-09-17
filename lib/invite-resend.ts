@@ -10,7 +10,7 @@
 
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
-import { buildInviteEmail, buildMigrationInviteEmail } from "@/lib/invite-email";
+import { buildInviteEmail, buildInviteReminderEmail, buildMigrationInviteEmail } from "@/lib/invite-email";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 
 export interface PendingInvitationRow {
@@ -26,14 +26,91 @@ export interface PendingInvitationRow {
   purpose: string | null;
   expires_at: string;
   accepted_at: string | null;
+  setup_code_hash: string | null;
+  setup_code_expires_at: string | null;
 }
 
 export const PENDING_INVITATION_COLUMNS =
-  "id, token, email, first_name, last_name, role, dealer_id, dealer_name, group_id, purpose, expires_at, accepted_at";
+  "id, token, email, first_name, last_name, role, dealer_id, dealer_name, group_id, purpose, expires_at, accepted_at, setup_code_hash, setup_code_expires_at";
 
 /** True when the row is live: unconsumed and not past its expiry. */
 export function isPendingInvitation(inv: PendingInvitationRow | null): inv is PendingInvitationRow {
   return !!inv && !inv.accepted_at && new Date(inv.expires_at) >= new Date();
+}
+
+/**
+ * True when the 8-digit code currently in the invitee's inbox still works —
+ * i.e. re-issuing one would DESTROY a working code rather than rescue anyone.
+ * Mirrors the gate /api/migrate/verify and /api/invite/accept apply: a missing
+ * hash or a past setup_code_expires_at means no usable code (absent expiry is
+ * treated as expired there, so treat it the same here).
+ */
+export function hasLiveSetupCode(inv: PendingInvitationRow): boolean {
+  if (!inv.setup_code_hash) return false;
+  if (!inv.setup_code_expires_at) return false;
+  return new Date(inv.setup_code_expires_at) >= new Date();
+}
+
+/**
+ * True when this invitation is consumed at /migrate rather than /signup.
+ * `purpose` is authoritative post-migration-102; a null purpose with a dealer
+ * is an older migration invite (same tolerance as /api/migrate/verify).
+ */
+export function isMigrationInvitation(inv: PendingInvitationRow): boolean {
+  return inv.purpose === "migration" || (inv.purpose == null && !!inv.dealer_id);
+}
+
+/** Dealer/group/account name to address the invitee's org by. */
+async function resolveOrgName(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  inv: PendingInvitationRow,
+  fallback: string,
+): Promise<string> {
+  if (inv.dealer_name) return inv.dealer_name;
+  if (inv.group_id) {
+    const { data: g } = await admin.from("groups").select("name").eq("id", inv.group_id).maybeSingle<{ name: string }>();
+    return g?.name ?? "your group";
+  }
+  if (inv.dealer_id) {
+    const { data: d } = await admin.from("dealers").select("name").eq("id", inv.dealer_id).maybeSingle<{ name: string }>();
+    return d?.name ?? fallback;
+  }
+  return fallback;
+}
+
+/**
+ * Point an invitee at the flow where the code they ALREADY have works, without
+ * touching that code. For the invitee who went to /login instead of using their
+ * invitation: re-issuing a code there silently killed the one in their inbox
+ * (they then typed it and got "expired/invalid"), so this is the no-rotate
+ * alternative — same destination, no new code, nothing to invalidate. The code
+ * itself can't be reprinted (only its hash is stored), so the email says to use
+ * the one already sent.
+ */
+export async function sendInvitationReminderEmail(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  inv: PendingInvitationRow,
+): Promise<void> {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com";
+  const recipientName = `${inv.first_name} ${inv.last_name}`.trim() || inv.email;
+  const migration = isMigrationInvitation(inv);
+  const orgName = await resolveOrgName(admin, inv, migration ? "your dealership" : "your account");
+  await sendMandrillEmail({
+    subject: migration
+      ? `Finish setting up DealerAddendums Platform 5.0 — ${orgName}`
+      : `Finish setting up your DA Platform account — ${orgName}`,
+    from_email: "noreply@dealeraddendums.com",
+    from_name: "DealerAddendums",
+    to: [{ email: inv.email, name: recipientName, type: "to" }],
+    html: buildInviteReminderEmail({
+      firstName: inv.first_name || "there",
+      orgName,
+      inviteUrl: migration
+        ? `${appUrl}/migrate?invite=${inv.token}`
+        : `${appUrl}/signup?invite=${inv.token}`,
+      isMigration: migration,
+    }),
+  });
 }
 
 /**
@@ -43,6 +120,12 @@ export function isPendingInvitation(inv: PendingInvitationRow | null): inv is Pe
  * Platform 5.0 email with the /migrate link (a /signup link would be rejected
  * by that flow); everything else gets the standard setup email.
  * Throws on failure — callers on unauthenticated paths should catch + swallow.
+ *
+ * ⚠️ This ROTATES the code: the one already in the invitee's inbox stops
+ * working the moment this runs. That is correct for an explicit "resend" (the
+ * invitee asked for a new one) and for an EXPIRED code, but never for a live
+ * code on a path the invitee didn't ask for — see hasLiveSetupCode and
+ * sendInvitationReminderEmail.
  */
 export async function resendPendingInvitationEmail(
   admin: ReturnType<typeof createAdminSupabaseClient>,

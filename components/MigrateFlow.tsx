@@ -42,7 +42,12 @@ function StepDots({ step }: { step: Step }) {
 }
 
 export default function MigrateFlow() {
-  const token = useSearchParams().get("invite") ?? "";
+  const params = useSearchParams();
+  const token = params.get("invite") ?? "";
+  // Arrived by typing their email on the sign-in page: they have no account
+  // yet, so /api/auth/otp-login sent them here instead of minting a code
+  // (which used to invalidate the one in their invitation email). Say why.
+  const fromLogin = params.get("from") === "login";
 
   const [step, setStep] = useState<Step>("code");
   const [email, setEmail] = useState("");
@@ -128,7 +133,12 @@ export default function MigrateFlow() {
     <div style={card}>
       {step === "code" && (
         <>
-          <Header title="Migrate to the new DealerAddendums" subtitle="Enter the code from your invite email to get started." />
+          <Header
+            title="Migrate to the new DealerAddendums"
+            subtitle={fromLogin
+              ? "Your account isn't set up yet — there's nothing to sign in to. Enter the 8-digit code from your invitation email to finish setting up. That code still works; we haven't sent a new one."
+              : "Enter the code from your invite email to get started."}
+          />
           <form onSubmit={submitCode} style={body}>
             <div style={{ marginBottom: 16 }}>
               <label style={label} htmlFor="m-email">Email</label>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 function IconAlert(p: React.SVGProps<SVGSVGElement>) {
@@ -43,6 +44,7 @@ export default function OtpCodeForm({
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const codeRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
 
   useEffect(() => {
     // Focus the code field — the email is usually already known on arrival.
@@ -95,11 +97,18 @@ export default function OtpCodeForm({
     const cleanEmail = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) { setError("Enter your email first, then resend."); return; }
     try {
-      await fetch(resendEndpoint, {
+      const res = await fetch(resendEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: cleanEmail }),
       });
+      // Some resend endpoints answer with a flow to send the user to instead of
+      // an email — a pending migration invitation resolves to /migrate, where
+      // the code already in their inbox works (nothing was re-issued). Without
+      // this the "check your inbox" notice below would promise a mail that
+      // deliberately wasn't sent.
+      const body = await res.json().catch(() => ({})) as { redirect?: string };
+      if (body.redirect && body.redirect.startsWith("/")) { router.push(body.redirect); return; }
     } catch {
       // resend endpoints always report success to avoid leaking account existence
     }

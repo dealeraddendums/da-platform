@@ -127,12 +127,22 @@ function LoginForm() {
     if (!emailValid) { setShakeKey(k => k + 1); return; }
     setCodeSending(true);
     try {
-      await fetch("/api/auth/otp-login", {
+      const res = await fetch("/api/auth/otp-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // Forward an explicit ?next so the email's deep-link preserves it.
         body: JSON.stringify({ email, ...(searchParams.get("next") ? { next: searchParams.get("next") } : {}) }),
       });
+      // An invitee who hasn't set up their account yet has no sign-in code to
+      // receive — a pending MIGRATION invitation comes back with the /migrate
+      // link instead, where the code already in their inbox works. (Before
+      // this, the server minted a fresh code here, which silently killed the
+      // one they were about to type.) Only ever an internal path.
+      const body = await res.json().catch(() => ({})) as { redirect?: string };
+      if (body.redirect && body.redirect.startsWith("/")) {
+        router.push(body.redirect);
+        return;
+      }
     } catch {
       // otp-login always reports success; ignore transport errors and proceed
     }
