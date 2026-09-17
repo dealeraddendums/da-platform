@@ -15,7 +15,7 @@ import { resolveTemplate, createTemplateResolverCache } from "@/lib/template-res
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { useService as usePdfService, renderBulkViaService, type BulkItem, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
-import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
+import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, autoMatchedLibraryRows, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { enforceCanPrint } from "@/lib/print-eligibility";
 import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
@@ -67,58 +67,11 @@ async function uploadBulkJobPdf(job: BulkBgJob): Promise<void> {
   }
 }
 
-function listMatchesLib(val: string | null, field: string | null, notFlag: boolean): boolean {
-  if (!field || field.toUpperCase() === "ALL") return true;
-  const v = (val ?? "").toLowerCase().trim();
-  const items = field.split(",").map(s => s.toLowerCase().trim()).filter(Boolean);
-  const found = items.some(item => v === item || v.includes(item));
-  return notFlag ? !found : found;
-}
-
-function libRowMatchesVehicle(
-  r: LibRow,
-  condition: string,
-  make: string | null,
-  model: string | null,
-  trim: string | null,
-  year: number | null,
-  mileage: number | null,
-  msrp: number | null,
-): boolean {
-  const adTypes = r.ad_types as string[] | null;
-  if (adTypes && adTypes.length > 0) {
-    if (!adTypes.includes(condition)) return false;
-  } else {
-    const adType = (r.ad_type as string) ?? "Both";
-    if (adType === "New" && condition !== "New") return false;
-    if (adType === "Used" && condition === "New") return false;
-  }
-  if (!listMatchesLib(make,  r.makes  as string | null, !!(r.makes_not)))  return false;
-  if (!listMatchesLib(model, r.models as string | null, !!(r.models_not))) return false;
-  if (!listMatchesLib(trim,  r.trims  as string | null, !!(r.trims_not)))  return false;
-  const yc = (r.year_condition  as number) ?? 0;
-  const yv = (r.year_value      as number | null) ?? null;
-  if (yc !== 0 && yv != null && year != null) {
-    if (yc === 1 && year !== yv) return false;
-    if (yc === 2 && year >   yv) return false;
-    if (yc === 3 && year <   yv) return false;
-  }
-  const mc = (r.miles_condition as number) ?? 0;
-  const mv = (r.miles_value     as number | null) ?? null;
-  if (mc !== 0 && mv != null && mileage != null) {
-    if (mc === 1 && mileage > mv) return false;
-    if (mc === 2 && mileage < mv) return false;
-  }
-  const sc = (r.msrp_condition as number) ?? 0;
-  const s1 = (r.msrp1          as number | null) ?? null;
-  const s2 = (r.msrp2          as number | null) ?? null;
-  if (sc !== 0 && msrp != null) {
-    if (sc === 1 && s1 != null && msrp > s1) return false;
-    if (sc === 2 && s1 != null && msrp < s1) return false;
-    if (sc === 3 && s1 != null && s2 != null && (msrp < s1 || msrp > s2)) return false;
-  }
-  return true;
-}
+// (A local re-implementation of the rules evaluator lived here — libRowMatchesVehicle
+// + listMatchesLib — used only by the library-seed branch. It had drifted from
+// lib/options-engine's matchesRulesRow: no fuel or bodystyle clause, no sentinel
+// normalization, and its own ad_type fallback. The seed now calls the shared
+// matcher, so it is gone rather than left to drift further.)
 
 /**
  * POST /api/pdf/bulk
@@ -371,6 +324,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           separator_below?: boolean;
           spaces?: number;
         };
+        // ── Vehicle data shape ───────────────────────────────────────────────
+        // Built BEFORE the option assembly below, because the library seed and
+        // the saved-row gate both evaluate rules against it.
+        //
+        // NEW_USED + CERTIFIED come from the one producer (vehicleConditionFields):
+        // NEW_USED used to be an inline `dv.condition === "Used"` test here, which
+        // is case-SENSITIVE — a feed-cased "USED" row resolved to New and picked up
+        // New-only products on a used car. CERTIFIED was already using the shared
+        // resolver, so the two could disagree about the same vehicle.
+        const vehicleData = {
+          id: 0 as const,
+          DEALER_ID: dv.dealer_id,
+          VIN_NUMBER: dv.vin ?? "",
+          STOCK_NUMBER: dv.stock_number,
+          YEAR: dv.year ? String(dv.year) : null,
+          MAKE: dv.make, MODEL: dv.model, TRIM: dv.trim,
+          BODYSTYLE: dv.body_style, EXT_COLOR: dv.exterior_color,
+          INT_COLOR: dv.interior_color, ENGINE: dv.engine, FUEL: dv.fuel ?? null,
+          DRIVETRAIN: dv.drivetrain, TRANSMISSION: dv.transmission,
+          MILEAGE: dv.mileage != null ? String(dv.mileage) : null,
+          DATE_IN_STOCK: dv.date_added, STATUS: "1" as const,
+          MSRP: dv.msrp != null ? String(dv.msrp) : null,
+          ...vehicleConditionFields(dv),
+          OPTIONS: null, PHOTOS: null, DESCRIPTION: dv.description ?? null,
+          PRINT_STATUS: "0" as const, HMPG: dv.hmpg ?? null, CMPG: dv.cmpg ?? null, MPG: dv.mpg ?? null,
+        };
+
         let effectiveOptions: EffectiveOption[] = [];
         let optionsSource = "library";
         // Raw saved rows kept for the newly-added-library-product merge —
@@ -470,31 +450,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               required: (o.required as boolean | undefined) !== false,
             }));
           } else {
-            // 3. Library matching rules per vehicle (library already cached above)
+            // 3. Never saved, no legacy data → seed from the library, rules-
+            // filtered. Uses the SHARED autoMatchedLibraryRows, the same seed
+            // the options GET, pdf/generate and the feed export run.
+            //
+            // This branch used to run a filter of its own that returned true
+            // for every applies_to='all' row — so the condition (ad_types) was
+            // never consulted in ALL mode and a bulk print of a never-saved
+            // vehicle seeded New-only and Used-only products onto it alike
+            // (Audi Coral Springs printed both "Protection Package" variants on
+            // a Used car, 2026-09-17). matchesRulesRow enforces condition in
+            // both modes, so routing through it fixes ALL mode and keeps the
+            // certified/case handling resolveVehicleCondition added.
             const dealerLib = libCache.get(dv.dealer_id)!;
-            // Shared resolver: honors the certified flag and normalizes case.
-            // Previously "anything but New/Used" fell through to CPO, so
-            // feed-cased "NEW"/"USED" rows matched CPO product rules.
-            const vehicleCond = resolveVehicleCondition(dv);
-            effectiveOptions = dealerLib
-              .filter(r => {
-                const appliesTo = (r.applies_to as string) ?? "all";
-                if (appliesTo === "none") return false;
-                if (appliesTo === "all")  return true;
-                return libRowMatchesVehicle(
-                  r, vehicleCond, dv.make, dv.model, dv.trim,
-                  dv.year ?? null, dv.mileage ?? null, dv.msrp ?? null,
-                );
-              })
-              .map(r => ({
-                option_name: r.option_name as string,
-                option_price: (r.item_price as string) ?? "NC",
-                description: (r.description as string) || null,
-                required: (r.required as boolean | undefined) !== false,
-                separator_above: r.separator_above === true,
-                separator_below: r.separator_below === true,
-                spaces: typeof r.spaces === "number" ? (r.spaces as number) : 0,
-              }));
+            const seeded = autoMatchedLibraryRows(
+              dealerLib as unknown as Array<Record<string, unknown> & { id: unknown; option_name: unknown }>,
+              vehicleData,
+            );
+            const libById = new Map(dealerLib.map(r => [String(r.id), r]));
+            effectiveOptions = seeded.map(m => {
+              const r = libById.get(m.default_id) ?? {};
+              return {
+                option_name: m.option_name,
+                option_price: m.option_price,
+                description: m.description,
+                required: m.required,
+                separator_above: (r as { separator_above?: unknown }).separator_above === true,
+                separator_below: (r as { separator_below?: unknown }).separator_below === true,
+                spaces: typeof (r as { spaces?: unknown }).spaces === "number" ? (r as { spaces: number }).spaces : 0,
+              };
+            });
           }
         }
 
@@ -595,26 +580,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             };
           });
         }
-
-        // ── Vehicle data shape ───────────────────────────────────────────────
-        const vehicleData = {
-          id: 0 as const,
-          DEALER_ID: dv.dealer_id,
-          VIN_NUMBER: dv.vin ?? "",
-          STOCK_NUMBER: dv.stock_number,
-          YEAR: dv.year ? String(dv.year) : null,
-          MAKE: dv.make, MODEL: dv.model, TRIM: dv.trim,
-          BODYSTYLE: dv.body_style, EXT_COLOR: dv.exterior_color,
-          INT_COLOR: dv.interior_color, ENGINE: dv.engine, FUEL: dv.fuel ?? null,
-          DRIVETRAIN: dv.drivetrain, TRANSMISSION: dv.transmission,
-          MILEAGE: dv.mileage != null ? String(dv.mileage) : null,
-          DATE_IN_STOCK: dv.date_added, STATUS: "1" as const,
-          MSRP: dv.msrp != null ? String(dv.msrp) : null,
-          NEW_USED: dv.condition === "Used" ? "Used" : "New",
-          CERTIFIED: vehicleConditionFields(dv).CERTIFIED,
-          OPTIONS: null, PHOTOS: null, DESCRIPTION: dv.description ?? null,
-          PRINT_STATUS: "0" as const, HMPG: dv.hmpg ?? null, CMPG: dv.cmpg ?? null, MPG: dv.mpg ?? null,
-        };
 
         // Corporate (group) products — rules-filtered for this vehicle, with layout fields
         const groupOpts = await getGroupOptionsForDealer(textDealerId, vehicleData, vehicleId);
