@@ -5,8 +5,9 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
-import { Mark, Extension } from "@tiptap/core";
+import { Mark, Extension, Node } from "@tiptap/core";
 import { useEffect, useState } from "react";
+import { normalizeProductHtmlSource } from "@/lib/product-name";
 
 const LINE_HEIGHT_TYPES = ["paragraph", "heading", "listItem"] as const;
 const LINE_HEIGHT_MIN = 0.8;
@@ -87,10 +88,48 @@ function looksLikeHtml(s: string): boolean {
 
 function toEditorContent(value: string): string {
   if (!value) return "";
-  if (looksLikeHtml(value)) return value;
-  const escaped = value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Load the NORMALIZED value: a stored description whose markup is entity-
+  // escaped (legacy-ETL rows, or HTML source an operator pasted in) has no
+  // real tag, so the plain-text branch below escaped it again and the editor
+  // showed tag source — which is how a mixed real/escaped value got made in
+  // the first place. Normalizing here means the operator sees the formatting,
+  // and a re-save stores real markup (the row self-heals on next edit).
+  const src = normalizeProductHtmlSource(value);
+  if (looksLikeHtml(src)) return src;
+  const escaped = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return `<p>${escaped.replace(/\n/g, "<br/>")}</p>`;
 }
+
+// Inline <img> support. StarterKit has no image node, so a product image
+// inserted by the "Add image to description" picker was dropped the moment
+// Tiptap parsed the document — it never appeared, and the next keystroke
+// re-serialized the doc without it, silently discarding the insert. Declared
+// here as a minimal inline node rather than pulling in @tiptap/extension-image
+// (no new dependency): src/alt/width/style round-trip verbatim, which is
+// exactly the tag the picker writes, and the render allowlist in
+// lib/product-name.tsx remains the gatekeeper for what actually prints.
+const InlineImage = Node.create({
+  name: "image",
+  inline: true,
+  group: "inline",
+  draggable: true,
+  addAttributes() {
+    return {
+      src: { default: null },
+      alt: { default: null },
+      title: { default: null },
+      width: { default: null },
+      height: { default: null },
+      style: { default: null },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "img[src]" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["img", HTMLAttributes];
+  },
+});
 
 const tbBtn = (active: boolean): React.CSSProperties => ({
   height: 26, minWidth: 26, padding: "0 6px", fontSize: 12, fontWeight: 600,
@@ -124,6 +163,7 @@ export default function RichTextEditor({
       Color.configure({ types: ["textStyle"] }),
       FontSize,
       LineHeight,
+      InlineImage,
     ],
     content: toEditorContent(value),
     editable: !disabled,

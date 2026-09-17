@@ -163,9 +163,9 @@ function runSanitize(raw: string, tags: string[], styleProps: Set<string>): stri
 // an escaped <script>/onerror payload decodes and is then stripped like any
 // raw one.
 const ESCAPED_TAG_PROBE = /<\s*(img|br|b|strong|i|em|u|span|sub|sup|p|ul|ol|li)[\s/>]/i;
-function normalizeEscapedHtml(raw: string): string {
-  if (raw.includes("<") || !/&lt;/i.test(raw)) return raw;
-  const decoded = raw
+
+function decodeEntities(s: string): string {
+  return s
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
@@ -173,7 +173,79 @@ function normalizeEscapedHtml(raw: string): string {
     .replace(/&#x0*27;/gi, "'")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&");
-  return ESCAPED_TAG_PROBE.test(decoded) ? decoded : raw;
+}
+
+// MIXED values — real tags AND escaped tag source in the same string — are the
+// common shape in the wild, and the whole-string peel above can't touch them
+// (a blanket decode would also eat body-text entities that are correctly single
+// -encoded, e.g. "Paint &amp; Interior"). Two ways they get made:
+//   • legacy-ETL rows that escaped the markup but left the line breaks real
+//     ("&lt;div style=&quot;…&quot;&gt;Text<br />&lt;/div&gt;"), and
+//   • an operator pasting HTML SOURCE into the rich-text editor, which stores
+//     it as text and auto-links any URL inside it
+//     ("&lt;img src=&quot;<a href="https://…">https://…</a>&quot;/&gt;").
+// Either way the escaped fragment printed as visible tag source on the sticker.
+// So decode per FRAGMENT instead: a `&lt;tag …&gt;` run that doesn't cross
+// another `&lt;` (which bounds the span — no runaway match), with any real tags
+// inside it unwrapped to their text (that's what rescues the auto-linked src).
+// Everything outside a fragment is left byte-identical, so body-text entities
+// keep their single encoding. The tag list is broader than the render allowlist
+// on purpose: an escaped <div>/<font>/<center> should decode and then be
+// dropped-but-kept-content by the sanitizer, not printed as source.
+const FRAGMENT_TAGS =
+  "img|br|b|strong|i|em|u|span|sub|sup|p|ul|ol|li|div|a|font|center|s|strike|small|big|h[1-6]|tt|pre";
+const ESCAPED_FRAGMENT_RE = new RegExp(
+  `&lt;\\s*/?\\s*(?:${FRAGMENT_TAGS})\\b(?:(?!&lt;)[\\s\\S])*?&gt;`,
+  "gi",
+);
+
+// An escaped tag token with NO attributes that never reaches its "&gt;" —
+// "&lt;/li<br />" or a value truncated mid-tag. There is no terminator to
+// decode against, so the fragment rule above can't see it and the bare token
+// printed on the sticker. Nothing legitimate reads as "</li", so drop the
+// token (its content sits outside it and is untouched). Deliberately narrow:
+// a token carrying ATTRIBUTES is left alone — "&lt;img src=&quot;…" with a
+// real tag after it is a fragment the rule above handles, and guessing a
+// terminator there rewrites a value that renders correctly today.
+const UNTERMINATED_BARE_TAG_RE = new RegExp(
+  `&lt;\\s*/?\\s*(?:${FRAGMENT_TAGS})\\b\\s*(?=&lt;|<|$)`,
+  "gi",
+);
+
+function decodeEscapedTagFragments(raw: string): string {
+  return raw
+    .replace(ESCAPED_FRAGMENT_RE, (fragment) =>
+      // Unwrap real tags inside the fragment (the editor's auto-link around a
+      // pasted src URL) keeping their text, then decode the fragment itself.
+      decodeEntities(fragment.replace(/<[^>]*>/g, "")),
+    )
+    .replace(UNTERMINATED_BARE_TAG_RE, "");
+}
+
+function normalizeEscapedHtml(raw: string): string {
+  if (!/&lt;/i.test(raw)) return raw;
+  if (raw.includes("<")) return decodeEscapedTagFragments(raw);
+  const decoded = decodeEntities(raw);
+  if (ESCAPED_TAG_PROBE.test(decoded)) return decoded;
+  // Whole-string peel rejected — the value carries no tag the probe knows.
+  // Fall through to fragment decoding rather than giving up: the probe list is
+  // the inline set, so a value whose only markup is an escaped <div> wrapper
+  // (common in legacy-ETL descriptions) failed it and printed as tag source.
+  // Fragment decoding is tag-gated per match, so escaped display text that
+  // isn't a tag at all ("Under &lt;$500&gt;") is still returned untouched.
+  return decodeEscapedTagFragments(raw);
+}
+
+/** Repair a stored product name/description whose markup arrived entity-escaped
+ *  (wholly, from the legacy ETL, or in fragments — see normalizeEscapedHtml).
+ *  Exported for the two call sites that must decide "is this HTML?" BEFORE
+ *  sanitizing: the print/canvas description renderer and the rich-text editor's
+ *  content loader. Both would otherwise treat escaped markup as plain text and
+ *  escape it a second time. NOT a substitute for sanitizing — the result still
+ *  goes through sanitizeProductHtml / sanitizeProductDescription to render. */
+export function normalizeProductHtmlSource(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return normalizeEscapedHtml(String(raw));
 }
 
 /** Sanitize a product NAME — tight, inline-only allowlist (bold/colored span/

@@ -20,7 +20,8 @@
     "sync:legacy": "npx tsx scripts/import-groups.ts && npx tsx scripts/import-dealers.ts && npx tsx scripts/import-users.ts",
     "export:legacy": "npx tsx scripts/export-legacy.ts",
     "test:options-filter": "tsx scripts/options-filter-verify-unit.ts",
-    "test:enrichment": "tsx scripts/enrichment-verify-unit.ts"
+    "test:enrichment": "tsx scripts/enrichment-verify-unit.ts",
+    "test:product-html": "tsx scripts/product-html-normalize-unit.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

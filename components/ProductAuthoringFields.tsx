@@ -14,7 +14,7 @@
 import { useState } from "react";
 import RichTextEditor from "@/components/RichTextEditor";
 import ImageUploadPicker from "@/components/ImageUploadPicker";
-import { RichName } from "@/lib/product-name";
+import { RichName, sanitizeProductDescription, normalizeProductHtmlSource } from "@/lib/product-name";
 
 const inp: React.CSSProperties = {
   width: "100%", padding: "7px 10px", border: "1px solid #e0e0e0", borderRadius: 4,
@@ -87,6 +87,18 @@ export default function ProductAuthoringFields({
   const [insertTarget, setInsertTarget] = useState<"description" | "item_name">("description");
   const [descToolbarOpen, setDescToolbarOpen] = useState(false);
   const [showPriceHelp, setShowPriceHelp] = useState(false);
+
+  // Rendered preview of the description, exactly as the addendum will print it
+  // (same sanitizer + .description-html rules as the PDF and the Addendum
+  // Details row). Shown whenever the value carries markup — images especially,
+  // which the editor body shows as a bare inline image with no sizing context.
+  // Escaped-markup values (legacy rows) are normalized first so the preview
+  // shows the formatting, not tag source.
+  const descPreview = (() => {
+    const src = normalizeProductHtmlSource(description);
+    if (!src || !/<[a-z][^>]*>/i.test(src)) return "";
+    return sanitizeProductDescription(src);
+  })();
 
   async function handleAiGenerate() {
     const name = itemName.trim();
@@ -164,6 +176,17 @@ export default function ProductAuthoringFields({
           minHeight={64}
           toolbarOpen={descToolbarOpen}
         />
+        {descPreview && (
+          <div style={{ marginTop: 6, padding: "6px 10px", background: "#f5f6f7", border: "1px solid #e0e0e0", borderRadius: 4 }}>
+            <div style={{ color: "#78828c", fontSize: 11, marginBottom: 4 }}>Preview:</div>
+            <div
+              className="description-html"
+              style={{ fontSize: 12, color: "#333" }}
+              // eslint-disable-next-line react/no-danger
+              dangerouslySetInnerHTML={{ __html: descPreview }}
+            />
+          </div>
+        )}
         {aiGenerated && !aiGenerating && (
           <p style={{ fontSize: 11, color: "#1565c0", marginTop: 4, marginBottom: 0 }}>✦ AI generated — edit as needed</p>
         )}

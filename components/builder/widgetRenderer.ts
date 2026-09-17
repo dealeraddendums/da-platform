@@ -1,5 +1,5 @@
 import { IB_DEFAULT, VEHICLE_PHOTO_COMING_SOON } from './constants';
-import { sanitizeProductHtml, sanitizeProductDescription } from '@/lib/product-name';
+import { sanitizeProductHtml, sanitizeProductDescription, normalizeProductHtmlSource } from '@/lib/product-name';
 import { watermarkUrl } from '@/lib/watermarks';
 import { code128Svg } from '@/lib/code128';
 
@@ -38,11 +38,17 @@ function readableText(bg: string): string {
 function renderDescription(desc: string, fontPx: number): string {
   if (!desc) return '';
   const baseStyle = `font-size:${fontPx}px;color:#666;padding-left:8px;margin-top:1px`;
-  if (looksLikeHtml(desc)) {
-    return `<div class="description-html" style="${baseStyle}">${sanitizeProductDescription(desc)}</div>`;
+  // Decide HTML-vs-plain-text on the NORMALIZED value: a description stored
+  // with entity-escaped markup (legacy ETL, or pasted source) carries no real
+  // tag, so the plain-text branch used to escape it a SECOND time and print
+  // the tag source on the sticker. normalizeProductHtmlSource repairs those
+  // before the test; genuinely plain text is unchanged and still escaped.
+  const src = normalizeProductHtmlSource(desc);
+  if (looksLikeHtml(src)) {
+    return `<div class="description-html" style="${baseStyle}">${sanitizeProductDescription(src)}</div>`;
   }
   // Escape plain text to keep parity with previous behavior.
-  const escaped = desc.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const escaped = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return `<div style="${baseStyle}">${escaped}</div>`;
 }
 

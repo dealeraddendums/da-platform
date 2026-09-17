@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { formatOptionPrice } from "@/lib/option-price";
 import type { AddendumLibraryRow } from "@/lib/db";
-import { RichName } from "@/lib/product-name";
+import { RichName, normalizeProductHtmlSource } from "@/lib/product-name";
 import ProductAuthoringFields from "@/components/ProductAuthoringFields";
 import ProductRulesFields from "@/components/ProductRulesFields";
 import ProductImportExport from "@/components/ProductImportExport";
@@ -53,7 +53,10 @@ const BLANK: FormData = {
 
 function stripHtml(html: string): string {
   if (!html) return "";
-  return html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
+  // Normalize escaped markup to real tags FIRST, so the list preview strips it
+  // instead of surfacing "<div style=…>" as visible text (legacy-ETL rows store
+  // their markup entity-escaped — see normalizeProductHtmlSource).
+  return normalizeProductHtmlSource(html).replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
 }
 
 // Product names are stored as rich-text HTML (RichName + DOMPurify is the render
