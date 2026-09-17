@@ -33,9 +33,13 @@ export default function SignupAlertBadge() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const load = useCallback(async () => {
+  // `fresh` bypasses the server's per-worker count cache. Used by the
+  // post-action refresh and on navigation, so a just-cleared item disappears
+  // immediately instead of lingering for up to the cache TTL on whichever
+  // worker answers. The background poll leaves the cache alone.
+  const load = useCallback(async (fresh = false) => {
     try {
-      const res = await fetch("/api/admin/trial-signups/pending-count", { cache: "no-store" });
+      const res = await fetch(`/api/admin/trial-signups/pending-count${fresh ? "?fresh=1" : ""}`, { cache: "no-store" });
       // 403 = a role that can't act on the queue. Stay silent rather than
       // rendering a count the viewer can do nothing about.
       if (!res.ok) { setCounts(null); return; }
@@ -47,16 +51,16 @@ export default function SignupAlertBadge() {
   }, []);
 
   useEffect(() => {
-    void load();
+    void load(true);
     const id = setInterval(() => void load(), POLL_MS);
-    const onRefresh = () => void load();
+    const onRefresh = () => void load(true);
     window.addEventListener(SIGNUP_COUNT_REFRESH_EVENT, onRefresh);
     return () => { clearInterval(id); window.removeEventListener(SIGNUP_COUNT_REFRESH_EVENT, onRefresh); };
   }, [load]);
 
   // Re-check on admin navigation — someone who just cleared the queue on
   // another page should see it reflected without waiting out the poll.
-  useEffect(() => { void load(); }, [pathname, load]);
+  useEffect(() => { void load(true); }, [pathname, load]);
 
   if (!counts || counts.total < 1) return null;
 
