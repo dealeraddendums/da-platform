@@ -86,9 +86,15 @@ export function matchesAdTypes(
  * shared between addendum_library and group_options.
  */
 type RulesRow = {
+  /** Library def's id — authoritative identity for a saved row carrying
+   *  default_id (migration 152). */
+  id?: string | null;
   /** Library def's name — used by savedRowSurvivesLibraryRules to narrow the
    *  same-name candidate set to exact-case matches (Serra APEX 2026-08-27). */
   option_name?: string | null;
+  /** Library def's price — the last-resort discriminator between defs whose
+   *  names are IDENTICAL (Audi Coral Springs 2026-09-17). */
+  item_price?: string | null;
   applies_to?: string | null;
   ad_types?: string[] | null;
   makes?: string | null;
@@ -444,8 +450,34 @@ export function liveOptionName(
   return nameById.get(did) ?? row.option_name;
 }
 
-export function savedRowSurvivesLibraryRules(rules: RulesRow[], vehicle: VehicleRow, savedName?: string | null): boolean {
+export function savedRowSurvivesLibraryRules(
+  rules: RulesRow[],
+  vehicle: VehicleRow,
+  savedName?: string | null,
+  /** The saved row's own price + library id — used to work out WHICH def the
+   *  row belongs to when several share its name. */
+  saved?: { option_price?: string | null; default_id?: string | null } | null,
+): boolean {
+  const gate = (rule: RulesRow) =>
+    rule.applies_to === "none" ||
+    matchesRulesRow({
+      ...rule,
+      makes: normalizeSentinelList(rule.makes),
+      models: normalizeSentinelList(rule.models),
+      trims: normalizeSentinelList(rule.trims),
+      body_styles: normalizeSentinelList(rule.body_styles),
+      fuel: normalizeSentinelList(rule.fuel),
+    }, vehicle);
+
+  // default_id is exact identity (migration 152) — when the saved row names its
+  // def, that def alone decides, whatever else shares its name.
+  const byId = saved?.default_id
+    ? rules.find(r => r.id != null && String(r.id) === String(saved.default_id))
+    : undefined;
+  if (byId) return gate(byId);
+
   if (rules.length === 0) return true;
+
   // Identity narrowing (Serra APEX 2026-08-27): the same-name grouping is
   // case-INSENSITIVE, so "APEX PROTECT GPS" (New-only) and "APEX Protect GPS"
   // (Used-only, $595) shared one candidate set — and the New def matching a
@@ -462,17 +494,47 @@ export function savedRowSurvivesLibraryRules(rules: RulesRow[], vehicle: Vehicle
     const exact = rules.filter(r => r.option_name != null && exactOptionName(r.option_name) === key);
     if (exact.length > 0) candidates = exact;
   }
-  return candidates.some(rule =>
-    rule.applies_to === "none" ||
-    matchesRulesRow({
-      ...rule,
-      makes: normalizeSentinelList(rule.makes),
-      models: normalizeSentinelList(rule.models),
-      trims: normalizeSentinelList(rule.trims),
-      body_styles: normalizeSentinelList(rule.body_styles),
-      fuel: normalizeSentinelList(rule.fuel),
-    }, vehicle)
-  );
+
+  // PRICE narrowing (Audi Coral Springs 2026-09-17). Exact-case narrowing left
+  // a hole the case-insensitive fix couldn't reach: two defs named IDENTICALLY,
+  // differing only by condition — a legitimate setup (one "Protection Package"
+  // for New at $1,499, another for Used at $999). Both stay candidates, so the
+  // New def vouched for the USED row and a New car printed both packages (and a
+  // $999 overcharge in the asking price). The saved row's price says which def
+  // it is.
+  //
+  // Scoped to CONDITION-SPLIT candidate sets on purpose. Where same-name defs
+  // share a condition and differ only in rules/price, the any-match below is
+  // the deliberate KARR behavior (a duplicated product shows when any variant
+  // applies) — narrowing there would silently drop a line the dealer expects
+  // (measured: it would have dropped one live Acura accessories row). Only
+  // narrows when it actually resolves to a def, too: a per-vehicle price
+  // override (263 rows fleet-wide deliberately differ from their library price
+  // — "NAME live, PRICE saved") matches nothing and keeps the name-based set.
+  if (candidates.length > 1 && saved?.option_price != null && conditionsDiffer(candidates)) {
+    const key = priceKey(saved.option_price);
+    if (key !== "") {
+      const byPrice = candidates.filter(r => r.item_price != null && priceKey(r.item_price) === key);
+      if (byPrice.length > 0) candidates = byPrice;
+    }
+  }
+
+  return candidates.some(gate);
+}
+
+/** True when the candidate defs do NOT all carry the same condition set — the
+ *  signature of a New/Used/CPO variant split, as opposed to a plain duplicate. */
+function conditionsDiffer(rules: RulesRow[]): boolean {
+  const keys = new Set(rules.map(r => JSON.stringify([...(r.ad_types ?? [])].sort())));
+  return keys.size > 1;
+}
+
+/** Comparison key for a price string — trimmed + case-folded, so "999" and
+ *  " 999" are one value and a modifier ("|85|", "NC", "5%") compares verbatim.
+ *  Deliberately NOT numeric: two defs priced "NC" and "0" are different
+ *  authored values and must not be treated as the same def. */
+function priceKey(v: string | null | undefined): string {
+  return String(v ?? "").trim().toLowerCase();
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

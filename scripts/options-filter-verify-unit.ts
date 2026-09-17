@@ -254,6 +254,116 @@ void test("pruneOrphanedDefaultRows: fully-orphaned set prunes to empty (never-s
   assert.deepEqual(pruneOrphanedDefaultRows(rows, names), []);
 });
 
+// ── identical-name twins split by condition (Audi Coral Springs 2026-09-17) ──
+// Two library defs named EXACTLY the same, differing only by condition and
+// price — a legitimate setup. Exact-case narrowing can't separate them, so the
+// New def used to vouch for the Used row and a New car printed both packages
+// (plus a $999 overcharge in the asking price).
+
+const PP_NEW = { id: "lib-new", option_name: "Protection Package", item_price: "1499", applies_to: "all", ad_types: ["New"] };
+const PP_USED = { id: "lib-used", option_name: "Protection Package", item_price: "999", applies_to: "all", ad_types: ["Used"] };
+const TWINS = [PP_NEW, PP_USED];
+
+void test("identical-name twins: the USED row is dropped from a NEW vehicle", () => {
+  const v = vehicle({ NEW_USED: "New" });
+  assert.equal(savedRowSurvivesLibraryRules(TWINS, v, "Protection Package", { option_price: "999" }), false);
+});
+
+void test("identical-name twins: the NEW row survives on a NEW vehicle", () => {
+  const v = vehicle({ NEW_USED: "New" });
+  assert.equal(savedRowSurvivesLibraryRules(TWINS, v, "Protection Package", { option_price: "1499" }), true);
+});
+
+void test("identical-name twins: mirror case — NEW row dropped from a USED vehicle", () => {
+  const v = vehicle({ NEW_USED: "Used" });
+  assert.equal(savedRowSurvivesLibraryRules(TWINS, v, "Protection Package", { option_price: "1499" }), false);
+  assert.equal(savedRowSurvivesLibraryRules(TWINS, v, "Protection Package", { option_price: "999" }), true);
+});
+
+void test("default_id beats name AND price — exact identity decides alone", () => {
+  const v = vehicle({ NEW_USED: "New" });
+  // Price says $999 but the row names the NEW def: judge the NEW def.
+  assert.equal(savedRowSurvivesLibraryRules(TWINS, v, "Protection Package", { option_price: "999", default_id: "lib-new" }), true);
+  // …and vice versa.
+  assert.equal(savedRowSurvivesLibraryRules(TWINS, v, "Protection Package", { option_price: "1499", default_id: "lib-used" }), false);
+});
+
+void test("a per-vehicle PRICE override keeps the name-based set (no false drop)", () => {
+  // "NAME live, PRICE saved": 263 fleet rows deliberately differ from their
+  // library price. An unmatchable price must not narrow to zero candidates.
+  const v = vehicle({ NEW_USED: "New" });
+  assert.equal(savedRowSurvivesLibraryRules(TWINS, v, "Protection Package", { option_price: "1275" }), true);
+});
+
+void test("price narrowing never applies to a single candidate", () => {
+  const v = vehicle({ NEW_USED: "New" });
+  const one = [{ id: "solo", option_name: "Nitrogen Fill", item_price: "199", applies_to: "all", ad_types: ["New"] }];
+  assert.equal(savedRowSurvivesLibraryRules(one, v, "Nitrogen Fill", { option_price: "149" }), true);
+});
+
+void test("both-condition twin still shows on New and Used", () => {
+  const both = [{ id: "recon", option_name: "Reconditioning Fee", item_price: "1299", applies_to: "rules", ad_types: ["New", "Used"], makes: "ALL", models: "ALL", trims: "ALL", body_styles: "ALL" }];
+  for (const c of ["New", "Used"]) {
+    assert.equal(savedRowSurvivesLibraryRules(both, vehicle({ NEW_USED: c }), "Reconditioning Fee", { option_price: "1299" }), true, c);
+  }
+});
+
+void test("Serra APEX (case-DRIFT twins) still resolves by exact case", () => {
+  const apex = [
+    { id: "a1", option_name: "APEX PROTECT GPS", item_price: "995", applies_to: "all", ad_types: ["New"] },
+    { id: "a2", option_name: "APEX Protect GPS", item_price: "595", applies_to: "all", ad_types: ["Used"] },
+  ];
+  const v = vehicle({ NEW_USED: "New" });
+  assert.equal(savedRowSurvivesLibraryRules(apex, v, "APEX Protect GPS", { option_price: "595" }), false);
+  assert.equal(savedRowSurvivesLibraryRules(apex, v, "APEX PROTECT GPS", { option_price: "995" }), true);
+});
+
+void test("KARR case-drift any-match fallback intact (no exact-case def exists)", () => {
+  const karr = [{ id: "k1", option_name: "KARR Security", item_price: "699", applies_to: "all", ad_types: ["New", "Used"] }];
+  const v = vehicle({ NEW_USED: "New" });
+  assert.equal(savedRowSurvivesLibraryRules(karr, v, "karr security", { option_price: "699" }), true);
+});
+
+void test("identical name AND price, condition-split: falls back to any-match", () => {
+  // Genuinely indistinguishable without default_id — documented limitation.
+  const ambiguous = [
+    { id: "x1", option_name: "Twin", item_price: "500", applies_to: "all", ad_types: ["New"] },
+    { id: "x2", option_name: "Twin", item_price: "500", applies_to: "all", ad_types: ["Used"] },
+  ];
+  assert.equal(savedRowSurvivesLibraryRules(ambiguous, vehicle({ NEW_USED: "New" }), "Twin", { option_price: "500" }), true);
+  // …and default_id resolves it.
+  assert.equal(savedRowSurvivesLibraryRules(ambiguous, vehicle({ NEW_USED: "New" }), "Twin", { option_price: "500", default_id: "x2" }), false);
+});
+
+void test("same-CONDITION duplicates keep KARR any-match (price narrowing stays out)", () => {
+  // Two defs, same name, SAME condition, different rules + price. A duplicated
+  // product must still show when any variant applies — narrowing by price here
+  // would have dropped a live Acura accessories row (measured 2026-09-17).
+  const dupes = [
+    { id: "d1", option_name: "OEM Accessories", item_price: "710", applies_to: "rules", ad_types: ["New", "Used"], trims: "TYPE S" },
+    { id: "d2", option_name: "OEM Accessories", item_price: "585", applies_to: "rules", ad_types: ["New", "Used"], trims: "ALL" },
+  ];
+  const v = vehicle({ NEW_USED: "New", TRIM: "Advance" });
+  assert.equal(savedRowSurvivesLibraryRules(dupes, v, "OEM Accessories", { option_price: "710" }), true);
+});
+
+void test("no saved identity at all behaves exactly as before (any-match)", () => {
+  const v = vehicle({ NEW_USED: "New" });
+  assert.equal(savedRowSurvivesLibraryRules(TWINS, v, "Protection Package"), true);
+});
+
+void test("CPO vehicle picks the CPO twin, not the New or Used one", () => {
+  const trio = [
+    { id: "c-new", option_name: "Care Plan", item_price: "100", applies_to: "all", ad_types: ["New"] },
+    { id: "c-used", option_name: "Care Plan", item_price: "200", applies_to: "all", ad_types: ["Used"] },
+    { id: "c-cpo", option_name: "Care Plan", item_price: "300", applies_to: "all", ad_types: ["CPO"] },
+  ];
+  const cpo = vehicle({ NEW_USED: "Used", CERTIFIED: "Yes" });
+  assert.equal(savedRowSurvivesLibraryRules(trio, cpo, "Care Plan", { option_price: "300" }), true);
+  assert.equal(savedRowSurvivesLibraryRules(trio, cpo, "Care Plan", { option_price: "100" }), false);
+  assert.equal(savedRowSurvivesLibraryRules(trio, cpo, "Care Plan", { option_price: "200" }), false);
+});
+
 // ── report ───────────────────────────────────────────────────────────────────
 setTimeout(() => {
   const failed = results.filter(r => !r.ok);

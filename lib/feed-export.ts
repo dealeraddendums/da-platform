@@ -615,6 +615,7 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           rulesVehicle as any,
           r.option_name,
+          { option_price: r.option_price ?? null, default_id: (r as { default_id?: string | null }).default_id ?? null },
         ),
       );
       const freshLib = newlyAddedLibraryMatches(

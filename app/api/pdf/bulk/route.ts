@@ -549,7 +549,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             // savedRowSurvivesLibraryRules normalizes sentinels and keeps
             // applies_to='none' manual-only products.
             const bulkRuleRow = {
+              id: r.id as string | null,
               option_name: r.option_name as string | null,
+              item_price: (r.item_price as string | null) ?? null,
               applies_to: r.applies_to as string | null,
               ad_types: r.ad_types as string[] | null,
               makes: r.makes as string | null,
@@ -623,7 +625,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // applies_to='none' manual-only products and "-NONE" auto-add
         // sentinels never drop (shared gate with options GET + pdf/generate).
         const effectiveFiltered = effectiveOptions.filter(o =>
-          savedRowSurvivesLibraryRules(libRuleByName.get(normalizeOptionName(o.option_name)) ?? [], vehicleData, o.option_name)
+          savedRowSurvivesLibraryRules(
+            libRuleByName.get(normalizeOptionName(o.option_name)) ?? [], vehicleData, o.option_name,
+            { option_price: o.option_price ?? null, default_id: (o as { default_id?: string | null }).default_id ?? null },
+          )
         );
 
         // Library products added AFTER this vehicle's last save that
