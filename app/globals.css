@@ -210,9 +210,12 @@
   font-size: 13px;
 }
 /* In the editor the placeholder is a block the author selects and deletes, so
-   label it for what it is rather than pretending to load. */
-.ProseMirror .jw-video::after { content: "▶ JW video"; }
-.ProseMirror .jw-video.ProseMirror-selectednode { outline: 2px solid #1976d2; }
+   label it for what it is rather than pretending to load. The editor surface
+   carries BOTH .help-article-body and .ProseMirror, so this has to out-specify
+   the loading caption above (3 classes + an attribute) or the author is told a
+   video is loading in a pane where no player is ever mounted. */
+.help-article-body.ProseMirror .jw-video:not([data-jw-mounted])::after { content: "▶ JW video"; }
+.help-article-body.ProseMirror .jw-video.ProseMirror-selectednode { outline: 2px solid #1976d2; }
 
 /* Product Fruits CLASSIC life-ring launcher: pin it bottom-LEFT if it ever
    appears. NOTE: the red floating circle live today is PF's AI-assistant
