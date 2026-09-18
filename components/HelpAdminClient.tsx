@@ -7,8 +7,8 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import HelpConversationsClient from "@/components/HelpConversationsClient";
 import HelpCategoriesClient, { type HelpCategory } from "@/components/HelpCategoriesClient";
-import { sanitizeHelpHtml } from "@/lib/help-sanitize";
 import { useCollapsedSections, chevronStyle } from "@/lib/use-collapsed-sections";
+import HelpArticleBody, { type JwConfig } from "@/components/HelpArticleBody";
 
 // ── Media blocks ────────────────────────────────────────────────────────────
 // A YouTube/Vimeo embed (responsive 16:9 wrapper), an uploaded clip, and an
@@ -61,6 +61,22 @@ const InlineImage = Node.create({
   addAttributes() { return { src: { default: null }, alt: { default: "" } }; },
   parseHTML() { return [{ tag: "img[src]" }]; },
   renderHTML({ HTMLAttributes }) { return ["img", mergeAttributes(HTMLAttributes)]; },
+});
+
+// A JW-hosted video. Stored as an inert placeholder — `<div data-jw-media="id">`
+// — NOT a player embed or a <script>, so the article body needs no new
+// allowance in the strict sanitizer (lib/help-sanitize). The player is mounted
+// onto the placeholder at render time by lib/jw-embed.
+const JwVideo = Node.create({
+  name: "jwVideo",
+  group: "block",
+  atom: true,
+  selectable: true,
+  addAttributes() { return { mediaId: { default: null, parseHTML: (el) => el.getAttribute("data-jw-media"), renderHTML: (a) => ({ "data-jw-media": a.mediaId }) } }; },
+  parseHTML() { return [{ tag: "div[data-jw-media]" }]; },
+  renderHTML({ HTMLAttributes }) {
+    return ["div", mergeAttributes(HTMLAttributes, { class: "jw-video" })];
+  },
 });
 
 /** Convert a YouTube/Vimeo share URL into its embed URL, or null if unrecognized. */
@@ -125,7 +141,7 @@ function toDraft(a: Article): Draft {
 
 type Tab = "articles" | "categories" | "conversations";
 
-export default function HelpAdminClient() {
+export default function HelpAdminClient({ jw }: { jw: JwConfig }) {
   const [articles, setArticles] = useState<Article[]>([]);
   const [cats, setCats] = useState<HelpCategory[]>([]);
   const [editing, setEditing] = useState<Draft | null>(null);
@@ -138,6 +154,10 @@ export default function HelpAdminClient() {
   const [rewriting, setRewriting] = useState(false);
   /** Body HTML from before the last AI rewrite — lets the author back out of one. */
   const [preRewrite, setPreRewrite] = useState<string | null>(null);
+  /** JW upload: null when idle, otherwise the live phase for the progress row. */
+  const [upload, setUpload] = useState<{ phase: "starting" | "uploading" | "processing"; pct: number; via?: "direct" | "proxy" } | null>(null);
+  /** mediaId → transcode status, so a just-uploaded video can flip Processing → Ready. */
+  const [mediaStatus, setMediaStatus] = useState<Record<string, "processing" | "ready" | "failed">>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const inlineImgRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
@@ -151,10 +171,12 @@ export default function HelpAdminClient() {
   }, []);
 
   const editor = useEditor({
-    extensions: [StarterKit, Underline, VideoEmbed, VideoFile, InlineImage],
+    extensions: [StarterKit, Underline, VideoEmbed, VideoFile, InlineImage, JwVideo],
     content: "",
     immediatelyRender: false,
-    editorProps: { attributes: { class: "help-article-body", style: "min-height:240px;padding:12px;outline:none;font-size:14px;line-height:1.6" } },
+    // White editing surface with dark text, like the Title/Slug inputs — the
+    // body sits on the blue app background and was inheriting it.
+    editorProps: { attributes: { class: "help-article-body", style: "min-height:240px;padding:12px;outline:none;font-size:14px;line-height:1.6;background:#fff;color:#333" } },
   });
 
   const load = useCallback(async () => {
@@ -226,17 +248,6 @@ export default function HelpAdminClient() {
     editor?.chain().focus().insertContent({ type: "videoEmbed", attrs: { src: url } }).run();
   }
 
-  async function uploadVideo(file: File) {
-    setToast("Uploading video…");
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch("/api/help/articles/upload-video", { method: "POST", body: fd });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) { setToast(j.error ?? "Upload failed"); return; }
-    setToast(null);
-    editor?.chain().focus().insertContent({ type: "videoFile", attrs: { src: j.url } }).run();
-  }
-
   async function uploadPdf(file: File) {
     setToast("Uploading PDF…");
     const fd = new FormData();
@@ -246,6 +257,80 @@ export default function HelpAdminClient() {
     if (!res.ok) { setToast(j.error ?? "Upload failed"); return; }
     setToast(null);
     setEditing((e) => (e ? { ...e, pdf_url: j.url } : e));
+  }
+
+  /**
+   * Upload a video to JW straight from the editor.
+   *
+   * The server signs the media-create call (the JW secret never reaches the
+   * browser) and hands back JW's own pre-authorized S3 URL; the bytes then go
+   * BROWSER → JW directly, so a 500 MB screencast never passes through our app
+   * server. Whether that S3 bucket accepts a cross-origin PUT from our origin
+   * is JW's configuration and isn't documented, so an opaque failure retries
+   * once through our streaming proxy rather than dead-ending the author.
+   */
+  async function uploadVideoToJw(file: File) {
+    if (!jw.configured) { setToast("Video upload isn't configured yet — JW credentials are missing."); return; }
+    if (file.size > 2 * 1024 * 1024 * 1024) { setToast("Video must be under 2 GB."); return; }
+
+    setToast(null);
+    setUpload({ phase: "starting", pct: 0 });
+    try {
+      const initRes = await fetch("/api/help/jw/upload-init", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name, mimeType: file.type, size: file.size, title: editing?.title || file.name }),
+      });
+      const init = await initRes.json().catch(() => ({}));
+      if (!initRes.ok || !init.mediaId || !init.uploadLink) {
+        setUpload(null); setToast(init.error ?? "Couldn't start the upload."); return;
+      }
+
+      setUpload({ phase: "uploading", pct: 0, via: "direct" });
+      const onProgress = (pct: number) => setUpload((u) => (u ? { ...u, pct } : u));
+      let ok = await putWithProgress(init.uploadLink, file, onProgress);
+      if (!ok) {
+        // Direct PUT gave an opaque failure — almost always CORS on JW's bucket.
+        setUpload({ phase: "uploading", pct: 0, via: "proxy" });
+        ok = await putWithProgress(`/api/help/jw/upload-proxy?to=${encodeURIComponent(init.uploadLink)}`, file, onProgress, "POST");
+      }
+      if (!ok) { setUpload(null); setToast("The upload to JW failed. Nothing was added to the article."); return; }
+
+      // The id goes into the article NOW, so a finished upload can't be lost.
+      editor?.chain().focus().insertContent({ type: "jwVideo", attrs: { mediaId: init.mediaId } }).run();
+      setMediaStatus((m) => ({ ...m, [init.mediaId]: "processing" }));
+      setUpload({ phase: "processing", pct: 100 });
+      setToast("✓ Uploaded. JW is processing it — Save the article; it plays once processing finishes.");
+      void pollMediaStatus(init.mediaId);
+      window.setTimeout(() => setUpload((u) => (u?.phase === "processing" ? null : u)), 6000);
+    } catch {
+      setUpload(null);
+      setToast("The upload failed. Nothing was added to the article.");
+    }
+  }
+
+  /** Watch a freshly uploaded item until JW finishes transcoding (~a few minutes). */
+  async function pollMediaStatus(mediaId: string) {
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 10000));
+      try {
+        const r = await fetch(`/api/help/jw/status/${mediaId}`);
+        if (!r.ok) continue;
+        const { status } = await r.json();
+        if (status === "ready") { setMediaStatus((m) => ({ ...m, [mediaId]: "ready" })); return; }
+        if (status === "failed") { setMediaStatus((m) => ({ ...m, [mediaId]: "failed" })); return; }
+      } catch { /* keep waiting — a blip isn't a failure */ }
+    }
+  }
+
+  /** Paste an id for a video already in the JW account. */
+  function insertExistingMedia() {
+    const raw = prompt("Paste a JW media ID (8 characters):");
+    if (!raw) return;
+    const id = raw.trim();
+    if (!/^[A-Za-z0-9]{8}$/.test(id)) { setToast("That doesn't look like a JW media ID (8 letters/numbers)."); return; }
+    editor?.chain().focus().insertContent({ type: "jwVideo", attrs: { mediaId: id } }).run();
+    setMediaStatus((m) => ({ ...m, [id]: "ready" }));
+    setToast("✓ Video added.");
   }
 
   /**
@@ -415,12 +500,12 @@ export default function HelpAdminClient() {
                 {preview ? "← Back to editing" : "Preview as dealer"}
               </button>
             </div>
-            <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden" }}>
+            <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden", background: "#fff" }}>
               {preview ? (
                 // Renders through the exact sanitizer the dealer page uses, so
                 // anything the allowlist drops is visible here first.
-                <div className="help-article-body" style={{ padding: 14, fontSize: 14, lineHeight: 1.65, color: "#33363d", minHeight: 240, background: "#fff" }}
-                  dangerouslySetInnerHTML={{ __html: sanitizeHelpHtml(editor?.getHTML() ?? editing.body) }} />
+                <HelpArticleBody html={editor?.getHTML() ?? editing.body} jw={jw}
+                  style={{ padding: 14, fontSize: 14, lineHeight: 1.65, color: "#33363d", minHeight: 240, background: "#fff" }} />
               ) : (
                 <>
                   <div style={{ display: "flex", gap: 4, padding: 8, borderBottom: "1px solid #eee", flexWrap: "wrap" }}>
@@ -435,8 +520,17 @@ export default function HelpAdminClient() {
                     <button onClick={() => inlineImgRef.current?.click()} style={btn(false)} title="Place an image in the text">🖼 Image</button>
                     <input ref={inlineImgRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadImage(f, true); e.target.value = ""; }} />
                     <button onClick={embedVideo} style={btn(false)} title="Embed YouTube/Vimeo">▶ Embed</button>
-                    <button onClick={() => videoRef.current?.click()} style={btn(false)} title="Upload an MP4/WebM clip">⬆ Video</button>
-                    <input ref={videoRef} type="file" accept="video/mp4,video/webm" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadVideo(f); e.target.value = ""; }} />
+                    <button onClick={() => videoRef.current?.click()} disabled={!!upload || !jw.configured}
+                      style={{ ...btn(false), opacity: upload || !jw.configured ? 0.55 : 1, cursor: upload ? "wait" : jw.configured ? "pointer" : "not-allowed" }}
+                      title={jw.configured ? "Upload a video — it is hosted and streamed by JW Player" : "JW Player credentials aren't configured yet"}>
+                      ⬆ Upload video
+                    </button>
+                    <button onClick={insertExistingMedia} disabled={!jw.configured}
+                      style={{ ...btn(false), opacity: jw.configured ? 1 : 0.55 }} title="Paste the ID of a video already in JW Player">
+                      JW ID
+                    </button>
+                    <input ref={videoRef} type="file" accept="video/mp4,video/webm,video/quicktime" style={{ display: "none" }}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadVideoToJw(f); e.target.value = ""; }} />
                     <span style={{ width: 1, background: "#e0e0e0", margin: "0 2px" }} />
                     <button onClick={() => void rewriteBody()} disabled={rewriting} style={{ ...btn(false), opacity: rewriting ? 0.6 : 1, cursor: rewriting ? "wait" : "pointer" }} title="Clean up this text with AI">
                       {rewriting ? "✨ Rewriting…" : "✨ Rewrite"}
@@ -447,6 +541,29 @@ export default function HelpAdminClient() {
                       </button>
                     )}
                   </div>
+                  {upload && (
+                    <div style={{ padding: "10px 12px", borderBottom: "1px solid #eee", background: "#f7fbff" }}>
+                      <div style={{ fontSize: 12, color: "#33363d", marginBottom: 6 }}>
+                        {upload.phase === "starting" && "Preparing the upload…"}
+                        {upload.phase === "uploading" && `Uploading to JW Player… ${upload.pct}%${upload.via === "proxy" ? " (via the server)" : ""}`}
+                        {upload.phase === "processing" && "Uploaded — JW is processing it. Playable in a few minutes."}
+                      </div>
+                      <div style={{ height: 6, borderRadius: 3, background: "#e3eaf2", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${upload.phase === "starting" ? 3 : upload.pct}%`, background: "#1976d2", transition: "width 150ms" }} />
+                      </div>
+                    </div>
+                  )}
+                  {Object.entries(mediaStatus).filter(([, st]) => st !== "ready").length > 0 && !upload && (
+                    <div style={{ padding: "8px 12px", borderBottom: "1px solid #eee", background: "#fff8e1", fontSize: 12, color: "#7a5c00" }}>
+                      {Object.entries(mediaStatus).filter(([, st]) => st !== "ready").map(([id, st]) => (
+                        <div key={id}>
+                          {st === "failed"
+                            ? `Video ${id} failed to process in JW Player.`
+                            : `Video ${id} is still processing — it will play once JW finishes.`}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <EditorContent editor={editor} />
                 </>
               )}
@@ -512,6 +629,35 @@ export default function HelpAdminClient() {
       )}
     </div>
   );
+}
+
+/**
+ * PUT/POST a file with a progress callback. XHR rather than fetch because fetch
+ * still has no upload-progress event, and a 500 MB upload with no feedback
+ * looks like a hang.
+ *
+ * Returns false instead of throwing on failure: a cross-origin PUT that the
+ * target rejects surfaces as status 0 with no detail, which is exactly the case
+ * the proxy retry exists for, and it is not an exceptional condition here.
+ */
+function putWithProgress(
+  url: string,
+  file: File,
+  onProgress: (pct: number) => void,
+  method: "PUT" | "POST" = "PUT",
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    xhr.setRequestHeader("Content-Type", file.type);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => resolve(xhr.status >= 200 && xhr.status < 300);
+    xhr.onerror = () => resolve(false);
+    xhr.onabort = () => resolve(false);
+    xhr.send(file);
+  });
 }
 
 function bySort(a: Article, b: Article): number {

@@ -17,19 +17,28 @@ const SECURITY_HEADERS: Record<string, string> = {
     // block the widget. The SDK spawns a Web Worker from app.productfruits.com to
     // load its chunks, so worker-src must allow the domain (blob: alone caused
     // ChunkLoadError); media-src is needed for its video tutorials.
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.productfruits.com",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.productfruits.com",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.productfruits.com https://cdn.jwplayer.com https://*.jwpcdn.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.productfruits.com https://*.jwpcdn.com",
     "font-src 'self' https://fonts.gstatic.com https://*.productfruits.com",
     "img-src 'self' data: https: blob: https://*.productfruits.com",
-    "media-src 'self' blob: https://*.productfruits.com",
+    "media-src 'self' blob: data: https://*.productfruits.com https://cdn.jwplayer.com https://content.jwplatform.com https://*.jwplatform.com https://*.jwpcdn.com",
+    // JW Player (Help Center article video): the cloud player library and its
+    // chunks come from cdn.jwplayer.com / *.jwpcdn.com, media + manifests from
+    // the delivery CDN and content.jwplatform.com, analytics from jwpltx.com.
+    // api.jwplayer.com is in connect-src because the BROWSER uploads video bytes
+    // straight to the pre-authorized S3 URL JW returns. JW picks that bucket and
+    // its region, so the enumerate-each-region rule below can't cover it —
+    // connect-src (and ONLY connect-src, not img/frame/script) therefore allows
+    // *.amazonaws.com. If the direct PUT is refused anyway the upload retries
+    // through our own streaming proxy, so this is an optimisation, not the gate.
     // S3 hosts: the global `*.s3.amazonaws.com` wildcard matches `bucket.s3.amazonaws.com`
     // but NOT the regional `bucket.s3.{region}.amazonaws.com` form, so each region the app
     // fetches/frames must be enumerated explicitly. Buckets in play: dealer-addendums
     // (us-west-1 — print output PDFs); new-addendum-backgrounds / new-infosheet-backgrounds /
     // new-infobox-images / new-dealer-logos / addendum-product-images (us-east-1).
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com https://*.s3.us-east-1.amazonaws.com https://xpsshipper.com https://api.anthropic.com https://api.qrserver.com https://api.mapbox.com https://events.mapbox.com https://*.productfruits.com wss://*.productfruits.com",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com https://*.s3.us-east-1.amazonaws.com https://xpsshipper.com https://api.anthropic.com https://api.qrserver.com https://api.mapbox.com https://events.mapbox.com https://*.productfruits.com wss://*.productfruits.com https://cdn.jwplayer.com https://api.jwplayer.com https://content.jwplatform.com https://*.jwplatform.com https://*.jwpcdn.com https://jwpltx.com https://*.jwpltx.com https://*.amazonaws.com",
     "worker-src 'self' blob: https://*.productfruits.com",
-    "frame-src 'self' blob: https://etl2.dealeraddendums.com https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com https://*.s3.us-east-1.amazonaws.com https://*.productfruits.com",
+    "frame-src 'self' blob: https://etl2.dealeraddendums.com https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com https://*.s3.us-east-1.amazonaws.com https://*.productfruits.com https://cdn.jwplayer.com https://*.jwpcdn.com",
     "object-src blob:",
     "frame-ancestors 'none'",
     "base-uri 'self'",

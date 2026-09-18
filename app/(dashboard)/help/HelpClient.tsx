@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { sanitizeHelpHtml } from "@/lib/help-sanitize";
 import { htmlToText as stripHtml } from "@/lib/help-knowledge";
 import { useCollapsedSections, chevronStyle } from "@/lib/use-collapsed-sections";
 import { PageHeader } from "@/components/PageHeader";
 import StartTourButton from "@/components/StartTourButton";
+import HelpArticleBody, { type JwConfig } from "@/components/HelpArticleBody";
 import { isProvider } from "@/lib/inventory-providers";
 
 type Category = { id: string; name: string; sort_order: number };
@@ -41,7 +41,7 @@ const PROVIDER_TABS: ReadonlyArray<{ tab: HelpTab; provider: string }> = [
   { tab: "dealertrack", provider: "DealerTrack" },
 ];
 
-export default function HelpPage({ inventoryProvider }: { inventoryProvider: string | null }) {
+export default function HelpPage({ inventoryProvider, jw }: { inventoryProvider: string | null; jw: JwConfig }) {
   const [tab, setTab] = useState<HelpTab>("guides");
 
   const tabs = useMemo(() => {
@@ -73,14 +73,14 @@ export default function HelpPage({ inventoryProvider }: { inventoryProvider: str
       {/* White card so the (dark) guide/assistant text is readable on the dark
           dashboard background, matching other dashboard pages. */}
       <div className="card" style={{ padding: 24 }}>
-        {active === "guides" ? <Guides /> : active === "assistant" ? <Assistant /> : <DealerTrack />}
+        {active === "guides" ? <Guides jw={jw} /> : active === "assistant" ? <Assistant /> : <DealerTrack />}
       </div>
     </div>
   );
 }
 
 // ─── Guides (Part 1: published help_articles, browsed by category) ───────────
-function Guides() {
+function Guides({ jw }: { jw: JwConfig }) {
   const [cats, setCats] = useState<Category[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
@@ -145,10 +145,9 @@ function Guides() {
         <button onClick={() => setOpenId(null)} style={{ background: "none", border: "none", color: "#1976d2", cursor: "pointer", fontSize: 13, padding: 0, marginBottom: 14 }}>← All guides</button>
         <div style={{ fontSize: 12, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>{open.category}</div>
         <h2 style={{ fontSize: 22, fontWeight: 700, color: "#2a2b3c", margin: "0 0 16px" }}>{open.title}</h2>
-        {/* Rich HTML, stored verbatim and re-sanitized here against the strict
-            allowlist (lib/help-sanitize) — rendered as HTML, never escaped. */}
-        <div className="help-article-body" style={{ fontSize: 14, lineHeight: 1.65, color: "#33363d" }}
-          dangerouslySetInnerHTML={{ __html: sanitizeHelpHtml(open.body) }} />
+        {/* Rich HTML, stored verbatim and re-sanitized on render against the
+            strict allowlist; JW video placeholders become players. */}
+        <HelpArticleBody html={open.body} jw={jw} style={{ fontSize: 14, lineHeight: 1.65, color: "#33363d" }} />
         {open.image_urls?.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 18 }}>
             {open.image_urls.map((u) => (

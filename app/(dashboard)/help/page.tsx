@@ -6,6 +6,7 @@ import { resolveSessionProfile } from "@/lib/profile-session";
 import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import HelpClient from "./HelpClient";
+import { getJwPublicConfig } from "@/lib/jwplayer";
 
 export const metadata = { title: "Help — DA Platform" };
 
@@ -56,5 +57,6 @@ export default async function HelpPage() {
     inventoryProvider = data?.inventory_provider ?? null;
   }
 
-  return <HelpClient inventoryProvider={inventoryProvider} />;
+  // Site + player id only — the JW API secret never leaves the server.
+  return <HelpClient inventoryProvider={inventoryProvider} jw={getJwPublicConfig()} />;
 }

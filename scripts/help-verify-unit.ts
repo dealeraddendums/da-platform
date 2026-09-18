@@ -18,6 +18,7 @@ import { sanitizeHelpHtml } from "@/lib/help-sanitize";
 import { ownsConversation, listConversations, canReviewConversations } from "@/lib/help-conversations";
 import { buildDealerContext } from "@/lib/help-context";
 import { isProvider, providerLabel } from "@/lib/inventory-providers";
+import { isJwMediaId } from "@/lib/jwplayer";
 
 // ── tiny test runner ─────────────────────────────────────────────────────────
 const results: { name: string; ok: boolean; err?: string }[] = [];
@@ -167,6 +168,28 @@ await test("buildDealerContext: dealer is driven by claims, not a request id (B)
   assert.ok(calls.flatMap((c) => c.eqs).filter(([col]) => col === "dealer_id").every(([, v]) => v === "dealerB"));
   // structural: the signature exposes no request-supplied dealer-id parameter
   assert.equal(buildDealerContext.length, 1, "buildDealerContext must require only claims (admin is an injected default)");
+});
+
+// ── JW video placeholders survive the sanitizer ──────────────────────────────
+// The body stores an inert <div data-jw-media="id"> and the player is mounted
+// onto it client-side, so the sanitizer needs no new allowance for executable
+// markup — but it must not strip the placeholder either.
+await test("sanitize: keeps a JW video placeholder (id + class)", () => {
+  const out = sanitizeHelpHtml('<div data-jw-media="AbCd1234" class="jw-video"></div>');
+  assert.match(out, /data-jw-media="AbCd1234"/);
+  assert.match(out, /class="jw-video"/);
+});
+await test("sanitize: a placeholder cannot smuggle a handler or a script", () => {
+  const out = sanitizeHelpHtml('<div data-jw-media="AbCd1234" onclick="alert(1)"><script>alert(2)</script></div>');
+  assert.match(out, /data-jw-media="AbCd1234"/);
+  assert.doesNotMatch(out, /onclick/i);
+  assert.doesNotMatch(out, /<script/i);
+});
+await test("isJwMediaId: accepts JW's 8-char ids and rejects anything else", () => {
+  for (const ok of ["AbCd1234", "00000000", "zzzzzzzz"]) assert.equal(isJwMediaId(ok), true, ok);
+  for (const bad of ["", "abc", "AbCd12345", "AbCd-234", "../../etc", null, undefined, 12345678]) {
+    assert.equal(isJwMediaId(bad), false, String(bad));
+  }
 });
 
 // ── provider gating for provider-specific help tabs ──────────────────────────

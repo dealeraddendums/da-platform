@@ -184,6 +184,36 @@
 .help-article-body video { max-width: 100%; border-radius: 6px; margin: 8px 0; }
 .help-article-body a { color: #1976d2; }
 
+/* JW video placeholder. The authored body stores an inert
+   <div data-jw-media="id" class="jw-video"> and lib/jw-embed mounts the player
+   onto it at render time. These rules give it a 16:9 box so the article doesn't
+   reflow when the player appears, and a caption for the window before it does
+   (or if the media is still transcoding). */
+.help-article-body .jw-video {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin: 12px 0;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #2a2b3c;
+  overflow: hidden;
+}
+.help-article-body .jw-video:not([data-jw-mounted])::after {
+  content: "Video loading…";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
+}
+/* In the editor the placeholder is a block the author selects and deletes, so
+   label it for what it is rather than pretending to load. */
+.ProseMirror .jw-video::after { content: "▶ JW video"; }
+.ProseMirror .jw-video.ProseMirror-selectednode { outline: 2px solid #1976d2; }
+
 /* Product Fruits CLASSIC life-ring launcher: pin it bottom-LEFT if it ever
    appears. NOTE: the red floating circle live today is PF's AI-assistant
    launcher, which lives in a shadow root that page CSS cannot reach — that one
