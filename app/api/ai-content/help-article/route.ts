@@ -58,8 +58,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       messages: [{ role: "user", content: `${titleNote}Rewrite this article body:\n\n${html}` }],
     });
 
-    const first = message.content[0];
-    const text = first && first.type === "text" ? first.text : "";
+    // Join EVERY text block rather than reading content[0]: Sonnet emits a
+    // leading `thinking` block, so indexing the first block returns nothing and
+    // the rewrite looks like an outage.
+    const text = message.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("");
     const out = stripFences(text).trim();
     if (!out) return NextResponse.json({ error: "The rewrite came back empty — try again." }, { status: 502 });
 
