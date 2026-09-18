@@ -38,11 +38,24 @@ export default function StartTourButton({ tourId }: { tourId?: string | null }) 
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const w = window as PFWindow;
-    if (w.productFruitsIsReady && pfTours()) { setReady(true); return; }
-    const onReady = () => setReady(true);
-    window.addEventListener("productfruits_ready", onReady, { once: true });
-    return () => window.removeEventListener("productfruits_ready", onReady);
+    if (pfTours()) { setReady(true); return; }
+    // Both signals, because neither alone is reliable: `productfruits_ready`
+    // fires once and may already be gone by the time an article is opened, and
+    // `productFruitsIsReady` has been observed still false on a page where the
+    // tours API was live. Poll for the API itself and take whichever lands first.
+    const onReady = () => { if (pfTours()) setReady(true); };
+    window.addEventListener("productfruits_ready", onReady);
+    const poll = window.setInterval(() => {
+      if (pfTours()) { setReady(true); window.clearInterval(poll); }
+    }, 500);
+    // The SDK is loaded by the dashboard layout; if it hasn't appeared in 30s it
+    // isn't coming (blocked script, offline), and the button stays disabled.
+    const stop = window.setTimeout(() => window.clearInterval(poll), 30000);
+    return () => {
+      window.removeEventListener("productfruits_ready", onReady);
+      window.clearInterval(poll);
+      window.clearTimeout(stop);
+    };
   }, []);
 
   if (!tourId) return null;
