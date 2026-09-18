@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { sanitizeHelpHtml } from "@/lib/help-sanitize";
 import { htmlToText as stripHtml } from "@/lib/help-knowledge";
+import { useCollapsedSections, chevronStyle } from "@/lib/use-collapsed-sections";
 import { PageHeader } from "@/components/PageHeader";
 import StartTourButton from "@/components/StartTourButton";
 
@@ -64,6 +65,7 @@ function Guides() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
+  const { isCollapsed, toggle } = useCollapsedSections("da.help.collapsedCategories");
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +112,9 @@ function Guides() {
   }, [filtered, cats]);
 
   const open = articles.find((a) => a.id === openId) ?? null;
+  // While searching, every section is forced open — a hit hidden inside a
+  // collapsed category reads as "no results".
+  const searching = search.trim().length > 0;
 
   if (loading) return <div style={{ color: "#78828c", fontSize: 13, padding: 24 }}>Loading guides…</div>;
 
@@ -144,21 +149,33 @@ function Guides() {
       {sections.length === 0 ? (
         <div style={{ color: "#78828c", fontSize: 13 }}>No guides found.</div>
       ) : (
-        sections.map((s) => (
-          <div key={s.key} style={{ marginBottom: 22 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 8 }}>{s.name}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {s.items.map((a) => (
-                <button key={a.id} onClick={() => setOpenId(a.id)}
-                  style={{ textAlign: "left", padding: "12px 14px", borderRadius: 6, border: "1px solid #e0e0e0", background: "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 14, color: "#2a2b3c", fontWeight: 500, display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ flex: 1 }}>{a.title}</span>
-                  {a.product_fruits_tour_id && <Chip>Tour</Chip>}
-                  {a.pdf_url && <Chip>PDF</Chip>}
-                </button>
-              ))}
+        sections.map((s) => {
+          const expanded = searching || !isCollapsed(s.key);
+          return (
+            <div key={s.key} style={{ marginBottom: 18 }}>
+              {/* The guides list sits inside a white card, so contrast comes from
+                  navy-on-white here — white would be invisible. */}
+              <button onClick={() => toggle(s.key)} aria-expanded={expanded}
+                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", background: "none", border: "none", padding: "6px 2px", marginBottom: 6, cursor: "pointer", fontFamily: "inherit" }}>
+                <span aria-hidden style={{ ...chevronStyle(expanded), fontSize: 11, color: "#2a2b3c" }}>▶</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#2a2b3c", textTransform: "uppercase", letterSpacing: ".05em" }}>{s.name}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#55595c" }}>{s.items.length}</span>
+              </button>
+              {expanded && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {s.items.map((a) => (
+                    <button key={a.id} onClick={() => setOpenId(a.id)}
+                      style={{ textAlign: "left", padding: "12px 14px", borderRadius: 6, border: "1px solid #e0e0e0", background: "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 14, color: "#2a2b3c", fontWeight: 500, display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ flex: 1 }}>{a.title}</span>
+                      {a.product_fruits_tour_id && <Chip>Tour</Chip>}
+                      {a.pdf_url && <Chip>PDF</Chip>}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        ))
+          );
+        })
       )}
     </div>
   );

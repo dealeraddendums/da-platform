@@ -8,6 +8,7 @@ import Underline from "@tiptap/extension-underline";
 import HelpConversationsClient from "@/components/HelpConversationsClient";
 import HelpCategoriesClient, { type HelpCategory } from "@/components/HelpCategoriesClient";
 import { sanitizeHelpHtml } from "@/lib/help-sanitize";
+import { useCollapsedSections, chevronStyle } from "@/lib/use-collapsed-sections";
 
 // ── Media blocks ────────────────────────────────────────────────────────────
 // A YouTube/Vimeo embed (responsive 16:9 wrapper), an uploaded clip, and an
@@ -133,6 +134,10 @@ export default function HelpAdminClient() {
   const [preview, setPreview] = useState(false);
   const [tab, setTab] = useState<Tab>("articles");
   const [initialConvId, setInitialConvId] = useState<string | null>(null);
+  const { isCollapsed, toggle } = useCollapsedSections("da.helpAdmin.collapsedCategories");
+  const [rewriting, setRewriting] = useState(false);
+  /** Body HTML from before the last AI rewrite — lets the author back out of one. */
+  const [preRewrite, setPreRewrite] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const inlineImgRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
@@ -187,6 +192,7 @@ export default function HelpAdminClient() {
   function startEdit(d: Draft) {
     setEditing(d);
     setPreview(false);
+    setPreRewrite(null);
     editor?.commands.setContent(d.body || "");
   }
 
@@ -242,6 +248,41 @@ export default function HelpAdminClient() {
     setEditing((e) => (e ? { ...e, pdf_url: j.url } : e));
   }
 
+  /**
+   * Clean up the body with Claude. The result lands IN the editor for review —
+   * nothing is persisted until Save — and the previous HTML is held so a rewrite
+   * the author doesn't like is one click away from undone.
+   */
+  async function rewriteBody() {
+    if (!editing || rewriting) return;
+    const current = editor?.getHTML() ?? editing.body;
+    setRewriting(true); setToast(null);
+    try {
+      const res = await fetch("/api/ai-content/help-article", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: current, title: editing.title }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.html) { setToast(j.error ?? "Rewrite failed — your text is unchanged."); return; }
+      setPreRewrite(current);
+      // setContent parses against the editor schema, so anything it doesn't
+      // support is dropped here rather than reaching a dealer.
+      editor?.commands.setContent(j.html);
+      setToast("✓ Rewritten — read it over, then Save (or Undo rewrite).");
+    } catch {
+      setToast("Rewrite failed — your text is unchanged.");
+    } finally {
+      setRewriting(false);
+    }
+  }
+
+  function undoRewrite() {
+    if (preRewrite === null) return;
+    editor?.commands.setContent(preRewrite);
+    setPreRewrite(null);
+    setToast("Rewrite undone.");
+  }
+
   async function save() {
     if (!editing) return;
     if (!editing.category_id) { setToast("Pick a category"); return; }
@@ -292,7 +333,7 @@ export default function HelpAdminClient() {
       ) : (
       <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#2a2b3c", margin: 0 }}>Help Center — Articles</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#fff", margin: 0 }}>Help Center — Articles</h1>
         {!editing && (
           <button onClick={startNew} disabled={cats.length === 0}
             style={{ ...btn(cats.length > 0), padding: "8px 14px", fontWeight: 600, opacity: cats.length ? 1 : 0.5, cursor: cats.length ? "pointer" : "default" }}>
@@ -309,31 +350,41 @@ export default function HelpAdminClient() {
 
       {!editing ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          {grouped.map((g) => (
-            <div key={g.key}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em" }}>{g.name}</span>
-                {!g.published && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#eceff1", color: "#607d8b" }}>SECTION HIDDEN</span>}
-                <span style={{ fontSize: 12, color: "#b0b6bb" }}>{g.items.length}</span>
+          {grouped.map((g) => {
+            const expanded = !isCollapsed(g.key);
+            return (
+              <div key={g.key}>
+                {/* This list renders straight onto the blue app background
+                    (--bg-app #3a6897), so the section title is white — the muted
+                    grey used inside white cards is unreadable here. */}
+                <button onClick={() => toggle(g.key)} aria-expanded={expanded}
+                  style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", background: "none", border: "none", padding: "4px 2px", marginBottom: 8, cursor: "pointer", fontFamily: "inherit" }}>
+                  <span aria-hidden style={{ ...chevronStyle(expanded), fontSize: 11, color: "#fff" }}>▶</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", textTransform: "uppercase", letterSpacing: ".05em" }}>{g.name}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.75)" }}>{g.items.length}</span>
+                  {!g.published && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "rgba(255,255,255,0.18)", color: "#fff" }}>SECTION HIDDEN</span>}
+                </button>
+                {expanded && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {g.items.map((a) => (
+                      <button key={a.id} onClick={() => startEdit(toDraft(a))} style={{ textAlign: "left", padding: "10px 12px", border: "1px solid #e0e0e0", borderRadius: 6, background: "#fff", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 14, color: "#2a2b3c", fontWeight: 500, flex: 1 }}>{a.title}</span>
+                        {a.product_fruits_tour_id && <Tag>Tour</Tag>}
+                        {a.pdf_url && <Tag>PDF</Tag>}
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: a.published ? "#e8f5e9" : "#fff3e0", color: a.published ? "#2e7d32" : "#e65100" }}>{a.published ? "Published" : "Draft"}</span>
+                      </button>
+                    ))}
+                    {g.items.length === 0 && <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", padding: "4px 2px" }}>No articles yet.</div>}
+                  </div>
+                )}
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {g.items.map((a) => (
-                  <button key={a.id} onClick={() => startEdit(toDraft(a))} style={{ textAlign: "left", padding: "10px 12px", border: "1px solid #e0e0e0", borderRadius: 6, background: "#fff", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontSize: 14, color: "#2a2b3c", fontWeight: 500, flex: 1 }}>{a.title}</span>
-                    {a.product_fruits_tour_id && <Tag>Tour</Tag>}
-                    {a.pdf_url && <Tag>PDF</Tag>}
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: a.published ? "#e8f5e9" : "#fff3e0", color: a.published ? "#2e7d32" : "#e65100" }}>{a.published ? "Published" : "Draft"}</span>
-                  </button>
-                ))}
-                {g.items.length === 0 && <div style={{ fontSize: 13, color: "#b0b6bb", padding: "4px 2px" }}>No articles yet.</div>}
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {articles.length === 0 && cats.length > 0 && <div style={{ color: "#78828c", fontSize: 13 }}>No articles yet.</div>}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <button onClick={() => setEditing(null)} style={{ alignSelf: "flex-start", background: "none", border: "none", color: "#1976d2", cursor: "pointer", fontSize: 13, padding: 0 }}>← Back to list</button>
+          <button onClick={() => setEditing(null)} style={{ alignSelf: "flex-start", background: "none", border: "none", color: "#fff", fontWeight: 600, cursor: "pointer", fontSize: 13, padding: 0, textDecoration: "underline" }}>← Back to list</button>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <Field label="Title"><input value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} style={inp} /></Field>
             <Field label="Category">
@@ -350,7 +401,7 @@ export default function HelpAdminClient() {
             </Field>
             <Field label="Sort order (within the category)"><input type="number" value={editing.sort_order} onChange={(e) => setEditing({ ...editing, sort_order: Number(e.target.value) })} style={inp} /></Field>
             <Field label="Published">
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, paddingTop: 6 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, paddingTop: 6, color: "#fff" }}>
                 <input type="checkbox" checked={editing.published} onChange={(e) => setEditing({ ...editing, published: e.target.checked })} /> Visible to dealers
               </label>
             </Field>
@@ -359,7 +410,7 @@ export default function HelpAdminClient() {
           {/* Rich text toolbar + editor */}
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <div style={{ fontSize: 12, color: "#55595c" }}>Body</div>
+              <div style={fieldLabel}>Body</div>
               <button onClick={() => setPreview((p) => !p)} style={{ ...btn(preview), fontSize: 12 }}>
                 {preview ? "← Back to editing" : "Preview as dealer"}
               </button>
@@ -386,6 +437,15 @@ export default function HelpAdminClient() {
                     <button onClick={embedVideo} style={btn(false)} title="Embed YouTube/Vimeo">▶ Embed</button>
                     <button onClick={() => videoRef.current?.click()} style={btn(false)} title="Upload an MP4/WebM clip">⬆ Video</button>
                     <input ref={videoRef} type="file" accept="video/mp4,video/webm" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadVideo(f); e.target.value = ""; }} />
+                    <span style={{ width: 1, background: "#e0e0e0", margin: "0 2px" }} />
+                    <button onClick={() => void rewriteBody()} disabled={rewriting} style={{ ...btn(false), opacity: rewriting ? 0.6 : 1, cursor: rewriting ? "wait" : "pointer" }} title="Clean up this text with AI">
+                      {rewriting ? "✨ Rewriting…" : "✨ Rewrite"}
+                    </button>
+                    {preRewrite !== null && (
+                      <button onClick={undoRewrite} style={{ ...btn(false), color: "#c62828", borderColor: "#ffcdd2" }} title="Put the previous text back">
+                        ↩ Undo rewrite
+                      </button>
+                    )}
                   </div>
                   <EditorContent editor={editor} />
                 </>
@@ -395,7 +455,7 @@ export default function HelpAdminClient() {
 
           {/* Image attachments (shown as a strip under the article) */}
           <div>
-            <div style={{ fontSize: 12, color: "#55595c", marginBottom: 4 }}>Photos (shown below the article)</div>
+            <div style={fieldLabel}>Photos (shown below the article)</div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
               {editing.image_urls.map((u) => (
                 <div key={u} style={{ position: "relative" }}>
@@ -412,7 +472,7 @@ export default function HelpAdminClient() {
 
           {/* PDF attachment */}
           <div>
-            <div style={{ fontSize: 12, color: "#55595c", marginBottom: 4 }}>PDF (optional — dealers can read or download it)</div>
+            <div style={fieldLabel}>PDF (optional — dealers can read or download it)</div>
             {editing.pdf_url ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", border: "1px solid #e0e0e0", borderRadius: 6, background: "#fff", maxWidth: 560 }}>
                 <span style={{ fontSize: 13, color: "#2a2b3c", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -436,7 +496,7 @@ export default function HelpAdminClient() {
                 onChange={(e) => setEditing({ ...editing, product_fruits_tour_id: e.target.value })}
                 placeholder="e.g. 12345" style={{ ...inp, maxWidth: 260 }} />
             </Field>
-            <div style={{ fontSize: 12, color: "#78828c", marginTop: 4 }}>
+            <div style={{ ...helpText, marginTop: 4 }}>
               Adds a <strong>Start tour</strong> button to the article that launches this tour in the app.
               Find the ID in Product Fruits → Tours (leave blank for no tour).
             </div>
@@ -464,5 +524,11 @@ function Tag({ children }: { children: React.ReactNode }) {
 
 const inp: React.CSSProperties = { width: "100%", padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" };
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div><div style={{ fontSize: 12, color: "#55595c", marginBottom: 4 }}>{label}</div>{children}</div>;
+  return <div><div style={fieldLabel}>{label}</div>{children}</div>;
 }
+
+// The editor form renders straight onto the blue app background (--bg-app
+// #3a6897), so labels and helper text are white — the muted greys used inside
+// white cards are unreadable here. Same treatment as the category titles.
+const fieldLabel: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "#fff", marginBottom: 4 };
+const helpText: React.CSSProperties = { fontSize: 12, color: "rgba(255,255,255,0.8)" };

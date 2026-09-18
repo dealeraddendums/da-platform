@@ -85,8 +85,8 @@ export default function HelpCategoriesClient({
 
   return (
     <div>
-      <h1 style={{ fontSize: 20, fontWeight: 700, color: "#2a2b3c", margin: "0 0 6px" }}>Help Center — Categories</h1>
-      <p style={{ fontSize: 13, color: "#78828c", margin: "0 0 16px" }}>
+      <h1 style={{ fontSize: 20, fontWeight: 700, color: "#fff", margin: "0 0 6px" }}>Help Center — Categories</h1>
+      <p style={{ fontSize: 13, color: "rgba(255,255,255,0.8)", margin: "0 0 16px" }}>
         Dealers browse the Help Guides tab by these sections, in this order. Unpublish a category to hide
         the whole section while you write it.
       </p>
