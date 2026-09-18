@@ -2,17 +2,26 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { sanitizeHelpHtml } from "@/lib/help-sanitize";
+import { htmlToText as stripHtml } from "@/lib/help-knowledge";
 import { PageHeader } from "@/components/PageHeader";
+import StartTourButton from "@/components/StartTourButton";
 
 export const dynamic = "force-dynamic";
+
+type Category = { id: string; name: string; sort_order: number };
 
 type Article = {
   id: string;
   slug: string;
+  /** Denormalized category name (kept in sync by the API) — shown on the article. */
   category: string;
+  /** The authoritative grouping key. */
+  category_id: string | null;
   title: string;
   body: string;
   image_urls: string[];
+  pdf_url: string | null;
+  product_fruits_tour_id: string | null;
   updated_at: string;
 };
 
@@ -48,8 +57,9 @@ export default function HelpPage() {
   );
 }
 
-// ─── Guides (Part 1: published help_articles) ────────────────────────────────
+// ─── Guides (Part 1: published help_articles, browsed by category) ───────────
 function Guides() {
+  const [cats, setCats] = useState<Category[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -57,9 +67,15 @@ function Guides() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/help/articles")
-      .then((r) => (r.ok ? r.json() : { data: [] }))
-      .then((d: { data: Article[] }) => { if (!cancelled) setArticles(d.data ?? []); })
+    Promise.all([
+      fetch("/api/help/categories").then((r) => (r.ok ? r.json() : { data: [] })),
+      fetch("/api/help/articles").then((r) => (r.ok ? r.json() : { data: [] })),
+    ])
+      .then(([c, a]: [{ data: Category[] }, { data: Article[] }]) => {
+        if (cancelled) return;
+        setCats(c.data ?? []);
+        setArticles(a.data ?? []);
+      })
       .catch((e) => console.error("[/help] load failed:", e))
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -68,14 +84,30 @@ function Guides() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return articles;
-    return articles.filter((a) => a.title.toLowerCase().includes(q) || a.body.toLowerCase().includes(q) || a.category.toLowerCase().includes(q));
+    return articles.filter((a) =>
+      a.title.toLowerCase().includes(q) ||
+      stripHtml(a.body).toLowerCase().includes(q) ||
+      (a.category ?? "").toLowerCase().includes(q));
   }, [articles, search]);
 
-  const grouped = useMemo(() => {
-    const m = new Map<string, Article[]>();
-    for (const a of filtered) { (m.get(a.category) ?? m.set(a.category, []).get(a.category))!.push(a); }
-    return Array.from(m.entries());
-  }, [filtered]);
+  // Sections follow the CATEGORY order the support team set — not alphabetical,
+  // not whatever order the rows came back in. Articles with no category (a data
+  // gap, not a normal state) fall into a trailing "More" section so published
+  // content is never silently invisible.
+  const sections = useMemo(() => {
+    const byCat = new Map<string, Article[]>();
+    const orphans: Article[] = [];
+    for (const a of filtered) {
+      if (!a.category_id) { orphans.push(a); continue; }
+      const list = byCat.get(a.category_id);
+      if (list) list.push(a); else byCat.set(a.category_id, [a]);
+    }
+    const out = cats
+      .map((c) => ({ key: c.id, name: c.name, items: byCat.get(c.id) ?? [] }))
+      .filter((s) => s.items.length > 0);
+    if (orphans.length) out.push({ key: "__more", name: "More", items: orphans });
+    return out;
+  }, [filtered, cats]);
 
   const open = articles.find((a) => a.id === openId) ?? null;
 
@@ -87,7 +119,9 @@ function Guides() {
         <button onClick={() => setOpenId(null)} style={{ background: "none", border: "none", color: "#1976d2", cursor: "pointer", fontSize: 13, padding: 0, marginBottom: 14 }}>← All guides</button>
         <div style={{ fontSize: 12, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>{open.category}</div>
         <h2 style={{ fontSize: 22, fontWeight: 700, color: "#2a2b3c", margin: "0 0 16px" }}>{open.title}</h2>
-        <div style={{ fontSize: 14, lineHeight: 1.65, color: "#33363d" }}
+        {/* Rich HTML, stored verbatim and re-sanitized here against the strict
+            allowlist (lib/help-sanitize) — rendered as HTML, never escaped. */}
+        <div className="help-article-body" style={{ fontSize: 14, lineHeight: 1.65, color: "#33363d" }}
           dangerouslySetInnerHTML={{ __html: sanitizeHelpHtml(open.body) }} />
         {open.image_urls?.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 18 }}>
@@ -97,6 +131,8 @@ function Guides() {
             ))}
           </div>
         )}
+        {open.pdf_url && <PdfAttachment url={open.pdf_url} />}
+        <StartTourButton tourId={open.product_fruits_tour_id} />
       </div>
     );
   }
@@ -105,23 +141,48 @@ function Guides() {
     <div>
       <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search guides…"
         style={{ width: "100%", maxWidth: 420, padding: "9px 12px", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 13, marginBottom: 18, fontFamily: "inherit" }} />
-      {grouped.length === 0 ? (
+      {sections.length === 0 ? (
         <div style={{ color: "#78828c", fontSize: 13 }}>No guides found.</div>
       ) : (
-        grouped.map(([category, arts]) => (
-          <div key={category} style={{ marginBottom: 22 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 8 }}>{category}</div>
+        sections.map((s) => (
+          <div key={s.key} style={{ marginBottom: 22 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#78828c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 8 }}>{s.name}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {arts.map((a) => (
+              {s.items.map((a) => (
                 <button key={a.id} onClick={() => setOpenId(a.id)}
-                  style={{ textAlign: "left", padding: "12px 14px", borderRadius: 6, border: "1px solid #e0e0e0", background: "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 14, color: "#2a2b3c", fontWeight: 500 }}>
-                  {a.title}
+                  style={{ textAlign: "left", padding: "12px 14px", borderRadius: 6, border: "1px solid #e0e0e0", background: "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 14, color: "#2a2b3c", fontWeight: 500, display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ flex: 1 }}>{a.title}</span>
+                  {a.product_fruits_tour_id && <Chip>Tour</Chip>}
+                  {a.pdf_url && <Chip>PDF</Chip>}
                 </button>
               ))}
             </div>
           </div>
         ))
       )}
+    </div>
+  );
+}
+
+function Chip({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", padding: "2px 7px", borderRadius: 10, background: "#f1f3f5", color: "#78828c" }}>
+      {children}
+    </span>
+  );
+}
+
+/** Attached document — always offer the file, and preview it inline where the browser can. */
+function PdfAttachment({ url }: { url: string }) {
+  const name = decodeURIComponent(url.split("/").pop() ?? "document.pdf").replace(/^\d{10,}_/, "");
+  return (
+    <div style={{ marginTop: 20, border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #eee", background: "#fafafa" }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#2a2b3c", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+        <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: "#1976d2", textDecoration: "none", fontWeight: 600 }}>Open</a>
+        <a href={url} download style={{ fontSize: 13, color: "#1976d2", textDecoration: "none", fontWeight: 600 }}>Download</a>
+      </div>
+      <iframe src={url} title={name} style={{ width: "100%", height: 520, border: "none", display: "block", background: "#fff" }} />
     </div>
   );
 }

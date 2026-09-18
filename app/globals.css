@@ -166,6 +166,24 @@
 .description-html ol    { margin: 0; padding-left: 1.2em; list-style: decimal outside; }
 .description-html li { margin: 0; padding: 0; }
 
+/* Help Center article body — on-screen render of sanitizeHelpHtml output
+   (/help article view and the CMS editor preview). Same reason as
+   .description-html above: Tailwind preflight zeroes ul/ol margin+padding and
+   sets list-style:none, so authored bullets/numbers would vanish. UNLAYERED so
+   they win over preflight. Also keeps inline images/video inside the column. */
+.help-article-body p { margin: 0 0 12px; }
+.help-article-body p:empty { min-height: 1em; }
+.help-article-body h2 { font-size: 18px; font-weight: 700; color: #2a2b3c; margin: 20px 0 8px; }
+.help-article-body h3 { font-size: 15px; font-weight: 700; color: #2a2b3c; margin: 16px 0 6px; }
+.help-article-body ul { margin: 0 0 12px; padding-left: 1.4em; list-style: disc outside; }
+.help-article-body ul ul { margin: 0; list-style: circle outside; }
+.help-article-body ol { margin: 0 0 12px; padding-left: 1.4em; list-style: decimal outside; }
+.help-article-body li { margin: 0 0 4px; padding: 0; }
+.help-article-body img { max-width: 100%; height: auto; border-radius: 6px; border: 1px solid #eee; margin: 8px 0; }
+.help-article-body iframe,
+.help-article-body video { max-width: 100%; border-radius: 6px; margin: 8px 0; }
+.help-article-body a { color: #1976d2; }
+
 /* Product Fruits CLASSIC life-ring launcher: pin it bottom-LEFT if it ever
    appears. NOTE: the red floating circle live today is PF's AI-assistant
    launcher, which lives in a shadow root that page CSS cannot reach — that one

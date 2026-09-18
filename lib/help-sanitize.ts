@@ -5,6 +5,7 @@
 //   • <video>/<source> whose src is our own S3 help/ prefix (uploaded clips)
 // Anything else (other iframes, foreign video hosts, javascript: URIs) is dropped.
 import DOMPurify from "isomorphic-dompurify";
+import { isHelpMediaUrl } from "@/lib/help-media";
 
 const ALLOWED_IFRAME_HOSTS = new Set([
   "www.youtube.com",
@@ -27,10 +28,11 @@ function isAllowedIframeSrc(src: string): boolean {
   }
 }
 
-// Uploaded clips live under the help/ prefix of our public-read bucket only.
-const VIDEO_SRC_RE = /^https:\/\/new-infobox-images\.s3\.[a-z0-9-]+\.amazonaws\.com\/help\//;
+// Uploaded clips live under the help/ prefix of our public-read bucket only —
+// the same rule the article write path applies to pdf_url, so it lives in one
+// dependency-free place (lib/help-media).
 function isAllowedVideoSrc(src: string): boolean {
-  return VIDEO_SRC_RE.test(src);
+  return isHelpMediaUrl(src);
 }
 
 // Register the element hook ONCE at module load. A per-call addHook/removeHook
