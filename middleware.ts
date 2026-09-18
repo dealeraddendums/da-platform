@@ -21,7 +21,7 @@ const SECURITY_HEADERS: Record<string, string> = {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.productfruits.com https://*.jwpcdn.com",
     "font-src 'self' https://fonts.gstatic.com https://*.productfruits.com",
     "img-src 'self' data: https: blob: https://*.productfruits.com",
-    "media-src 'self' blob: data: https://*.productfruits.com https://cdn.jwplayer.com https://*.jwplayer.com https://content.jwplatform.com https://*.jwplatform.com https://*.jwpcdn.com https://*.jwpsrv.com",
+    "media-src 'self' blob: data: https://*.productfruits.com https://cdn.jwplayer.com https://*.jwplayer.com https://content.jwplatform.com https://*.jwplatform.com https://*.jwpcdn.com https://*.jwpsrv.com https://*.s3.amazonaws.com https://s3.amazonaws.com https://*.s3.us-west-1.amazonaws.com https://*.s3.us-east-1.amazonaws.com",
     // JW Player (Help Center article video). The host list is NOT guesswork —
     // it is what a real player actually requested, read off the network log
     // while playing an uploaded video:
@@ -31,6 +31,12 @@ const SECURITY_HEADERS: Record<string, string> = {
     //   *.jwpsrv.com              THE VIDEO SEGMENTS (videos-cloudfront-usp…) and
     //                             the thumbnail strips (assets-jpcust…)
     //   prd.jwpltx.com            playback analytics pings
+    // media-src also lists our S3 buckets: 4 of the videos already in the JW
+    // account are hosting_type "external" and point at s3.amazonaws.com/
+    // addendum-videos (the pre-JW library). JW serves those straight from S3, so
+    // pasting one of their ids into an article renders a player that errors
+    // without this. Enumerated, not the blanket *.amazonaws.com used for the
+    // upload target — these buckets are ours and are known.
     // The first cut allowed only cdn.jwplayer.com and *.jwpcdn.com; the player
     // loaded, fetched its manifest, and then silently failed to play because the
     // segments live on a different domain entirely.
