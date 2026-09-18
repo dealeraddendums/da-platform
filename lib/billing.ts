@@ -157,7 +157,16 @@ export async function customerExists(customerId: string | null | undefined): Pro
   return (await getCustomer(customerId)) != null;
 }
 
-export interface BillingCustomerMatch { id: string; name?: string; company?: string; email?: string; }
+export interface BillingCustomerMatch {
+  id: string;
+  name?: string;
+  company?: string;
+  email?: string;
+  /** The dealer/group `internal_id` da-billing has stored on this customer,
+   *  when one was ever stamped. The stable resolution key — prefer it over a
+   *  name match, which drifts on rename. */
+  internalId?: string;
+}
 
 /**
  * Soft-match lookup: active da-billing customers whose company/name/email contain
@@ -189,6 +198,10 @@ export interface BillingCustomerUpdate {
   name?: string;
   company?: string;
   email?: string;
+  /** Stamp the dealer/group `internal_id` so da-billing resolves this customer
+   *  by id instead of by name. da-billing ignores a blank/whitespace value
+   *  rather than erasing a stored one. */
+  internalId?: string;
   phone?: string;
   address?: string;
   city?: string;

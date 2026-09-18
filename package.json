@@ -21,7 +21,8 @@
     "export:legacy": "npx tsx scripts/export-legacy.ts",
     "test:options-filter": "tsx scripts/options-filter-verify-unit.ts",
     "test:enrichment": "tsx scripts/enrichment-verify-unit.ts",
-    "test:product-html": "tsx scripts/product-html-normalize-unit.ts"
+    "test:product-html": "tsx scripts/product-html-normalize-unit.ts",
+    "test:dealer-billing-customer": "tsx scripts/dealer-billing-customer-verify-unit.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

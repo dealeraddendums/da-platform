@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { fetchLabelPricingEntries } from "@/lib/label-products";
+import { ensureDealerCustomer } from "@/lib/dealer-billing-customer";
 
 // DA Platform SKU -> da-billing labelType slug. da-billing's price
 // resolver keys off these slugs (size + finish), not our SKUs or the
@@ -235,6 +236,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     billingCustomerKey = grp?.billing_customer_id ?? null;
   } else {
     billingCustomerKey = dealerCfg?.billing_customer_id ?? null;
+    // A NULL billing_customer_id means "not linked yet", NOT "no billing".
+    // Resolve it here — link to the dealer's existing da-billing customer if
+    // one exists, mint only as a last resort — so nothing downstream can read
+    // the empty pointer as "no template" and create a duplicate customer
+    // (AutoNation Audi Fremont, 2026-09-18). See lib/dealer-billing-customer.ts.
+    if (!billingCustomerKey && dealerCfg && dealerId) {
+      const resolved = await ensureDealerCustomer(admin, {
+        id: dealerId,
+        name: dealerCfg.name ?? null,
+        internal_id: dealerCfg.internal_id ?? null,
+        billing_customer_id: null,
+        primary_contact: dealerCfg.primary_contact ?? null,
+        primary_contact_email: dealerCfg.primary_contact_email ?? null,
+      });
+      billingCustomerKey = resolved.customerId;
+      if (!billingCustomerKey) {
+        console.error(
+          `[orders/labels] could not resolve a da-billing customer for dealer ${dealerId}: ${resolved.error ?? "unknown"}`,
+        );
+      }
+    }
   }
 
   // Write initial record. Cast around the registered Database type because
@@ -365,31 +387,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // Case 3: dealer is in a group but has no active template (their
         // subscription moved to the group template). Generate a one-time
         // invoice to the dealer.
-        let invoiceCustomerId = dealerCfg.billing_customer_id;
+        // billingCustomerKey was resolved above (link-don't-duplicate): an
+        // existing customer when the dealer has one, a freshly created one
+        // only when they genuinely have none. This branch must NEVER mint a
+        // customer of its own — that blind create is what produced the
+        // AutoNation Audi Fremont duplicate on 2026-09-18.
+        const invoiceCustomerId = billingCustomerKey;
         if (!invoiceCustomerId) {
-          // Create a minimal customer record first.
-          const createRes = await fetch(`${BILLING_BASE}/customers`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-API-Key': billingKey },
-            body: JSON.stringify({
-              name: dealerCfg.primary_contact ?? dealerCfg.name,
-              company: dealerCfg.name,
-              email: dealerCfg.primary_contact_email ?? '',
-              isGroup: false,
-            }),
-          });
-          if (!createRes.ok) {
-            const errText = await createRes.text().catch(() => '');
-            console.error('[orders/labels] one-time invoice customer create failed:', createRes.status, errText);
-            billingStatus = 'failed';
-            await admin.from('label_orders').update({ billing_status: 'failed' }).eq('id', orderId);
-          } else {
-            const created = await createRes.json() as { customer?: { id?: string }; id?: string };
-            invoiceCustomerId = created.customer?.id ?? created.id ?? null;
-            if (invoiceCustomerId) {
-              await admin.from('dealers').update({ billing_customer_id: invoiceCustomerId }).eq('id', dealerId);
-            }
-          }
+          console.error('[orders/labels] no da-billing customer for dealer', dealerId, '— cannot raise the one-time label invoice');
+          billingStatus = 'failed';
+          await admin.from('label_orders').update({ billing_status: 'failed' }).eq('id', orderId);
         }
 
         if (invoiceCustomerId) {
