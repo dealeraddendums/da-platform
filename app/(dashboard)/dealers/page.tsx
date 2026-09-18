@@ -34,6 +34,11 @@ export default async function DealersPage() {
     if (ghostCtx?.group_id && !ghostCtx.dealer_text_id) {
       return <GroupDealerList groupId={ghostCtx.group_id} />;
     }
+    // Dealer ghost: the mirror image of the above. The session is confined to
+    // one dealer, so the platform-wide list (with its Ghost / Login actions on
+    // every OTHER dealer) is out of scope — the nav doesn't offer it in dealer
+    // ghost, but a direct URL used to render it anyway.
+    if (ghostCtx?.dealer_text_id) redirect("/dashboard");
     return <DealerList role={role} />;
   }
 

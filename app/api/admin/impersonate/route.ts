@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
+import { requireGhostGroup } from "@/lib/ghost-containment";
 
 /**
  * POST /api/admin/impersonate
@@ -29,11 +30,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("name, dealer_id")
+    .select("name, dealer_id, group_id")
     .eq("dealer_id", dealer_id)
     .single();
 
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
+
+  // A group-ghost session may log into a MEMBER of the ghosted group (that is
+  // the group_admin's own switch-into-a-dealer, reached from the group page) but
+  // nothing outside it. A dealer ghost has no group scope, so it is refused.
+  const ghostBlocked = requireGhostGroup(
+    claims,
+    (dealer as { group_id: string | null }).group_id,
+    "log in as a dealer outside the account you are operating as"
+  );
+  if (ghostBlocked) return ghostBlocked;
 
   const { data: profileRows } = await admin
     .from("profiles")

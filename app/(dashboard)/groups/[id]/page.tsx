@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
+import { readGhostContext } from "@/lib/ghost-containment";
 import type { GroupRow } from "@/lib/db";
 import GroupProfileCard, { GroupDealers } from "@/components/GroupProfileCard";
 import GroupOptionsPanel from "@/components/GroupOptionsPanel";
@@ -31,6 +32,18 @@ export default async function GroupPage({ params }: Props) {
   if (isGroupAdmin && profile?.group_id !== params.id) {
     redirect(`/groups/${profile?.group_id ?? ""}`);
   }
+
+  // Ghost containment: a group ghost is confined to the group it ghosted —
+  // another group's page is out of scope and bounces back, exactly as a real
+  // group_admin's does above. A dealer ghost has no group page at all. In a
+  // ghost session the session-level controls (Login as this group, Delete
+  // Group) and the "← All Groups" link back to the platform list are hidden;
+  // the APIs behind them refuse a ghost session too.
+  const ghost = isSuperAdmin ? readGhostContext() : null;
+  if (ghost?.dealer_text_id) redirect("/dashboard");
+  const ghostGroupId = ghost?.group_id ?? null;
+  if (ghostGroupId && ghostGroupId !== params.id) redirect(`/groups/${ghostGroupId}`);
+  const inGhostSession = Boolean(ghostGroupId);
 
   const { data: groupData } = await admin.from("groups").select("*").eq("id", params.id).single();
   const group = groupData as GroupRow | null;
@@ -63,7 +76,7 @@ export default async function GroupPage({ params }: Props) {
 
   return (
     <div>
-      {isSuperAdmin && (
+      {isSuperAdmin && !inGhostSession && (
         <nav className="mb-4">
           <Link href="/groups" className="text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>
             ← All Groups
@@ -75,6 +88,7 @@ export default async function GroupPage({ params }: Props) {
         canEdit={canEdit}
         isSuperAdmin={isSuperAdmin}
         isGroupAdmin={isGroupAdmin}
+        inGhostSession={inGhostSession}
         hubspotCompanyId={hubspotCompanyId}
         memberCount={memberCount ?? 0}
         etlLockedByName={etlLockedByName}

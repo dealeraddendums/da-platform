@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { US_STATE_CODES } from "@/lib/constants/us-states";
 import { requireSuperAdmin } from "@/lib/auth";
+import { refuseInGhost } from "@/lib/ghost-containment";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow, GroupUpdate } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
@@ -32,8 +33,11 @@ const DB_SORT_COL_MAP: Partial<Record<SortableCol, string>> = { created_at: "leg
  * Query params: q, page, per_page, sort, sort_dir, legacy_id_gte
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const { error } = await requireSuperAdmin();
+  const { claims, error } = await requireSuperAdmin();
   if (error) return error;
+  // The platform-wide group list is out of scope inside a ghost session.
+  const ghostBlocked = refuseInGhost(claims, "browse all groups");
+  if (ghostBlocked) return ghostBlocked;
 
   const admin = createAdminSupabaseClient();
   const { searchParams } = req.nextUrl;
@@ -121,6 +125,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireSuperAdmin();
   if (error) return error;
+  const ghostBlocked = refuseInGhost(claims, "create a group");
+  if (ghostBlocked) return ghostBlocked;
 
   let body: {
     name?: string;

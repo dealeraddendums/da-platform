@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { signGhostToken } from "@/lib/ghost";
+import { refuseInGhost } from "@/lib/ghost-containment";
 
 /**
  * POST /api/admin/ghost
@@ -12,6 +13,10 @@ import { signGhostToken } from "@/lib/ghost";
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireSuperAdmin();
   if (error) return error;
+  // No nested ghost: a ghost session is confined to one account, and re-minting
+  // the cookie from inside it is how you would hop to a different one.
+  const ghostBlocked = refuseInGhost(claims, "enter ghost mode for another account");
+  if (ghostBlocked) return ghostBlocked;
 
   let body: { dealer_id?: string; group_id?: string };
   try {

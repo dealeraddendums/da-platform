@@ -19,6 +19,14 @@ type Props = {
   canEdit: boolean;
   isSuperAdmin: boolean;
   isGroupAdmin?: boolean;
+  /**
+   * True when a super_admin is viewing this group from inside a GROUP GHOST
+   * session. Session-level controls (Login as this group, Delete Group) are
+   * hidden — starting a nested session from inside a ghost, or deleting the
+   * account you are currently operating as, is never the intent. The APIs
+   * behind them refuse a ghost session as well (lib/ghost-containment.ts).
+   */
+  inGhostSession?: boolean;
   hubspotCompanyId?: number | null;
   /** Active member-dealer count — shown in the ETL-freeze blast-radius confirm. */
   memberCount?: number;
@@ -79,7 +87,7 @@ function HubSpotPill({ href }: { href: string }) {
   );
 }
 
-export default function GroupProfileCard({ group: initialGroup, canEdit, isSuperAdmin, isGroupAdmin = false, hubspotCompanyId, memberCount, etlLockedByName }: Props) {
+export default function GroupProfileCard({ group: initialGroup, canEdit, isSuperAdmin, isGroupAdmin = false, inGhostSession = false, hubspotCompanyId, memberCount, etlLockedByName }: Props) {
   const router = useRouter();
   const [group, setGroup] = useState(initialGroup);
   const [editing, setEditing] = useState(false);
@@ -275,7 +283,7 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
         subtitle={`Group ID: ${group.id.slice(0, 8)}…`}
         action={
           <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
-            {isSuperAdmin && !editing && (
+            {isSuperAdmin && !editing && !inGhostSession && (
               // One-click entry: impersonate a group_admin, ghost when none.
               // Replaces the Active/Inactive pill (status lives on the
               // Deactivate/Activate button + the Status row below).
@@ -328,7 +336,7 @@ export default function GroupProfileCard({ group: initialGroup, canEdit, isSuper
                 {toggling ? "…" : group.active ? "Deactivate" : "Activate"}
               </button>
             )}
-            {isSuperAdmin && !editing && group.is_test && (
+            {isSuperAdmin && !editing && !inGhostSession && group.is_test && (
               <button
                 onClick={() => void openDeleteModal()}
                 style={{

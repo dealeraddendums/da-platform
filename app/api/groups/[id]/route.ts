@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { US_STATE_CODES } from "@/lib/constants/us-states";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
+import { refuseInGhost, requireGhostGroup } from "@/lib/ghost-containment";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { GroupRow, GroupUpdate } from "@/lib/db";
 import { billingConfigured, updateCustomer } from "@/lib/billing";
@@ -36,6 +37,10 @@ export async function GET(
   if (claims.role !== "super_admin" && claims.role !== "group_admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // A ghost session may only reach the group it ghosted.
+  const ghostBlocked = requireGhostGroup(claims, params.id);
+  if (ghostBlocked) return ghostBlocked;
 
   const admin = createAdminSupabaseClient();
   const { data, error: dbError } = await admin
@@ -72,6 +77,10 @@ export async function PATCH(
   if (claims.role !== "super_admin" && claims.role !== "group_admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // A ghost session may only reach the group it ghosted.
+  const ghostBlocked = requireGhostGroup(claims, params.id);
+  if (ghostBlocked) return ghostBlocked;
 
   // group_admin may only patch their own group
   if (claims.role === "group_admin" && params.id !== claims.group_id) {
@@ -230,6 +239,9 @@ export async function DELETE(
 ): Promise<NextResponse> {
   const { claims, error } = await requireSuperAdmin();
   if (error) return error;
+  // Never from inside a ghost — including the group being ghosted.
+  const ghostBlocked = refuseInGhost(claims, "delete a group");
+  if (ghostBlocked) return ghostBlocked;
 
   const admin = createAdminSupabaseClient();
 

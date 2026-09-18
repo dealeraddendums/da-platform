@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
+import { refuseInGhost } from "@/lib/ghost-containment";
 
 /**
  * POST /api/admin/impersonate-group
@@ -11,6 +12,10 @@ import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireSuperAdmin();
   if (error) return error;
+  // Starting a real group_admin session from inside a ghost session is a nested
+  // session — exit the ghost first.
+  const ghostBlocked = refuseInGhost(claims, "log in as a group");
+  if (ghostBlocked) return ghostBlocked;
 
   let body: { group_id?: string };
   try {

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
+import { readGhostContext } from "@/lib/ghost-containment";
 import GroupList from "@/components/GroupList";
 import { PageHeader } from "@/components/PageHeader";
 
@@ -18,6 +19,16 @@ export default async function GroupsPage() {
   const role = profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user";
+
+  // Ghost containment: a super_admin in ghost mode is operating INSIDE one
+  // account, so the platform-wide groups list (and its per-row Ghost / Login
+  // into OTHER groups, and + New Group) must not be reachable from here. A
+  // group ghost lands on the ghosted group's own page — that is what the
+  // group_admin nav's "My Group" means in that session. A dealer ghost has no
+  // group page at all.
+  const ghost = role === "super_admin" ? readGhostContext() : null;
+  if (ghost?.group_id) redirect(`/groups/${ghost.group_id}`);
+  if (ghost?.dealer_text_id) redirect("/dashboard");
 
   if (role === "super_admin") {
     return <GroupList />;
