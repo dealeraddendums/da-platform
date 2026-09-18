@@ -121,3 +121,40 @@ export function normalizeInventoryProvider(raw: string | null | undefined): { pr
   }
   return { provider: trimmed, known: false };
 }
+
+// ── Reading a stored provider back out (display + feature gating) ───────────
+
+/**
+ * The human-readable provider label for a stored value: the canonical spelling
+ * when it resolves, otherwise the stored text verbatim (a provider we don't
+ * know about is still the truth about that dealer — better shown than hidden).
+ * Returns null when nothing is set.
+ */
+export function providerLabel(stored: string | null | undefined): string | null {
+  return normalizeInventoryProvider(stored)?.provider ?? null;
+}
+
+/**
+ * True iff a dealer's stored provider IS `canonical` (pass the canonical
+ * spelling, e.g. "DealerTrack"). Used to gate provider-specific help content.
+ *
+ * Resolution rules:
+ *  - Anything the normalizer recognises must match EXACTLY. It has already
+ *    resolved the value to one canonical name, so trusting it prevents a
+ *    prefix rule from letting one provider answer for another.
+ *  - Free text it does NOT recognise falls back to a collapsed prefix match, so
+ *    "Dealertrack FTP" or "DealerTrack - hourly" still count as DealerTrack.
+ *    Safe because no canonical provider name is a prefix of another (checked).
+ *
+ * Deliberately not folded into PROVIDER_PREFIXES: that table also drives the
+ * 4.0 Feed Source sync, and widening it would change what gets written to
+ * dealers.inventory_provider, not just what the UI shows.
+ */
+export function isProvider(stored: string | null | undefined, canonical: string): boolean {
+  const resolved = normalizeInventoryProvider(stored);
+  if (!resolved) return false;
+  const a = collapse(resolved.provider);
+  const b = collapse(canonical);
+  if (!b) return false;
+  return resolved.known ? a === b : a === b || a.startsWith(b);
+}

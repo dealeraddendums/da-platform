@@ -17,6 +17,7 @@ import type { JwtClaims } from "@/lib/auth";
 import { sanitizeHelpHtml } from "@/lib/help-sanitize";
 import { ownsConversation, listConversations, canReviewConversations } from "@/lib/help-conversations";
 import { buildDealerContext } from "@/lib/help-context";
+import { isProvider, providerLabel } from "@/lib/inventory-providers";
 
 // ── tiny test runner ─────────────────────────────────────────────────────────
 const results: { name: string; ok: boolean; err?: string }[] = [];
@@ -166,6 +167,33 @@ await test("buildDealerContext: dealer is driven by claims, not a request id (B)
   assert.ok(calls.flatMap((c) => c.eqs).filter(([col]) => col === "dealer_id").every(([, v]) => v === "dealerB"));
   // structural: the signature exposes no request-supplied dealer-id parameter
   assert.equal(buildDealerContext.length, 1, "buildDealerContext must require only claims (admin is an injected default)");
+});
+
+// ── provider gating for provider-specific help tabs ──────────────────────────
+// The DealerTrack tab hands out FTP credentials; it must appear for DealerTrack
+// dealers and NOT for the ~1,860 dealers with no provider set.
+await test("isProvider: canonical + stored variants match DealerTrack", () => {
+  for (const v of ["DealerTrack", "dealertrack", "DEALERTRACK", " Dealer Track ", "dealer-track", "Dealertrack FTP", "DealerTrack - hourly"]) {
+    assert.equal(isProvider(v, "DealerTrack"), true, `expected ${JSON.stringify(v)} to match`);
+  }
+});
+await test("isProvider: no provider, or a different provider, does not match", () => {
+  for (const v of [null, undefined, "", "   ", "Vauto", "Homenet", "CDK", "DealerSocket", "DealerOn", "MAXDIGITAL"]) {
+    assert.equal(isProvider(v, "DealerTrack"), false, `expected ${JSON.stringify(v)} NOT to match`);
+  }
+});
+await test("isProvider: a recognised provider never answers for another via the prefix fallback", () => {
+  // "DealerOn"/"DealerSocket" resolve to themselves, so the unresolved-only
+  // prefix rule can't let one canonical stand in for another.
+  assert.equal(isProvider("DealerOn", "Dealer"), false);
+  assert.equal(isProvider("DealerSocket Inventory Plus", "DealerSpecialties"), false);
+});
+await test("providerLabel: canonical spelling, raw text when unknown, null when unset", () => {
+  assert.equal(providerLabel("dealer track"), "DealerTrack");
+  assert.equal(providerLabel("dealer.com"), "DealerDotCom");
+  assert.equal(providerLabel("MAXDIGITAL"), "MAXDIGITAL"); // unknown but real — show it
+  assert.equal(providerLabel(null), null);
+  assert.equal(providerLabel("   "), null);
 });
 
 // ── report ───────────────────────────────────────────────────────────────────

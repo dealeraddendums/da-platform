@@ -9,7 +9,7 @@ import { normalizeStateCode } from "@/lib/constants/us-states";
 import { LABEL_PRODUCTS, type LabelProduct } from "@/lib/label-products";
 import type { AddendumPaperSize } from "@/lib/recommended-labels";
 import { paperSizeWidthLabel, productMatchesPaperSize } from "@/lib/recommended-labels";
-import { DMS_PROVIDERS, OTHER_PROVIDERS } from "@/lib/inventory-providers";
+import { DMS_PROVIDERS, OTHER_PROVIDERS, providerLabel } from "@/lib/inventory-providers";
 import WebsiteIntegrationsTab from "@/components/WebsiteIntegrationsTab";
 import { formatBillingDate } from "@/lib/billing-date";
 
@@ -43,7 +43,7 @@ type Props = {
  * Shown for all roles — these IDs aren't secrets and support calls need them.
  * NULL renders as "—" (and the copy button is hidden so there's nothing to copy).
  */
-function IdRow({ label, value }: { label: string; value: string | null | undefined }) {
+function IdRow({ label, value, copyable = true }: { label: string; value: string | null | undefined; copyable?: boolean }) {
   const [copied, setCopied] = useState(false);
   const has = value != null && value !== "";
   async function copy() {
@@ -57,7 +57,7 @@ function IdRow({ label, value }: { label: string; value: string | null | undefin
   return (
     <span style={{ fontSize: 12, color: "#78828c", display: "inline-flex", alignItems: "center", gap: 6 }}>
       {label}: <strong style={{ fontFamily: "monospace", color: "#555" }}>{has ? value : "—"}</strong>
-      {has && (
+      {has && copyable && (
         <button
           type="button"
           onClick={() => void copy()}
@@ -172,6 +172,9 @@ function InfoTab({ dealer, canEdit }: { dealer: DealerRow; canEdit: boolean }) {
         <IdRow label="Dealer ID" value={dealer.dealer_id} />
         <IdRow label="Inventory Dealer ID" value={dealer.inventory_dealer_id} />
         <IdRow label="Internal ID" value={dealer.internal_id} />
+        {/* Set from Feed Source on the dealer record and managed there — shown
+            here so a dealer can tell support which feed they're on. */}
+        <IdRow label="Feed Provider" value={providerLabel(dealer.inventory_provider)} copyable={false} />
       </div>
 
       {canEdit && (
