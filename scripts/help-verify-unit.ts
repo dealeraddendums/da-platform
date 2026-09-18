@@ -18,7 +18,7 @@ import { sanitizeHelpHtml } from "@/lib/help-sanitize";
 import { ownsConversation, listConversations, canReviewConversations } from "@/lib/help-conversations";
 import { buildDealerContext } from "@/lib/help-context";
 import { isProvider, providerLabel } from "@/lib/inventory-providers";
-import { isJwMediaId } from "@/lib/jwplayer";
+import { isJwMediaId, extractJwMediaIds } from "@/lib/jwplayer";
 
 // ── tiny test runner ─────────────────────────────────────────────────────────
 const results: { name: string; ok: boolean; err?: string }[] = [];
@@ -190,6 +190,19 @@ await test("isJwMediaId: accepts JW's 8-char ids and rejects anything else", () 
   for (const bad of ["", "abc", "AbCd12345", "AbCd-234", "../../etc", null, undefined, 12345678]) {
     assert.equal(isJwMediaId(bad), false, String(bad));
   }
+});
+
+// ── JW title sync: which media an article links ──────────────────────────────
+await test("extractJwMediaIds: finds every linked video, in document order, deduped", () => {
+  const html = '<p>a</p><div data-jw-media="AAAAAAAA"></div><p>b</p><div data-jw-media="BBBBBBBB"></div>'
+             + '<div data-jw-media="AAAAAAAA"></div>';
+  assert.deepEqual(extractJwMediaIds(html), ["AAAAAAAA", "BBBBBBBB"]);
+});
+await test("extractJwMediaIds: an article with no video yields nothing to sync", () => {
+  assert.deepEqual(extractJwMediaIds("<p>just words</p>"), []);
+  assert.deepEqual(extractJwMediaIds(""), []);
+  // a malformed id is not a media reference
+  assert.deepEqual(extractJwMediaIds('<div data-jw-media="nope"></div>'), []);
 });
 
 // ── provider gating for provider-specific help tabs ──────────────────────────

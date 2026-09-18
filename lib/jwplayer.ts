@@ -123,3 +123,69 @@ export async function getMediaStatus(mediaId: string): Promise<JwMediaStatus> {
 export function playbackUrl(siteId: string, mediaId: string): string {
   return `${JW_DELIVERY_BASE}/v2/sites/${siteId}/media/${mediaId}/playback.json`;
 }
+
+// ── Keeping JW's copy of the title in step with ours ────────────────────────
+
+/** Rename a media item in JW. Throws on failure; callers decide how to react. */
+export async function updateMediaTitle(mediaId: string, title: string): Promise<void> {
+  const cfg = serverConfig();
+  if (!cfg) throw new JwError("JW isn't configured.", 503);
+  if (!isJwMediaId(mediaId)) throw new JwError("Not a JW media id.", 400);
+
+  const res = await jwFetch(`/v2/sites/${cfg.siteId}/media/${mediaId}`, {
+    method: "PATCH",
+    secret: cfg.secret,
+    body: JSON.stringify({ metadata: { title: title.slice(0, 5000) } }),
+  });
+  if (!res.ok) throw new JwError(`JW rename failed (HTTP ${res.status}).`, 502);
+}
+
+/** Every JW media id referenced by an article body, in document order. */
+export function extractJwMediaIds(html: string): string[] {
+  const out: string[] = [];
+  const re = /data-jw-media="([A-Za-z0-9]{8})"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html ?? "")) !== null) if (!out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+
+/**
+ * Point JW's titles at the article's current title after a rename.
+ *
+ * BEST EFFORT, and deliberately so: JW being down must never fail an article
+ * Save. Nothing is awaited by the caller, every call is individually caught,
+ * each gets one retry, and the whole thing is time-boxed — the worst outcome is
+ * a video still carrying its old name in the JW dashboard, which is cosmetic.
+ *
+ * With more than one video in an article, the second onwards get a " (2)",
+ * " (3)" suffix: JW's dashboard is a flat list, and three rows with identical
+ * names are worse than no sync at all.
+ *
+ * Note JW's Delivery layer caches for ~3 minutes, so the new title shows in the
+ * player a little after it shows in the dashboard.
+ */
+export function syncMediaTitles(mediaIds: string[], articleTitle: string): void {
+  if (mediaIds.length === 0 || !articleTitle.trim()) return;
+  if (!serverConfig()) return; // not configured — nothing to sync to
+
+  void (async () => {
+    const deadline = Date.now() + 15_000;
+    for (let i = 0; i < mediaIds.length; i++) {
+      if (Date.now() > deadline) {
+        console.warn(`[jw] title sync ran out of time with ${mediaIds.length - i} left`);
+        return;
+      }
+      const title = i === 0 ? articleTitle : `${articleTitle} (${i + 1})`;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await updateMediaTitle(mediaIds[i], title);
+          break;
+        } catch (err) {
+          if (attempt === 1) {
+            console.warn(`[jw] couldn't rename media ${mediaIds[i]}:`, err instanceof Error ? err.message : err);
+          }
+        }
+      }
+    }
+  })();
+}

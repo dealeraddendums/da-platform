@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { checkPdfUrl, isValidTourId, resolveCategory } from "@/lib/help-articles";
+import { extractJwMediaIds, syncMediaTitles } from "@/lib/jwplayer";
 
 type Params = { params: { id: string } };
 const SELECT_ADMIN =
@@ -32,6 +33,13 @@ export async function PUT(req: NextRequest, { params }: Params): Promise<NextRes
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
 
   const admin = createAdminSupabaseClient();
+
+  // Needed to spot a rename, and to know which videos this article links when
+  // the body itself isn't part of the patch.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: before } = await (admin as any)
+    .from("help_articles").select("title, body").eq("id", params.id).maybeSingle();
+
   const patch: Record<string, unknown> = { updated_by: claims.sub, updated_at: new Date().toISOString() };
 
   if (body.category_id !== undefined) {
@@ -72,6 +80,19 @@ export async function PUT(req: NextRequest, { params }: Params): Promise<NextRes
     if (dbErr.code === "23505") return NextResponse.json({ error: "Slug already in use" }, { status: 409 });
     return NextResponse.json({ error: dbErr.message }, { status: 500 });
   }
+
+  // Renaming the article renames its videos in JW, so the dashboard doesn't
+  // fill up with stale names (or the filename a video was uploaded under before
+  // the author had typed a title). Fire-and-forget on purpose — see
+  // syncMediaTitles: a JW outage must not fail the Save the author just made.
+  // Skipped entirely when the title didn't move or nothing is linked.
+  const newTitle = typeof data?.title === "string" ? data.title : "";
+  const titleChanged = Boolean(before?.title) && newTitle !== before.title;
+  if (titleChanged) {
+    const mediaIds = extractJwMediaIds(typeof data?.body === "string" ? data.body : (before?.body ?? ""));
+    if (mediaIds.length > 0) syncMediaTitles(mediaIds, newTitle);
+  }
+
   return NextResponse.json({ data });
 }
 
