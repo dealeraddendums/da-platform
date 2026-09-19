@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { verifySetupCode } from "@/lib/invite-code";
 import { rateLimit } from "@/lib/rate-limit";
+import { resolveMigrationInvite, manualAttemptAllowed } from "@/lib/migrate-invite-lookup";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +12,16 @@ export const dynamic = "force-dynamic";
 //                           consume — a mail scanner pre-fetch reveals nothing
 //                           sensitive and changes nothing.
 // POST { token, code }    → verify the scanner-proof 8-digit code and return the
-//                           ETL-pre-staged dealer data for the "confirm your
+//   or { email, code }       ETL-pre-staged dealer data for the "confirm your
 //                           dealership" step. Does NOT consume the invite and
 //                           does NOT create anything — the account + all system
 //                           actions happen only on final Confirm (13a.3).
+//                           The email+code form is the manual fallback for a
+//                           dealer whose link was wrapped or stripped by
+//                           corporate mail security: the code is the
+//                           credential, not the link. Resolution (including
+//                           which rooftop, when one mailbox holds several
+//                           invites) lives in lib/migrate-invite-lookup.ts.
 //
 // Guards: the invitation must be purpose='migration' (so a /signup user invite
 // can't be driven through /migrate), not expired, not already accepted.
@@ -64,20 +70,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Too many attempts — please wait a moment." }, { status: 429 });
   }
 
-  let body: { token?: string; code?: string };
+  let body: { token?: string; code?: string; email?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
   const token = body.token?.trim();
   const code = body.code?.trim();
-  if (!token || !code) return NextResponse.json({ error: "token and code required" }, { status: 400 });
+  const manualEmail = body.email?.trim();
+  if (!code || (!token && !manualEmail)) {
+    return NextResponse.json({ error: "Enter the email your invitation was sent to and the 8-digit code." }, { status: 400 });
+  }
+  // Manual path only: cap attempts per mailbox so a rotating-IP grind can't
+  // brute-force a known invitee's code past the per-IP limit above.
+  if (!token && manualEmail && !manualAttemptAllowed(manualEmail)) {
+    return NextResponse.json({ error: "Too many attempts — please wait a few minutes and try again." }, { status: 429 });
+  }
 
-  const inv = await loadInvite(token);
-  if (!inv || !isMigration(inv)) return NextResponse.json({ error: "Invalid migration link." }, { status: 404 });
-  if (inv.accepted_at) return NextResponse.json({ error: "This migration has already been completed." }, { status: 410 });
-  if (new Date(inv.expires_at) < new Date()) return NextResponse.json({ error: "This migration link has expired. Ask us to resend it." }, { status: 410 });
-
-  const codeExpired = inv.setup_code_expires_at ? new Date(inv.setup_code_expires_at) < new Date() : true;
-  if (!inv.setup_code_hash || codeExpired) return NextResponse.json({ error: "Your code has expired. Ask us to resend it." }, { status: 410 });
-  if (!verifySetupCode(code, inv.setup_code_hash)) return NextResponse.json({ error: "That code is incorrect. Check your email." }, { status: 401 });
+  const resolved = await resolveMigrationInvite({ token, email: manualEmail, code });
+  if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  const inv = resolved.invite;
 
   // Code verified — gather the ETL-pre-staged data for the confirm step.
   const admin = createAdminSupabaseClient();

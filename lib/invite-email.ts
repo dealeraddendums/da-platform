@@ -7,6 +7,26 @@
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com";
 
+/** Host as a dealer would type it, e.g. "app.dealeraddendums.com". */
+const APP_HOST = APP_URL.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+
+/**
+ * The "button didn't work" escape hatch, shown under every migration CTA.
+ *
+ * Corporate mail security (Outlook Safe Links, Barracuda) rewrites anchor
+ * hrefs through a proxy and can mangle or strip the invite token; the dealer
+ * then lands on /migrate with nothing and reads it as "the link doesn't work".
+ * This line is deliberately PLAIN TEXT, not an <a> — a rewriter leaves it
+ * alone, so the dealer can always read the address and type it. /migrate now
+ * accepts the email + code directly, so this path genuinely completes.
+ */
+function manualFallbackHtml(): string {
+  return `<p style="font-size:13px;color:#55595c;line-height:1.6;margin:0 0 24px;text-align:center;background:#f5f6f7;border-radius:6px;padding:12px 16px;">
+      <strong>Button not working?</strong> Some company email systems block it.<br />
+      Go to <strong>${APP_HOST}/migrate</strong> and enter your email address and the code above.
+    </p>`;
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -151,13 +171,14 @@ export function buildMigrationInviteEmail(opts: {
       <div style="padding:6px 0;font-size:14px;color:#333;">🔐&nbsp; <strong>Passkey login</strong> — sign in with Face ID or Touch ID, no password needed</div>
       <div style="padding:6px 0;font-size:14px;color:#333;">📊&nbsp; <strong>Real-time dashboard</strong> with live activity tracking</div>
     </div>
-    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 14px;text-align:center;">When you're ready, use this code to get started at <strong>app.dealeraddendums.com/migrate</strong>:</p>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 14px;text-align:center;">When you're ready, use this code to get started at <strong>${APP_HOST}/migrate</strong>:</p>
     <div style="text-align:center;margin:0 0 24px;">
       <div style="display:inline-block;background:#f5f6f7;border:1px solid #e0e0e0;border-radius:8px;padding:18px 28px;font-family:'Courier New',monospace;font-size:34px;font-weight:700;letter-spacing:6px;color:#1a1a2e;">${escapeHtml(spacedCode)}</div>
     </div>
     <div style="text-align:center;margin-bottom:24px;">
       <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">Get started &rarr;</a>
     </div>
+    ${manualFallbackHtml()}
     <p style="font-size:13px;color:#78828c;line-height:1.6;margin:0 0 24px;text-align:center;">Tip: use the link and code in this email to set up your account — the regular sign-in page won't work until your account is set up.</p>
     <div style="background:#fff8ed;border:1px solid #ffe4a0;border-radius:6px;padding:14px 18px;">
       <p style="font-size:13px;color:#7a5a00;margin:0;line-height:1.6;"><strong>Heads up:</strong> Platform 4.0 will remain available until <strong>${sunsetFormatted}</strong>. After that, the new platform will be your home. No rush — but it's good to know.</p>
@@ -223,6 +244,7 @@ export function buildMigrationFollowUpEmail(opts: {
     <div style="text-align:center;margin-bottom:24px;">
       <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">Start migration &rarr;</a>
     </div>
+    ${manualFallbackHtml()}
     <p style="font-size:13px;color:#78828c;line-height:1.6;margin:0 0 24px;text-align:center;">Tip: use the link and code in this email to set up your account — the regular sign-in page won't work until your account is set up.</p>
     <div style="background:#fff8ed;border:1px solid #ffe4a0;border-radius:6px;padding:14px 18px;">
       <p style="font-size:13px;color:#7a5a00;margin:0;line-height:1.6;">Platform 4.0 will be available until <strong>${sunsetFormatted}</strong>. Nothing changes until you confirm the migration.</p>

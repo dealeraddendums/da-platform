@@ -61,20 +61,37 @@ export default function MigrateFlow() {
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [pendingMsg, setPendingMsg] = useState("");
+  // Manual mode: the dealer types their email alongside the code, because no
+  // usable token arrived. Either they came to /migrate directly (exactly what
+  // the invite email tells them to do — "use this code to get started at
+  // app.dealeraddendums.com/migrate"), or corporate mail security wrapped or
+  // stripped the link. The code is the credential, so this must work.
+  const [manual, setManual] = useState(false);
 
   // Inert prefill — show the email the invite was sent to.
   useEffect(() => {
-    if (!token) { setLoadError("This migration link is missing its code. Please use the link from your email."); return; }
+    // No token at all → straight to manual entry. This used to be a dead end
+    // ("This migration link is missing its code"), which is what dealers were
+    // reporting as "the link doesn't work" while holding a valid code.
+    if (!token) { setManual(true); return; }
     fetch(`/api/migrate/verify?token=${encodeURIComponent(token)}`)
-      .then(r => r.json())
-      .then((j: { email?: string; error?: string }) => { if (j.error) setLoadError(j.error); else setEmail(j.email ?? ""); })
-      .catch(() => setLoadError("Couldn't load your migration link. Please try again."));
+      .then(async r => ({ status: r.status, j: (await r.json()) as { email?: string; error?: string } }))
+      .then(({ status, j }) => {
+        if (!j.error) { setEmail(j.email ?? ""); return; }
+        // 410 = genuinely finished or expired. That is terminal and a manual
+        // code can't fix it, so say so plainly rather than inviting a retry.
+        if (status === 410) { setLoadError(j.error); return; }
+        // Anything else (404 = token mangled/rewritten by a link scanner, or
+        // truncated in transit) falls back to manual entry instead of dying.
+        setManual(true);
+      })
+      .catch(() => setManual(true));
   }, [token]);
 
   async function submitCode(e: React.FormEvent) {
     e.preventDefault(); setError(""); setLoading(true);
     try {
-      const res = await fetch("/api/migrate/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, code: code.trim() }) });
+      const res = await fetch("/api/migrate/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(manual ? { email: email.trim(), code: code.trim() } : { token, code: code.trim() }) });
       const j = await res.json();
       if (!res.ok) { setError(j.error ?? "That code didn't work."); return; }
       setDealer(j.dealer); setPlan(j.plan);
@@ -88,7 +105,7 @@ export default function MigrateFlow() {
     try {
       const res = await fetch("/api/migrate/confirm", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, code: code.trim(), password, corrections }),
+        body: JSON.stringify({ ...(manual ? { email: email.trim() } : { token }), code: code.trim(), password, corrections }),
       });
       const j = await res.json();
       if (!res.ok || !j.ok) {
@@ -107,6 +124,9 @@ export default function MigrateFlow() {
   }
 
   const passwordsOk = password.length >= 8 && password === confirm;
+  // Manual mode also needs a plausible email before the code can be checked.
+  const emailOk = !manual || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+  const submitBlocked = loading || code.length < 8 || !emailOk;
 
   // ── Render ─────────────────────────────────────────────────────────────────
   const Header = ({ title, subtitle }: { title: string; subtitle: string }) => (
@@ -137,12 +157,18 @@ export default function MigrateFlow() {
             title="Migrate to the new DealerAddendums"
             subtitle={fromLogin
               ? "Your account isn't set up yet — there's nothing to sign in to. Enter the 8-digit code from your invitation email to finish setting up. That code still works; we haven't sent a new one."
-              : "Enter the code from your invite email to get started."}
+              : manual
+                ? "Enter the email your invitation was sent to and the 8-digit code from that email."
+                : "Enter the code from your invite email to get started."}
           />
           <form onSubmit={submitCode} style={body}>
             <div style={{ marginBottom: 16 }}>
               <label style={label} htmlFor="m-email">Email</label>
-              <input id="m-email" style={{ ...input, background: "#f5f6f7" }} value={email} readOnly />
+              <input id="m-email" style={manual ? input : { ...input, background: "#f5f6f7" }}
+                type="email" inputMode="email" autoComplete="email"
+                placeholder={manual ? "The email your invitation was sent to" : undefined}
+                value={email} readOnly={!manual}
+                onChange={manual ? e => setEmail(e.target.value) : undefined} />
             </div>
             <div style={{ marginBottom: 18 }}>
               <label style={label} htmlFor="m-code">Migration code</label>
@@ -151,7 +177,7 @@ export default function MigrateFlow() {
                 value={code} onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))} />
             </div>
             {error && <div style={errBox}>{error}</div>}
-            <button type="submit" style={loading || code.length < 8 ? btnDisabled : btn} disabled={loading || code.length < 8}>
+            <button type="submit" style={submitBlocked ? btnDisabled : btn} disabled={submitBlocked}>
               {loading ? "Verifying…" : "Verify & Continue"}
             </button>
           </form>

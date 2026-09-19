@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
-import { verifySetupCode } from "@/lib/invite-code";
+import { resolveMigrationInvite, manualAttemptAllowed } from "@/lib/migrate-invite-lookup";
 import { rateLimit } from "@/lib/rate-limit";
 import { getAuthUserIdByEmail } from "@/lib/last-sign-in";
 import { fireProfileSync } from "@/lib/sync-hubspot";
@@ -41,31 +41,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Too many attempts — please wait a moment." }, { status: 429 });
   }
 
-  let body: { token?: string; code?: string; password?: string; corrections?: { phone?: string; primary_contact?: string; primary_contact_email?: string } };
+  let body: { token?: string; code?: string; email?: string; password?: string; corrections?: { phone?: string; primary_contact?: string; primary_contact_email?: string } };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
   const token = body.token?.trim();
   const code = body.code?.trim();
+  const manualEmail = body.email?.trim();
   const password = body.password;
-  if (!token || !code) return NextResponse.json({ error: "token and code required" }, { status: 400 });
+  if (!code || (!token && !manualEmail)) {
+    return NextResponse.json({ error: "Enter the email your invitation was sent to and the 8-digit code." }, { status: 400 });
+  }
   if (!password || password.length < 8) return NextResponse.json({ error: "A password of at least 8 characters is required." }, { status: 400 });
+  // Manual path only: per-mailbox cap, so rotating IPs can't grind a known
+  // invitee's code past the per-IP limit above.
+  if (!token && manualEmail && !manualAttemptAllowed(manualEmail)) {
+    return NextResponse.json({ error: "Too many attempts — please wait a few minutes and try again." }, { status: 429 });
+  }
 
   const admin = createAdminSupabaseClient();
-
-  // ── Load + verify the migration invite (the scanner-proof gate; consume last) ─
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const a = admin as any;
-  let invRes = await a.from("invitations").select("id, email, first_name, last_name, dealer_id, expires_at, accepted_at, setup_code_hash, setup_code_expires_at, purpose").eq("token", token).maybeSingle();
-  if (invRes.error && /purpose/i.test(invRes.error.message ?? "")) {
-    invRes = await a.from("invitations").select("id, email, first_name, last_name, dealer_id, expires_at, accepted_at, setup_code_hash, setup_code_expires_at").eq("token", token).maybeSingle();
-  }
-  const inv = invRes.data as Inv | null;
-  const isMigration = inv && (inv.purpose === "migration" || (inv.purpose == null && !!inv.dealer_id));
-  if (!inv || !isMigration) return NextResponse.json({ error: "Invalid migration link." }, { status: 404 });
-  if (inv.accepted_at) return NextResponse.json({ error: "This migration has already been completed." }, { status: 410 });
-  if (new Date(inv.expires_at) < new Date()) return NextResponse.json({ error: "This migration link has expired." }, { status: 410 });
-  const codeExpired = inv.setup_code_expires_at ? new Date(inv.setup_code_expires_at) < new Date() : true;
-  if (!inv.setup_code_hash || codeExpired) return NextResponse.json({ error: "Your code has expired. Ask us to resend it." }, { status: 410 });
-  if (!verifySetupCode(code, inv.setup_code_hash)) return NextResponse.json({ error: "That code is incorrect." }, { status: 401 });
+
+  // ── Load + verify the migration invite (the scanner-proof gate; consume last) ─
+  // Accepts the emailed link's token OR a manually typed email + code, so a
+  // wrapped/stripped link can't trap a dealer holding a valid code. The code
+  // is verified either way — it is the credential, and on the manual path it
+  // is also what picks the rooftop when one mailbox holds several invites.
+  const resolved = await resolveMigrationInvite({ token, email: manualEmail, code });
+  if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  const inv = resolved.invite;
 
   const { data: dealer } = await admin
     .from("dealers")
