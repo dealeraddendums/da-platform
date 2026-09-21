@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
-import { resolveMigrationInvite, manualAttemptAllowed } from "@/lib/migrate-invite-lookup";
+import { resolveMigrationInvite, manualAttemptAllowed } from "@/lib/invite-lookup";
 import { rateLimit } from "@/lib/rate-limit";
 import { getAuthUserIdByEmail } from "@/lib/last-sign-in";
 import { fireProfileSync } from "@/lib/sync-hubspot";

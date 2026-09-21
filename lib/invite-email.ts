@@ -20,10 +20,10 @@ const APP_HOST = APP_URL.replace(/^https?:\/\//, "").replace(/\/+$/, "");
  * alone, so the dealer can always read the address and type it. /migrate now
  * accepts the email + code directly, so this path genuinely completes.
  */
-function manualFallbackHtml(): string {
+function manualFallbackHtml(path: "/migrate" | "/signup" = "/migrate"): string {
   return `<p style="font-size:13px;color:#55595c;line-height:1.6;margin:0 0 24px;text-align:center;background:#f5f6f7;border-radius:6px;padding:12px 16px;">
       <strong>Button not working?</strong> Some company email systems block it.<br />
-      Go to <strong>${APP_HOST}/migrate</strong> and enter your email address and the code above.
+      Go to <strong>${APP_HOST}${path}</strong> and enter your email address and the code above.
     </p>`;
 }
 
@@ -70,6 +70,7 @@ export function buildInviteEmail(opts: {
             padding: 10px 24px; border-radius: 4px; font-weight: 600; font-size: 14px; margin: 0 0 24px;">
     Set Up Your Account
   </a>
+  ${manualFallbackHtml("/signup")}
   <p style="margin: 0 0 16px; color: #55595c; font-size: 13px;">
     Tip: use the setup link and code in this email to create your account — the regular
     sign-in page won't work until your account is set up.

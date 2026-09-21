@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { rateLimit } from "@/lib/rate-limit";
-import { resolveMigrationInvite, manualAttemptAllowed } from "@/lib/migrate-invite-lookup";
+import { resolveMigrationInvite, manualAttemptAllowed } from "@/lib/invite-lookup";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 //                           corporate mail security: the code is the
 //                           credential, not the link. Resolution (including
 //                           which rooftop, when one mailbox holds several
-//                           invites) lives in lib/migrate-invite-lookup.ts.
+//                           invites) lives in lib/invite-lookup.ts.
 //
 // Guards: the invitation must be purpose='migration' (so a /signup user invite
 // can't be driven through /migrate), not expired, not already accepted.

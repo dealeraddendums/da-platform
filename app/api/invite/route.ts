@@ -20,15 +20,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: inv } = await (admin as any)
     .from("invitations")
-    .select("id, email, first_name, last_name, role, dealer_name, group_id, expires_at, accepted_at")
+    .select("id, email, first_name, last_name, role, dealer_name, group_id, expires_at, accepted_at, purpose")
     .eq("token", token)
     .maybeSingle() as { data: {
       id: string; email: string; first_name: string; last_name: string;
       role: string; dealer_name: string | null; group_id: string | null;
-      expires_at: string; accepted_at: string | null;
+      expires_at: string; accepted_at: string | null; purpose: string | null;
     } | null };
 
-  if (!inv) return NextResponse.json({ error: "Invalid invitation" }, { status: 404 });
+  // A migration token belongs to /migrate and must not render as a staff
+  // invite here (migration 102's stated intent, enforced at last).
+  if (!inv || inv.purpose === "migration") return NextResponse.json({ error: "Invalid invitation" }, { status: 404 });
   if (inv.accepted_at) return NextResponse.json({ error: "Invitation already accepted" }, { status: 410 });
   if (new Date(inv.expires_at) < new Date()) return NextResponse.json({ error: "Invitation expired" }, { status: 410 });
 

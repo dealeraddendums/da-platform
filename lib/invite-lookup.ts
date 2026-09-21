@@ -3,8 +3,15 @@ import { verifySetupCode } from "@/lib/invite-code";
 import { rateLimit } from "@/lib/rate-limit";
 
 /**
- * Resolve the migration invitation behind a /migrate submission — by the
- * tokenized link OR by the dealer typing their email + 8-digit code.
+ * Resolve the invitation behind a /migrate or /signup submission — by the
+ * tokenized link OR by the person typing their email + 8-digit code.
+ *
+ * Both invite kinds share the `invitations` table and differ only by
+ * `purpose` ('migration' | 'user'), so they share ONE resolver: the
+ * enumeration rules, the code-disambiguation rule and the throttle are all
+ * security-relevant, and a second hand-rolled copy would drift. /migrate got
+ * the manual path in 5ccb5b3; /signup (staff invites) got it next, after a
+ * dealer's link was DNS-blocked and the code they held had nowhere to go.
  *
  * ── Why the manual path exists ──────────────────────────────────────────────
  * The invite email has always told dealers, in bold: "use this code to get
@@ -46,11 +53,38 @@ export type ResolveResult =
   | { ok: true; invite: MigrationInvite }
   | { ok: false; status: number; error: string };
 
-function isMigration(inv: MigrationInvite): boolean {
-  // purpose is authoritative; absent rows predate migration 102 and are
-  // migration invites only if they carry a dealer (those always do).
-  return inv.purpose === "migration" || (inv.purpose == null && !!inv.dealer_id);
+export type InvitePurpose = "migration" | "user";
+
+/**
+ * `purpose` is NOT NULL DEFAULT 'user' (migration 102), so every real row
+ * carries one. The null branch is defensive only, for rows written by an
+ * older deploy mid-migration: those are migration invites only if they carry
+ * a dealer. The two predicates are deliberately non-overlapping — an
+ * invitation must never be consumable by BOTH flows.
+ */
+function matchesPurpose(inv: MigrationInvite, purpose: InvitePurpose): boolean {
+  if (purpose === "migration") {
+    return inv.purpose === "migration" || (inv.purpose == null && !!inv.dealer_id);
+  }
+  return inv.purpose === "user";
 }
+
+/**
+ * Wording differs per flow, but the SHAPE of what each status reveals must
+ * not: same statuses, same generic 401 for "unknown email or wrong code".
+ */
+const COPY: Record<InvitePurpose, { invalid: string; done: string; linkExpired: string }> = {
+  migration: {
+    invalid: "Invalid migration link.",
+    done: "This migration has already been completed.",
+    linkExpired: "This migration link has expired. Ask us to resend it.",
+  },
+  user: {
+    invalid: "Invalid invitation.",
+    done: "This invitation has already been used. Try signing in instead.",
+    linkExpired: "This invitation has expired. Ask your administrator to resend it.",
+  },
+};
 
 function liveCode(inv: MigrationInvite): boolean {
   if (!inv.setup_code_hash) return false;
@@ -58,11 +92,12 @@ function liveCode(inv: MigrationInvite): boolean {
 }
 
 /** Validate one already-loaded invitation against a submitted code. */
-function checkToken(inv: MigrationInvite | null, code: string): ResolveResult {
-  if (!inv || !isMigration(inv)) return { ok: false, status: 404, error: "Invalid migration link." };
-  if (inv.accepted_at) return { ok: false, status: 410, error: "This migration has already been completed." };
+function checkToken(inv: MigrationInvite | null, code: string, purpose: InvitePurpose): ResolveResult {
+  const copy = COPY[purpose];
+  if (!inv || !matchesPurpose(inv, purpose)) return { ok: false, status: 404, error: copy.invalid };
+  if (inv.accepted_at) return { ok: false, status: 410, error: copy.done };
   if (new Date(inv.expires_at) < new Date()) {
-    return { ok: false, status: 410, error: "This migration link has expired. Ask us to resend it." };
+    return { ok: false, status: 410, error: copy.linkExpired };
   }
   if (!liveCode(inv)) return { ok: false, status: 410, error: "Your code has expired. Ask us to resend it." };
   if (!verifySetupCode(code, inv.setup_code_hash)) {
@@ -83,6 +118,7 @@ async function resolveByEmail(
   admin: any,
   email: string,
   code: string,
+  purpose: InvitePurpose,
 ): Promise<ResolveResult> {
   const wanted = email.trim().toLowerCase();
   // ilike narrows server-side, but `_` and `%` are ILIKE wildcards and these
@@ -103,7 +139,7 @@ async function resolveByEmail(
   if (rows.length === 0) return generic;
 
   const candidates = rows.filter(
-    r => isMigration(r) && !r.accepted_at && new Date(r.expires_at) >= new Date() && liveCode(r),
+    r => matchesPurpose(r, purpose) && !r.accepted_at && new Date(r.expires_at) >= new Date() && liveCode(r),
   );
 
   const matched = candidates.filter(r => verifySetupCode(code, r.setup_code_hash));
@@ -114,7 +150,9 @@ async function resolveByEmail(
     return {
       ok: false,
       status: 409,
-      error: "That code matches more than one dealership. Please use the link in your email, or contact support@dealeraddendums.com.",
+      error: purpose === "migration"
+        ? "That code matches more than one dealership. Please use the link in your email, or contact support@dealeraddendums.com."
+        : "That code matches more than one invitation. Please use the link in your email, or contact support@dealeraddendums.com.",
     };
   }
 
@@ -122,9 +160,11 @@ async function resolveByEmail(
   // that this email's invitation is already done or timed out — those are not
   // secrets to the person holding the mailbox, and "wrong code" would send
   // them hunting for a code that can never work.
-  const migrationRows = rows.filter(isMigration);
+  const migrationRows = rows.filter(r => matchesPurpose(r, purpose));
   if (migrationRows.length > 0 && migrationRows.every(r => r.accepted_at)) {
-    return { ok: false, status: 410, error: "This migration has already been completed. Try signing in instead." };
+    return { ok: false, status: 410, error: purpose === "migration"
+      ? "This migration has already been completed. Try signing in instead."
+      : "This invitation has already been used. Try signing in instead." };
   }
   if (migrationRows.length > 0 && candidates.length === 0) {
     return { ok: false, status: 410, error: "Your code has expired. Ask us to resend it." };
@@ -133,14 +173,17 @@ async function resolveByEmail(
 }
 
 /**
- * The single entry point both /api/migrate/verify and /api/migrate/confirm use.
- * Supply `token` (from the emailed link) or `email` (typed manually); `code` is
- * always required, from the human, either way.
+ * The single entry point for both flows. Supply `token` (from the emailed
+ * link) or `email` (typed manually); `code` is always required, from the
+ * human, either way. `purpose` decides which kind of invitation may be
+ * resolved — a migration token must never be consumable by /signup, nor a
+ * user invite by /migrate.
  */
-export async function resolveMigrationInvite(input: {
+export async function resolveInvite(input: {
   token?: string | null;
   email?: string | null;
   code: string;
+  purpose: InvitePurpose;
   /** Injectable for tests; production callers omit it. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   admin?: any;
@@ -155,13 +198,31 @@ export async function resolveMigrationInvite(input: {
   if (token) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data } = await (admin as any).from("invitations").select(COLUMNS).eq("token", token).maybeSingle();
-    return checkToken((data as MigrationInvite) ?? null, code);
+    return checkToken((data as MigrationInvite) ?? null, code, input.purpose);
   }
 
   if (!email) {
     return { ok: false, status: 400, error: "Enter the email your invitation was sent to." };
   }
-  return resolveByEmail(admin, email, code);
+  return resolveByEmail(admin, email, code, input.purpose);
+}
+
+/** /migrate — dealership migration invitations. */
+export async function resolveMigrationInvite(input: {
+  token?: string | null; email?: string | null; code: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin?: any;
+}): Promise<ResolveResult> {
+  return resolveInvite({ ...input, purpose: "migration" });
+}
+
+/** /signup — staff/user invitations (dealer, group or org-less staff). */
+export async function resolveUserInvite(input: {
+  token?: string | null; email?: string | null; code: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin?: any;
+}): Promise<ResolveResult> {
+  return resolveInvite({ ...input, purpose: "user" });
 }
 
 /**
@@ -174,6 +235,6 @@ export async function resolveMigrationInvite(input: {
  * cap is double the number below. Still ~4 orders of magnitude short of
  * meaningful against 10^8 codes that live 14 days.)
  */
-export function manualAttemptAllowed(email: string): boolean {
-  return rateLimit(`migrate-manual:${email.trim().toLowerCase()}`, 10, 10 * 60_000);
+export function manualAttemptAllowed(email: string, scope: "migrate" | "signup" = "migrate"): boolean {
+  return rateLimit(`${scope}-manual:${email.trim().toLowerCase()}`, 10, 10 * 60_000);
 }

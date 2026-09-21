@@ -63,6 +63,13 @@ function SignupPageInner() {
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteLoading, setInviteLoading] = useState(!!inviteToken);
 
+  // Manual mode: the invitee types their email alongside the code because no
+  // usable token arrived. Either they came to /signup directly (exactly what
+  // the invite email now tells them to do when the button is blocked), or
+  // corporate mail security rewrote/truncated the link. The CODE is the
+  // credential, so this has to work without one. Mirrors /migrate (5ccb5b3).
+  const [manual, setManual] = useState(false);
+
   // Invite setup is a small state machine. Most dealers aren't technical, so we
   // let them choose: a one-time emailed code (no password to remember) or a
   // password. Either way we offer (never require) a passkey after sign-in.
@@ -72,15 +79,18 @@ function SignupPageInner() {
     if (!inviteToken) return;
     fetch(`/api/invite?token=${encodeURIComponent(inviteToken)}`)
       .then(r => r.json())
-      .then((json: { data?: InviteDetails; error?: string }) => {
-        if (json.error || !json.data) {
-          setInviteError(json.error ?? "Invalid or expired invitation.");
-        } else {
-          setInviteDetails(json.data);
-          setEmail(json.data.email);
-        }
+      .then(async r => ({ status: r.status, json: (await r.json()) as { data?: InviteDetails; error?: string } }))
+      .then(({ status, json }) => {
+        if (json.data) { setInviteDetails(json.data); setEmail(json.data.email); return; }
+        // 410 = genuinely used or expired. Terminal — no code can fix it, so
+        // say so plainly rather than inviting a retry that cannot succeed.
+        if (status === 410) { setInviteError(json.error ?? "This invitation is no longer valid."); return; }
+        // Anything else (404 = token mangled by a link scanner, or truncated
+        // in transit) drops to manual entry instead of dead-ending someone
+        // who is holding a perfectly good code.
+        setManual(true);
       })
-      .catch(() => setInviteError("Failed to load invitation."))
+      .catch(() => setManual(true))
       .finally(() => setInviteLoading(false));
   }, [inviteToken]);
 
@@ -127,12 +137,19 @@ function SignupPageInner() {
     e.preventDefault();
     setError("");
     if (!code.trim()) { setError("Enter the setup code from your email."); return; }
+    if (manual && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
+      setError("Enter the email address your invitation was sent to."); return;
+    }
     setLoading(true);
 
     const res = await fetch("/api/invite/accept", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: inviteToken, code: code.trim() }),
+      body: JSON.stringify(
+        manual
+          ? { email: email.trim(), code: code.trim() }
+          : { token: inviteToken, code: code.trim() },
+      ),
     });
     const json = await res.json() as { tokenHash?: string; error?: string };
 
@@ -158,8 +175,12 @@ function SignupPageInner() {
     setInviteStep("passkey");
   }
 
-  // Idempotent, non-consuming: re-emails a fresh setup code.
+  // Idempotent, non-consuming: re-emails a fresh setup code. Token-only —
+  // in manual mode we have no verified invitation to resend for, and resending
+  // by raw email would both leak who has an invite and kill the live code
+  // sitting in their inbox.
   async function handleResend() {
+    if (!inviteToken) return;
     setError("");
     setResendNotice("");
     try {
@@ -205,7 +226,7 @@ function SignupPageInner() {
 
   // ── Invite flow ────────────────────────────────────────────────────────────
 
-  if (inviteToken) {
+  if (inviteToken || manual) {
     if (inviteLoading) {
       return (
         <AuthShell title="Welcome to DA Platform" subtitle="Loading your invitation…">
@@ -240,7 +261,9 @@ function SignupPageInner() {
 
     // Step 1 — let the dealer choose how to sign in. The setup code is already
     // in their invite email, so "Enter my setup code" just opens the code form.
-    if (inviteStep === "choose") {
+    // Manual mode skips this: with no token there is no password path to offer
+    // (setting a password is not proof of invitation), so the code IS the flow.
+    if (inviteStep === "choose" && !manual) {
       return (
         <AuthShell
           title="Finish setting up your account"
@@ -282,12 +305,27 @@ function SignupPageInner() {
     // Step 2a — enter the emailed setup code (consumed only on submit).
     if (inviteStep === "code") {
       return (
-        <AuthShell title="Enter your setup code" subtitle="Type the 8-digit code from your invite email to finish setting up your account.">
+        <AuthShell
+          title="Enter your setup code"
+          subtitle={manual
+            ? "Enter the email your invitation was sent to and the 8-digit code from that email."
+            : "Type the 8-digit code from your invite email to finish setting up your account."}
+        >
           {inviteBadge}
           <form onSubmit={e => void handleCodeSubmit(e)} noValidate style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             <div>
               <label className="lp-label" htmlFor="inv-email-code">Email address</label>
-              <input id="inv-email-code" className="lp-input" type="email" value={email} readOnly />
+              <input
+                id="inv-email-code"
+                className="lp-input"
+                type="email"
+                autoComplete="email"
+                value={email}
+                readOnly={!manual}
+                required={manual}
+                placeholder={manual ? "you@dealership.com" : undefined}
+                onChange={manual ? (e => setEmail(e.target.value)) : undefined}
+              />
             </div>
             <div>
               <label className="lp-label" htmlFor="inv-code">Setup code</label>
@@ -319,12 +357,20 @@ function SignupPageInner() {
               {loading ? (<><span className="lp-spinner" /> Verifying…</>) : "Verify & Continue"}
             </button>
 
-            <p style={{ marginTop: 4, textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
-              Didn&apos;t get it?{" "}
-              <button type="button" className="lp-btn-link" onClick={() => void handleResend()} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
-                Resend code
-              </button>
-            </p>
+            {!manual && (
+              <p style={{ marginTop: 4, textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
+                Didn&apos;t get it?{" "}
+                <button type="button" className="lp-btn-link" onClick={() => void handleResend()} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+                  Resend code
+                </button>
+              </p>
+            )}
+            {manual && (
+              <p style={{ marginTop: 4, textAlign: "center", fontSize: 13, color: "var(--da-text-muted)" }}>
+                Use the 8-digit code from your invitation email. Can&apos;t find it? Ask your
+                manager to resend the invitation.
+              </p>
+            )}
             <p style={{ textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
               <button type="button" className="lp-btn-link" onClick={() => { setError(""); setResendNotice(""); setInviteStep("choose"); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
                 ← Back
@@ -532,6 +578,21 @@ function SignupPageInner() {
         <p style={{ marginTop: 8, textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
           Already have an account?{" "}
           <Link href="/login" className="lp-btn-link">Sign in</Link>
+        </p>
+
+        {/* The invite email tells a person whose button was blocked to come
+            here and type their code, so that has to be reachable with no
+            token in the URL. */}
+        <p style={{ marginTop: 2, textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
+          Were you invited?{" "}
+          <button
+            type="button"
+            className="lp-btn-link"
+            onClick={() => { setError(""); setManual(true); setInviteStep("code"); }}
+            style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
+          >
+            Enter your setup code
+          </button>
         </p>
       </form>
     </AuthShell>

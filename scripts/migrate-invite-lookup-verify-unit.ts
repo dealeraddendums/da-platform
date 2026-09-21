@@ -10,7 +10,7 @@
  */
 
 import { hashSetupCode } from "../lib/invite-code";
-import { buildMigrationInviteEmail, buildMigrationFollowUpEmail } from "../lib/invite-email";
+import { buildMigrationInviteEmail, buildMigrationFollowUpEmail, buildInviteEmail } from "../lib/invite-email";
 
 let pass = 0, fail = 0;
 const failures: string[] = [];
@@ -51,8 +51,24 @@ function stubAdmin(rows: Record<string, unknown>[]) {
 }
 
 async function resolve(rows: Record<string, unknown>[], input: { token?: string; email?: string; code: string }) {
-  const { resolveMigrationInvite } = await import("../lib/migrate-invite-lookup");
+  const { resolveMigrationInvite } = await import("../lib/invite-lookup");
   return resolveMigrationInvite({ ...input, admin: stubAdmin(rows) });
+}
+
+/** /signup side — same resolver, purpose:'user'. */
+async function resolveUser(rows: Record<string, unknown>[], input: { token?: string; email?: string; code: string }) {
+  const { resolveUserInvite } = await import("../lib/invite-lookup");
+  return resolveUserInvite({ ...input, admin: stubAdmin(rows) });
+}
+
+/** A staff/user invitation (what /signup consumes). */
+function userInv(over: Record<string, unknown> = {}) {
+  return {
+    id: "u-1", email: "karen_kessinger@jenkinscars.com", first_name: "Karen", last_name: "Kessinger",
+    dealer_id: "dealer-jenkins-ford", expires_at: future, accepted_at: null,
+    setup_code_hash: hashSetupCode("11223344"), setup_code_expires_at: future,
+    purpose: "user", token: "utok-good", ...over,
+  };
 }
 
 (async () => {
@@ -138,6 +154,65 @@ async function resolve(rows: Record<string, unknown>[], input: { token?: string;
 
     const fu = buildMigrationFollowUpEmail({ firstName: "Rich", orgName: "Jenkins Kia Crystal River", migrateUrl: "https://app.dealeraddendums.com/migrate?invite=tok", setupCode: "02099258", followUpNumber: 1, invitedAt: new Date() });
     check("follow-up (drip) email carries the same fallback", /Button not working\?/.test(fu) && fu.includes("app.dealeraddendums.com/migrate"));
+  }
+
+  // ── /signup staff invites: the same trap, closed the same way ────────────
+  console.log("\n/signup invite resolution — user invites (Karen-class)\n");
+  {
+    const r = await resolveUser([userInv()], { token: "utok-good", code: "11223344" });
+    check("user: token + correct code → resolves", r.ok === true);
+
+    const m = await resolveUser([userInv()], { email: "karen_kessinger@jenkinscars.com", code: "11223344" });
+    check("user: manual email + code → resolves (the Karen case)", m.ok === true && (m as { invite: { id: string } }).invite.id === "u-1");
+
+    const mixed = await resolveUser([userInv()], { email: " Karen_Kessinger@JenkinsCars.com ", code: "11223344" });
+    check("user:   …email is case/space tolerant", mixed.ok === true);
+
+    const wrong = await resolveUser([userInv()], { email: "karen_kessinger@jenkinscars.com", code: "00000000" });
+    const unknown = await resolveUser([userInv()], { email: "nobody@example.com", code: "11223344" });
+    check("user: wrong code → 401", wrong.ok === false && wrong.status === 401);
+    check("user: unknown email and wrong code give the SAME answer (non-enumerable)",
+      wrong.ok === false && unknown.ok === false && wrong.status === unknown.status &&
+      (wrong as { error: string }).error === (unknown as { error: string }).error);
+
+    const used = await resolveUser([userInv({ accepted_at: new Date().toISOString() })], { email: "karen_kessinger@jenkinscars.com", code: "11223344" });
+    check("user: already-used invite → 410, not a retry prompt", used.ok === false && used.status === 410);
+
+    const expired = await resolveUser([userInv({ setup_code_expires_at: past })], { email: "karen_kessinger@jenkinscars.com", code: "11223344" });
+    check("user: expired code → 410", expired.ok === false && expired.status === 410);
+
+    // One mailbox, two rooftops — the CODE picks, never the email.
+    const two = [userInv({ id: "u-a", dealer_id: "d-a", token: "ta", setup_code_hash: hashSetupCode("11112222") }),
+                 userInv({ id: "u-b", dealer_id: "d-b", token: "tb", setup_code_hash: hashSetupCode("33334444") })];
+    const picked = await resolveUser(two, { email: "karen_kessinger@jenkinscars.com", code: "33334444" });
+    check("user: two live invites for one mailbox → the CODE picks the right one",
+      picked.ok === true && (picked as { invite: { id: string } }).invite.id === "u-b");
+  }
+
+  // ── The two flows must not be able to consume each other's invitations ────
+  {
+    const crossA = await resolveUser([inv()], { email: "rich_meier@jenkinscars.com", code: "02099258" });
+    check("a MIGRATION invite cannot be consumed via /signup", crossA.ok === false);
+    const crossB = await resolveUser([inv()], { token: "tok-good", code: "02099258" });
+    check("  …not by token either (404)", crossB.ok === false && crossB.status === 404);
+    const crossC = await resolve([userInv()], { email: "karen_kessinger@jenkinscars.com", code: "11223344" });
+    check("a USER invite cannot be consumed via /migrate", crossC.ok === false);
+    const crossD = await resolve([userInv()], { token: "utok-good", code: "11223344" });
+    check("  …not by token either (404)", crossD.ok === false && crossD.status === 404);
+  }
+
+  // ── Email copy: the staff invite must name the typable fallback ───────────
+  {
+    const html = buildInviteEmail({
+      firstName: "Karen", orgName: "Jenkins Ford Lincoln", roleLabel: "Dealer Admin",
+      inviteUrl: "https://app.dealeraddendums.com/signup?invite=tok", setupCode: "11223344",
+    });
+    check("staff invite email has the 'button not working' fallback", /Button not working\?/.test(html));
+    check("  …and names the /signup manual URL", /app\.dealeraddendums\.com\/signup<\/strong>/.test(html));
+    check("  …and is plain text, not an <a> a rewriter would mangle",
+      !/<a[^>]*>[^<]*app\.dealeraddendums\.com\/signup/.test(html));
+    check("  …and sits AFTER the button, where a stuck invitee looks",
+      html.indexOf("Button not working?") > html.indexOf("Set Up Your Account"));
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

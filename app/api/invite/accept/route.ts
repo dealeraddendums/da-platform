@@ -3,7 +3,7 @@ import { recordAuthEvent } from "@/lib/auth-events";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import { fireProfileSync } from "@/lib/sync-hubspot";
-import { verifySetupCode } from "@/lib/invite-code";
+import { resolveUserInvite, manualAttemptAllowed } from "@/lib/invite-lookup";
 import { getAuthUserIdByEmail } from "@/lib/last-sign-in";
 import { rateLimit } from "@/lib/rate-limit";
 import { setUserDirectScope } from "@/lib/tags";
@@ -13,7 +13,14 @@ import { setUserDirectScope } from "@/lib/tags";
  * Finalize an invitation — SCANNER-PROOF: the account is created and the
  * invitation is consumed ONLY here, on a human action:
  *   - { token, code }     → verify the emailed one-time setup code, then finalize.
- *   - { token, password } → set a password, then finalize.
+ *   - { email, code }     → same, for an invitee whose LINK never worked. Corporate
+ *                           mail security (Safe Links, Barracuda) and dealership DNS
+ *                           filtering can rewrite, truncate or blackhole the link, and
+ *                           the invitee is then holding a valid code with nowhere to
+ *                           type it. The code is the credential, never the link.
+ *   - { token, password } → set a password, then finalize. Token-only: setting a
+ *                           password is not itself proof of invitation, so the link
+ *                           must carry it.
  *
  * Neither loading the invite page nor any GET/HEAD pre-fetch consumes anything.
  * A mail scanner can pre-touch the link but can't read & type the code, so it
@@ -28,30 +35,74 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Too many attempts — please wait a moment." }, { status: 429 });
   }
 
-  let body: { token?: string; code?: string; password?: string };
+  let body: { token?: string; code?: string; password?: string; email?: string };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { token, code, password } = body;
-  if (!token) return NextResponse.json({ error: "token required" }, { status: 400 });
-
+  const { token, code, password, email: manualEmail } = body;
   const usingPassword = !!password;
+  const usingManual = !token && !!manualEmail;
+
+  if (!token && !usingManual) return NextResponse.json({ error: "token required" }, { status: 400 });
+  if (usingManual && usingPassword) {
+    // Manual entry proves possession of the code, not of the link. Allowing a
+    // password to be set through it would let anyone who guesses a code choose
+    // the account's password; the code path signs them in and they can set one
+    // afterwards.
+    return NextResponse.json({ error: "Enter your setup code to continue." }, { status: 400 });
+  }
   if (!usingPassword && !code) {
     return NextResponse.json({ error: "A setup code or password is required." }, { status: 400 });
   }
   if (usingPassword && password!.length < 6) {
     return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
   }
+  // Per-mailbox throttle for the manual path: the email is guessable, so the
+  // per-IP cap above is not enough on its own against code-grinding.
+  if (usingManual && !manualAttemptAllowed(manualEmail!, "signup")) {
+    return NextResponse.json({ error: "Too many attempts — please wait a few minutes." }, { status: 429 });
+  }
 
   const admin = createAdminSupabaseClient();
 
-  // Validate token
+  // ── Resolve + authorize the invitation ────────────────────────────────────
+  // The code paths (tokenized OR manual email+code) go through the shared
+  // resolver, which enforces purpose='user'. That matters twice over: it is
+  // what migration 102 always intended (a /migrate token must not be
+  // consumable by the signup flow — never actually enforced here until now),
+  // and with manual entry live, a migration code typed into /signup would
+  // otherwise resolve and be burned by the wrong flow.
+  let invId: string;
+  if (!usingPassword) {
+    const resolved = await resolveUserInvite({
+      ...(usingManual ? { email: manualEmail } : { token }),
+      code: code!.trim(),
+      admin,
+    });
+    if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+    invId = resolved.invite.id;
+  } else {
+    // Password path stays token-only and needs the same purpose guard.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: row } = await (admin as any)
+      .from("invitations").select("id, purpose, expires_at, accepted_at").eq("token", token).maybeSingle() as
+      { data: { id: string; purpose: string | null; expires_at: string; accepted_at: string | null } | null };
+    if (!row || row.purpose === "migration") return NextResponse.json({ error: "Invalid invitation" }, { status: 404 });
+    if (row.accepted_at) return NextResponse.json({ error: "This invitation has already been used. Try signing in instead." }, { status: 410 });
+    if (new Date(row.expires_at) < new Date()) {
+      return NextResponse.json({ error: "This invitation has expired. Ask your administrator to resend it." }, { status: 410 });
+    }
+    invId = row.id;
+  }
+
+  // Load the full row by id — the resolver returns only the columns it needs
+  // to authorize, and finalizing needs role/dealer/group/scope as well.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: inv } = await (admin as any)
     .from("invitations")
     .select("id, email, first_name, last_name, role, dealer_id, group_id, expires_at, accepted_at, setup_code_hash, setup_code_expires_at, scope_tag_ids, scope_dealer_ids, invited_by")
-    .eq("token", token)
+    .eq("id", invId)
     .maybeSingle() as { data: {
       id: string; email: string; first_name: string; last_name: string;
       role: string; dealer_id: string | null; group_id: string | null;
@@ -60,18 +111,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } | null };
 
   if (!inv) return NextResponse.json({ error: "Invalid invitation" }, { status: 404 });
-  if (new Date(inv.expires_at) < new Date()) return NextResponse.json({ error: "This invitation has expired. Ask your administrator to resend it." }, { status: 410 });
-
-  // Code path: verify the one-time setup code (the scanner-proof gate).
-  if (!usingPassword) {
-    const codeExpired = inv.setup_code_expires_at ? new Date(inv.setup_code_expires_at) < new Date() : true;
-    if (!inv.setup_code_hash || codeExpired) {
-      return NextResponse.json({ error: "Your setup code has expired. Use “Resend code” to get a new one." }, { status: 410 });
-    }
-    if (!verifySetupCode(code!.trim(), inv.setup_code_hash)) {
-      return NextResponse.json({ error: "That code is incorrect. Check your email or request a new one." }, { status: 401 });
-    }
-  }
 
   const isGroupInvite = !!inv.group_id && !inv.dealer_id;
   // Staff invite (admin Users page "Send invite"): no dealer AND no group —
