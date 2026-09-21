@@ -482,12 +482,14 @@ export default function HelpAdminClient({ jw }: { jw: JwConfig }) {
             <Field label="Audience">
               <select value={editing.audience} onChange={(e) => setEditing({ ...editing, audience: e.target.value })} style={inp}>
                 <option value="dealer">dealer</option><option value="group">group</option><option value="all">all</option>
+                <option value="internal">internal — staff only, never shown to dealers</option>
               </select>
             </Field>
             <Field label="Sort order (within the category)"><input type="number" value={editing.sort_order} onChange={(e) => setEditing({ ...editing, sort_order: Number(e.target.value) })} style={inp} /></Field>
             <Field label="Published">
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, paddingTop: 6, color: "#fff" }}>
-                <input type="checkbox" checked={editing.published} onChange={(e) => setEditing({ ...editing, published: e.target.checked })} /> Visible to dealers
+                <input type="checkbox" checked={editing.published} onChange={(e) => setEditing({ ...editing, published: e.target.checked })} />{" "}
+                {editing.audience === "internal" ? "Live (staff only — dealers never see this)" : "Visible to dealers"}
               </label>
             </Field>
           </div>

@@ -1,14 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { checkPdfUrl, isValidTourId, resolveCategory } from "@/lib/help-articles";
+import { checkPdfUrl, isValidTourId, resolveCategory, readableAudiences, ARTICLE_AUDIENCES } from "@/lib/help-articles";
 import { extractJwMediaIds, syncMediaTitles } from "@/lib/jwplayer";
 
 type Params = { params: { id: string } };
 const SELECT_ADMIN =
   "id, slug, category, category_id, title, body, image_urls, pdf_url, product_fruits_tour_id, audience, sort_order, published, updated_by, updated_at, created_at";
 
-/** GET /api/help/articles/[id] — published readable by any authed user; drafts super_admin only. */
+/**
+ * GET /api/help/articles/[id] — published readable by any authed user whose
+ * ROLE is in the article's audience; drafts super_admin only.
+ *
+ * The audience check is not decoration. The list endpoint has always
+ * allowlisted audiences, but this by-id route did not, so any authed user
+ * could read any published article if they had its id — which would have made
+ * 'internal' (migration 160) staff-only in the browse UI and public to anyone
+ * who guessed an id. It also closes the same pre-existing leak for 'group'.
+ */
 export async function GET(_req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
@@ -17,8 +26,12 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (admin as any).from("help_articles").select(SELECT_ADMIN).eq("id", params.id).maybeSingle();
   if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (!data.published && claims.role !== "super_admin") {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (claims.role !== "super_admin") {
+    // Same allowlist the browse/search endpoint applies — kept in one helper
+    // so the two can't drift apart.
+    if (!data.published || !readableAudiences(claims.role).includes(data.audience)) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
   }
   return NextResponse.json({ data });
 }
@@ -67,7 +80,7 @@ export async function PUT(req: NextRequest, { params }: Params): Promise<NextRes
     }
     patch.product_fruits_tour_id = raw || null;
   }
-  if (typeof body.audience === "string" && ["dealer", "group", "all"].includes(body.audience)) patch.audience = body.audience;
+  if (typeof body.audience === "string" && (ARTICLE_AUDIENCES as readonly string[]).includes(body.audience)) patch.audience = body.audience;
   if (Number.isFinite(body.sort_order as number)) patch.sort_order = body.sort_order;
   if (typeof body.published === "boolean") patch.published = body.published;
   if (typeof body.slug === "string" && body.slug.trim()) {

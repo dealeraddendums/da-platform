@@ -50,3 +50,25 @@ export async function resolveCategory(
     .from("help_categories").select("id, name").eq("id", categoryId).maybeSingle();
   return (data as HelpCategory | null) ?? null;
 }
+
+/**
+ * Every audience an article may carry (migration 091, extended by 160).
+ * 'internal' is STAFF-ONLY: no dealer-facing surface may ever return it.
+ */
+export const ARTICLE_AUDIENCES = ["dealer", "group", "all", "internal"] as const;
+export type ArticleAudience = (typeof ARTICLE_AUDIENCES)[number];
+
+/**
+ * The audiences a given role may READ — the single allowlist behind browse,
+ * search and the by-id fetch, so those three cannot drift apart.
+ *
+ * Deliberately an allowlist, not a denylist of 'internal': a future audience
+ * value is then invisible to dealers until someone opts it in, which is the
+ * safe direction to fail.
+ *
+ * super_admin is not handled here — staff read everything through the CMS
+ * (`?all=1`), which skips this filter entirely.
+ */
+export function readableAudiences(role: string): ArticleAudience[] {
+  return role === "group_admin" ? ["dealer", "all", "group"] : ["dealer", "all"];
+}

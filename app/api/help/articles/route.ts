@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { checkPdfUrl, isValidTourId, resolveCategory } from "@/lib/help-articles";
+import { checkPdfUrl, isValidTourId, resolveCategory, readableAudiences, ARTICLE_AUDIENCES } from "@/lib/help-articles";
 
 const COMMON = "id, slug, category, category_id, title, body, image_urls, pdf_url, product_fruits_tour_id, audience, sort_order, updated_at";
 const SELECT_PUBLIC = COMMON;
@@ -9,7 +9,8 @@ const SELECT_ADMIN = `${COMMON}, published, updated_by, created_at`;
 
 /**
  * GET /api/help/articles
- *   - Any authed user: published articles (audience dealer/all; group_admin also 'group').
+ *   - Any authed user: published articles their ROLE may read (see
+ *     readableAudiences — 'internal' is staff-only and never listed here).
  *   - super_admin with ?all=1: every article incl. drafts (for the CMS).
  *   - Optional ?category_id= and ?q= (title/body search).
  *
@@ -38,8 +39,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (!wantAll) {
     q = q.eq("published", true);
-    const audiences = claims.role === "group_admin" ? ["dealer", "all", "group"] : ["dealer", "all"];
-    q = q.in("audience", audiences);
+    q = q.in("audience", readableAudiences(claims.role));
   }
 
   const categoryId = sp.get("category_id");
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const slug = (body.slug?.trim() || body.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
-  const audience = ["dealer", "group", "all"].includes(body.audience ?? "") ? body.audience : "dealer";
+  const audience = (ARTICLE_AUDIENCES as readonly string[]).includes(body.audience ?? "") ? body.audience : "dealer";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error: dbErr } = await (admin as any)
