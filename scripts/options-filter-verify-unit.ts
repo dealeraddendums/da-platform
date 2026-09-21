@@ -364,6 +364,71 @@ void test("CPO vehicle picks the CPO twin, not the New or Used one", () => {
   assert.equal(savedRowSurvivesLibraryRules(trio, cpo, "Care Plan", { option_price: "200" }), false);
 });
 
+// ── Blank vehicle classifier vs a SPECIFIC list must NOT match ───────────────
+// Greenway Ford 2027 F-150 (912GW5K), trim blank in the feed, was matching
+// "Market Adjustment - Raptor" ($5,000) AND "Market Adjustment - Raptor R"
+// ($20,000): $25,000 of adjustment on a truck that is neither.
+void test("blank TRIM does not match a trim-specific rule (Greenway Raptor bug)", () => {
+  const raptor = { ...baseRule, makes: "FORD", models: "F-150", trims: "Raptor", ad_types: ["New"] };
+  const raptorR = { ...baseRule, makes: "FORD", models: "F-150", trims: "Raptor R", ad_types: ["New"] };
+  const blankTrim = vehicle({ YEAR: "2027", MAKE: "Ford", MODEL: "F-150", TRIM: null, BODYSTYLE: "Crew Cab Pickup", MSRP: "72065" });
+  assert.equal(matchesRulesRow(raptor, blankTrim), false);
+  assert.equal(matchesRulesRow(raptorR, blankTrim), false);
+  assert.equal(matchesRulesRow(raptor, vehicle({ ...blankTrim, TRIM: "" })), false, "empty string too");
+  assert.equal(matchesRulesRow(raptor, vehicle({ ...blankTrim, TRIM: "   " })), false, "whitespace too");
+});
+
+void test("a REAL Raptor still matches the Raptor rule (the fix isn't a blanket drop)", () => {
+  const raptor = { ...baseRule, makes: "FORD", models: "F-150", trims: "Raptor", ad_types: ["New"] };
+  assert.equal(matchesRulesRow(raptor, vehicle({ MAKE: "Ford", MODEL: "F-150", TRIM: "Raptor" })), true);
+});
+
+void test("a trim that isn't in the rule still doesn't match (unchanged)", () => {
+  const raptor = { ...baseRule, makes: "FORD", models: "F-150", trims: "Raptor" };
+  assert.equal(matchesRulesRow(raptor, vehicle({ MAKE: "Ford", MODEL: "F-150", TRIM: "Lariat" })), false);
+});
+
+void test("a product with NO trim filter still matches a blank-trim vehicle (unchanged)", () => {
+  const anyTrim = { ...baseRule, makes: "FORD", models: "F-150" };
+  const allTrim = { ...baseRule, makes: "FORD", models: "F-150", trims: "ALL" };
+  const v = vehicle({ MAKE: "Ford", MODEL: "F-150", TRIM: null });
+  assert.equal(matchesRulesRow(anyTrim, v), true);
+  assert.equal(matchesRulesRow(allTrim, v), true);
+});
+
+void test("the same rule applies to make / model / fuel / body_style", () => {
+  const v = vehicle({ MAKE: null, MODEL: null, FUEL: null, BODYSTYLE: null });
+  assert.equal(matchesRulesRow({ ...baseRule, makes: "FORD" }, v), false);
+  assert.equal(matchesRulesRow({ ...baseRule, models: "F-150" }, v), false);
+  assert.equal(matchesRulesRow({ ...baseRule, fuel: "Electric" }, v), false);
+  assert.equal(matchesRulesRow({ ...baseRule, body_styles: "Sedan" }, v), false);
+});
+
+void test("NUMERIC null-skip is untouched — an unpriced/mileage-less vehicle still matches", () => {
+  const v = vehicle({ MSRP: null, MILEAGE: null, YEAR: null });
+  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 1, msrp1: 40000 }, v), true, "null MSRP still skips");
+  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 2, msrp1: 60000 }, v), true, "both sides of a price pair still match");
+  assert.equal(matchesRulesRow({ ...baseRule, miles_condition: 1, miles_value: 100 }, v), true);
+  assert.equal(matchesRulesRow({ ...baseRule, year_condition: 1, year_value: 2024 }, v), true);
+  // MSRP 0 is still treated as unpriced, not as a real $0 (the LYRIQ fix).
+  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 1, msrp1: 40000 }, vehicle({ MSRP: "0" })), true);
+});
+
+void test("NONE / -NONE sentinels behave exactly as before on a blank-trim vehicle", () => {
+  const v = vehicle({ TRIM: null });
+  assert.equal(matchesRulesRow({ ...baseRule, trims: "NONE" }, v), false);
+  assert.equal(matchesRulesRow({ ...baseRule, trims: "-NONE" }, v), false);
+  // NOT-IN of the sentinel still matches everything.
+  assert.equal(matchesRulesRow({ ...baseRule, trims: "NONE", trims_not: true }, v), true);
+  // normalizeSentinelList still collapses them for the saved-row gate.
+  assert.equal(normalizeSentinelList("-NONE"), null);
+});
+
+void test("NOT-mode on a blank value is unchanged (deliberately not widened)", () => {
+  const v = vehicle({ TRIM: null });
+  assert.equal(matchesRulesRow({ ...baseRule, trims: "Raptor", trims_not: true }, v), false);
+});
+
 // ── report ───────────────────────────────────────────────────────────────────
 setTimeout(() => {
   const failed = results.filter(r => !r.ok);

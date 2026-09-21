@@ -65,7 +65,30 @@ function listMatchesWithNot(
   const lf = listField.trim().toUpperCase();
   if (lf === "NONE" || lf === "-NONE") return notFlag;
   const val = (vehicleValue ?? "").toLowerCase().trim();
-  if (!val) return !notFlag; // empty vehicle value: matches "ALL" lists but not specific ones
+  if (!val) {
+    // BLANK VEHICLE VALUE vs a SPECIFIC list = NO MATCH.
+    //
+    // This line is only ever reached for a specific list — an unconstrained
+    // one (null / "" / "ALL") already returned true at the top — so the old
+    // `return !notFlag` passed every IN rule on a blank value. Its comment
+    // claimed "matches ALL lists but not specific ones"; the code did the
+    // opposite of the second half.
+    //
+    // What that cost: Greenway Ford's 2027 F-150 (stock 912GW5K) has a blank
+    // trim in the feed, so it matched BOTH "Market Adjustment - Raptor"
+    // ($5,000) and "Market Adjustment - Raptor R" ($20,000) — $25,000 of
+    // market adjustment printed on a truck that is neither.
+    //
+    // For a text classifier, missing is not wildcard: a vehicle whose trim we
+    // do not know cannot be shown to BE the required trim. Same for make,
+    // model, fuel and body style, which share this helper.
+    //
+    // NOT-mode is deliberately left exactly as it was (it also returned false
+    // here). Whether "all trims EXCEPT Raptor" should apply to an unknown
+    // trim is a real question, but it is a separate one and changing it would
+    // move money in the other direction, so it is not folded in here.
+    return false;
+  }
   const items = listField.split(",").map((s) => s.toLowerCase().trim()).filter(Boolean);
   if (items.length === 0) return true;
   const inList = items.some((item) => val === item || val.includes(item));
