@@ -25,6 +25,10 @@ type ListResponse = {
   page: number;
   per_page: number;
   printedTypes?: Record<string, string[]>;
+  /** How many terms the server actually searched (a list search is a union). */
+  search_terms?: number;
+  /** True when the paste exceeded the term cap and was trimmed. */
+  search_truncated?: boolean;
 };
 
 const PER_PAGE_OPTIONS = [15, 25, 50, 0] as const; // 0 = All
@@ -135,6 +139,8 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
   const [vehicles, setVehicles] = useState<DealerVehicleRow[]>([]);
   const [printedTypes, setPrintedTypes] = useState<Record<string, string[]>>({});
   const [total, setTotal] = useState(0);
+  const [searchTerms, setSearchTerms] = useState(0);
+  const [searchTruncated, setSearchTruncated] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(15);
   const [q, setQ] = useState("");
@@ -238,6 +244,8 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
     } else {
       setVehicles(json.data);
       setTotal(json.total);
+      setSearchTerms(json.search_terms ?? 0);
+      setSearchTruncated(json.search_truncated ?? false);
       setPrintedTypes(json.printedTypes ?? {});
     }
   }, [page, perPage, condition, printStatus, sortBy, sortDir, q]);
@@ -409,7 +417,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
           <input
             type="text" value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search stock, VIN, make, model…"
+            placeholder="Search stock, VIN, make, model — or paste a list"
             style={{ height: 36, border: "1px solid var(--border)", borderRadius: 4, padding: "0 10px", fontSize: 13, width: 240 }}
           />
           <button type="submit" style={{ height: 36, padding: "0 12px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, cursor: "pointer" }}>
@@ -462,7 +470,10 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
       {/* Summary */}
       <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", marginBottom: 8 }}>
         {total.toLocaleString()} vehicle{total !== 1 ? "s" : ""}
-        {q ? ` matching "${q}"` : ""}
+        {/* A list search is a union, so echoing the raw paste back reads badly
+            once it is more than one term — say how many terms instead. */}
+        {q ? (searchTerms > 1 ? ` matching your search (${searchTerms} terms)` : ` matching "${q.trim()}"`) : ""}
+        {searchTruncated ? ` — only the first ${searchTerms} terms were searched` : ""}
       </p>
 
       {/* Bulk actions toolbar */}

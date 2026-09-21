@@ -23,7 +23,8 @@
     "test:enrichment": "tsx scripts/enrichment-verify-unit.ts",
     "test:product-html": "tsx scripts/product-html-normalize-unit.ts",
     "test:dealer-billing-customer": "tsx scripts/dealer-billing-customer-verify-unit.ts",
-    "test:migrate-invite": "tsx scripts/migrate-invite-lookup-verify-unit.ts"
+    "test:migrate-invite": "tsx scripts/migrate-invite-lookup-verify-unit.ts",
+    "test:vehicle-search": "tsx scripts/vehicle-search-verify-unit.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

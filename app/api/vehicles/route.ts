@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { tokenizeSearch, buildVehicleSearchOr } from "@/lib/vehicle-search";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { vehicleConditionFields } from "@/lib/vehicles";
@@ -95,8 +96,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       query = query.or('certified.in.("yes","y","true","t","1","x","certified","cert","cpo")');
     }
 
-    if (q) {
-      query = query.or(`vin.ilike.%${q}%,stock_number.ilike.%${q}%,make.ilike.%${q}%,model.ilike.%${q}%`);
+    // Same multi-term union search as the dealer inventory list (shared
+    // helper), so pasting a list of stock numbers or VINs works identically
+    // on the admin side and a comma can't break the logic tree.
+    const { terms: searchTerms } = tokenizeSearch(q);
+    if (searchTerms.length) {
+      const orTree = buildVehicleSearchOr(searchTerms, { includeYear: false });
+      if (orTree) query = query.or(orTree);
     }
 
     const { data: rows, error: dbErr, count } = await query

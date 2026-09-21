@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { tokenizeSearch, buildVehicleSearchOr } from "@/lib/vehicle-search";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerVehicleInsert, DealerVehicleRow, VehicleAuditLogInsert } from "@/lib/db";
@@ -96,12 +97,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .or(`certified.is.null,certified.not.in.(${notCertified})`);
     }
   }
-  if (q) {
-    const yearNum = parseInt(q, 10);
-    const yearClause = (!isNaN(yearNum) && yearNum >= 1900 && yearNum <= 2099) ? `,year.eq.${yearNum}` : "";
-    query = query.or(
-      `stock_number.ilike.%${q}%,vin.ilike.%${q}%,make.ilike.%${q}%,model.ilike.%${q}%${yearClause}`
-    );
+  // Free text is a LIST of terms (commas/whitespace/newlines) — pasting a
+  // column of stock numbers is the point — and the result is their union.
+  // Terms are quoted, so a comma or paren can no longer break the tree.
+  const { terms: searchTerms, truncated: searchTruncated } = tokenizeSearch(q);
+  if (searchTerms.length) {
+    const orTree = buildVehicleSearchOr(searchTerms);
+    if (orTree) query = query.or(orTree);
   }
   // Print status reads dealer_vehicles.print_status — matches dashboard counts
   // and surfaces both legacy ETL-printed and platform-printed vehicles.
@@ -142,6 +144,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     per_page: perPage,
     dealer_id: dealerId,
     printedTypes,
+    // Lets the UI say how many terms it actually searched, and warn rather
+    // than quietly return a subset when a paste exceeds the cap.
+    search_terms: searchTerms.length,
+    search_truncated: searchTruncated,
   });
 }
 
