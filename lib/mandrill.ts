@@ -23,6 +23,13 @@ interface MandrillMessage {
   to: MandrillRecipient[];
   /** Optional attachments (passed through to Mandrill's attachments[] field). */
   attachments?: MandrillAttachment[];
+  /**
+   * Mandrill click-tracking. Defaults to FALSE for every send — see the note
+   * in sendMandrillEmail. Only set this true for a genuinely promotional send.
+   */
+  track_clicks?: boolean;
+  /** Mandrill open-tracking (pixel only — never rewrites a link). Left on. */
+  track_opens?: boolean;
 }
 
 interface MandrillSendResult {
@@ -40,7 +47,18 @@ export async function sendMandrillEmail(message: MandrillMessage): Promise<void>
   const res = await fetch(`${MANDRILL_API}/messages/send.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: apiKey, message }),
+    // track_clicks is FIRST so an explicit per-message value still wins.
+    //
+    // Click tracking rewrites every href into https://mandrillapp.com/track/click/…
+    // before the recipient ever sees it. Dealership networks routinely run DNS
+    // filtering that blocks third-party click redirectors, so that host answers
+    // NXDOMAIN on their machine while resolving fine everywhere else — the link
+    // is dead for exactly the people we sent it to, and looks healthy to us.
+    // Every email this helper sends is transactional (invites, codes, invoices,
+    // alerts): the link IS the payload, and a redirector that can be blocked is
+    // a single point of failure we get nothing for. Click analytics are not
+    // worth a migration invite or a Pay link that cannot be opened.
+    body: JSON.stringify({ key: apiKey, message: { track_clicks: false, ...message } }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
