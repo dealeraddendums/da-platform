@@ -16,12 +16,28 @@
  *    split, escaped, and OR'd, giving the UNION of matches.
  */
 
-/** Fields a term is matched against, in the order the UI presents them. */
-export const VEHICLE_SEARCH_FIELDS = ["stock_number", "vin", "make", "model"] as const;
+/**
+ * Text fields a term is matched against — kept aligned with the columns the
+ * inventory table actually SHOWS (Stock # · Year / Make / Model · Trim · VIN),
+ * because a field that is visible but unsearchable reads as a broken search.
+ *
+ * `trim` was the missing one: a "2025 Ford F-150 / Raptor" sits right there on
+ * the page with Raptor rendered under the model, and searching "Raptor"
+ * returned nothing.
+ *
+ * `year` is an integer column, so it can't take ilike — it is matched
+ * separately, and only for a term that actually looks like a model year.
+ *
+ * `condition` is displayed too but deliberately NOT here: it holds New/Used,
+ * so "new" would match half the lot, and the New/Used/CPO filter already
+ * covers it precisely.
+ */
+export const VEHICLE_SEARCH_FIELDS = ["stock_number", "vin", "make", "model", "trim"] as const;
 
 /**
- * Bound on how many terms one search may carry. Each term expands to four
- * conditions, and the whole tree rides in a query string through nginx and on
+ * Bound on how many terms one search may carry. Each term expands to one
+ * condition per searchable field, and the whole tree rides in a query string
+ * through nginx and on
  * to PostgREST, so an unbounded paste could blow the request-line limit and
  * fail as an opaque 4xx. Callers surface `truncated` rather than silently
  * searching a subset.
@@ -57,10 +73,14 @@ function ilikePattern(term: string): string {
   return `"%${term.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}%"`;
 }
 
-/** A 4-digit year is also matched against the year column, as before. */
+/**
+ * A term that looks like a model year also matches the integer `year` column,
+ * so "2025" finds 2025 units. Anything else (a stock number like 41805, a
+ * price) must not, or a numeric stock number would drag in a whole model year.
+ */
 function yearClause(term: string): string {
   const n = Number.parseInt(term, 10);
-  return /^\d{4}$/.test(term.trim()) && n >= 1900 && n <= 2099 ? `,year.eq.${n}` : "";
+  return /^\d{4}$/.test(term.trim()) && n >= 1900 && n <= 2099 ? `year.eq.${n}` : "";
 }
 
 /**
@@ -76,18 +96,13 @@ function yearClause(term: string): string {
  *
  * Returns null when there is nothing to search, so callers can skip `.or()`.
  */
-export function buildVehicleSearchOr(
-  terms: string[],
-  opts: { includeYear?: boolean } = {},
-): string | null {
+export function buildVehicleSearchOr(terms: string[]): string | null {
   const clauses: string[] = [];
   for (const term of terms) {
     const pattern = ilikePattern(term);
     for (const field of VEHICLE_SEARCH_FIELDS) clauses.push(`${field}.ilike.${pattern}`);
-    if (opts.includeYear !== false) {
-      const y = yearClause(term);
-      if (y) clauses.push(y.slice(1));
-    }
+    const y = yearClause(term);
+    if (y) clauses.push(y);
   }
   return clauses.length ? clauses.join(",") : null;
 }

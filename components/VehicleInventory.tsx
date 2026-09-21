@@ -247,7 +247,7 @@ export default function VehicleInventory({ fixedDealerId, role, groupId, printGa
               <input
                 className="input"
                 style={{ maxWidth: 280 }}
-                placeholder="VIN, stock #, make, model — or paste a list"
+                placeholder="VIN, stock #, year, make, model, trim — or paste a list"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
               />

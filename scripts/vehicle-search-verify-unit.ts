@@ -69,14 +69,24 @@ console.log("\nvehicle search — tokenizing + escaping\n");
   check("a stock number does NOT add year.eq", !n.includes("year.eq"));
   const old = buildVehicleSearchOr(tokenizeSearch("1200").terms)!;
   check("an out-of-range number does NOT add year.eq", !old.includes("year.eq"));
-  const off = buildVehicleSearchOr(tokenizeSearch("2024").terms, { includeYear: false })!;
-  check("admin list can opt out of the year clause (no behavior change there)", !off.includes("year.eq"));
+  check("year matching is on for BOTH lists (admin shows Year too)",
+    buildVehicleSearchOr(tokenizeSearch("2024").terms)!.includes("year.eq.2024"));
+}
+
+// ── trim: the field that was visible but unsearchable ─────────────────────
+{
+  const tree = buildVehicleSearchOr(tokenizeSearch("Raptor").terms)!;
+  check("trim is searched (the 'Raptor returns 0' bug)", tree.includes('trim.ilike."%Raptor%"'));
+  check("  …every displayed text column is covered",
+    ["stock_number", "vin", "make", "model", "trim"].every(f => tree.includes(`${f}.ilike.`)));
+  check("  …and condition is deliberately NOT searched (the New/Used filter owns it)",
+    !tree.includes("condition.ilike"));
 }
 
 // ── Single term = exactly today's behavior ─────────────────────────────────
 {
   const one = buildVehicleSearchOr(tokenizeSearch("F-150").terms)!;
-  check("single term still ORs across all four fields (no regression)",
+  check("single term ORs across every searchable field (no regression)",
     one.split(",").length === VEHICLE_SEARCH_FIELDS.length);
   check("  …and stays a CONTAINS match, so partials keep working",
     one.includes('model.ilike."%F-150%"'));

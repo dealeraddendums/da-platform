@@ -98,10 +98,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     // Same multi-term union search as the dealer inventory list (shared
     // helper), so pasting a list of stock numbers or VINs works identically
-    // on the admin side and a comma can't break the logic tree.
+    // on the admin side, a comma can't break the logic tree, and both lists
+    // search every column they display (trim and year included).
     const { terms: searchTerms } = tokenizeSearch(q);
     if (searchTerms.length) {
-      const orTree = buildVehicleSearchOr(searchTerms, { includeYear: false });
+      const orTree = buildVehicleSearchOr(searchTerms);
       if (orTree) query = query.or(orTree);
     }
 

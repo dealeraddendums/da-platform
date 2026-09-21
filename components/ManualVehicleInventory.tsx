@@ -417,7 +417,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
           <input
             type="text" value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search stock, VIN, make, model — or paste a list"
+            placeholder="Search stock, VIN, year, make, model, trim — or paste a list"
             style={{ height: 36, border: "1px solid var(--border)", borderRadius: 4, padding: "0 10px", fontSize: 13, width: 240 }}
           />
           <button type="submit" style={{ height: 36, padding: "0 12px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, cursor: "pointer" }}>
