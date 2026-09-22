@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
-import { authorizeDealerAction } from "@/lib/dealer-authz";
+import { authorizeDealerAction, resolveDealerForRequest, resolveEffectiveDealer } from "@/lib/dealer-authz";
 import { fetchLabelPricingEntries } from "@/lib/label-products";
 import { ensureDealerCustomer } from "@/lib/dealer-billing-customer";
 
@@ -74,53 +74,63 @@ const BILLING_BASE = 'https://billing.dealeraddendums.com/api/v1';
 /**
  * GET /api/orders/labels
  *
- * Returns recent label_orders for the current dealer (or any dealer when
- * called by super_admin/group_admin with ?dealer_id=<UUID>). Used by the
- * Orders tab on /profile to display status + tracking links.
+ * Returns recent label_orders for the dealership currently being operated —
+ * every order placed at that rooftop, by anyone, not just the caller's own.
+ * Orders are a dealership record: the Orders tab on /profile shows the whole
+ * store's history with an "Ordered By" column naming the placer.
+ *
+ * The dealership is resolved from the real context via the canonical
+ * `resolveDealerForRequest` (docs/group-admin-dealer-parity.md), never from a
+ * trusted caller param: a dealer role's own dealer, a group_admin's /
+ * group_user's switched-into member dealer, or a super_admin's ghosted dealer.
+ * `?dealer_id=<UUID>` stays supported for callers with no dealer context of
+ * their own (a super_admin who isn't ghosting) and is authorized like any
+ * other dealer-scoped action. Before 2026-09-22 only dealer_admin/dealer_user
+ * resolved a dealer here, so a group_admin operating a member store (and a
+ * ghosted super_admin, a group_user and dealer_restricted) saw an empty list —
+ * including the orders they had placed themselves.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
 
   const admin = createAdminSupabaseClient();
-  let dealerUuid: string | null = null;
 
-  if (claims.role === 'dealer_admin' || claims.role === 'dealer_user') {
-    if (!claims.dealer_id) {
-      return NextResponse.json({ error: 'No dealer assigned' }, { status: 403 });
-    }
+  // The optional param is a dealer UUID (that's what the admin surfaces hold);
+  // authorization works on the text dealer_id, so translate first.
+  const explicitUuid = req.nextUrl.searchParams.get('dealer_id');
+  let explicitTextId: string | null = null;
+  if (explicitUuid) {
     const { data: drow } = await admin
       .from('dealers')
-      .select('id')
-      .eq('dealer_id', claims.dealer_id)
-      .maybeSingle<{ id: string }>();
-    dealerUuid = drow?.id ?? null;
-  } else if (claims.role === 'super_admin' || claims.role === 'group_admin') {
-    const param = req.nextUrl.searchParams.get('dealer_id');
-    if (param) {
-      // group_admin may only read a dealer (by UUID) in their own group.
-      if (claims.role === 'group_admin') {
-        const { data: drow } = await admin
-          .from('dealers')
-          .select('group_id')
-          .eq('id', param)
-          .maybeSingle<{ group_id: string | null }>();
-        if (!drow || drow.group_id !== claims.group_id) {
-          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        }
-      }
-      dealerUuid = param;
-    }
+      .select('dealer_id')
+      .eq('id', explicitUuid)
+      .maybeSingle<{ dealer_id: string }>();
+    if (!drow) return NextResponse.json({ error: 'Dealer not found' }, { status: 404 });
+    explicitTextId = drow.dealer_id;
   }
 
-  if (!dealerUuid) {
+  // No dealer context and no explicit target (e.g. a super_admin at platform
+  // level, or a group_admin who hasn't switched into a store) — nothing to
+  // show rather than an error; the Orders tab only renders in dealer context.
+  if (!resolveEffectiveDealer(claims) && !explicitTextId) {
     return NextResponse.json({ data: [] });
   }
+
+  const authz = await resolveDealerForRequest(claims, explicitTextId);
+  if (!authz.ok) return authz.response;
+
+  const { data: target } = await admin
+    .from('dealers')
+    .select('id')
+    .eq('dealer_id', authz.dealerId)
+    .maybeSingle<{ id: string }>();
+  if (!target) return NextResponse.json({ data: [] });
 
   const { data, error: dbErr } = await admin
     .from('label_orders')
     .select('id, dealer_id, items, ship_to, total_amount, billed_to, group_id, billing_status, email_status, xps_status, xps_order_id, xps_tracking_number, xps_carrier, created_at, ordered_by, ordered_by_name')
-    .eq('dealer_id', dealerUuid)
+    .eq('dealer_id', target.id)
     .order('created_at', { ascending: false })
     .limit(100);
 
