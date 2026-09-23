@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 
 # Runs on the self-hosted runner installed ON the production EC2
-# (ec2-18-145-132-52), so the deploy executes locally — no inbound SSH and no
+# (50.18.199.245), so the deploy executes locally — no inbound SSH and no
 # security-group opening for GitHub-hosted runner IPs. The runner is a systemd
 # service (actions.runner.dealeraddendums-da-platform.da-platform-prod).
 #
