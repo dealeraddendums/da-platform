@@ -135,7 +135,7 @@ async function ensureGroupCustomer(
     company: group.name,
     internalId: group.internal_id ?? undefined,
     isGroup: true,
-  });
+  }, { reuseExistingOnDuplicate: true });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (admin as any)
     .from("groups")

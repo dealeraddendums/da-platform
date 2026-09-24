@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
-import { createCustomer, customerExists, searchCustomers, billingConfigured } from "@/lib/billing";
+import { createCustomer, customerExists, searchCustomers, billingConfigured, BillingDuplicateError } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -145,6 +145,17 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
 
     return NextResponse.json({ ok: true, billing_customer_id: created.id, created: true });
   } catch (err) {
+    // da-billing's own duplicate guard caught what our soft-match above missed
+    // (e.g. the dealer's email changed but the DA Client ID still matches).
+    // Surface it on the SAME contract the candidate-linking UI already speaks
+    // instead of logging a sync error for what is really a review prompt.
+    if (err instanceof BillingDuplicateError) {
+      return NextResponse.json({
+        error: "possible_existing_customer",
+        message: err.message,
+        candidates: err.existing.slice(0, 10).map((c) => ({ id: c.id, company: c.company ?? c.name ?? null, email: c.email ?? null })),
+      }, { status: 409 });
+    }
     const message = err instanceof Error ? err.message : String(err);
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

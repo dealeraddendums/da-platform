@@ -18,6 +18,7 @@ import {
   createTemplate,
   deleteTemplate,
   createCustomer,
+  setBillingState,
   customerExists,
   todayIso,
   subscriptionDescriptorFor,
@@ -179,7 +180,17 @@ async function setDealerTier(
         internalId: dealer.internal_id ?? undefined,
         isGroup: false,
         billingState: "active",
-      });
+      }, { reuseExistingOnDuplicate: true });
+      // A reused customer keeps whatever billing state it already had, so the
+      // "bill immediately" intent above has to be applied explicitly — otherwise
+      // a dealer who just paid silently sits in setup mode and is never emailed.
+      if (cust.reused) {
+        try {
+          await setBillingState(cust.id, "active");
+        } catch (err) {
+          console.error(`[billing-subscription] linked existing customer ${cust.id} but could not set it live:`, err);
+        }
+      }
       key = cust.id;
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -173,8 +173,14 @@ export async function ensureDealerCustomer(
       email: dealer.primary_contact_email ?? "",
       internalId: internalId || undefined,
       isGroup: false,
-    });
+    }, { reuseExistingOnDuplicate: true });
     await d.setPointer(dealer.id, created.id);
+    if (created.reused) {
+      // da-billing's duplicate guard recognised it even though our own lookups
+      // didn't (e.g. the name drifted) — that's a link, not a create.
+      console.log(`[ensureDealerCustomer] dealer ${label}: da-billing matched an existing customer — linked ${created.id}`);
+      return { customerId: created.id, via: "created", created: false };
+    }
     console.log(`[ensureDealerCustomer] dealer ${label}: no existing customer resolved — created ${created.id}`);
     return { customerId: created.id, via: "created", created: true };
   } catch (err) {

@@ -280,7 +280,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         state: stateField,
         internalId: groupInternalId,
         isGroup: true,
-      });
+      }, { reuseExistingOnDuplicate: true });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error: updateErr } = await (admin as any)
         .from("groups")

@@ -40,7 +40,7 @@ async function readBody(res: Response): Promise<string> {
   try { return await res.text(); } catch { return ""; }
 }
 
-class BillingError extends Error {
+export class BillingError extends Error {
   status: number;
   body: string;
   constructor(status: number, message: string, body: string) {
@@ -78,9 +78,37 @@ export interface BillingCustomerResponse {
   name?: string;
   company?: string;
   email?: string;
+  /** True when da-billing's duplicate guard matched an existing customer and we
+   *  linked to it instead of minting a second record. */
+  reused?: boolean;
 }
 
-export async function createCustomer(input: BillingCustomerInput): Promise<BillingCustomerResponse> {
+/** da-billing refused a create because an active customer already matches
+ *  (DA Client ID, or company + email). Carries the candidates so the caller can
+ *  link or tell an operator which record to look at. */
+export class BillingDuplicateError extends BillingError {
+  matchedOn: string;
+  existing: Array<{ id: string; company?: string | null; name?: string | null; email?: string | null; internalId?: string | null }>;
+  constructor(message: string, body: string, matchedOn: string, existing: BillingDuplicateError["existing"]) {
+    super(409, message, body);
+    this.matchedOn = matchedOn;
+    this.existing = existing;
+  }
+}
+
+/**
+ * Create a da-billing customer.
+ *
+ * da-billing refuses a create that duplicates an active customer (409
+ * `possible_duplicate_customer`). Resolvers whose job is "make sure this dealer
+ * has a customer" pass `reuseExistingOnDuplicate` so a single unambiguous match
+ * is LINKED rather than duplicated; everything else gets a
+ * `BillingDuplicateError` naming the candidates.
+ */
+export async function createCustomer(
+  input: BillingCustomerInput,
+  opts?: { reuseExistingOnDuplicate?: boolean },
+): Promise<BillingCustomerResponse> {
   const res = await fetch(`${BASE}/customers`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
@@ -99,6 +127,36 @@ export async function createCustomer(input: BillingCustomerInput): Promise<Billi
     }),
   });
   const text = await readBody(res);
+  if (res.status === 409) {
+    let dup: { error?: string; matchedOn?: string; message?: string; existing?: BillingDuplicateError["existing"] } = {};
+    try { dup = JSON.parse(text); } catch { /* fall through to the generic error below */ }
+    if (dup.error === "possible_duplicate_customer") {
+      const existing = dup.existing ?? [];
+      // Exactly one candidate is an unambiguous answer: that IS this dealer's
+      // customer. More than one needs a human — never guess between them.
+      //
+      // COLLISION VETO on an internalId match: short numeric ids are NOT unique
+      // across the platform and legacy Aurora namespaces (lib/group-membership.ts
+      // vetoes the same way for the "G" badge). Auto-linking on id alone could
+      // point a new dealer at a different company's billing record, so the
+      // company name has to agree too; otherwise a human decides.
+      const nameAgrees = (a?: string | null, b?: string | null) =>
+        !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+      const safeToReuse =
+        existing.length === 1 &&
+        (dup.matchedOn !== "internalId" || nameAgrees(existing[0].company ?? existing[0].name, input.company ?? input.name));
+      if (opts?.reuseExistingOnDuplicate && safeToReuse) {
+        const hit = existing[0];
+        console.warn(
+          `[createCustomer] "${input.company ?? input.name}" already exists in da-billing (matched ${dup.matchedOn}) — linking ${hit.id} instead of creating a duplicate`,
+        );
+        // A reused customer keeps the billing state it already has. Callers that
+        // need it live (self-pay upgrades) must call setBillingState themselves.
+        return { id: hit.id, name: hit.name ?? undefined, company: hit.company ?? undefined, email: hit.email ?? undefined, reused: true };
+      }
+      throw new BillingDuplicateError(dup.message ?? "possible_duplicate_customer", text, dup.matchedOn ?? "unknown", existing);
+    }
+  }
   if (!res.ok) throw new BillingError(res.status, `createCustomer ${res.status}`, text);
   try {
     const parsed = JSON.parse(text) as Record<string, unknown>;

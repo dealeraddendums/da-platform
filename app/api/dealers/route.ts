@@ -76,7 +76,7 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
         state: args.state,
         internalId: args.dealerInternalId,
         isGroup: false,
-      });
+      }, { reuseExistingOnDuplicate: true });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (args.adminClient as any)
         .from("dealers")
