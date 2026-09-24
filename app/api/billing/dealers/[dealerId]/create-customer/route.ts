@@ -114,6 +114,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       address: dealer.address ?? undefined,
       state: dealer.state ?? undefined,
       internalId: dealer.internal_id ?? undefined,
+      platformId: dealer.id,
       isGroup: false,
     });
 

@@ -75,6 +75,7 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
         phone: args.phone,
         state: args.state,
         internalId: args.dealerInternalId,
+        platformId: args.dealerUuid,
         isGroup: false,
       }, { reuseExistingOnDuplicate: true });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

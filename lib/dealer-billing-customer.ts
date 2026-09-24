@@ -172,6 +172,7 @@ export async function ensureDealerCustomer(
       company: dealer.name ?? "",
       email: dealer.primary_contact_email ?? "",
       internalId: internalId || undefined,
+      platformId: dealer.id,
       isGroup: false,
     }, { reuseExistingOnDuplicate: true });
     await d.setPointer(dealer.id, created.id);

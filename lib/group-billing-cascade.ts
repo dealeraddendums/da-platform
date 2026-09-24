@@ -134,6 +134,7 @@ async function ensureGroupCustomer(
     name: group.name,
     company: group.name,
     internalId: group.internal_id ?? undefined,
+    platformId: group.id,
     isGroup: true,
   }, { reuseExistingOnDuplicate: true });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

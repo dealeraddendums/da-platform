@@ -178,6 +178,7 @@ async function setDealerTier(
         name: dealer.name,
         company: dealer.name,
         internalId: dealer.internal_id ?? undefined,
+        platformId: dealer.id,
         isGroup: false,
         billingState: "active",
       }, { reuseExistingOnDuplicate: true });

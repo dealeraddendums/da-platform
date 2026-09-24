@@ -66,6 +66,11 @@ export interface BillingCustomerInput {
    *  Without it da-billing falls back to matching the dealer NAME, which breaks
    *  silently on a rename. Always pass it when it is known. */
   internalId?: string;
+  /** The DA Platform `dealers.id` / `groups.id` (Supabase UUID) this customer is
+   *  for. `internalId` says which DA client; this says which DA Platform ROW —
+   *  and unlike internalId it is globally unique, so da-billing's duplicate
+   *  check can trust it on its own. Always pass it when it is known. */
+  platformId?: string;
   /** Billing lifecycle on create. Omit for the default ('setup' — invoices
    *  generate but email is held until go-live, used for migration onboarding);
    *  pass 'active' only when the dealer is paying now and must be billed
@@ -121,6 +126,7 @@ export async function createCustomer(
       state: input.state,
       isGroup: input.isGroup ?? false,
       ...(input.internalId ? { internalId: input.internalId } : {}),
+      ...(input.platformId ? { platformId: input.platformId } : {}),
       // Only sent when explicitly provided; omitted => da-billing defaults to
       // 'setup' (migration onboarding). Self-pay upgrade paths pass 'active'.
       ...(input.billingState ? { billingState: input.billingState } : {}),
