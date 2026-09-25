@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
 // 4.0 fallback, ~1.2-1.6s) so wrong-password-existing and unknown-email can't be
 // told apart by latency. Successes return immediately (fast happy path; timing
 // then only distinguishes success from failure, which needs the real password).
-const FAIL_FLOOR_MS = 1800;
+const FAIL_FLOOR_MS = 2600;
 const LOCK_MAX_FAILS = 5;
 const LOCK_WINDOW_MS = 15 * 60_000;
 
