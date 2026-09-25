@@ -269,6 +269,18 @@ export async function middleware(request: NextRequest) {
 
   // /welcome is the 4.0-lockout landing page — public like /login, and a
   // visitor who already has a 5.0 session skips it straight to the dashboard.
+  // Unified-login cutover (reversible): when UNIFIED_LOGIN_LIVE is set, the classic
+  // /login is redirected to the unified front door. Unset the env + reload to roll
+  // back instantly — the classic /login page is otherwise untouched. Query string
+  // (?next / ?email / ?mode) is preserved so OTP deep-links keep working.
+  if ((process.env.UNIFIED_LOGIN_LIVE === "1" || process.env.UNIFIED_LOGIN_LIVE === "true") && pathname === "/login") {
+    const to = new URL("/unified-login", request.url);
+    to.search = request.nextUrl.search;
+    const r = NextResponse.redirect(to);
+    applySecurityHeaders(r, pathname);
+    return r;
+  }
+
   const isAuthRoute = pathname === "/login" || pathname === "/signup" || pathname === "/welcome" || pathname === "/unified-login";
   const isResetRoute = pathname === "/reset-password";
   const isApiAuth = pathname.startsWith("/api/auth/");
