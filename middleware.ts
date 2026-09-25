@@ -269,7 +269,7 @@ export async function middleware(request: NextRequest) {
 
   // /welcome is the 4.0-lockout landing page — public like /login, and a
   // visitor who already has a 5.0 session skips it straight to the dashboard.
-  const isAuthRoute = pathname === "/login" || pathname === "/signup" || pathname === "/welcome";
+  const isAuthRoute = pathname === "/login" || pathname === "/signup" || pathname === "/welcome" || pathname === "/unified-login";
   const isResetRoute = pathname === "/reset-password";
   const isApiAuth = pathname.startsWith("/api/auth/");
   const isProtected =
