@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/db";
+import { isUsableOnV5 } from "@/lib/v5-usable";
 import { rateLimit } from "@/lib/rate-limit";
 import { recordAuthEvent, clientIp } from "@/lib/auth-events";
 
@@ -143,15 +145,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const supabase = createClient(); // server client — sets session cookies on success
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (!error && data?.session) {
-      clearFails(lockKey);
-      recordAuthEvent({ event: "password_verify", result: "success", email, userId: data.user?.id, req });
-      // Cookies are already attached to the outgoing response by the ssr client.
-      // Success returns immediately — no timing floor (see FAIL_FLOOR_MS note).
-      return NextResponse.json({ ok: true, redirect: next });
+      // Correct 5.0 password — but only finish the 5.0 login if the dealer is
+      // USABLE on 5.0 (same predicate as the /not-migrated gate, lib/v5-usable.ts).
+      // Otherwise a not-migrated dealer whose 5.0 password happens to match would
+      // land on /not-migrated instead of their working 4.0 login.
+      const admin = createAdminSupabaseClient();
+      const { data: prof } = await admin
+        .from("profiles").select("role, dealer_id").eq("id", data.user.id)
+        .maybeSingle<{ role: string | null; dealer_id: string | null }>();
+      let dealerRow:
+        | { dealer_id: string | null; migration_status: string | null; is_native: boolean | null }
+        | null = null;
+      if (prof?.dealer_id) {
+        const { data: d } = await admin
+          .from("dealers").select("dealer_id, migration_status, is_native")
+          .eq("dealer_id", prof.dealer_id)
+          .maybeSingle<{ dealer_id: string | null; migration_status: string | null; is_native: boolean | null }>();
+        dealerRow = d ?? null;
+      }
+      if (isUsableOnV5(prof?.role ?? null, dealerRow)) {
+        clearFails(lockKey);
+        recordAuthEvent({ event: "password_verify", result: "success", email, userId: data.user?.id, req });
+        // Cookies already attached by the ssr client. Success returns immediately.
+        return NextResponse.json({ ok: true, redirect: next });
+      }
+      // Correct password but the dealer isn't usable on 5.0 (would hit
+      // /not-migrated), or the dealer_id resolves to no dealers row. Discard the
+      // 5.0 session so NO cookie is set, and fall through to the 4.0 handoff where
+      // they have a working login. Not a credential failure -> no lockout strike.
+      await supabase.auth.signOut({ scope: "local" });
+      recordAuthEvent({ event: "password_verify", result: "failure", email, detail: "5.0 not usable -> 4.0 fallback", req });
+    } else {
+      // 5.0 failed — strike, then fall through to 4.0 (the email may be a 4.0 login).
+      registerFail(lockKey);
+      recordAuthEvent({ event: "password_verify", result: "failure", email, detail: "5.0 invalid", req });
     }
-    // 5.0 failed — strike, then fall through to 4.0 (the email may be a 4.0 login).
-    registerFail(lockKey);
-    recordAuthEvent({ event: "password_verify", result: "failure", email, detail: "5.0 invalid", req });
   }
 
   // ── 4.0 SSO handoff ───────────────────────────────────────────────────────

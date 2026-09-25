@@ -11,6 +11,7 @@ import Topbar from "@/components/Topbar";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import PlatformBanner from "@/components/PlatformBanner";
 import UnmigratedNotice from "@/components/UnmigratedNotice";
+import { isDealerMigratedOnV5 } from "@/lib/v5-usable";
 import MainContent from "@/components/MainContent";
 import ProductFruitsWidget from "@/components/ProductFruitsWidget";
 import { BuilderBreadcrumbProvider } from "@/contexts/BuilderBreadcrumb";
@@ -92,6 +93,7 @@ export default async function DashboardLayout({
     group_controls_templates: boolean | null;
     account_type: string | null;
     migration_status: string | null;
+    is_native: boolean | null;
   };
   let dealerName: string | null = null;
   let templatesLocked = false;
@@ -100,7 +102,7 @@ export default async function DashboardLayout({
   if (isDealerRole && profile?.dealer_id) {
     ({ data: dealerData } = await admin
       .from("dealers")
-      .select("name, dealer_id, group_id, group_controls_templates, account_type, migration_status")
+      .select("name, dealer_id, group_id, group_controls_templates, account_type, migration_status, is_native")
       .eq("dealer_id", profile.dealer_id)
       .maybeSingle<DealerRow>());
     dealerName = dealerData?.name ?? null;
@@ -125,10 +127,8 @@ export default async function DashboardLayout({
     // on V5.0 and have nothing to migrate. Dealers renamed to a real inventory
     // id get migration_status='migrated' as part of the cascade
     // (lib/dealer-id-sync.ts) so they keep passing after losing the prefix.
-    const dealerTextId = dealerData?.dealer_id ?? "";
-    const isV5Native = dealerTextId.startsWith("ss_") || dealerTextId.startsWith("ga_");
-    const isMigrated = dealerData?.migration_status === "migrated";
-    if (!isV5Native && !isMigrated) {
+    // Single source of truth (lib/v5-usable.ts) — also used by POST /api/auth/login.
+    if (!isDealerMigratedOnV5(dealerData)) {
       unmigratedNoticeStatus = dealerData?.migration_status ?? "legacy";
     }
   }
