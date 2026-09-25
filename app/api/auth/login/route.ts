@@ -22,7 +22,11 @@ export const dynamic = "force-dynamic";
 //   * one generic error for every failure — never reveals which system matched
 //     or whether an account exists
 
-const TIMING_FLOOR_MS = 600;      // all responses take at least this long
+// Failure responses are floored ABOVE the worst-case failure path (5.0 GoTrue +
+// 4.0 fallback, ~1.2-1.6s) so wrong-password-existing and unknown-email can't be
+// told apart by latency. Successes return immediately (fast happy path; timing
+// then only distinguishes success from failure, which needs the real password).
+const FAIL_FLOOR_MS = 1800;
 const LOCK_MAX_FAILS = 5;
 const LOCK_WINDOW_MS = 15 * 60_000;
 
@@ -47,7 +51,7 @@ const safeNext = (n: unknown): string =>
 
 async function floor(started: number): Promise<void> {
   const el = Date.now() - started;
-  if (el < TIMING_FLOOR_MS) await new Promise((r) => setTimeout(r, TIMING_FLOOR_MS - el));
+  if (el < FAIL_FLOOR_MS) await new Promise((r) => setTimeout(r, FAIL_FLOOR_MS - el));
 }
 
 // Generic, non-enumerable messages (never say which system or whether the account exists)
@@ -142,7 +146,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       clearFails(lockKey);
       recordAuthEvent({ event: "password_verify", result: "success", email, userId: data.user?.id, req });
       // Cookies are already attached to the outgoing response by the ssr client.
-      await floor(started);
+      // Success returns immediately — no timing floor (see FAIL_FLOOR_MS note).
       return NextResponse.json({ ok: true, redirect: next });
     }
     // 5.0 failed — strike, then fall through to 4.0 (the email may be a 4.0 login).
@@ -154,7 +158,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const r = await call40(username, password);
   if (r.kind === "ok") {
     recordAuthEvent({ event: "password_verify", result: "success", email: emailMode ? email : null, detail: "4.0 handoff", req });
-    return done(200, { ok: true, redirect: r.login_url });
+    return NextResponse.json({ ok: true, redirect: r.login_url }); // success: no floor
   }
   if (r.kind === "rate") return done(429, { ok: false, error: ERR_RATE });
   if (r.kind === "misconfig") return done(400, { ok: false, error: ERR_GENERIC });
