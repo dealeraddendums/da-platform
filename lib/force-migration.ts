@@ -126,6 +126,7 @@ interface ForceFlags {
   force_hold_reason: string | null;
   forced_at: string | null;
   account_type: string | null;
+  primary_contact_email: string | null;
 }
 
 /** Per-dealer force flags (migration 161), keyed by dealers.id. */
@@ -133,7 +134,7 @@ export async function loadForceFlags(dealerIds?: string[]): Promise<Map<string, 
   const admin = createAdminSupabaseClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let q: any = (admin.from("dealers") as any)
-    .select("id, final_notice_at, force_hold, force_hold_reason, forced_at, account_type");
+    .select("id, final_notice_at, force_hold, force_hold_reason, forced_at, account_type, primary_contact_email");
   if (dealerIds?.length) q = q.in("id", dealerIds);
   const { data, error } = await q;
   if (error) throw new Error(`force flags unavailable (migration 161 applied?): ${error.message}`);
@@ -142,11 +143,21 @@ export async function loadForceFlags(dealerIds?: string[]): Promise<Map<string, 
   return map;
 }
 
-/** Strip the "✓" suffix loadReadinessRows adds to completed recipients. */
-function cleanRecipients(list: string[] | undefined): string[] {
-  return (list ?? [])
+/**
+ * Who we would actually email. loadReadinessRows marks completed recipients with
+ * a trailing "✓", so that is stripped. The dealer's primary_contact_email is
+ * merged in as well: an invited dealer whose invitation row has aged out still
+ * has a reachable address, and the notify step already falls back to it — if the
+ * verdict ignored it, that dealer would read UNREACHABLE while we could in fact
+ * email them perfectly well.
+ */
+export function resolveRecipients(list: string[] | undefined, primaryContactEmail?: string | null): string[] {
+  const out = (list ?? [])
     .map((r) => r.replace(/\s*✓\s*$/, "").trim())
     .filter((r) => r.includes("@"));
+  const primary = (primaryContactEmail ?? "").trim();
+  if (primary.includes("@") && !out.some((e) => e.toLowerCase() === primary.toLowerCase())) out.push(primary);
+  return out;
 }
 
 /**
@@ -174,7 +185,7 @@ export async function loadForceQueue(): Promise<{ rows: ForceQueueRow[]; checked
     const slice = candidates.slice(i, i + BATCH);
     const results = await Promise.all(slice.map(async (r: ReadinessRow) => {
       const f = flags.get(r.id)!;
-      const recipients = cleanRecipients(r.inviteRecipients);
+      const recipients = resolveRecipients(r.inviteRecipients, f.primary_contact_email);
       // Reachable if ANY recipient is deliverable — one good address is enough
       // to send the "you're on 5.0" email and for them to request a code.
       let state: DeliverabilityState = "unknown";

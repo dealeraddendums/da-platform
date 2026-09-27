@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { migrateDealerRecord } from "@/lib/migrate-dealer";
 import { setLegacyMigratedFlag } from "@/lib/legacy-lockout";
 import { loadReadinessRows } from "@/lib/migration-readiness-data";
-import { loadForceFlags, computeForceVerdict } from "@/lib/force-migration";
+import { loadForceFlags, computeForceVerdict, resolveRecipients } from "@/lib/force-migration";
 import { checkDeliverability, type DeliverabilityState } from "@/lib/mandrill";
 import { billingConfigured, getTemplate, activateTemplate, setBillingState } from "@/lib/billing";
 import { futureNextInvoice } from "@/lib/migrate-dealer";
@@ -188,9 +188,7 @@ async function recheckVerdict(dealerUuid: string, legacyDealerId: string): Promi
   const flags = await loadForceFlags([dealerUuid]);
   const f = flags.get(dealerUuid);
 
-  const recipients = (r.inviteRecipients ?? [])
-    .map((x) => x.replace(/\s*✓\s*$/, "").trim())
-    .filter((x) => x.includes("@"));
+  const recipients = resolveRecipients(r.inviteRecipients, f?.primary_contact_email);
 
   let state: DeliverabilityState = "unknown";
   if (recipients.length) {
