@@ -17,6 +17,9 @@ import type { ReadinessRow } from "@/lib/migration-readiness";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { checkDeliverability, type DeliverabilityState } from "@/lib/mandrill";
 
+/** How long a forced dealer stays visible in the queue so un-force is reachable. */
+export const RECENT_FORCE_DAYS = 30;
+
 export type ForceVerdict = "safe" | "not-ready" | "unreachable" | "excluded" | "held";
 
 export const VERDICT_LABEL: Record<ForceVerdict, string> = {
@@ -169,10 +172,20 @@ export async function loadForceQueue(): Promise<{ rows: ForceQueueRow[]; checked
   const { rows } = await loadReadinessRows();
   const flags = await loadForceFlags();
 
-  // Only invited dealers that have had the mandatory final notice.
+  // Invited dealers that have had the mandatory final notice — PLUS dealers we
+  // have already forced. A forced dealer flips to migration_status 'migrated',
+  // so filtering on 'invited' alone made the row vanish the instant the force
+  // succeeded, which is exactly when an operator is most likely to want it back:
+  // un-force was unreachable from the one screen that promises it. Forced rows
+  // stay visible for RECENT_FORCE_DAYS, compute as EXCLUDED ("already
+  // migrated") so the Force button never re-renders, and carry the Un-force
+  // affordance.
+  const forcedCutoff = Date.now() - RECENT_FORCE_DAYS * 86_400_000;
   const candidates = rows.filter((r) => {
     const f = flags.get(r.id);
-    return r.migrationStatus === "invited" && !!f?.final_notice_at;
+    if (!f) return false;
+    if (f.forced_at && Date.parse(f.forced_at) >= forcedCutoff) return true;
+    return r.migrationStatus === "invited" && !!f.final_notice_at;
   });
 
   const now = Date.now();
@@ -245,7 +258,14 @@ export async function loadForceQueue(): Promise<{ rows: ForceQueueRow[]; checked
   }
 
   // Safe first (the actionable ones), then by how long they've been stalled.
+  // Recently-forced rows first — they read as EXCLUDED ("already migrated") and
+  // would otherwise sink to the bottom, but they are the rows an operator is
+  // most likely to have come here to undo. Then actionable-first by verdict,
+  // then longest-stalled first.
   const order: Record<ForceVerdict, number> = { safe: 0, "not-ready": 1, unreachable: 2, held: 3, excluded: 4 };
-  out.sort((a, b) => order[a.verdict] - order[b.verdict] || (b.daysSinceInvite ?? 0) - (a.daysSinceInvite ?? 0));
+  out.sort((a, b) =>
+    Number(!!b.forcedAt) - Number(!!a.forcedAt)
+    || order[a.verdict] - order[b.verdict]
+    || (b.daysSinceInvite ?? 0) - (a.daysSinceInvite ?? 0));
   return { rows: out, checkedEmails };
 }
