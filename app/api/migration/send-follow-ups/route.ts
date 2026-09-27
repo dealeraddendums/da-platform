@@ -59,7 +59,22 @@ interface DripDealer { id: string; name: string; invited_at: string | null; forc
 
 async function processFollowUps(dealers: DripDealer[]) {
   const now = Date.now();
-  const results = { sent: 0, skipped: 0, failed: 0, finalNotices: 0, errors: [] as string[] };
+  // `sent` used to be incremented for any call that didn't throw — but
+  // sendMigrationFollowUp swallows per-recipient mail failures and returns
+  // { ok:false, warning } instead of throwing. A dealer whose only contact has
+  // hard-bounced therefore logged as "sent" while nothing left the building, and
+  // its stage never advanced, so it silently re-attempted every night forever
+  // (the class found 2026-08-04: dealers stuck in the drip for weeks behind a
+  // bouncing address). Counting delivery separately makes those dealers visible.
+  const results = {
+    sent: 0,            // at least one recipient actually received it
+    notDelivered: 0,    // attempted, but every recipient failed / all completed
+    skipped: 0,
+    failed: 0,
+    finalNotices: 0,
+    undeliverable: [] as string[],
+    errors: [] as string[],
+  };
 
   for (const dealer of dealers) {
     if (!dealer.invited_at) { results.skipped++; continue; }
@@ -75,9 +90,14 @@ async function processFollowUps(dealers: DripDealer[]) {
 
     const followUpNumber = (stageIndex + 1) as 1 | 2 | 3;
     try {
-      await sendMigrationFollowUp(dealer.id, followUpNumber);
-      results.sent++;
-      if (followUpNumber === MAX_STAGE) results.finalNotices++;
+      const res = await sendMigrationFollowUp(dealer.id, followUpNumber);
+      if (res.ok) {
+        results.sent++;
+        if (followUpNumber === MAX_STAGE) results.finalNotices++;
+      } else {
+        results.notDelivered++;
+        results.undeliverable.push(`${dealer.name}: ${res.warning ?? "no recipient received it"}`);
+      }
     } catch (e) {
       results.failed++;
       results.errors.push(`${dealer.name}: ${e instanceof Error ? e.message : String(e)}`);
