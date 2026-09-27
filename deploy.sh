@@ -83,16 +83,24 @@ echo "[deploy] current -> $REL ; pm2 reload (rolling)…"
 # time — reloading by name can re-exec the previous release's cached script path under a symlink.
 pm2 reload "$BASE/ecosystem.config.js" --update-env
 
-# 6. Health gate — poll a REAL HTTP 200 (not just pm2 'online'); auto-revert if never healthy.
+# 6. Health gate — poll a REAL HTTP response (not just pm2 'online'); auto-revert if never healthy.
+#    ANY 2xx or 3xx counts as healthy: the point is "the app is serving this route", and a
+#    redirect proves that just as well as a 200. This used to demand a literal 200, which broke
+#    the moment /login started 307-ing to /unified-login behind UNIFIED_LOGIN_LIVE (2026-09-27) —
+#    every deploy built fine, failed the gate, and auto-reverted. Matching on the first digit
+#    keeps the gate honest (5xx and connection failures still fail) without re-breaking each time
+#    a route legitimately changes shape.
 HEALTH_URL="http://127.0.0.1:3000/login"
 healthy=
 for i in $(seq 1 15); do          # ~30s: 15 x 2s
   sleep 2
   code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$HEALTH_URL" || true)
-  if [ "$code" = "200" ]; then healthy=1; echo "[deploy] health OK (200) after $((i*2))s"; break; fi
+  case "$code" in
+    2??|3??) healthy=1; echo "[deploy] health OK (HTTP $code) after $((i*2))s"; break ;;
+  esac
 done
 if [ -z "$healthy" ]; then
-  echo "[deploy] NEW RELEASE UNHEALTHY (no HTTP 200 from $HEALTH_URL in ~30s)."
+  echo "[deploy] NEW RELEASE UNHEALTHY (no 2xx/3xx from $HEALTH_URL in ~30s)."
   if [ -n "$PREV" ] && [ -d "$PREV" ]; then
     echo "[deploy] auto-reverting current -> $PREV and reloading…"
     ln -sfn "$PREV" "$BASE/current"
