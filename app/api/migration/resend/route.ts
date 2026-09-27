@@ -36,12 +36,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const res = await sendMigrationInvite(dealer.inventory_dealer_id, claims.sub);
     if (!res.allCompleted) {
       // Manual resend restarts the drip: invited_at was just reset by
-      // sendMigrationInvite, so zero the follow-up count too. (Skipped when
+      // sendMigrationInvite, so zero the follow-up counters too. (Skipped when
       // nothing was sent — an all-completed "resend" changes nothing.)
+      //
+      // final_notice_at is CLEARED as well, which pulls the dealer back out of
+      // the Force Migration queue: an operator who just re-invited someone has
+      // given them another chance, and forcing them the next morning off a
+      // final notice sent weeks ago would contradict that. They re-enter the
+      // 14/21/23 drip and become forceable again once the new final notice lands.
       await admin
         .from("dealers")
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .update({ invite_follow_up_count: 0 } as any)
+        .update({ invite_follow_up_count: 0, force_drip_stage: 0, final_notice_at: null } as any)
         .eq("id", body.dealerId);
     }
     return NextResponse.json({

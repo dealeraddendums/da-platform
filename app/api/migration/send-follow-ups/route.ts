@@ -6,13 +6,26 @@ export const dynamic = "force-dynamic";
 
 // POST /api/migration/send-follow-ups — daily cron (EasyCron).
 // Auth: X-Cron-Secret header matching CRON_SECRET env var.
-// Finds all invited-but-not-migrated dealers who are overdue for their next
-// drip follow-up, sends it (fresh code + escalating copy), and increments
-// dealers.invite_follow_up_count. Max 5 follow-ups; a manual resend resets
-// the count to 0 so the drip restarts.
-// Schedule (days since invited_at): 1→Day 3, 2→Day 10, 3→Day 30, 4→Day 60, 5→Day 90
+//
+// The force-migration drip (spec: force-migration-spec.md). Finds invited-but-
+// not-migrated dealers overdue for their next follow-up, sends it (fresh code +
+// escalating copy), and advances dealers.force_drip_stage.
+//
+// Schedule, in days since invited_at:  stage 1 → Day 14 · 2 → Day 21 · 3 → Day 23
+// Stage 3 is the MANDATORY FINAL NOTICE and stamps final_notice_at, which is
+// what makes a dealer eligible to appear in the Force Migration queue.
+//
+// This REPLACED the old 3/10/30/60/90 drip (Allan, 2026-09-27). It deliberately
+// runs on its own counter (force_drip_stage) rather than the legacy
+// invite_follow_up_count: most of the backlog already sits at 1–5 on the old
+// track, so reusing that column would permanently exclude the longest-stalled
+// dealers — exactly the ones this feature exists to clear.
+//
+// One stage per dealer per run: a long-invited dealer past all three thresholds
+// escalates over three consecutive days rather than getting three emails at once.
 
-const SCHEDULE_DAYS = [3, 10, 30, 60, 90]; // indexed by invite_follow_up_count
+const SCHEDULE_DAYS = [14, 21, 23] as const; // indexed by force_drip_stage
+const MAX_STAGE = SCHEDULE_DAYS.length;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const secret = req.headers.get("x-cron-secret");
@@ -22,19 +35,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const admin = createAdminSupabaseClient();
 
-  // invited_at / invite_follow_up_count aren't in the generated DB types yet
-  // (migrations 050/124) — same `as any` pattern as billing-pending.
+  // force_drip_stage is migration 161 — not in the generated DB types yet.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (admin
     .from("dealers")
-    .select("id, name, invited_at, invite_follow_up_count") as any)
+    .select("id, name, invited_at, force_drip_stage") as any)
     .eq("migration_status", "invited")
     .eq("active", true)
-    .lt("invite_follow_up_count", 5)
+    .lt("force_drip_stage", MAX_STAGE)
     .not("invited_at", "is", null);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const dealers = (data ?? []) as Array<{ id: string; name: string; invited_at: string | null; invite_follow_up_count: number }>;
+  const dealers = (data ?? []) as DripDealer[];
 
   // Fire-and-forget so EasyCron sees a fast 200 (same pattern as
   // sync-hubspot-computed); results land in the PM2 log.
@@ -43,27 +55,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   return NextResponse.json(responseData);
 }
 
-async function processFollowUps(dealers: Array<{ id: string; name: string; invited_at: string | null; invite_follow_up_count: number }>) {
+interface DripDealer { id: string; name: string; invited_at: string | null; force_drip_stage: number | null }
+
+async function processFollowUps(dealers: DripDealer[]) {
   const now = Date.now();
-  const results = { sent: 0, skipped: 0, failed: 0, errors: [] as string[] };
+  const results = { sent: 0, skipped: 0, failed: 0, finalNotices: 0, errors: [] as string[] };
 
   for (const dealer of dealers) {
     if (!dealer.invited_at) { results.skipped++; continue; }
 
-    const invitedAt = new Date(dealer.invited_at).getTime();
-    const daysSinceInvite = (now - invitedAt) / (1000 * 60 * 60 * 24);
-    const nextFollowUpIndex = dealer.invite_follow_up_count; // 0 = none sent yet
-    const daysThreshold = SCHEDULE_DAYS[nextFollowUpIndex];
+    const daysSinceInvite = (now - new Date(dealer.invited_at).getTime()) / (1000 * 60 * 60 * 24);
+    const stageIndex = dealer.force_drip_stage ?? 0; // 0 = none sent yet
+    const daysThreshold = SCHEDULE_DAYS[stageIndex];
 
     if (daysThreshold === undefined || daysSinceInvite < daysThreshold) {
       results.skipped++;
       continue;
     }
 
-    const followUpNumber = (nextFollowUpIndex + 1) as 1 | 2 | 3 | 4 | 5;
+    const followUpNumber = (stageIndex + 1) as 1 | 2 | 3;
     try {
       await sendMigrationFollowUp(dealer.id, followUpNumber);
       results.sent++;
+      if (followUpNumber === MAX_STAGE) results.finalNotices++;
     } catch (e) {
       results.failed++;
       results.errors.push(`${dealer.name}: ${e instanceof Error ? e.message : String(e)}`);

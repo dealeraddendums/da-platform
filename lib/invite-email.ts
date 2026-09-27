@@ -192,63 +192,87 @@ export function buildMigrationInviteEmail(opts: {
 </div>`;
 }
 
-// Automated follow-up for a still-unmigrated dealer (drip #1–#5 = Day
-// 3/10/30/60/90 after the original invite). Copy escalates from gentle
-// reminder to sunset-deadline urgency; each send carries a FRESH code
-// (the invitations upsert refreshes the 14-day TTL).
+// Automated follow-up for a still-unmigrated dealer. The drip is the 14/21/23-day
+// escalation that ends in the Force Migration queue (spec: force-migration-spec.md):
+//   1 = Day 14 reminder · 2 = Day 21 "we're moving you soon" · 3 = Day 23 MANDATORY
+//   FINAL NOTICE (last email before a team member force-migrates them).
+// Each send carries a FRESH code (the invitations upsert refreshes the 14-day TTL).
+// Stage 3 must be unambiguous: migration is happening, and here is exactly how to
+// sign in afterward — including the no-password path (Email me a sign-in code).
 export function buildMigrationFollowUpEmail(opts: {
   firstName: string;
   orgName: string;
   migrateUrl: string;
   setupCode: string;
-  followUpNumber: 1 | 2 | 3 | 4 | 5;
-  /** Original invite date — anchors the 120-day 4.0 sunset. */
+  followUpNumber: 1 | 2 | 3;
+  /** Original invite date — anchors the drip and the final-notice date math. */
   invitedAt: Date;
 }): string {
   const spacedCode = opts.setupCode.split("").join(" ");
-  const sunsetDate = new Date(opts.invitedAt);
-  sunsetDate.setDate(sunsetDate.getDate() + 120);
-  const sunsetFormatted = sunsetDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-  const daysLeft = Math.max(0, Math.round((sunsetDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+  const org = escapeHtml(opts.orgName);
+  // The force happens the day after the final notice (day 24).
+  const forceDate = new Date(opts.invitedAt);
+  forceDate.setDate(forceDate.getDate() + 24);
+  const forceFormatted = forceDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+  const isFinal = opts.followUpNumber === 3;
 
   const headlines: Record<number, string> = {
-    1: `Your new platform account is waiting`,
-    2: `Still here when you're ready`,
-    3: `${daysLeft} days left on Platform 4.0`,
-    4: `${daysLeft} days left — time to make the switch`,
-    5: `Last chance — Platform 4.0 retires in ${daysLeft} days`,
+    1: `Your Platform 5.0 account is ready`,
+    2: `We're moving ${opts.orgName} to Platform 5.0 soon`,
+    3: `Final notice — you're being moved to Platform 5.0`,
   };
   const bodies: Record<number, string> = {
-    1: `Just a quick reminder — your <strong>${escapeHtml(opts.orgName)}</strong> account on DA Platform 5.0 is all set up and waiting for you. No pressure to switch today; your existing account is still fully active.`,
-    2: `No rush, but your <strong>${escapeHtml(opts.orgName)}</strong> account is ready whenever you are. You can use both the new and existing platforms for as long as you need.`,
-    3: `Your <strong>${escapeHtml(opts.orgName)}</strong> account on DA Platform 5.0 is ready. Platform 4.0 will be available until <strong>${sunsetFormatted}</strong> — now is a great time to get familiar with the new platform before then.`,
-    4: `Platform 4.0 retires on <strong>${sunsetFormatted}</strong>. Your <strong>${escapeHtml(opts.orgName)}</strong> account on the new platform is all set — use the code below to get in, set up your login, and make sure everything looks right before the cutover.`,
-    5: `Platform 4.0 retires on <strong>${sunsetFormatted}</strong> — that's coming up fast. Here's a fresh migration code for <strong>${escapeHtml(opts.orgName)}</strong>. Once you migrate, your templates, inventory, and settings will all be there waiting.`,
+    1: `Your <strong>${org}</strong> account on DealerAddendums Platform 5.0 is set up and waiting. Everything came across — your products, templates, and settings. Use the code below to finish setting up your login.`,
+    2: `A quick heads-up: <strong>${org}</strong> is scheduled to move to Platform 5.0. You can make the switch yourself right now with the code below, which takes about a minute — or we'll move the account for you shortly.`,
+    3: `This is the last email before we move <strong>${org}</strong> to Platform 5.0 for you on <strong>${forceFormatted}</strong>. Your products, templates, and settings are already there. After the move, Platform 4.0 sign-in will redirect here — <strong>nothing is lost, but you will sign in at the new address.</strong>`,
   };
 
   const headline = headlines[opts.followUpNumber] ?? headlines[1];
   const body = bodies[opts.followUpNumber] ?? bodies[1];
+  const bannerBg = isFinal ? "#fdecea" : "#fff8ed";
+  const bannerBorder = isFinal ? "#f5c2c0" : "#ffe4a0";
+  const bannerText = isFinal ? "#8a1c14" : "#7a5a00";
+  const bannerCopy = isFinal
+    ? `<strong>This is your final notice.</strong> On ${forceFormatted} this account moves to Platform 5.0 automatically. You don't need to do anything — but signing in below first means there's no interruption.`
+    : `Platform 4.0 still works today. Nothing changes until the move.`;
+
+  // Stage 3 spells out how to get in AFTER the move, including the no-password path.
+  const afterTheMove = isFinal ? `
+    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:18px 20px;margin:0 0 24px;">
+      <p style="font-size:14px;font-weight:600;color:#1a1a2e;margin:0 0 10px;">How to sign in after the move</p>
+      <p style="font-size:13px;color:#55595c;line-height:1.7;margin:0 0 8px;">
+        1. Go to <strong>${APP_HOST}/login</strong> (your old 4.0 address will send you there automatically).
+      </p>
+      <p style="font-size:13px;color:#55595c;line-height:1.7;margin:0 0 8px;">
+        2. Enter your work email address.
+      </p>
+      <p style="font-size:13px;color:#55595c;line-height:1.7;margin:0;">
+        3. <strong>Haven't set a password?</strong> Choose <strong>&ldquo;Email me a sign-in code&rdquo;</strong> — we'll send a
+        code to your inbox and you're in. No password needed.
+      </p>
+    </div>` : "";
 
   return `<div style="font-family:Roboto,Arial,sans-serif;max-width:560px;margin:0 auto;padding:0;color:#333;">
   <div style="background:#2a2b3c;border-radius:6px 6px 0 0;padding:28px 32px;text-align:center;">
     <img src="${APP_URL}/images/da-logo.png" alt="DA Platform" width="48" height="48" style="border-radius:50%;margin:0 auto 12px;display:block;" />
     <div style="color:#fff;font-size:20px;font-weight:700;">DealerAddendums Platform 5.0</div>
-    <div style="color:rgba(255,255,255,0.65);font-size:13px;margin-top:4px;">${headline}</div>
+    <div style="color:rgba(255,255,255,0.65);font-size:13px;margin-top:4px;">${escapeHtml(headline)}</div>
   </div>
   <div style="background:#fff;padding:32px;border-left:1px solid #e0e0e0;border-right:1px solid #e0e0e0;">
     <p style="font-size:16px;font-weight:500;color:#1a1a2e;margin:0 0 8px;">Hi ${escapeHtml(opts.firstName)},</p>
     <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 24px;">${body}</p>
-    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 14px;text-align:center;">Here's your migration code — good for 14 days:</p>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 14px;text-align:center;">${isFinal ? "Want to set it up yourself first? Use this code — good for 14 days:" : "Here's your migration code — good for 14 days:"}</p>
     <div style="text-align:center;margin:0 0 24px;">
       <div style="display:inline-block;background:#f5f6f7;border:1px solid #e0e0e0;border-radius:8px;padding:18px 28px;font-family:'Courier New',monospace;font-size:34px;font-weight:700;letter-spacing:6px;color:#1a1a2e;">${escapeHtml(spacedCode)}</div>
     </div>
     <div style="text-align:center;margin-bottom:24px;">
-      <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">Start migration &rarr;</a>
+      <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">${isFinal ? "Set up my login now &rarr;" : "Start migration &rarr;"}</a>
     </div>
     ${manualFallbackHtml()}
-    <p style="font-size:13px;color:#78828c;line-height:1.6;margin:0 0 24px;text-align:center;">Tip: use the link and code in this email to set up your account — the regular sign-in page won't work until your account is set up.</p>
-    <div style="background:#fff8ed;border:1px solid #ffe4a0;border-radius:6px;padding:14px 18px;">
-      <p style="font-size:13px;color:#7a5a00;margin:0;line-height:1.6;">Platform 4.0 will be available until <strong>${sunsetFormatted}</strong>. Nothing changes until you confirm the migration.</p>
+    ${afterTheMove}
+    <div style="background:${bannerBg};border:1px solid ${bannerBorder};border-radius:6px;padding:14px 18px;">
+      <p style="font-size:13px;color:${bannerText};margin:0;line-height:1.6;">${bannerCopy}</p>
     </div>
   </div>
   <div style="background:#f5f6f7;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 6px 6px;padding:20px 32px;text-align:center;">
@@ -417,4 +441,51 @@ export function buildPasswordResetEmail(opts: {
   </p>
 </div>
 `;
+}
+
+// Sent the moment a team member force-migrates a dealer. This is the ONLY
+// instruction they get, and many of these dealers never set a 5.0 password —
+// so the no-password path (Email me a sign-in code) is the headline action, not
+// a footnote. No setup code here on purpose: the account already exists after a
+// force, so they sign in rather than "set up".
+export function buildForcedMigrationEmail(opts: {
+  firstName: string;
+  orgName: string;
+  loginUrl: string;
+}): string {
+  const org = escapeHtml(opts.orgName);
+  return `<div style="font-family:Roboto,Arial,sans-serif;max-width:560px;margin:0 auto;padding:0;color:#333;">
+  <div style="background:#2a2b3c;border-radius:6px 6px 0 0;padding:28px 32px;text-align:center;">
+    <img src="${APP_URL}/images/da-logo.png" alt="DA Platform" width="48" height="48" style="border-radius:50%;margin:0 auto 12px;display:block;" />
+    <div style="color:#fff;font-size:20px;font-weight:700;">DealerAddendums Platform 5.0</div>
+    <div style="color:rgba(255,255,255,0.65);font-size:13px;margin-top:4px;">${org} has moved</div>
+  </div>
+  <div style="background:#fff;padding:32px;border-left:1px solid #e0e0e0;border-right:1px solid #e0e0e0;">
+    <p style="font-size:16px;font-weight:500;color:#1a1a2e;margin:0 0 8px;">Hi ${escapeHtml(opts.firstName)},</p>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 20px;">
+      <strong>${org}</strong> is now on DealerAddendums Platform 5.0. Your products, templates and settings
+      all came across, and printing works the same way. Your old Platform 4.0 address will bring you here
+      automatically from now on.
+    </p>
+    <div style="text-align:center;margin:0 0 24px;">
+      <a href="${opts.loginUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">Sign in to Platform 5.0 &rarr;</a>
+    </div>
+    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:18px 20px;margin:0 0 24px;">
+      <p style="font-size:14px;font-weight:600;color:#1a1a2e;margin:0 0 10px;">Don't have a password yet?</p>
+      <p style="font-size:13px;color:#55595c;line-height:1.7;margin:0;">
+        That's expected — most accounts don't. On the sign-in page, enter your work email and choose
+        <strong>&ldquo;Email me a sign-in code&rdquo;</strong>. We'll send a code to this address and you're straight in.
+        You can set a password later from My Profile if you want one.
+      </p>
+    </div>
+    <p style="font-size:13px;color:#55595c;line-height:1.6;margin:0 0 4px;text-align:center;background:#f5f6f7;border-radius:6px;padding:12px 16px;">
+      <strong>Button not working?</strong> Some company email systems block it.<br />
+      Go to <strong>${APP_HOST}/login</strong> and enter your email address.
+    </p>
+  </div>
+  <div style="background:#f5f6f7;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 6px 6px;padding:20px 32px;text-align:center;">
+    <p style="font-size:12px;color:#78828c;margin:0 0 4px;">Need a hand? <a href="mailto:support@dealeraddendums.com" style="color:#1976d2;">support@dealeraddendums.com</a></p>
+    <p style="font-size:12px;color:#78828c;margin:0;">DealerAddendums &middot; dealeraddendums.com</p>
+  </div>
+</div>`;
 }

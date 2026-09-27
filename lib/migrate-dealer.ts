@@ -50,7 +50,15 @@ export interface MigratableDealer {
 export async function migrateDealerRecord(
   admin: SupabaseClient,
   dealer: MigratableDealer,
-  opts: { nowIso: string; hubspotContext: string; extraPatch?: Record<string, unknown> },
+  opts: {
+    nowIso: string;
+    hubspotContext: string;
+    extraPatch?: Record<string, unknown>;
+    /** Force flow only: the caller drives the 4.0 migrated_to_v5 call itself
+     *  (awaited, abort-on-failure) instead of this fire-and-forget one, so a
+     *  4.0 failure can roll the whole force back. */
+    skipLegacyLockout?: boolean;
+  },
 ): Promise<{ ok: boolean; error?: string; plan: string }> {
   const plan = paidTierFor(dealer.inventory_provider_is_dms, dealer.inventory_provider);
   const patch: Record<string, unknown> = {
@@ -99,6 +107,6 @@ export async function migrateDealerRecord(
   // group self-service) auto-sets the legacy migrated_to_v5 flag via the
   // 4.0-owned endpoint (never a direct Aurora write). Failure/missing endpoint
   // → legacy_lockout_pending for the manual 4.0 admin-toggle path.
-  fireLegacyLockout(admin, dealer, true);
+  if (!opts.skipLegacyLockout) fireLegacyLockout(admin, dealer, true);
   return { ok: true, plan };
 }

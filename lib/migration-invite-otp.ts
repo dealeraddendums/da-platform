@@ -428,11 +428,14 @@ export async function sendMigrationInvite(
  * dealers.invite_follow_up_count. Does NOT touch invited_at — the drip clock
  * stays anchored on the original invite (the drip stops entirely once the
  * dealer migrates: the cron only selects migration_status='invited').
- * followUpNumber: 1–5 (1=Day 3, 2=Day 10, 3=Day 30, 4=Day 60, 5=Day 90)
+ * followUpNumber: 1–3 on the force-migration track (1=Day 14, 2=Day 21,
+ * 3=Day 23 MANDATORY FINAL NOTICE). Stage 3 stamps dealers.final_notice_at,
+ * which is the gate for a dealer appearing in the Force Migration queue —
+ * nobody is forceable until we can prove the final notice actually sent.
  */
 export async function sendMigrationFollowUp(
   dealerUuid: string,
-  followUpNumber: 1 | 2 | 3 | 4 | 5,
+  followUpNumber: 1 | 2 | 3,
   adminUserId?: string,
 ): Promise<{ ok: boolean; email: string | null; emailSent: boolean; warning?: string }> {
   const admin = createAdminSupabaseClient();
@@ -458,11 +461,9 @@ export async function sendMigrationFollowUp(
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com";
   const invitedAt = dealer.invited_at ? new Date(dealer.invited_at) : new Date();
   const subjects: Record<number, string> = {
-    1: `Your new platform account is waiting — ${dealer.name}`,
-    2: `Still here when you're ready — ${dealer.name}`,
-    3: `Platform 4.0 retiring soon — ${dealer.name}`,
-    4: `60 days left — time to make the switch — ${dealer.name}`,
-    5: `Last chance — Platform 4.0 retires in 30 days — ${dealer.name}`,
+    1: `Your Platform 5.0 account is ready — ${dealer.name}`,
+    2: `We're moving ${dealer.name} to Platform 5.0 soon`,
+    3: `Final notice — ${dealer.name} moves to Platform 5.0 tomorrow`,
   };
 
   const warnings: string[] = [];
@@ -491,8 +492,16 @@ export async function sendMigrationFollowUp(
   }
 
   if (emailsSent > 0) {
+    // force_drip_stage is the NEW 14/21/23 track (migration 161). The legacy
+    // invite_follow_up_count is kept in step for history//resend compatibility,
+    // but the force queue reads final_notice_at, which only stage 3 sets.
+    const patch: Record<string, unknown> = {
+      force_drip_stage: followUpNumber,
+      invite_follow_up_count: followUpNumber,
+    };
+    if (followUpNumber === 3) patch.final_notice_at = new Date().toISOString();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin.from("dealers") as any).update({ invite_follow_up_count: followUpNumber }).eq("id", dealer.id);
+    await (admin.from("dealers") as any).update(patch).eq("id", dealer.id);
   }
 
   return {

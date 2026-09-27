@@ -69,6 +69,8 @@ interface ApiResp { rows: Row[]; summary: Summary; operators: Operator[]; curren
 // rows, which exclude migrated dealers — that's why the tab was always empty).
 interface BillingPendingDealer { id: string; name: string; group_name: string | null; account_type: string | null; billing_customer_id: string | null; }
 
+import ForceMigrationQueue from "@/components/ForceMigrationQueue";
+
 const NAVY = "#2a2b3c";
 
 const Check = ({ ok, title }: { ok: boolean; title?: string }) => (
@@ -99,8 +101,8 @@ export default function MigrationConsole() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  // Tab: "readiness" (default) | "billing-pending"
-  const [activeTab, setActiveTab] = useState<"readiness" | "billing-pending">("readiness");
+  // Tab: "readiness" (default) | "billing-pending" | "force"
+  const [activeTab, setActiveTab] = useState<"readiness" | "billing-pending" | "force">("readiness");
   const [activateStates, setActivateStates] = useState<Record<string, ActivateState>>({});
 
   // wave selection (Ready rows only) + send
@@ -768,6 +770,9 @@ export default function MigrationConsole() {
             <button type="button" style={activeTab === "billing-pending" ? tabActive : tabBase} onClick={() => setActiveTab("billing-pending")}>
               Billing Pending{billingPending.length > 0 ? ` (${billingPending.length})` : ""}
             </button>
+            <button type="button" style={activeTab === "force" ? tabActive : tabBase} onClick={() => setActiveTab("force")}>
+              Force Migration
+            </button>
           </div>
         );
       })()}
@@ -955,6 +960,8 @@ export default function MigrationConsole() {
 
       <p style={{ fontSize: 11, color: "var(--text-muted, #78828c)", marginTop: 10 }}>{data.note}</p>
       </>}
+
+      {activeTab === "force" && <ForceMigrationQueue />}
 
       {activeTab === "billing-pending" && (() => {
         const bpTh: React.CSSProperties = { textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 600, color: "#55595c", textTransform: "uppercase", letterSpacing: ".04em", borderBottom: "1px solid #e0e0e0", whiteSpace: "nowrap" };
