@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { S3Client, PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { resolveDeleteContext, isDeletableKey, findImageUsage, RAW_IMAGE_BUCKETS, UNOWNED_BUCKETS } from "@/lib/raw-image-delete";
 
 const ALLOWED_BUCKETS = new Set([
   "new-addendum-backgrounds",
@@ -34,7 +35,7 @@ function getClient() {
 
 /** GET /api/upload-image?bucket=X&prefix=Y — list images */
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const { error } = await requireAuth();
+  const { claims, error } = await requireAuth();
   if (error) return error;
 
   const { searchParams } = req.nextUrl;
@@ -52,12 +53,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     MaxKeys: 200,
   }));
 
+  // `deletable` is decided HERE, from resolved claims — the picker only renders
+  // the control, it never decides who may delete (and DELETE re-checks anyway).
+  const ctx = resolveDeleteContext(claims);
   const images = (result.Contents ?? [])
     .filter(obj => obj.Key && /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(obj.Key))
     .map(obj => ({
       key: obj.Key!,
       url: `https://${bucket}.s3.${REGION}.amazonaws.com/${obj.Key!}`,
       size: obj.Size ?? 0,
+      deletable: isDeletableKey(bucket, obj.Key!, ctx),
     }));
 
   return NextResponse.json({ images });
@@ -121,4 +126,66 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const url = `https://${bucket}.s3.${REGION}.amazonaws.com/${key}`;
   return NextResponse.json({ url, key }, { status: 201 });
+}
+
+/**
+ * DELETE /api/upload-image?bucket=X&key=Y[&force=1]
+ *
+ * Permanently removes a raw S3 object. Ownership comes from lib/raw-image-delete
+ * (server-resolved claims vs. the key prefix) — never from anything the client
+ * sends. Without ?force=1 an in-use image returns 409 with the list of things
+ * referencing it, so the UI can warn before destroying it.
+ */
+export async function DELETE(req: NextRequest): Promise<NextResponse> {
+  const { claims, error } = await requireAuth();
+  if (error) return error;
+
+  const bucket = req.nextUrl.searchParams.get("bucket")?.trim() ?? "";
+  const key = req.nextUrl.searchParams.get("key")?.trim() ?? "";
+  const force = req.nextUrl.searchParams.get("force") === "1";
+
+  if (!RAW_IMAGE_BUCKETS.has(bucket)) {
+    return NextResponse.json({ error: "Invalid bucket" }, { status: 400 });
+  }
+  if (!key || key.includes("..")) {
+    return NextResponse.json({ error: "key required" }, { status: 400 });
+  }
+
+  const ctx = resolveDeleteContext(claims);
+  if (!isDeletableKey(bucket, key, ctx)) {
+    console.warn(`[upload-image] delete denied — role=${claims.role} sub=${claims.sub} bucket=${bucket} key=${key}`);
+    return NextResponse.json({
+      error: UNOWNED_BUCKETS.has(bucket)
+        ? "These images are shared across dealers and can only be removed by DealerAddendums support."
+        : "You can only delete images you uploaded.",
+    }, { status: 403 });
+  }
+
+  const url = `https://${bucket}.s3.${REGION}.amazonaws.com/${key}`;
+  if (!force) {
+    let usedBy: string[] = [];
+    try {
+      usedBy = await findImageUsage(url);
+    } catch (err) {
+      // A usage-scan failure must not block the operator; the confirm dialog
+      // simply can't list references. Never treat it as "not in use" silently.
+      console.error("[upload-image] usage scan failed:", err instanceof Error ? err.message : err);
+      return NextResponse.json({ error: "Could not check whether this image is in use — try again." }, { status: 503 });
+    }
+    if (usedBy.length > 0) {
+      return NextResponse.json({ error: "in_use", usedBy }, { status: 409 });
+    }
+  }
+
+  try {
+    await s3Delete(bucket, key);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Delete failed" }, { status: 500 });
+  }
+  console.log(`[upload-image] deleted bucket=${bucket} key=${key} by=${claims.sub} role=${claims.role} force=${force}`);
+  return NextResponse.json({ ok: true });
+}
+
+async function s3Delete(bucket: string, key: string): Promise<void> {
+  await getClient().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }

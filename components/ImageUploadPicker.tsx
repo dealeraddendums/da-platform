@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { deriveAltFromUrl } from "@/lib/product-name";
 
-interface ImageItem { key: string; url: string; }
+interface ImageItem { key: string; url: string; deletable?: boolean }
 
 type Props = {
   title?: string;
@@ -94,6 +94,37 @@ export default function ImageUploadPicker({
       .finally(() => setLoadingLib(false));
   }, [tab, listEndpoint, images.length]);
 
+  // Permanent delete of a raw S3 object. `deletable` is decided by the server
+  // (lib/raw-image-delete) and re-checked by the endpoint — this only draws the
+  // control. A 409 means the image is still referenced somewhere, so the
+  // operator gets a second, specific confirmation before destroying it.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  async function handleDelete(img: ImageItem) {
+    const name = img.key.split("/").pop() ?? "this image";
+    if (!confirm(`Delete "${name}"? This permanently removes the file and cannot be undone.`)) return;
+    setDeleteError(null);
+    const base = `/api/upload-image?bucket=${encodeURIComponent(uploadBucket)}&key=${encodeURIComponent(img.key)}`;
+    try {
+      let res = await fetch(base, { method: "DELETE" });
+      if (res.status === 409) {
+        const j = await res.json() as { usedBy?: string[] };
+        const list = (j.usedBy ?? []).slice(0, 6).join("\n  • ");
+        const more = (j.usedBy ?? []).length > 6 ? `\n  … and ${(j.usedBy ?? []).length - 6} more` : "";
+        if (!confirm(`This image is still used by:\n  • ${list}${more}\n\nDelete anyway?`)) return;
+        res = await fetch(`${base}&force=1`, { method: "DELETE" });
+      }
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({} as { error?: string }));
+        setDeleteError((j as { error?: string }).error ?? "Delete failed");
+        return;
+      }
+      setImages(prev => prev.filter(i => i.key !== img.key));
+      if (selectedUrl === img.url) setSelectedUrl(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
+
   const handleFileSelect = useCallback((file: File) => {
     setUploadError(null);
     const allowed = acceptedTypes.split(",").map(t => t.trim());
@@ -183,12 +214,21 @@ export default function ImageUploadPicker({
                   {images.length === 0 ? "No images yet. Upload one to get started." : "No images match."}
                 </div>
               ) : (
+                <>
+                {deleteError && <p style={{ color: "#ff5252", fontSize: 12, marginBottom: 8 }}>{deleteError}</p>}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
                   {filtered.map(img => {
                     const name = img.key.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
                     return (
                       <div key={img.key} onClick={() => setSelectedUrl(img.url)}
-                        style={{ cursor: "pointer", border: `2px solid ${selectedUrl === img.url ? "#1976d2" : "#e0e0e0"}`, borderRadius: 4, overflow: "hidden", background: "#fff" }}>
+                        style={{ position: "relative", cursor: "pointer", border: `2px solid ${selectedUrl === img.url ? "#1976d2" : "#e0e0e0"}`, borderRadius: 4, overflow: "hidden", background: "#fff" }}>
+                        {img.deletable && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); void handleDelete(img); }}
+                            title="Delete image"
+                            style={{ position: "absolute", top: 4, right: 4, zIndex: 2, width: 22, height: 22, borderRadius: "50%", border: "none", background: "rgba(0,0,0,.55)", color: "#fff", cursor: "pointer", fontSize: 13, lineHeight: "22px", padding: 0 }}
+                          >×</button>
+                        )}
                         {/* 4:3 container with contain so logos/images are never cropped */}
                         <div style={{ aspectRatio: "4 / 3", overflow: "hidden", background: "#fff" }}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -201,6 +241,7 @@ export default function ImageUploadPicker({
                     );
                   })}
                 </div>
+                </>
               )}
             </div>
           )}

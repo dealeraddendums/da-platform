@@ -84,9 +84,18 @@ export default function ImagePickerModal({ bucket, title, onSelect, onClose }: I
     if (!confirm(`Delete "${img.display_name ?? "this image"}"? This cannot be undone.`)) return;
     setError("");
     try {
-      const res = await fetch(`/api/image-library?id=${encodeURIComponent(img.id)}`, { method: "DELETE" });
+      const base = `/api/image-library?id=${encodeURIComponent(img.id)}`;
+      let res = await fetch(base, { method: "DELETE" });
+      if (res.status === 409) {
+        // Still referenced — name the references before destroying it.
+        const j = await res.json() as { usedBy?: string[] };
+        const list = (j.usedBy ?? []).slice(0, 6).join("\n  \u2022 ");
+        const more = (j.usedBy ?? []).length > 6 ? `\n  \u2026 and ${(j.usedBy ?? []).length - 6} more` : "";
+        if (!confirm(`This image is still used by:\n  \u2022 ${list}${more}\n\nDelete anyway?`)) return;
+        res = await fetch(`${base}&force=1`, { method: "DELETE" });
+      }
       if (res.ok) setImages((prev) => prev.filter((i) => i.id !== img.id));
-      else { const j = await res.json().catch(() => ({})); setError(j.error ?? "Delete failed"); }
+      else { const j = await res.json().catch(() => ({})); setError((j as { error?: string }).error ?? "Delete failed"); }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     }

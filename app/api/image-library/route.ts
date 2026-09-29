@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { ALLOWED_BUCKETS, REGION, s3Client, cleanDisplayName, resolveViewContext } from "@/lib/image-library";
+import { findImageUsage } from "@/lib/raw-image-delete";
 
 // Scoped image library for the Builder picker. Returns the images visible to the
 // caller — platform (everyone) + their group + their (active) dealer — each
@@ -148,10 +149,27 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // In-use safeguard: a background can be a template's bgUrl or a custom paper
+  // size's background. Warn once (409) and let the caller force it — consumers
+  // fall back to the default background rather than crashing on a dead URL.
+  if (req.nextUrl.searchParams.get("force") !== "1") {
+    const url = `https://${row.bucket}.s3.${REGION}.amazonaws.com/${row.s3_key}`;
+    try {
+      const usedBy = await findImageUsage(url);
+      if (usedBy.length > 0) {
+        return NextResponse.json({ error: "in_use", usedBy }, { status: 409 });
+      }
+    } catch (err) {
+      console.error("[image-library] usage scan failed:", err instanceof Error ? err.message : err);
+      return NextResponse.json({ error: "Could not check whether this image is in use — try again." }, { status: 503 });
+    }
+  }
+
   await Promise.all([
     s3Client().send(new DeleteObjectCommand({ Bucket: row.bucket, Key: row.s3_key })).catch(() => null),
     admin.from("image_library").delete().eq("id", id),
   ]);
+  console.log(`[image-library] deleted id=${id} bucket=${row.bucket} key=${row.s3_key} by=${claims.sub}`);
   return NextResponse.json({ ok: true });
 }
 
