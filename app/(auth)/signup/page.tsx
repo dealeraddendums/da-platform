@@ -75,10 +75,17 @@ function SignupPageInner() {
   // password. Either way we offer (never require) a passkey after sign-in.
   const [inviteStep, setInviteStep] = useState<"choose" | "password" | "code" | "passkey">("choose");
 
+  // Manual entry is code-only (a password is not proof of invitation), so it
+  // must never reach the password step — that step's email is the resolved
+  // invitation's, and without one it rendered an empty locked box.
+  function enterManual() {
+    setManual(true);
+    setInviteStep("code");
+  }
+
   useEffect(() => {
     if (!inviteToken) return;
     fetch(`/api/invite?token=${encodeURIComponent(inviteToken)}`)
-      .then(r => r.json())
       .then(async r => ({ status: r.status, json: (await r.json()) as { data?: InviteDetails; error?: string } }))
       .then(({ status, json }) => {
         if (json.data) { setInviteDetails(json.data); setEmail(json.data.email); return; }
@@ -88,9 +95,9 @@ function SignupPageInner() {
         // Anything else (404 = token mangled by a link scanner, or truncated
         // in transit) drops to manual entry instead of dead-ending someone
         // who is holding a perfectly good code.
-        setManual(true);
+        enterManual();
       })
-      .catch(() => setManual(true))
+      .catch(() => enterManual())
       .finally(() => setInviteLoading(false));
   }, [inviteToken]);
 
@@ -302,8 +309,10 @@ function SignupPageInner() {
       );
     }
 
-    // Step 2a — enter the emailed setup code (consumed only on submit).
-    if (inviteStep === "code") {
+    // Step 2a — enter the emailed setup code (consumed only on submit). Also the
+    // landing for manual entry, and for any state without a resolved invitation
+    // email — the password step's sign-in needs one, so it is never shown blank.
+    if (inviteStep === "code" || ((manual || !email) && inviteStep !== "passkey")) {
       return (
         <AuthShell
           title="Enter your setup code"
@@ -313,7 +322,7 @@ function SignupPageInner() {
         >
           {inviteBadge}
           <form onSubmit={e => void handleCodeSubmit(e)} noValidate style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            <div>
+            {(manual || email) && <div>
               <label className="lp-label" htmlFor="inv-email-code">Email address</label>
               <input
                 id="inv-email-code"
@@ -326,7 +335,7 @@ function SignupPageInner() {
                 placeholder={manual ? "you@dealership.com" : undefined}
                 onChange={manual ? (e => setEmail(e.target.value)) : undefined}
               />
-            </div>
+            </div>}
             <div>
               <label className="lp-label" htmlFor="inv-code">Setup code</label>
               <input
@@ -371,11 +380,11 @@ function SignupPageInner() {
                 manager to resend the invitation.
               </p>
             )}
-            <p style={{ textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
-              <button type="button" className="lp-btn-link" onClick={() => { setError(""); setResendNotice(""); setInviteStep("choose"); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+            {(!manual || !inviteToken) && <p style={{ textAlign: "center", fontSize: 14, color: "var(--da-text-muted)" }}>
+              <button type="button" className="lp-btn-link" onClick={() => { setError(""); setResendNotice(""); if (manual) { setManual(false); setCode(""); } setInviteStep("choose"); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
                 ← Back
               </button>
-            </p>
+            </p>}
           </form>
         </AuthShell>
       );
@@ -393,7 +402,8 @@ function SignupPageInner() {
       );
     }
 
-    // Step 2b — set a password.
+    // Step 2b — set a password. Only reachable with a resolved invitation (see
+    // the code-step condition above), so `email` is always the invitee's.
     const strength = passwordStrength(password);
     const passwordsMatch = password.length > 0 && password === confirm;
     const ready = !loading && password.length >= 8 && passwordsMatch;
@@ -406,16 +416,18 @@ function SignupPageInner() {
         {inviteBadge}
 
         <form onSubmit={e => void handleInviteSubmit(e)} noValidate style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          <div>
-            <label className="lp-label" htmlFor="email">Email address</label>
-            <input
-              id="email"
-              className="lp-input"
-              type="email"
-              value={email}
-              readOnly
-            />
-          </div>
+          {email && (
+            <div>
+              <label className="lp-label" htmlFor="email">Email address</label>
+              <input
+                id="email"
+                className="lp-input"
+                type="email"
+                value={email}
+                readOnly
+              />
+            </div>
+          )}
 
           <div>
             <label className="lp-label" htmlFor="inv-password">New password</label>
@@ -588,7 +600,7 @@ function SignupPageInner() {
           <button
             type="button"
             className="lp-btn-link"
-            onClick={() => { setError(""); setManual(true); setInviteStep("code"); }}
+            onClick={() => { setError(""); enterManual(); }}
             style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
           >
             Enter your setup code
