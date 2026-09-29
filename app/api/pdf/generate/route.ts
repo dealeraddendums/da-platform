@@ -5,7 +5,7 @@ import type { DealerSettingsRow } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
 import { isRestylerGroup } from "@/lib/restyler";
 import { buildPdfKey } from "@/lib/s3-upload";
-import { useService as usePdfService, renderViaService, enqueueGenerate, type PdfDocTypeTag } from "@/lib/pdf-service-client";
+import { useService as usePdfService, renderViaService, renderBulkViaService, enqueueGenerate, enqueueMerged, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { enforceCanPrint } from "@/lib/print-eligibility";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/record-print";
@@ -21,7 +21,7 @@ import {
 } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, autoMatchedLibraryRows, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-save";
-import { resolveTemplate } from "@/lib/template-resolver";
+import { resolveTemplate, resolveSecondAddendum, SECOND_ADDENDUM_SETTINGS_COLUMNS, type ResolvedTemplate } from "@/lib/template-resolver";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
 import QRCode from "qrcode";
@@ -453,6 +453,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     let savedRestylerAttrPos: { x?: unknown; y?: unknown } | null = null;
     let savedTemplateFontScale: number | undefined;
     let savedTemplatePaperSize: PaperSize | undefined;
+    // Double addendum (migration 162): the OPTIONAL second template for this
+    // vehicle's condition. null on every path except an addendum print by a
+    // dealer who has the feature on AND a second template set for the
+    // condition — so every other print is byte-for-byte what it was before.
+    let secondTemplate: ResolvedTemplate | null = null;
     let aiEnabled = true; // default: AI mode per platform default
 
     if (!inWidgets || inWidgets.length === 0) {
@@ -463,6 +468,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           "default_infosheet_new", "default_infosheet_used", "default_infosheet_cpo",
           "default_buyersguide_new", "default_buyersguide_used", "default_buyersguide_cpo",
           "ai_content_default",
+          // Double-addendum (migration 162) — the second template ids + the toggle.
+          ...SECOND_ADDENDUM_SETTINGS_COLUMNS,
         ].join(", "))
         .eq("dealer_id", dv.dealer_id)
         .maybeSingle<DealerSettingsRow>();
@@ -486,27 +493,54 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (typeof resolved.fontScale === "number") savedTemplateFontScale = resolved.fontScale;
       if (resolved.paperSizeStr) savedTemplatePaperSize = resolved.paperSizeStr as PaperSize;
       console.log(`[pdf/generate] template source=${resolved.source}${resolved.makeKey ? ` make=${resolved.makeKey}` : ""} id=${resolved.templateId ?? "none"} group=${resolved.isGroup}`);
+
+      // The second addendum rides on the SAME settings row and the SAME
+      // resolved condition as the primary, so the two can never disagree about
+      // which vehicle condition is in play. Addendums only — an infosheet or
+      // buyer's guide never gets a second document.
+      if (docType === "addendum") {
+        secondTemplate = await resolveSecondAddendum(admin, {
+          condition: resolveVehicleCondition(dv),
+          settings: settings as Record<string, unknown> | null,
+        });
+        if (secondTemplate) {
+          console.log(`[pdf/generate] double addendum — second template id=${secondTemplate.templateId} group=${secondTemplate.isGroup}`);
+        }
+      }
     }
 
     // ── Resolve custom paper size dimensions ──────────────────────────────────
-    let customPaperDims: { widthIn: number; heightIn: number } | undefined;
-    let customSizeBgUrl: string | undefined;
-    let customSizeDocType: 'addendum' | 'infosheet' | undefined;
+    // Extracted so the optional SECOND addendum resolves its own paper size the
+    // same way the primary does — a second template saved at a custom size has
+    // to render at that size, not inherit the primary's.
     const knownSizes = new Set(['standard', 'narrow', 'infosheet']);
-    const effectivePaperSizeStr = savedTemplatePaperSize ?? paperSize;
-    if (!knownSizes.has(effectivePaperSizeStr)) {
+    interface CustomSizeInfo {
+      dims?: { widthIn: number; heightIn: number };
+      bgUrl?: string;
+      docType?: 'addendum' | 'infosheet';
+    }
+    const customSizeDealerId = dv.dealer_id;
+    const resolveCustomSize = async (sizeStr: string): Promise<CustomSizeInfo> => {
+      if (knownSizes.has(sizeStr)) return {};
       const { data: cs } = await admin
         .from("dealer_custom_sizes")
         .select("width_in, height_in, background_url, doc_type")
-        .eq("id", effectivePaperSizeStr)
-        .eq("dealer_id", dv.dealer_id)
+        .eq("id", sizeStr)
+        .eq("dealer_id", customSizeDealerId)
         .maybeSingle();
-      if (cs) {
-        customPaperDims = { widthIn: Number(cs.width_in), heightIn: Number(cs.height_in) };
-        if (cs.background_url) customSizeBgUrl = cs.background_url;
-        if (cs.doc_type === 'infosheet' || cs.doc_type === 'addendum') customSizeDocType = cs.doc_type;
-      }
-    }
+      if (!cs) return {};
+      return {
+        dims: { widthIn: Number(cs.width_in), heightIn: Number(cs.height_in) },
+        ...(cs.background_url ? { bgUrl: cs.background_url as string } : {}),
+        ...(cs.doc_type === 'infosheet' || cs.doc_type === 'addendum' ? { docType: cs.doc_type as 'addendum' | 'infosheet' } : {}),
+      };
+    };
+
+    const effectivePaperSizeStr = savedTemplatePaperSize ?? paperSize;
+    const primaryCustom = await resolveCustomSize(effectivePaperSizeStr);
+    const customPaperDims = primaryCustom.dims;
+    const customSizeBgUrl = primaryCustom.bgUrl;
+    const customSizeDocType = primaryCustom.docType;
 
     // ── Build widget layout ───────────────────────────────────────────────────
     const effectivePaperSize: PaperSize = (knownSizes.has(effectivePaperSizeStr) ? effectivePaperSizeStr : 'standard') as PaperSize;
@@ -766,19 +800,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const dealerLogoUrl = rawLogo
       ? (rawLogo.startsWith("http") ? rawLogo : S3_LOGO + rawLogo)
       : null;
-    const html = await buildPdfHtml({
+    // Everything that describes THE VEHICLE rather than the template. Shared
+    // verbatim by the primary and the optional second addendum so the two
+    // documents can never disagree about products, pricing or AI content —
+    // only the layout (widgets/paper/background/scale) differs between them.
+    const sharedHtmlArgs = {
       retailWholesalePrice: typeof body.retailWholesalePrice === "number" && Number.isFinite(body.retailWholesalePrice) && body.retailWholesalePrice > 0 ? body.retailWholesalePrice : null,
-      widgets,
-      paperSize: effectivePaperSizeStr,
-      fontScale: effectiveFontScale,
-      bgUrl,
       vehicle: vehicleData,
       options,
       disclaimers,
       dealerLogoUrl,
-      forceDealerLogo: savedTemplateIsGroup,
       dealer: dealer ? { name: dealer.name, address: dealer.address, city: dealer.city, state: dealer.state, zip: dealer.zip, phone: dealer.phone } : undefined,
-      customDims: customPaperDims,
       aiEnabled,
       aiDescription: aiContent?.description ?? null,
       aiFeatures: (aiContent?.features as [string, string][] | undefined) ?? null,
@@ -786,11 +818,46 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
       alwaysShowCents,
       restylerAttribution,
+    };
+
+    const html = await buildPdfHtml({
+      ...sharedHtmlArgs,
+      widgets,
+      paperSize: effectivePaperSizeStr,
+      fontScale: effectiveFontScale,
+      bgUrl,
+      forceDealerLogo: savedTemplateIsGroup,
+      customDims: customPaperDims,
       // Builder "Download PDF" sends live ad-hoc widgets + the current canvas
       // position; a saved-template print reads it from the template JSON. The
       // clamp in resolveRestylerAttrPos sanitizes either source.
       restylerAttrPos: (body as { restylerAttrPos?: { x?: unknown; y?: unknown } | null }).restylerAttrPos ?? savedRestylerAttrPos,
     });
+
+    // ── Second addendum (migration 162) ──────────────────────────────────────
+    // Rendered with ITS OWN template metadata — paper size, custom dimensions,
+    // background and font scale all come from the second template, exactly as
+    // the primary takes them from its own. The dealer-level printer nudge is
+    // applied downstream in buildPdfHtml for both, so both sheets land on the
+    // paper the same way.
+    let secondHtml: string | null = null;
+    let secondPaperSizeStr: string | undefined;
+    let secondCustomDims: { widthIn: number; heightIn: number } | undefined;
+    if (secondTemplate && secondTemplate.widgets && secondTemplate.widgets.length > 0) {
+      secondPaperSizeStr = (secondTemplate.paperSizeStr as PaperSize | undefined) ?? paperSize;
+      const secondCustom = await resolveCustomSize(secondPaperSizeStr);
+      secondCustomDims = secondCustom.dims;
+      secondHtml = await buildPdfHtml({
+        ...sharedHtmlArgs,
+        widgets: secondTemplate.widgets,
+        paperSize: secondPaperSizeStr,
+        fontScale: typeof secondTemplate.fontScale === "number" ? secondTemplate.fontScale : fontScale,
+        bgUrl: secondTemplate.bgUrl || secondCustom.bgUrl || BG_DEFAULT,
+        forceDealerLogo: secondTemplate.isGroup,
+        customDims: secondCustomDims,
+        restylerAttrPos: secondTemplate.restylerAttrPos,
+      });
+    }
 
     const s3Key = buildPdfKey({
       internalId: dealer?.internal_id ?? null,
@@ -830,11 +897,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const asyncMode = req.nextUrl.searchParams.get("async") === "1";
     if (asyncMode && usePdfService()) {
       try {
-        const { jobId } = await enqueueGenerate(html, {
-          paperSize: effectivePaperSizeStr,
-          customDims: customPaperDims,
-          docType: docType as PdfDocTypeTag,
-        }, s3Key);
+        // Double addendum: one merge job (primary first) instead of one
+        // single-render job. Same jobId contract, same status endpoint, same
+        // s3Key — so the browser's existing polling is untouched.
+        const { jobId } = secondHtml
+          ? await enqueueMerged(
+              [
+                { html, paperSize: effectivePaperSizeStr, customDims: customPaperDims },
+                { html: secondHtml, paperSize: secondPaperSizeStr, customDims: secondCustomDims },
+              ],
+              s3Key,
+              docType as PdfDocTypeTag,
+            )
+          : await enqueueGenerate(html, {
+              paperSize: effectivePaperSizeStr,
+              customDims: customPaperDims,
+              docType: docType as PdfDocTypeTag,
+            }, s3Key);
         const printToken = await createPendingPrint(admin, { dealerTextId: dv.dealer_id, createdBy: claims.sub, payloads: [printPayload] });
         if (!printToken) {
           void recordPrint(admin, claims.sub, printPayload)
@@ -861,12 +940,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     let pdfBuffer: Buffer;
     try {
       // The service uploads to s3Key itself with the doc_type tag.
-      const result = await renderViaService(html, {
-        paperSize: effectivePaperSizeStr,
-        customDims: customPaperDims,
-        docType: docType as PdfDocTypeTag,
-      }, s3Key);
-      pdfBuffer = result.buffer;
+      // Double addendum goes through the bulk endpoint, which renders both
+      // documents and merges them in order — the merged PDF is what lands at
+      // s3Key ({VIN}.pdf), so the dealer-website Download button serves the
+      // whole sticker set, not just page one.
+      if (secondHtml) {
+        const merged = await renderBulkViaService(
+          [
+            { html, paperSize: effectivePaperSizeStr, customDims: customPaperDims },
+            { html: secondHtml, paperSize: secondPaperSizeStr, customDims: secondCustomDims },
+          ],
+          s3Key,
+          docType as PdfDocTypeTag,
+        );
+        pdfBuffer = merged.buffer;
+      } else {
+        const result = await renderViaService(html, {
+          paperSize: effectivePaperSizeStr,
+          customDims: customPaperDims,
+          docType: docType as PdfDocTypeTag,
+        }, s3Key);
+        pdfBuffer = result.buffer;
+      }
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : "PDF render failed" }, { status: 500 });
     }

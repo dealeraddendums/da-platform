@@ -7,7 +7,7 @@ import { isRestylerGroup } from "@/lib/restyler";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/record-print";
 import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-save";
-import { resolveTemplate, createTemplateResolverCache } from "@/lib/template-resolver";
+import { resolveTemplate, resolveSecondAddendum, createTemplateResolverCache, SECOND_ADDENDUM_SETTINGS_COLUMNS } from "@/lib/template-resolver";
 // buildBuyersGuidePdf is pdf-lib only (no Puppeteer). The bulk
 // buyer_guide branch still renders it locally; if we ever want it on
 // the PDF service too, the single buyers-guide route's pattern shows
@@ -248,6 +248,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               "default_infosheet_new", "default_infosheet_used", "default_infosheet_cpo",
               "default_buyersguide_new", "default_buyersguide_used", "default_buyersguide_cpo",
               "qr_url_template", "ai_content_default", "always_show_cents",
+              // Double-addendum (migration 162) — the second template ids + the toggle.
+              ...SECOND_ADDENDUM_SETTINGS_COLUMNS,
             ].join(", "))
             .eq("dealer_id", dv.dealer_id)
             .maybeSingle<DealerSettingsRow>();
@@ -276,6 +278,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const templatePaperSizeStr = resolved.paperSizeStr;
         const templateRestylerAttrPos = resolved.restylerAttrPos;
         console.log(`[BULK]   template source=${resolved.source}${resolved.makeKey ? ` make=${resolved.makeKey}` : ""} id=${resolved.templateId ?? "none"} group=${templateIsGroup}`);
+
+        // Double addendum (migration 162). Same settings row, same resolved
+        // condition, same per-batch template cache as the primary above.
+        const secondTemplate = docType === "addendum"
+          ? await resolveSecondAddendum(admin, {
+              condition: resolveVehicleCondition(dv),
+              settings: dealerSettings as Record<string, unknown> | null,
+              cache: templateResolverCache,
+            })
+          : null;
 
         // ── Effective paper size ─────────────────────────────────────────────
         // Each vehicle's OWN template width wins — same precedence as
@@ -887,17 +899,77 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           docType,
         });
 
+        // ── Second addendum (migration 162) ──────────────────────────────
+        // Built from the same vehicle data as the primary, with the second
+        // template's own paper size / background / font scale.
+        let secondHtml: string | null = null;
+        let secondPaperSizeStr: string | undefined;
+        let secondCustomDims: { widthIn: number; heightIn: number } | undefined;
+        if (secondTemplate?.widgets && secondTemplate.widgets.length > 0) {
+          secondPaperSizeStr = secondTemplate.paperSizeStr ?? effectivePaperSizeStr;
+          let secondBgFromSize: string | undefined;
+          if (!knownSizes.has(secondPaperSizeStr)) {
+            const { data: cs2 } = await admin
+              .from("dealer_custom_sizes")
+              .select("width_in, height_in, background_url")
+              .eq("id", secondPaperSizeStr)
+              .eq("dealer_id", dv.dealer_id)
+              .maybeSingle();
+            if (cs2) {
+              secondCustomDims = { widthIn: Number(cs2.width_in), heightIn: Number(cs2.height_in) };
+              if (cs2.background_url) secondBgFromSize = cs2.background_url as string;
+            }
+          }
+          secondHtml = await buildPdfHtml({
+            restylerAttribution,
+            restylerAttrPos: secondTemplate.restylerAttrPos,
+            widgets: secondTemplate.widgets,
+            paperSize: secondPaperSizeStr,
+            fontScale: typeof secondTemplate.fontScale === "number" ? secondTemplate.fontScale : 1.0,
+            bgUrl: secondTemplate.bgUrl ?? secondBgFromSize ?? BG_DEFAULT,
+            vehicle: vehicleData, options,
+            disclaimers,
+            dealerLogoUrl,
+            forceDealerLogo: secondTemplate.isGroup,
+            dealer: dealer ? { name: dealer.name, address: dealer.address, city: dealer.city, state: dealer.state, zip: dealer.zip, phone: dealer.phone } : undefined,
+            customDims: secondCustomDims,
+            aiEnabled,
+            aiDescription: aiContent?.description ?? null,
+            aiFeatures: (aiContent?.features as [string, string][] | undefined) ?? null,
+            dbDescription: vehicleData.DESCRIPTION ?? null,
+            dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
+            alwaysShowCents: (dealerSettings as Record<string, unknown> | null)?.always_show_cents === true,
+          });
+        }
+
         // Queue for the batch service call below. Per-vehicle rendering
         // happens server-side on the PDF service; bgJob carries no
         // pdfBuffer — uploadBulkJobPdf picks up preUploadedSignedUrl
         // from the service response once renderBulkViaService returns.
+        //
+        // DOUBLE ADDENDUM: the vehicle contributes TWO adjacent items and
+        // NEITHER carries s3Key. Letting the service upload them individually
+        // would put half the sticker at the canonical {VIN}.pdf that the
+        // dealer-website Download button reads. Instead both pages are cut out
+        // of the merged PDF below and uploaded together — the same
+        // merged-split machinery the single-item path already uses as its
+        // self-heal, just over a page RANGE instead of a single page.
         serviceItems.push({
           vehicleId,
           html,
           paperSize: effectivePaperSizeStr,
           customDims: customPaperDims,
-          s3Key,
+          ...(secondHtml ? {} : { s3Key }),
         });
+        if (secondHtml) {
+          serviceItems.push({
+            vehicleId,
+            html: secondHtml,
+            paperSize: secondPaperSizeStr ?? effectivePaperSizeStr,
+            customDims: secondCustomDims,
+          });
+          console.log(`[BULK]   double addendum vehicleId=${vehicleId} second=${secondTemplate?.templateId}`);
+        }
         bgJobs.push({ vehicleId, s3Key, dvDealerId: dv.dealer_id, dvVin: dv.vin ?? null, dealerUuid: dealer?.id ?? null, docType, options, saveOptions });
         console.log(`[BULK]   queued vehicleId=${vehicleId}`);
 
@@ -941,6 +1013,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // slot. Auto-disables the moment the service starts returning signedUrls.
       let mergedDocForSplit: PDFDocument | null = null;
       let canSplit = false;
+      // Load the merged doc whenever ANY item lacks a signedUrl. Double-addendum
+      // items are sent without an s3Key on purpose, so they never get one —
+      // which is exactly the condition that makes the split necessary.
       if (!result.items.every(it => it?.signedUrl)) {
         try {
           mergedDocForSplit = await PDFDocument.load(mergedBuffer);
@@ -954,22 +1029,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           console.error("[BULK] merged PDF load for per-vehicle fallback failed:", err instanceof Error ? err.message : err);
         }
       }
+      // Items map to vehicles 1:1 EXCEPT for double-addendum vehicles, which
+      // contribute two adjacent items. Walk contiguous runs of the same
+      // vehicleId so a double vehicle's {VIN}.pdf gets BOTH of its pages
+      // rather than just the first.
+      const vehicleRuns: { vehicleId: string; start: number; count: number }[] = [];
       for (let i = 0; i < serviceItems.length; i++) {
-        const vehicleId = serviceItems[i].vehicleId;
-        const itemResult = result.items[i];
+        const last = vehicleRuns[vehicleRuns.length - 1];
+        if (last && last.vehicleId === serviceItems[i].vehicleId) last.count++;
+        else vehicleRuns.push({ vehicleId: serviceItems[i].vehicleId, start: i, count: 1 });
+      }
+
+      for (const run of vehicleRuns) {
+        const { vehicleId, start, count } = run;
+        const itemResult = result.items[start];
         const bgJob = bgJobs.find(j => j.vehicleId === vehicleId);
         if (!bgJob) continue;
-        if (itemResult?.signedUrl) {
+        // A single-item vehicle the service already uploaded: nothing to do.
+        // Double-addendum vehicles deliberately carry no per-item s3Key, so
+        // they never have a signedUrl and always take the split path below.
+        if (count === 1 && itemResult?.signedUrl) {
           bgJob.preUploadedSignedUrl = itemResult.signedUrl;
         } else if (canSplit && mergedDocForSplit) {
-          // Service didn't upload this one — extract its page and let the
-          // background logging path upload it to bgJob.s3Key.
+          // Extract this vehicle's page range and let the background logging
+          // path upload it to bgJob.s3Key (the canonical {VIN}.pdf).
           try {
             const single = await PDFDocument.create();
-            const [pg] = await single.copyPages(mergedDocForSplit, [i]);
-            single.addPage(pg);
+            const idx = Array.from({ length: count }, (_, k) => start + k);
+            const pages = await single.copyPages(mergedDocForSplit, idx);
+            pages.forEach(pg => single.addPage(pg));
             bgJob.pdfBuffer = Buffer.from(await single.save());
-            console.warn(`[BULK] service skipped per-vehicle upload vehicleId=${vehicleId} — recovering ${bgJob.s3Key} from merged-split fallback`);
+            if (count > 1) {
+              console.log(`[BULK] double addendum vehicleId=${vehicleId} — ${count} pages -> ${bgJob.s3Key}`);
+            } else {
+              console.warn(`[BULK] service skipped per-vehicle upload vehicleId=${vehicleId} — recovering ${bgJob.s3Key} from merged-split fallback`);
+            }
           } catch (err) {
             console.error(`[BULK] per-vehicle fallback split failed vehicleId=${vehicleId}:`, err instanceof Error ? err.message : err);
           }

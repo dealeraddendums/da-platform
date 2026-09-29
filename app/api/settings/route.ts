@@ -24,6 +24,11 @@ const DEFAULTS = {
   default_buyersguide_cpo: null,
   qr_url_template: null,
   always_show_cents: false,
+  // Double addendum (migration 162) — off, with no second templates chosen.
+  print_double_addendums: false,
+  default_addendum_new_second: null,
+  default_addendum_used_second: null,
+  default_addendum_cpo_second: null,
 };
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -81,6 +86,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     const DEFAULT_TEMPLATE_FIELDS = [
       "default_template_new", "default_template_used", "default_template_cpo",
       "default_addendum_new", "default_addendum_used", "default_addendum_cpo",
+      "default_addendum_new_second", "default_addendum_used_second", "default_addendum_cpo_second",
       "default_infosheet_new", "default_infosheet_used", "default_infosheet_cpo",
       "default_buyersguide_new", "default_buyersguide_used", "default_buyersguide_cpo",
     ] as const;
@@ -133,6 +139,10 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     ...("default_buyersguide_used" in body && { default_buyersguide_used: body.default_buyersguide_used ?? null }),
     ...("default_buyersguide_cpo" in body && { default_buyersguide_cpo: body.default_buyersguide_cpo ?? null }),
     ...("buyers_guide_defaults" in body && { buyers_guide_defaults: body.buyers_guide_defaults ?? null }),
+    ...("print_double_addendums" in body && { print_double_addendums: body.print_double_addendums === true }),
+    ...("default_addendum_new_second" in body && { default_addendum_new_second: body.default_addendum_new_second ?? null }),
+    ...("default_addendum_used_second" in body && { default_addendum_used_second: body.default_addendum_used_second ?? null }),
+    ...("default_addendum_cpo_second" in body && { default_addendum_cpo_second: body.default_addendum_cpo_second ?? null }),
     ...("qr_url_template" in body && { qr_url_template: body.qr_url_template ?? null }),
     ...(body.always_show_cents !== undefined && { always_show_cents: body.always_show_cents === true }),
   };

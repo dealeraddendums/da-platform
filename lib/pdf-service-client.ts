@@ -217,6 +217,35 @@ export async function enqueueGenerate(
   });
 }
 
+/**
+ * Enqueue a MERGE job: render several HTML documents and merge them into one
+ * PDF at `s3Key`. Used by the double-addendum path (migration 162) in async
+ * mode, where a single vehicle prints its primary template plus an optional
+ * second one as one document.
+ *
+ * Deliberately reuses the existing /api/pdf/bulk endpoint — that is already
+ * "render each job, merge them in order, upload the merged result to the
+ * top-level s3Key", which is exactly a merge when the jobs happen to be the
+ * two halves of one vehicle's sticker. No da-pdf-service change needed, and
+ * GET /api/pdf/status/:jobId already reports bulk jobs, so the browser's
+ * existing polling works unchanged.
+ *
+ * NOTE: the items intentionally carry NO per-item s3Key. Uploading them
+ * individually would overwrite the canonical {VIN}.pdf with half the document
+ * (the dealer-website "Download Addendum" button reads that exact key).
+ */
+export async function enqueueMerged(
+  items: BulkItem[],
+  s3Key: string,
+  docType: PdfDocTypeTag = "addendum",
+): Promise<{ jobId: string }> {
+  return postJson("/api/pdf/bulk", {
+    jobs: items.map(({ s3Key: _drop, ...rest }) => { void _drop; return rest; }),
+    docType,
+    s3Key,
+  });
+}
+
 export async function enqueueBuyerGuide(
   srcPdfBytes: Buffer,
   input: unknown,

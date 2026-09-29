@@ -291,3 +291,64 @@ export async function resolveTemplate(admin: Admin, args: ResolveTemplateArgs): 
     makeKey: makeKeyUsed,
   };
 }
+
+// ── Second addendum (migration 162) ──────────────────────────────────────────
+//
+// "Print Double Addendums": an OPTIONAL second addendum template per condition
+// that gets merged into the SAME PDF behind the primary.
+//
+// Deliberately NOT a cascade. resolveTemplate above falls back (this condition
+// -> any condition -> blank starter) because a vehicle must always print
+// SOMETHING. The second addendum is the opposite: it is opt-in, per condition,
+// and a blank picker means "no second addendum for this condition". Running it
+// through the same fallback chain would hand a dealer who configured a second
+// template for New only a surprise duplicate on every Used car, and a dealer
+// with the box ticked but nothing chosen a blank starter page on every print.
+//
+// Also deliberately skips the per-make override rung: overrides steer the
+// PRIMARY sticker's branding (migration 153). Applying them here would let a
+// Genesis make-override silently become the second page of a Hyundai print.
+export async function resolveSecondAddendum(
+  admin: Admin,
+  args: {
+    condition: string | null | undefined;
+    /** Same dealer_settings row the caller already fetched for the primary. */
+    settings: Record<string, unknown> | null;
+    cache?: TemplateResolverCache;
+  },
+): Promise<ResolvedTemplate | null> {
+  const { settings, cache } = args;
+  if (!settings || settings.print_double_addendums !== true) return null;
+
+  const condKey = resolveVehicleCondition({ condition: args.condition }) === "New" ? "new"
+    : resolveVehicleCondition({ condition: args.condition }) === "Used" ? "used"
+    : "cpo";
+
+  const templateId = (settings[`default_addendum_${condKey}_second`] as string | null) ?? null;
+  if (!templateId) return null;
+
+  const loaded = await loadTemplateById(admin, templateId, cache);
+  // A deleted or empty second template must print NOTHING extra rather than a
+  // blank page — same rule the make-override rung uses.
+  if (!loaded.widgets || loaded.widgets.length === 0) return null;
+
+  return {
+    widgets: loaded.widgets,
+    isGroup: loaded.meta.isGroup === true,
+    bgUrl: loaded.meta.bgUrl,
+    fontScale: loaded.meta.fontScale,
+    paperSizeStr: loaded.meta.paperSizeStr,
+    restylerAttrPos: loaded.meta.restylerAttrPos ?? null,
+    source: "condition_default",
+    templateId,
+  };
+}
+
+/** The dealer_settings columns the second-addendum resolver needs. Callers add
+ *  these to their existing settings select so there is one list to keep right. */
+export const SECOND_ADDENDUM_SETTINGS_COLUMNS = [
+  "print_double_addendums",
+  "default_addendum_new_second",
+  "default_addendum_used_second",
+  "default_addendum_cpo_second",
+] as const;

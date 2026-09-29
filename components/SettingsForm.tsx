@@ -54,6 +54,11 @@ const SETTING_DEFAULTS: Omit<DealerSettingsRow, "dealer_id" | "updated_at"> = {
   buyers_guide_defaults: null,
   qr_url_template: null,
   always_show_cents: false,
+  // Double addendum (migration 162)
+  print_double_addendums: false,
+  default_addendum_new_second: null,
+  default_addendum_used_second: null,
+  default_addendum_cpo_second: null,
 };
 
 const WARRANTY_LABELS: Record<string, string> = {
@@ -146,6 +151,10 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
           default_addendum_new: initialSettings.default_addendum_new ?? null,
           default_addendum_used: initialSettings.default_addendum_used ?? null,
           default_addendum_cpo: initialSettings.default_addendum_cpo ?? null,
+          print_double_addendums: initialSettings.print_double_addendums ?? false,
+          default_addendum_new_second: initialSettings.default_addendum_new_second ?? null,
+          default_addendum_used_second: initialSettings.default_addendum_used_second ?? null,
+          default_addendum_cpo_second: initialSettings.default_addendum_cpo_second ?? null,
           default_infosheet_new: initialSettings.default_infosheet_new ?? null,
           default_infosheet_used: initialSettings.default_infosheet_used ?? null,
           default_infosheet_cpo: initialSettings.default_infosheet_cpo ?? null,
@@ -228,6 +237,10 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
         default_addendum_new: sJson.data.default_addendum_new ?? null,
         default_addendum_used: sJson.data.default_addendum_used ?? null,
         default_addendum_cpo: sJson.data.default_addendum_cpo ?? null,
+        print_double_addendums: sJson.data.print_double_addendums ?? false,
+        default_addendum_new_second: sJson.data.default_addendum_new_second ?? null,
+        default_addendum_used_second: sJson.data.default_addendum_used_second ?? null,
+        default_addendum_cpo_second: sJson.data.default_addendum_cpo_second ?? null,
         default_infosheet_new: sJson.data.default_infosheet_new ?? null,
         default_infosheet_used: sJson.data.default_infosheet_used ?? null,
         default_infosheet_cpo: sJson.data.default_infosheet_cpo ?? null,
@@ -737,8 +750,12 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
                 const filtered = templates.filter((t) => t.document_type === docTab);
                 const selectedId = (settings[key] as string | null) ?? "";
                 const selectedName = filtered.find((t) => t.id === selectedId)?.name ?? null;
+                const secondKey = `default_addendum_${vtype}_second` as keyof typeof settings;
+                const secondId = (settings[secondKey] as string | null) ?? "";
+                const secondName = filtered.find((t) => t.id === secondId)?.name ?? null;
                 return (
-                  <div key={vtype} className="flex items-center gap-3 mb-3">
+                  <div key={vtype}>
+                    <div className="flex items-center gap-3 mb-3">
                     <label className="text-sm w-28 flex-shrink-0" style={{ color: "var(--text-secondary)" }}>
                       {label}
                     </label>
@@ -759,6 +776,35 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
                         ))}
                       </select>
                     )}
+                    </div>
+                    {/* Second addendum picker (migration 162). Addendum tab
+                        only — an infosheet never gets a second document. Its
+                        own row so the primary layout above is untouched when
+                        the feature is off. */}
+                    {docTab === "addendum" && settings.print_double_addendums && (
+                      <div className="flex items-center gap-3 mb-3">
+                        <label className="text-sm w-28 flex-shrink-0 text-right" style={{ color: "var(--text-muted)", fontStyle: "italic" }}>
+                          + second
+                        </label>
+                        {templatesAreLocked ? (
+                          <div className="input flex-1" style={{ display: "flex", alignItems: "center", background: "#fafafa", color: secondName ? "#333" : "#999", cursor: "not-allowed" }}>
+                            {secondName ?? "— None —"}
+                          </div>
+                        ) : (
+                          <select
+                            key={`${secondKey}-${templates.length}`}
+                            className="input flex-1"
+                            value={secondId}
+                            onChange={(e) => setSettings((s) => ({ ...s, [secondKey]: e.target.value || null }))}
+                          >
+                            <option value="">— None —</option>
+                            {filtered.map((t) => (
+                              <option key={t.id} value={t.id}>{t.name}{(t as { source?: string }).source === "group" ? " (Group)" : ""}</option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -766,6 +812,29 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
                 <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
                   No {docTab} templates saved yet. Create them in the Builder.
                 </p>
+              )}
+              {/* Print Double Addendums (migration 162). Addendum tab only.
+                  Unchecking hides the pickers but KEEPS the stored ids, so a
+                  dealer can toggle the feature off and back on without having
+                  to re-pick their second templates. */}
+              {docTab === "addendum" && (
+                <div className="mt-4 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+                  <label className="flex items-start gap-2" style={{ cursor: templatesAreLocked ? "not-allowed" : "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={settings.print_double_addendums === true}
+                      disabled={templatesAreLocked}
+                      onChange={(e) => setSettings((s) => ({ ...s, print_double_addendums: e.target.checked }))}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span>
+                      <span className="text-sm" style={{ color: "var(--text-primary)" }}>Print Double Addendums</span>
+                      <span className="block text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                        Print a second addendum behind the first. Choose one per vehicle type above — leave any blank to print a single addendum for that type. Both sheets come out as one PDF and count as one print.
+                      </span>
+                    </span>
+                  </label>
+                </div>
               )}
               {/* Per-make overrides (migration 153) — Genesis prints Genesis, etc. */}
               <MakeOverrides

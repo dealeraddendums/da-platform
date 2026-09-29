@@ -566,6 +566,13 @@ export type DealerSettingsRow = {
   default_buyersguide_used: string | null;
   default_buyersguide_cpo: string | null;
   buyers_guide_defaults: BuyersGuideDefaults | null;
+  /** Print Double Addendums (migration 162): when true, a vehicle whose
+   *  condition has a *_second template set prints BOTH templates merged into
+   *  one PDF (primary first) and still counts as ONE print. */
+  print_double_addendums: boolean;
+  default_addendum_new_second: string | null;
+  default_addendum_used_second: string | null;
+  default_addendum_cpo_second: string | null;
   qr_url_template: string | null;
   /** Print Settings "Always show cents" (migration 144): true → every numeric
    *  money label on the addendum renders two decimals; false → whole-dollar
@@ -594,6 +601,10 @@ type DealerSettingsInsert = {
   default_buyersguide_used?: string | null;
   default_buyersguide_cpo?: string | null;
   buyers_guide_defaults?: BuyersGuideDefaults | null;
+  print_double_addendums?: boolean;
+  default_addendum_new_second?: string | null;
+  default_addendum_used_second?: string | null;
+  default_addendum_cpo_second?: string | null;
   qr_url_template?: string | null;
   always_show_cents?: boolean;
 };
@@ -617,6 +628,13 @@ export type DealerSettingsUpdate = {
   default_buyersguide_used?: string | null;
   default_buyersguide_cpo?: string | null;
   buyers_guide_defaults?: BuyersGuideDefaults | null;
+  /** Print Double Addendums (migration 162): when true, a vehicle whose
+   *  condition has a *_second template set prints BOTH templates merged into
+   *  one PDF (primary first) and still counts as ONE print. */
+  print_double_addendums?: boolean;
+  default_addendum_new_second?: string | null;
+  default_addendum_used_second?: string | null;
+  default_addendum_cpo_second?: string | null;
   qr_url_template?: string | null;
   always_show_cents?: boolean;
   updated_at?: string;
