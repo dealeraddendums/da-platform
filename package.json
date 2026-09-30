@@ -25,7 +25,8 @@
     "test:dealer-billing-customer": "tsx scripts/dealer-billing-customer-verify-unit.ts",
     "test:migrate-invite": "tsx scripts/migrate-invite-lookup-verify-unit.ts",
     "test:vehicle-search": "tsx scripts/vehicle-search-verify-unit.ts",
-    "test:force-migration": "tsx scripts/force-migration-verify-unit.ts"
+    "test:force-migration": "tsx scripts/force-migration-verify-unit.ts",
+    "test:image-builder": "tsx scripts/image-builder-verify-unit.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

@@ -26,7 +26,7 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
 
   const admin = createAdminSupabaseClient();
-  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; full_name: string | null; group_id: string | null; active_dealer_id: string | null; created_at: string | null; }>(admin, session, "role, dealer_id, full_name, group_id, active_dealer_id, created_at");
+  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; full_name: string | null; group_id: string | null; active_dealer_id: string | null; created_at: string | null; can_use_image_builder: boolean | null; }>(admin, session, "role, dealer_id, full_name, group_id, active_dealer_id, created_at, can_use_image_builder");
 
   const role: UserRole = (profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
@@ -208,7 +208,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar role={sidebarRole} hideBuilder={isDealerRole && templatesLocked} showUpgrade={showUpgrade} />
+      <Sidebar role={sidebarRole} hideBuilder={isDealerRole && templatesLocked} showUpgrade={showUpgrade} showImageBuilder={profile?.can_use_image_builder === true} />
       <div className="flex flex-col flex-1 overflow-hidden">
         <ImpersonationBanner />
         <PlatformBanner />

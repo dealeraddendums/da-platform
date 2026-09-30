@@ -442,6 +442,21 @@ const nav: NavEntry[] = [
       </svg>
     ),
   },
+  {
+    // Also shown to users granted profiles.can_use_image_builder (migration 163)
+    // via Sidebar's showImageBuilder prop.
+    label: "Image Builder",
+    href: "/admin/image-builder",
+    roles: ["super_admin"],
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        <path d="M8 16l2.5-6 2.5 6" />
+        <line x1="8.8" y1="14" x2="12.2" y2="14" />
+        <line x1="16" y1="10" x2="16" y2="16" />
+      </svg>
+    ),
+  },
   // ── Documents section ─────────────────────────────────────────────────────────
   {
     section: "Documents",
@@ -460,7 +475,7 @@ const nav: NavEntry[] = [
   },
 ];
 
-export default function Sidebar({ role = "dealer_user", hideBuilder = false, showUpgrade = false }: { role?: UserRole | "group_user"; hideBuilder?: boolean; showUpgrade?: boolean }) {
+export default function Sidebar({ role = "dealer_user", hideBuilder = false, showUpgrade = false, showImageBuilder = false }: { role?: UserRole | "group_user"; hideBuilder?: boolean; showUpgrade?: boolean; showImageBuilder?: boolean }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -469,7 +484,8 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
   // management (dealers.group_controls_templates = true) — Builder is then
   // off-limits for dealer roles. group_admin / super_admin always see it.
   const visibleNav = nav
-    .filter((entry) => entry.roles.includes(role as UserRole))
+    .filter((entry) => entry.roles.includes(role as UserRole)
+      || (showImageBuilder && "href" in entry && entry.href === "/admin/image-builder"))
     .filter((entry) => !(hideBuilder && "href" in entry && entry.href === "/builder"));
 
   function getIsActive(item: NavItem): boolean {
