@@ -604,7 +604,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const effectiveFiltered = effectiveOptions.filter(o =>
           savedRowSurvivesLibraryRules(
             libRuleByName.get(normalizeOptionName(o.option_name)) ?? [], vehicleData, o.option_name,
-            { option_price: o.option_price ?? null, default_id: (o as { default_id?: string | null }).default_id ?? null },
+            { option_price: o.option_price ?? null, default_id: (o as { default_id?: string | null }).default_id ?? null, source: (o as { source?: string | null }).source ?? null },
           )
         );
 

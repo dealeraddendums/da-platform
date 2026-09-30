@@ -293,7 +293,7 @@ function hydrateSavedAgainstLibrary<T extends SavedRow>(
   const filtered = withLiveType.filter(r =>
     savedRowSurvivesLibraryRules(
       rulesByName.get(normalizeOptionName(r.option_name)) ?? [], vehicle, r.option_name,
-      { option_price: (r as { option_price?: string | null }).option_price ?? null, default_id: r.default_id ?? null },
+      { option_price: (r as { option_price?: string | null }).option_price ?? null, default_id: r.default_id ?? null, source: r.source ?? null },
     )
   );
 
@@ -530,13 +530,22 @@ export async function POST(
     const saveLib = effectiveDealerId
       ? (((await admin
             .from("addendum_library")
-            .select("id, option_name")
-            .eq("dealer_id", effectiveDealerId)).data ?? []) as Array<{ id?: unknown; option_name?: string | null }>)
+            .select("id, option_name, item_price")
+            .eq("dealer_id", effectiveDealerId)).data ?? []) as Array<{ id?: unknown; option_name?: string | null; item_price?: string | null }>)
       : [];
     const libNames = libraryNameSet(saveLib);
+    const libPriceByName = new Map<string, string>(
+      saveLib.flatMap(l => l.option_name && l.item_price != null ? [[normalizeOptionName(l.option_name), l.item_price] as [string, string]] : [])
+    );
     const effectiveSource = (o: OptionInput): "default" | "manual" => {
       const claimed = o.source === "default" ? "default" : "manual";
       if (claimed === "default" && !libNames.has(normalizeOptionName(o.option_name))) return "manual";
+      if (claimed === "default") {
+        const libPrice = libPriceByName.get(normalizeOptionName(o.option_name));
+        // Operator saved a different price than the library → treat as intentional
+        // per-vehicle override so it survives library rules at read/print time.
+        if (libPrice !== undefined && (o.option_price ?? "NC") !== libPrice) return "manual";
+      }
       return claimed;
     };
     // Stamp the stable library identity (migration 152) on library-tracked rows

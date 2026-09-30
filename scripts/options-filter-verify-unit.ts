@@ -429,6 +429,20 @@ void test("NOT-mode on a blank value is unchanged (deliberately not widened)", (
   assert.equal(matchesRulesRow({ ...baseRule, trims: "Raptor", trims_not: true }, v), false);
 });
 
+// ── source="manual" bypass (MB Escondido MARKET ADJUSTMENT 2026-09-03) ──────
+void test("savedRowSurvivesLibraryRules: source='manual' survives even when trim rule excludes the vehicle", () => {
+  const rule: Parameters<typeof savedRowSurvivesLibraryRules>[0][number] = {
+    ...baseRule,
+    option_name: "MARKET ADJUSTMENT",
+    trims: "AMG G63,AMG G63/AMG G63 Bi-Turbo,G63 AMG,G63 AMG 4-Matic",
+  };
+  const v = vehicle({ TRIM: "G 580" });
+  // source="default" with a non-AMG price is ruled out — G 580 is not in the AMG-only trim list
+  assert.equal(savedRowSurvivesLibraryRules([rule], v, "MARKET ADJUSTMENT", { option_price: "$25,000" }), false);
+  // source="manual" always survives — operator set a per-vehicle price override
+  assert.equal(savedRowSurvivesLibraryRules([rule], v, "MARKET ADJUSTMENT", { source: "manual" }), true);
+});
+
 // ── report ───────────────────────────────────────────────────────────────────
 setTimeout(() => {
   const failed = results.filter(r => !r.ok);

@@ -477,10 +477,11 @@ export function savedRowSurvivesLibraryRules(
   rules: RulesRow[],
   vehicle: VehicleRow,
   savedName?: string | null,
-  /** The saved row's own price + library id — used to work out WHICH def the
-   *  row belongs to when several share its name. */
-  saved?: { option_price?: string | null; default_id?: string | null } | null,
+  /** The saved row's own price + library id + source — used to work out WHICH def the
+   *  row belongs to when several share its name, and to bypass rules for manual overrides. */
+  saved?: { option_price?: string | null; default_id?: string | null; source?: string | null } | null,
 ): boolean {
+  if (saved?.source === "manual") return true;
   const gate = (rule: RulesRow) =>
     rule.applies_to === "none" ||
     matchesRulesRow({

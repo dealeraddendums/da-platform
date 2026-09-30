@@ -318,7 +318,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const savedFiltered = (optionRows ?? []).filter(r =>
       savedRowSurvivesLibraryRules(
         libRulesByName.get(normalizeOptionName(r.option_name as string)) ?? [], vehicleData, r.option_name as string,
-        { option_price: (r.option_price as string | null) ?? null, default_id: (r.default_id as string | null) ?? null },
+        { option_price: (r.option_price as string | null) ?? null, default_id: (r.default_id as string | null) ?? null, source: r.source as string | null ?? null },
       )
     );
 
