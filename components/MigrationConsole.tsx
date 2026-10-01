@@ -125,6 +125,7 @@ export default function MigrationConsole() {
   // wave summaries (13b step 3)
   const [waves, setWaves] = useState<Wave[]>([]);
   const [resendingId, setResendingId] = useState<string | null>(null);
+  const [phoneCodeRow, setPhoneCodeRow] = useState<{ id: string; name: string } | null>(null);
 
   // operator assignment
   const [assignTarget, setAssignTarget] = useState("me"); // "me" | "unassign" | <operatorId>
@@ -625,6 +626,13 @@ export default function MigrationConsole() {
               {resendingId === r.id ? "…" : "resend"}
             </button>
           )}
+          {(r.inviteStatus === "invited" || r.inviteStatus === "stalled" || r.inviteStatus === "expired") && (
+            <button type="button" onClick={() => setPhoneCodeRow({ id: r.id, name: r.name })}
+              title="Invite email not arriving? Generate a code to read to the dealer over the phone"
+              style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline", whiteSpace: "nowrap" }}>
+              phone code
+            </button>
+          )}
           {r.etlLocked ? (
             /* etl_locked: 5.0 config is the hand-managed truth — nothing to
                sync (the ETL refuses these by design), so no dead sync link. */
@@ -1038,6 +1046,9 @@ export default function MigrationConsole() {
         );
       })()}
 
+      {phoneCodeRow && (
+        <PhoneCodeModal dealer={phoneCodeRow} onClose={() => setPhoneCodeRow(null)} />
+      )}
       {inviteAdminsGroup && (
         <InviteAdminsModal group={inviteAdminsGroup} onClose={() => setInviteAdminsGroup(null)} />
       )}
@@ -1083,6 +1094,125 @@ function adminStatusChip(a: AdminCandidate): React.ReactNode {
   );
   if (a.has_auth) return <span style={{ fontSize: 11, fontWeight: 700, color: "#b06a00" }}>Has login · never signed in — can re-invite</span>;
   return <span style={{ fontSize: 11, fontWeight: 700, color: "#c62828" }}>No 5.0 login</span>;
+}
+
+type PhoneRecipient = {
+  invitationId: string; email: string; name: string | null; accepted: boolean; acceptedAt: string | null;
+  expired: boolean; codeLive: boolean; codeExpiresAt: string | null;
+};
+
+/**
+ * "Phone code" — the invite email isn't reaching the dealer, so support reads
+ * them a code instead. Codes are stored hashed, so the emailed one can't be
+ * shown: this generates a fresh code for ONE recipient (replacing the code in
+ * their inbox) and displays it once. Never emailed. super_admin + audited
+ * server-side (/api/migration/phone-code).
+ */
+function PhoneCodeModal({ dealer, onClose }: { dealer: { id: string; name: string }; onClose: () => void }) {
+  const [recipients, setRecipients] = useState<PhoneRecipient[] | null>(null);
+  const [loadErr, setLoadErr] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [issued, setIssued] = useState<{ code: string; email: string; expiresAt: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/migration/phone-code?dealerId=${encodeURIComponent(dealer.id)}`, { cache: "no-store" });
+        const j = await res.json();
+        if (!cancelled) { if (res.ok) setRecipients(j.recipients ?? []); else setLoadErr(j.error ?? "Failed to load"); }
+      } catch { if (!cancelled) setLoadErr("Failed to load"); }
+    })();
+    return () => { cancelled = true; };
+  }, [dealer.id]);
+
+  async function generate(r: PhoneRecipient) {
+    if (!confirm(`Generate a new code for ${r.email}?\n\nThis REPLACES the code already emailed to them — the emailed code stops working. Nothing is emailed; you read the new code to them.`)) return;
+    setBusy(r.invitationId);
+    try {
+      const res = await fetch("/api/migration/phone-code", {
+        method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+        body: JSON.stringify({ dealerId: dealer.id, invitationId: r.invitationId }),
+      });
+      const j = await res.json();
+      if (!res.ok) { alert(j.error ?? "Could not generate a code"); return; }
+      setCopied(false);
+      setIssued({ code: j.code, email: j.email, expiresAt: j.expiresAt });
+    } catch { alert("Could not generate a code"); } finally { setBusy(null); }
+  }
+
+  const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "—";
+
+  return (
+    <div style={modalOverlay}>
+      <div style={modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: NAVY, marginBottom: 4 }}>Phone code — {dealer.name}</div>
+        <p style={{ fontSize: 12, color: "#78828c", margin: "0 0 14px" }}>
+          For a dealer whose invite email didn&apos;t arrive. Codes are stored securely and can&apos;t be looked up, so this
+          generates a <strong>new</strong> code for one person and shows it here — it replaces the code in their inbox and is not emailed.
+        </p>
+
+        {issued ? (
+          <div>
+            <div style={{ fontSize: 12, color: "#55595c", marginBottom: 6 }}>Read this code to <strong>{issued.email}</strong>:</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+              <div style={{ fontFamily: "'Roboto Mono', Menlo, monospace", fontSize: 30, fontWeight: 700, letterSpacing: 4, color: NAVY, padding: "8px 14px", border: "1px solid #e0e0e0", borderRadius: 6 }}>
+                {issued.code.slice(0, 4)} {issued.code.slice(4)}
+              </div>
+              <button type="button" onClick={() => { void navigator.clipboard?.writeText(issued.code).then(() => setCopied(true)); }}
+                style={{ height: 32, padding: "0 14px", fontSize: 13, fontWeight: 500, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
+                {copied ? "Copied ✓" : "Copy"}
+              </button>
+            </div>
+            <div style={{ fontSize: 13, color: "#333", lineHeight: 1.6 }}>
+              <div>Valid until <strong>{fmt(issued.expiresAt)}</strong> (14 days).</div>
+              <div>The dealer goes to <strong>app.dealeraddendums.com/migrate</strong>, enters <strong>{issued.email}</strong> and this code.</div>
+            </div>
+            <div style={{ fontSize: 12, color: "#b06a00", background: "#fff8e1", border: "1px solid #ffe0b2", borderRadius: 4, padding: "8px 10px", marginTop: 12 }}>
+              This code is shown only once. A later <strong>Resend</strong> or an automatic follow-up email will replace it again —
+              have them enter it now if you can.
+            </div>
+          </div>
+        ) : loadErr ? (
+          <div style={{ color: "#c62828", fontSize: 13 }}>{loadErr}</div>
+        ) : !recipients ? (
+          <div style={{ color: "#78828c", fontSize: 13 }}>Loading…</div>
+        ) : recipients.length === 0 ? (
+          <div style={{ fontSize: 13, color: "#333" }}>This dealer has no migration invitation yet — send the invite first, then come back for a phone code.</div>
+        ) : (
+          <div style={{ border: "1px solid #e0e0e0", borderRadius: 6 }}>
+            {recipients.map((r, i) => (
+              <div key={r.invitationId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", borderTop: i ? "1px solid #e0e0e0" : "none" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "#333", overflow: "hidden", textOverflow: "ellipsis" }}>{r.email}</div>
+                  <div style={{ fontSize: 11, color: "#78828c" }}>
+                    {r.name ? `${r.name} · ` : ""}
+                    {r.accepted ? `accepted ${fmt(r.acceptedAt)}` : r.expired ? "invite expired" : r.codeLive ? `emailed code valid until ${fmt(r.codeExpiresAt)}` : "no working code"}
+                  </div>
+                </div>
+                {r.accepted ? (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#2e7d32", whiteSpace: "nowrap" }}>Accepted ✓</span>
+                ) : (
+                  <button type="button" onClick={() => void generate(r)} disabled={busy !== null}
+                    style={{ height: 30, padding: "0 12px", fontSize: 12, fontWeight: 500, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: busy ? "default" : "pointer", whiteSpace: "nowrap", opacity: busy && busy !== r.invitationId ? 0.6 : 1 }}>
+                    {busy === r.invitationId ? "…" : "Generate phone code"}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+          <button type="button" onClick={onClose}
+            style={{ height: 34, padding: "0 16px", fontSize: 13, background: "#fff", color: "#55595c", border: "1px solid #e0e0e0", borderRadius: 4, cursor: "pointer" }}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function InviteAdminsModal({ group, onClose }: { group: { id: string; name: string }; onClose: () => void }) {
