@@ -54,6 +54,17 @@ function listMatchesWithNot(
   notFlag: boolean
 ): boolean {
   if (!listField || listField === "ALL" || listField === "") return true;
+  // A list whose ONLY token is ALL is the same unconstrained list, just badly
+  // punctuated: 4.0 stored "all models" as ",ALL" on 18 library products (and
+  // printed them across every model). The exact check above missed it, so
+  // "all" was substring-matched against the model — Akins' "Wild Willies"
+  // package, saved at $1,699 on a Super Duty F-250, failed its own rule and
+  // vanished from the PDF while the editor still showed it (2026-10-01).
+  // Deliberately NOT widened to "ALL alongside real values": "ALL,Frontier",
+  // "ALL,Yukon" (a $5,000 market adjustment) etc. are 4.0 pickers that left
+  // ALL ticked next to the real model — those keep the specific-list behavior.
+  const tokens = listField.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+  if (tokens.length > 0 && tokens.every((t) => t === "ALL")) return true;
   // Literal "NONE"/"-NONE" sentinel (4.0's applies-to-no-vehicles marker) =
   // matches NOTHING in IN-mode (so NOT-IN mode matches everything). The
   // substring matcher below already yielded no-match for real vehicle values,
