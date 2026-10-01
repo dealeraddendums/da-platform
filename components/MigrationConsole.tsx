@@ -1113,7 +1113,7 @@ function PhoneCodeModal({ dealer, onClose }: { dealer: { id: string; name: strin
   const [loadErr, setLoadErr] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [issued, setIssued] = useState<{ code: string; email: string; expiresAt: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"" | "ok" | "fail">("");
 
   useEffect(() => {
     let cancelled = false;
@@ -1137,9 +1137,23 @@ function PhoneCodeModal({ dealer, onClose }: { dealer: { id: string; name: strin
       });
       const j = await res.json();
       if (!res.ok) { alert(j.error ?? "Could not generate a code"); return; }
-      setCopied(false);
+      setCopied("");
       setIssued({ code: j.code, email: j.email, expiresAt: j.expiresAt });
     } catch { alert("Could not generate a code"); } finally { setBusy(null); }
+  }
+
+  // navigator.clipboard rejects without page focus / permission, so fall back to
+  // a selection copy — and say so if both fail rather than pretending.
+  async function copyCode(code: string) {
+    try { await navigator.clipboard.writeText(code); setCopied("ok"); return; } catch { /* fall through */ }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = code; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(ok ? "ok" : "fail");
+    } catch { setCopied("fail"); }
   }
 
   const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "—";
@@ -1157,14 +1171,15 @@ function PhoneCodeModal({ dealer, onClose }: { dealer: { id: string; name: strin
           <div>
             <div style={{ fontSize: 12, color: "#55595c", marginBottom: 6 }}>Read this code to <strong>{issued.email}</strong>:</div>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-              <div style={{ fontFamily: "'Roboto Mono', Menlo, monospace", fontSize: 30, fontWeight: 700, letterSpacing: 4, color: NAVY, padding: "8px 14px", border: "1px solid #e0e0e0", borderRadius: 6 }}>
+              <div style={{ userSelect: "all", fontFamily: "'Roboto Mono', Menlo, monospace", fontSize: 30, fontWeight: 700, letterSpacing: 4, color: NAVY, padding: "8px 14px", border: "1px solid #e0e0e0", borderRadius: 6 }}>
                 {issued.code.slice(0, 4)} {issued.code.slice(4)}
               </div>
-              <button type="button" onClick={() => { void navigator.clipboard?.writeText(issued.code).then(() => setCopied(true)); }}
+              <button type="button" onClick={() => void copyCode(issued.code)}
                 style={{ height: 32, padding: "0 14px", fontSize: 13, fontWeight: 500, background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
-                {copied ? "Copied ✓" : "Copy"}
+                {copied === "ok" ? "Copied ✓" : "Copy"}
               </button>
             </div>
+            {copied === "fail" && <div style={{ fontSize: 12, color: "#c62828", margin: "-6px 0 10px" }}>Couldn&apos;t copy automatically — click the code to select it, then copy.</div>}
             <div style={{ fontSize: 13, color: "#333", lineHeight: 1.6 }}>
               <div>Valid until <strong>{fmt(issued.expiresAt)}</strong> (14 days).</div>
               <div>The dealer goes to <strong>app.dealeraddendums.com/migrate</strong>, enters <strong>{issued.email}</strong> and this code.</div>
