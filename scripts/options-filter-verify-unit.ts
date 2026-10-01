@@ -453,33 +453,29 @@ const wildWillies = {
 };
 const f250 = vehicle({ MAKE: "Ford", MODEL: "Super Duty F-250 SRW", TRIM: "Lariat", BODYSTYLE: "Crew Cab Pickup", YEAR: "2026" });
 
-void test("',ALL' models list matches every model (Akins Wild Willies F-250)", () => {
-  assert.equal(matchesRulesRow(wildWillies, f250), true);
-});
-void test("saved per-vehicle Wild Willies ($1,699) survives the library-rules gate", () => {
+void test("saved per-vehicle Wild Willies ($1,699, models ',ALL') survives the library-rules gate", () => {
   assert.equal(savedRowSurvivesLibraryRules([wildWillies], f250, "Wild Willies",
     { option_price: "1699", default_id: wildWillies.id, source: "default" }), true);
 });
-void test("'ALL,' / ' , ALL , ' / ',all' are the same as ALL", () => {
-  for (const models of ["ALL,", " , ALL , ", ",all", "ALL,ALL"]) {
-    assert.equal(matchesRulesRow({ ...baseRule, models }, f250), true, models);
-  }
+void test("AUTO-matching ',ALL' is unchanged — the $0 shell does not auto-add to every vehicle", () => {
+  // 4.0 never auto-applied these; only the saved-row gate collapses ALL-only lists.
+  assert.equal(matchesRulesRow(wildWillies, f250), false);
 });
-void test("an ALL-only list in NOT mode stays unconstrained, like plain ALL", () => {
-  assert.equal(matchesRulesRow({ ...baseRule, models: "ALL", models_not: true }, f250), true);
-  assert.equal(matchesRulesRow({ ...baseRule, models: ",ALL", models_not: true }, f250), true);
+void test("normalizeSentinelList collapses ALL-only lists, keeps ALL beside real values", () => {
+  for (const v of [",ALL", "ALL,", " , ALL , ", ",all", "ALL,ALL"]) assert.equal(normalizeSentinelList(v), null, v);
+  assert.equal(normalizeSentinelList("ALL"), "ALL");
+  assert.equal(normalizeSentinelList("ALL,Frontier"), "ALL,Frontier");
+  assert.equal(normalizeSentinelList("NONE,ALL"), "NONE,ALL");
 });
-void test("'ALL,Frontier' is NOT widened — ALL next to a real model keeps today's specific-list behavior", () => {
-  const rails = { ...baseRule, models: "ALL,Frontier" };
-  assert.equal(matchesRulesRow(rails, vehicle({ MAKE: "Nissan", MODEL: "Frontier" })), true);
-  assert.equal(matchesRulesRow(rails, vehicle({ MAKE: "Nissan", MODEL: "Rogue" })), false);
+void test("saved row on an 'ALL,Frontier' product still drops on a Rogue (not widened)", () => {
+  const rails = { ...baseRule, id: "rails", option_name: "Frontier Step Rails", item_price: "499", models: "ALL,Frontier" };
+  const saved = { option_price: "499", default_id: "rails", source: "default" };
+  assert.equal(savedRowSurvivesLibraryRules([rails], vehicle({ MAKE: "Nissan", MODEL: "Frontier" }), "Frontier Step Rails", saved), true);
+  assert.equal(savedRowSurvivesLibraryRules([rails], vehicle({ MAKE: "Nissan", MODEL: "Rogue" }), "Frontier Step Rails", saved), false);
 });
-void test("'NONE,ALL' / 'ALL,NONE' are left exactly as before (ambiguous, not widened)", () => {
-  assert.equal(matchesRulesRow({ ...baseRule, models: "NONE,ALL" }, f250), false);
-  assert.equal(matchesRulesRow({ ...baseRule, models: "ALL,NONE" }, f250), false);
-});
-void test("a genuine model list still excludes other models", () => {
-  assert.equal(matchesRulesRow({ ...baseRule, models: "F-150,Ranger" }, f250), false);
+void test("a saved row whose product has a genuine model list still drops on other models", () => {
+  const r = { ...baseRule, id: "x", option_name: "Ranger Pkg", item_price: "999", models: "F-150,Ranger" };
+  assert.equal(savedRowSurvivesLibraryRules([r], f250, "Ranger Pkg", { option_price: "999", default_id: "x", source: "default" }), false);
 });
 
 // ── report ───────────────────────────────────────────────────────────────────

@@ -54,17 +54,6 @@ function listMatchesWithNot(
   notFlag: boolean
 ): boolean {
   if (!listField || listField === "ALL" || listField === "") return true;
-  // A list whose ONLY token is ALL is the same unconstrained list, just badly
-  // punctuated: 4.0 stored "all models" as ",ALL" on 18 library products (and
-  // printed them across every model). The exact check above missed it, so
-  // "all" was substring-matched against the model — Akins' "Wild Willies"
-  // package, saved at $1,699 on a Super Duty F-250, failed its own rule and
-  // vanished from the PDF while the editor still showed it (2026-10-01).
-  // Deliberately NOT widened to "ALL alongside real values": "ALL,Frontier",
-  // "ALL,Yukon" (a $5,000 market adjustment) etc. are 4.0 pickers that left
-  // ALL ticked next to the real model — those keep the specific-list behavior.
-  const tokens = listField.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
-  if (tokens.length > 0 && tokens.every((t) => t === "ALL")) return true;
   // Literal "NONE"/"-NONE" sentinel (4.0's applies-to-no-vehicles marker) =
   // matches NOTHING in IN-mode (so NOT-IN mode matches everything). The
   // substring matcher below already yielded no-match for real vehicle values,
@@ -225,7 +214,19 @@ export function normalizeSentinelList(v: string | null | undefined): string | nu
   if (v == null) return null;
   const t = v.trim().toUpperCase();
   if (t === "" || t === "-NONE" || t === "NONE") return null;
-  if (v.split(",").map((s) => s.trim()).filter(Boolean).length === 0) return null;
+  const tokens = v.split(",").map((s) => s.trim()).filter(Boolean);
+  if (tokens.length === 0) return null;
+  // A list made only of ALL tokens (",ALL", "ALL,") is "all" with stray
+  // punctuation — 4.0 stored it that way on 18 products. Uncollapsed, the
+  // matcher substring-matched "all" against the model, so Akins' saved
+  // per-vehicle "Wild Willies" package ($1,699) on a Super Duty F-250 failed
+  // its own rule and vanished from the PDF while the editor showed it
+  // (2026-10-01). Saved rows only: AUTO-adding still reads ",ALL" literally,
+  // because 4.0 never auto-applied these (Akins printed Wild Willies 182 times,
+  // always hand-priced) — widening it would put the $0 shell on 2,162
+  // vehicles. lib/rule-summary.ts describes auto-add rules, so it deliberately
+  // does NOT mirror this branch. "ALL,Frontier"-style lists are untouched.
+  if (t !== "ALL" && tokens.every((s) => s.toUpperCase() === "ALL")) return null;
   return v;
 }
 
