@@ -96,8 +96,9 @@ export default function LoginCodeModal({ user, onClose }: Props) {
             <div style={{ fontSize: 14, color: "#333", lineHeight: 1.6 }}>
               <div>Valid until <strong>{expiry}</strong> (7 days).</div>
               <div>
-                They go to <strong>app.dealeraddendums.com/signup</strong>, enter <strong>{issued.email}</strong> and this code,
-                and they&apos;re signed in. They can choose a password after that.
+                They go to <strong>app.dealeraddendums.com/signup</strong>, click <strong>Enter your setup code</strong> (under
+                &ldquo;Were you invited?&rdquo;), then enter <strong>{issued.email}</strong> and this code — and they&apos;re signed in.
+                They can choose a password after that.
               </div>
             </div>
             <p style={{ fontSize: 12, color: "#e65100", background: "#fff8e1", border: "1px solid #ffe0b2", borderRadius: 4, padding: "8px 12px", margin: "12px 0" }}>
