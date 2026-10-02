@@ -4,7 +4,8 @@ import { duplicateRegistrationMessage } from "@/lib/invite-duplicate";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
-import { lastSignInByEmail, lastSignInByEmailStrict } from "@/lib/last-sign-in";
+import { lastSignInByEmail } from "@/lib/last-sign-in";
+import { neverSignedInResolver } from "@/lib/user-access";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 import type { ProfileRow } from "@/lib/db";
 
@@ -48,12 +49,12 @@ export async function GET(
   // matching by profiles.id misses ETL/legacy profiles whose id != auth id.
   // Resolve via the GoTrue admin API, keyed by EMAIL.
   const lastSignIn = await lastSignInByEmail();
-  // STRICT twin (same cached build) — drives never-signed-in-only actions.
-  const strictSignIn = await lastSignInByEmailStrict();
+  // Never-completed-a-5.0-login (lib/user-access.ts) — drives the never-signed-in-only actions.
+  const isNeverSignedIn = await neverSignedInResolver();
   const enriched = (data ?? []).map(r => ({
     ...r,
     last_sign_in_at: lastSignIn.get((r.email ?? "").toLowerCase()) ?? null,
-    never_signed_in: !strictSignIn.get((r.email ?? "").toLowerCase()),
+    never_signed_in: isNeverSignedIn(r.email),
   }));
 
   // Pending invitations — created but not yet accepted, not expired. Without

@@ -40,13 +40,71 @@ export interface AccessContext {
   target: AccessTarget;
   dealer: { id: string; name: string; dealer_id: string; migration_status: string | null; is_native: boolean | null } | null;
   groupName: string | null;
-  /** STRICT: an impersonation mint, a consumed recovery link or a 4.0-era
-   *  last_login does not count as having signed in. */
+  /** Never completed a 5.0 login — see neverSignedInResolver (strict sign-in
+   *  map + durable login evidence). */
   neverSignedIn: boolean;
   /** A dealer-role user whose dealer isn't usable on 5.0 yet. Their invite row
    *  is (or should be) the dealer's MIGRATION invitation — a plain "user"
    *  invite would overwrite it on the shared (email, dealer) row. */
   dealerNotOnV5: boolean;
+}
+
+// ── "Has this person EVER completed a 5.0 login?" ─────────────────────────────
+// The strict last-sign-in map alone can't answer it. GoTrue keeps only the
+// LATEST sign-in, so one impersonation after a real login reads as "never"
+// (Toyota Carlsbad, Ariel Arce: real password login 10/01, Allan impersonated
+// 10/02), and the strict map also nulls any sign-in that follows a recovery
+// email — which every emailed-code (OTP) login does (Ray Nuqul, 10/01). Those
+// are the safe direction for a migration gate and the WRONG direction here:
+// they would offer an invite/login code to someone who already signs in.
+// So a login also counts when there is durable evidence of one:
+//   • a successful auth_events row for a real 5.0 credential (5.0 password,
+//     emailed code, passkey, invite acceptance) — never the 4.0 handoff, and
+//     impersonation/ghost never write these events; or
+//   • an accepted invitation (accepted only on a human code/password submit,
+//     which signs them in).
+const LOGIN_EVENTS = ["password_verify", "otp_verify", "passkey_verify", "invite_accept"];
+let loginEvidence: { at: number; emails: Set<string> } | null = null;
+const EVIDENCE_TTL_MS = 60_000;
+
+async function completedLoginEmails(admin: Admin): Promise<Set<string>> {
+  if (loginEvidence && Date.now() - loginEvidence.at < EVIDENCE_TTL_MS) return loginEvidence.emails;
+  const emails = new Set<string>();
+  const add = (e: string | null | undefined) => { const k = (e ?? "").trim().toLowerCase(); if (k) emails.add(k); };
+  // Paged — PostgREST clamps every read to 1,000 rows.
+  for (let from = 0; ; from += 1000) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (admin as any).from("auth_events")
+      .select("email, detail").eq("result", "success").in("event", LOGIN_EVENTS)
+      .range(from, from + 999) as { data: { email: string | null; detail: string | null }[] | null; error: { message: string } | null };
+    if (error) { console.error("[user-access] auth_events read failed:", error.message); break; }
+    for (const r of data ?? []) if (r.detail !== "4.0 handoff") add(r.email);
+    if ((data ?? []).length < 1000) break;
+  }
+  for (let from = 0; ; from += 1000) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (admin as any).from("invitations")
+      .select("email").not("accepted_at", "is", null)
+      .range(from, from + 999) as { data: { email: string | null }[] | null; error: { message: string } | null };
+    if (error) { console.error("[user-access] invitations read failed:", error.message); break; }
+    for (const r of data ?? []) add(r.email);
+    if ((data ?? []).length < 1000) break;
+  }
+  loginEvidence = { at: Date.now(), emails };
+  return emails;
+}
+
+/** (email) => true when the person has NEVER completed a 5.0 login. One
+ *  resolver for the Users lists and the server gate, so a button can never
+ *  show for someone the API would refuse (or the reverse). */
+export async function neverSignedInResolver(admin?: Admin): Promise<(email: string | null | undefined) => boolean> {
+  const db = admin ?? createAdminSupabaseClient();
+  const [strict, evidence] = await Promise.all([lastSignInByEmailStrict(), completedLoginEmails(db)]);
+  return (email) => {
+    const k = (email ?? "").trim().toLowerCase();
+    if (!k) return false;
+    return !strict.get(k) && !evidence.has(k);
+  };
 }
 
 export async function loadAccessContext(
@@ -85,8 +143,7 @@ export async function loadAccessContext(
     groupName = data?.name ?? null;
   }
 
-  const strict = await lastSignInByEmailStrict();
-  const neverSignedIn = !strict.get(target.email.trim().toLowerCase());
+  const neverSignedIn = (await neverSignedInResolver(admin))(target.email);
   const dealerNotOnV5 = DEALER_ROLES.has(target.role) && !isDealerMigratedOnV5(dealer);
 
   return { ok: true, ctx: { target, dealer, groupName, neverSignedIn, dealerNotOnV5 } };

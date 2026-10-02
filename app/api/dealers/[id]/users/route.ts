@@ -6,7 +6,8 @@ import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
-import { lastSignInByEmail, lastSignInByEmailStrict } from "@/lib/last-sign-in";
+import { lastSignInByEmail } from "@/lib/last-sign-in";
+import { neverSignedInResolver } from "@/lib/user-access";
 
 type Params = { params: { id: string } };
 
@@ -65,14 +66,14 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
   // isn't exposed to PostgREST, so the old admin.schema("auth").from("users")
   // query always returned nothing → "Last sign in: Never" for every dealer user.
   const lastSignIn = await lastSignInByEmail();
-  // STRICT twin (same cached build): drives the never-signed-in-only
-  // Resend invite / Login code actions (lib/user-access.ts).
-  const strictSignIn = await lastSignInByEmailStrict();
+  // Never-completed-a-5.0-login (lib/user-access.ts) — drives the
+  // never-signed-in-only Resend invite / Login code actions.
+  const isNeverSignedIn = await neverSignedInResolver();
   const enriched = (data ?? []).map(r => ({
     ...r,
     source: "dealer" as const,
     last_sign_in_at: lastSignIn.get((r.email ?? "").toLowerCase()) ?? null,
-    never_signed_in: !strictSignIn.get((r.email ?? "").toLowerCase()),
+    never_signed_in: isNeverSignedIn(r.email),
   }));
 
   // ── Group-scoped users (2026-08-12): group_users of this dealer's group
@@ -118,7 +119,7 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
             source: "group" as const,
             group_name: groupName,
             last_sign_in_at: lastSignIn.get((g.email ?? "").toLowerCase()) ?? null,
-            never_signed_in: !strictSignIn.get((g.email ?? "").toLowerCase()),
+            never_signed_in: isNeverSignedIn(g.email),
           }))
           .sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? ""));
       }
