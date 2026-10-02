@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { lastSignInByEmail } from "@/lib/last-sign-in";
+import { lastSignInByEmail, lastSignInByEmailStrict } from "@/lib/last-sign-in";
 import { fireProfileSync } from "@/lib/sync-hubspot";
 import type { UserRole } from "@/lib/db";
 
@@ -89,6 +89,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const rows = profiles ?? [];
 
     const lastSignIn = await lastSignInByEmail();
+  // STRICT twin (same cached build): drives the never-signed-in-only
+  // Resend invite / Login code actions (lib/user-access.ts).
+  const strictSignIn = await lastSignInByEmailStrict();
 
     const users: Array<Record<string, unknown>> = rows.map(p => ({
       ...p,
@@ -97,6 +100,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       group_name:         null,
       source:             "dealer",
       last_sign_in_at:    lastSignIn.get((p.email ?? "").toLowerCase()) ?? null,
+      never_signed_in:    !strictSignIn.get((p.email ?? "").toLowerCase()),
       hubspot_contact_id: null,
     }));
 
@@ -140,6 +144,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
                 group_name:         groupRow?.name ?? null,
                 source:             "group",
                 last_sign_in_at:    lastSignIn.get((g.email ?? "").toLowerCase()) ?? null,
+                never_signed_in:    !strictSignIn.get((g.email ?? "").toLowerCase()),
                 hubspot_contact_id: null,
               });
             }
@@ -228,6 +233,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       : { data: [] as { dealer_id: string; name: string }[] };
     const dealerMap = new Map((dealerRows ?? []).map(d => [d.dealer_id, d.name]));
     const lastSignIn = await lastSignInByEmail();
+  // STRICT twin (same cached build): drives the never-signed-in-only
+  // Resend invite / Login code actions (lib/user-access.ts).
+  const strictSignIn = await lastSignInByEmailStrict();
 
     // Group-level rows (group_admin / group_user) need the group's name — the
     // Edit modal seeds its Group field from it, and a null seed used to make a
@@ -241,6 +249,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       dealer_name: p.dealer_id ? (dealerMap.get(p.dealer_id) ?? null) : null,
       group_name:  p.group_id === groupId ? groupName : null,
       last_sign_in_at: lastSignIn.get((p.email ?? "").toLowerCase()) ?? null,
+      never_signed_in: !strictSignIn.get((p.email ?? "").toLowerCase()),
       hubspot_contact_id: null,
     }));
 
@@ -293,6 +302,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       : Promise.resolve({ data: [] as { id: string; name: string }[] }),
     lastSignInByEmail(),
   ]);
+  // STRICT twin (same cached build) — drives never-signed-in-only actions.
+  const strictSignIn = await lastSignInByEmailStrict();
 
   const dealerMap = new Map((dealerRes.data ?? []).map(d => [d.dealer_id, d.name]));
   const groupMap  = new Map((groupRes.data  ?? []).map(g => [g.id,        g.name]));
@@ -322,6 +333,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     dealer_name:        p.dealer_id ? (dealerMap.get(p.dealer_id) ?? null) : null,
     group_name:         p.group_id  ? (groupMap.get(p.group_id)   ?? null) : null,
     last_sign_in_at:    lastSignIn.get((p.email ?? "").toLowerCase()) ?? null,
+    never_signed_in:    !strictSignIn.get((p.email ?? "").toLowerCase()),
     invited_at:         invitedMap.get((p.email ?? "").toLowerCase()) ?? null,
     hubspot_contact_id: hubspotContactMap.get(p.email?.toLowerCase() ?? "") ?? null,
   }));

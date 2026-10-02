@@ -12,6 +12,7 @@ import ProductImportExport from "@/components/ProductImportExport";
 import DealerCheckList from "@/components/DealerCheckList";
 import RulesInfoTip from "@/components/RulesInfoTip";
 import StoreTagsEditor from "@/components/StoreTagsEditor";
+import LoginCodeModal from "@/components/LoginCodeModal";
 
 type Props = {
   groupId: string;
@@ -94,6 +95,8 @@ type GroupUserProfile = {
    *  last_sign_in_at instead, which the API merges in from auth.users. */
   last_login: string | null;
   last_sign_in_at: string | null;
+  /** STRICT never-completed-a-5.0-sign-in (gates Resend invite + Login code). */
+  never_signed_in?: boolean;
   created_at: string;
 };
 
@@ -143,6 +146,25 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
   const [inviting, setInviting] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
   const [invToast, setInvToast] = useState<{ kind: "success" | "warning"; msg: string } | null>(null);
+  const [loginCodeUser, setLoginCodeUser] = useState<GroupUserProfile | null>(null);
+  const [resendingUserId, setResendingUserId] = useState<string | null>(null);
+
+  // Never-signed-in users (2026-10-02): Resend invite + Login code. Viewers of
+  // this tab are super_admin or the group's own group_admin — the same set the
+  // server allows for group-level users (lib/user-access.ts re-checks).
+  async function resendUserInvite(u: GroupUserProfile) {
+    if (!confirm(`Email a new invite to ${u.email}?\n\nThey get a fresh 8-digit setup code and link. Any code sent before stops working.`)) return;
+    setResendingUserId(u.id);
+    try {
+      const res = await fetch(`/api/users/${u.id}/send-invite`, { method: "POST" });
+      const j = await res.json().catch(() => ({})) as { error?: string; expiresAt?: string };
+      if (!res.ok) { setInvToast({ kind: "warning", msg: j.error ?? "Could not send the invite" }); return; }
+      const until = j.expiresAt ? ` — valid until ${new Date(j.expiresAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}` : "";
+      setInvToast({ kind: "success", msg: `Invite sent to ${u.email}${until}` });
+    } catch {
+      setInvToast({ kind: "warning", msg: "Could not send the invite" });
+    } finally { setResendingUserId(null); }
+  }
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState("");
@@ -551,6 +573,16 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
                     ) : (
                       <div className="flex items-center justify-end gap-3">
                         <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => startEdit(u)} title="Edit">Edit</button>
+                        {u.never_signed_in && (
+                          <>
+                            <button className="text-xs" style={{ color: "var(--blue)" }} disabled={resendingUserId === u.id}
+                              onClick={() => void resendUserInvite(u)} title="Never signed in — email them a fresh invite">
+                              {resendingUserId === u.id ? "Sending…" : "Resend invite"}
+                            </button>
+                            <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => setLoginCodeUser(u)}
+                              title="Never signed in — generate a code to read to them over the phone">Login code</button>
+                          </>
+                        )}
                         {/* Set Password goes through PATCH /api/users/[id], which is
                             super_admin-only for group-role targets — mirror that here. */}
                         {isSuperAdmin && (
@@ -593,6 +625,9 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
         </table>
       )}
 
+      {loginCodeUser && (
+        <LoginCodeModal user={loginCodeUser} onClose={() => setLoginCodeUser(null)} />
+      )}
       {pwUser && isSuperAdmin && (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}

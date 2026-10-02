@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import LoginCodeModal from "@/components/LoginCodeModal";
 
 type DealerUserProfile = {
   id: string;
@@ -16,6 +17,8 @@ type DealerUserProfile = {
   active: boolean;
   last_login: string | null;
   last_sign_in_at: string | null;
+  /** STRICT never-completed-a-5.0-sign-in (gates Resend invite + Login code). */
+  never_signed_in?: boolean;
   created_at: string;
   /** "group" = a group_user scoped to this dealer — read-only here (managed
    *  at the group level); "dealer"/undefined = native dealer user. */
@@ -79,6 +82,9 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
   // Set Password goes through PATCH /api/users/[id], which allows super_admin
   // (any user) and dealer_admin (own-dealer users only) — mirror that here.
   const canSetPassword = viewerRole === "super_admin" || viewerRole === "dealer_admin";
+  // Never-signed-in users (2026-10-02): Resend invite + Login code. Server
+  // re-checks role, scope and never-signed-in (lib/user-access.ts).
+  const canFirstLoginHelp = ["super_admin", "dealer_admin", "group_admin", "group_user"].includes(viewerRole);
 
   // Allow dealer_admin / group_admin to invite the two non-admin roles only.
   const inviteRoles: { value: string; label: string }[] = viewerRole === "super_admin"
@@ -108,6 +114,8 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
   const [saving, setSaving] = useState(false);
   const [impersonating, setImpersonating] = useState<string | null>(null);
   const [pwUser, setPwUser] = useState<DealerUserProfile | null>(null);
+  const [loginCodeUser, setLoginCodeUser] = useState<DealerUserProfile | null>(null);
+  const [resendingUserId, setResendingUserId] = useState<string | null>(null);
   const [pwValue, setPwValue] = useState("");
   const [pwShow, setPwShow] = useState(false);
   const [pwSaving, setPwSaving] = useState(false);
@@ -202,6 +210,20 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
       alert(json.error ?? "Failed to save");
     }
     setSaving(false);
+  }
+
+  async function resendUserInvite(u: DealerUserProfile) {
+    if (!confirm(`Email a new invite to ${u.email}?\n\nThey get a fresh 8-digit setup code and link. Any code sent before stops working.`)) return;
+    setResendingUserId(u.id);
+    try {
+      const res = await fetch(`/api/users/${u.id}/send-invite`, { method: "POST" });
+      const j = await res.json().catch(() => ({})) as { error?: string; expiresAt?: string };
+      if (!res.ok) { setInvToast({ kind: "warning", msg: j.error ?? "Could not send the invite" }); return; }
+      const until = j.expiresAt ? ` — valid until ${new Date(j.expiresAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}` : "";
+      setInvToast({ kind: "success", msg: `Invite sent to ${u.email}${until}` });
+    } catch {
+      setInvToast({ kind: "warning", msg: "Could not send the invite" });
+    } finally { setResendingUserId(null); }
   }
 
   async function deleteUser(u: DealerUserProfile) {
@@ -475,6 +497,16 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
                         {canEdit && (
                           <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => startEdit(u)} title="Edit">Edit</button>
                         )}
+                        {canFirstLoginHelp && u.never_signed_in && (
+                          <>
+                            <button className="text-xs" style={{ color: "var(--blue)" }} disabled={resendingUserId === u.id}
+                              onClick={() => void resendUserInvite(u)} title="Never signed in — email them a fresh invite">
+                              {resendingUserId === u.id ? "Sending…" : "Resend invite"}
+                            </button>
+                            <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => setLoginCodeUser(u)}
+                              title="Never signed in — generate a code to read to them over the phone">Login code</button>
+                          </>
+                        )}
                         {canSetPassword && (
                           <button className="text-xs" style={{ color: "var(--blue)" }} onClick={() => openSetPassword(u)} title="Set or reset this user's password">Set Password</button>
                         )}
@@ -502,6 +534,9 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
         </table>
       )}
 
+      {loginCodeUser && (
+        <LoginCodeModal user={loginCodeUser} onClose={() => setLoginCodeUser(null)} />
+      )}
       {pwUser && canSetPassword && (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}

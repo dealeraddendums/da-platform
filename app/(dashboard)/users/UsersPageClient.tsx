@@ -6,6 +6,7 @@ import { HubSpotEmail } from "@/components/HubSpotEmail";
 import Pager from "@/components/Pager";
 import { PageHeader } from "@/components/PageHeader";
 import StoreTagsEditor from "@/components/StoreTagsEditor";
+import LoginCodeModal from "@/components/LoginCodeModal";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,9 @@ type UserRow = {
   last_login: string | null;
   last_sign_in_at: string | null;
   invited_at?: string | null;
+  /** STRICT "has never completed a 5.0 sign-in" (impersonation/legacy stamps
+   *  don't count) — gates Resend invite + Login code for managing admins. */
+  never_signed_in?: boolean;
   created_at: string;
   hubspot_contact_id: number | null;
   /** "group" = a group_user scoped to this dealer, appended read-only to the
@@ -661,16 +665,19 @@ function SendInviteModal({ user, onClose, onSuccess }: {
 }) {
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const isReset = !!user.last_sign_in_at;
+  // Same STRICT verdict the server uses to pick the email (impersonation or a
+  // 4.0-era stamp is not a sign-in); fall back for older API payloads.
+  const isReset = user.never_signed_in === undefined ? !!user.last_sign_in_at : !user.never_signed_in;
 
   async function confirm() {
     setSending(true);
     setErr(null);
     const res = await fetch(`/api/users/${user.id}/send-invite`, { method: "POST" });
-    const json = await res.json() as { error?: string; mode?: string };
+    const json = await res.json() as { error?: string; mode?: string; expiresAt?: string };
     setSending(false);
     if (!res.ok) { setErr(json.error ?? "Failed to send"); return; }
-    onSuccess(json.mode === "reset" ? `Reset email sent to ${user.email}` : `Invite sent to ${user.email}`);
+    const until = json.expiresAt ? ` — valid until ${new Date(json.expiresAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}` : "";
+    onSuccess(json.mode === "reset" ? `Reset email sent to ${user.email}${until}` : `Invite sent to ${user.email}${until}`);
   }
 
   return (
@@ -832,6 +839,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
   const [editUser, setEditUser]       = useState<UserRow | null>(null);
   const [deleteUser, setDeleteUser]   = useState<UserRow | null>(null);
   const [sendInviteUser, setSendInviteUser] = useState<UserRow | null>(null);
+  const [loginCodeUser, setLoginCodeUser] = useState<UserRow | null>(null);
   const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
   const [impersonating, setImpersonating] = useState<string | null>(null);
 
@@ -895,6 +903,12 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
   // only, not in ghost or dealer/group scoped contexts). The API is the real
   // gate; this just mirrors it.
   const canSendInvite = viewerRole === "super_admin" && !isGhostMode && !dealerMode && !groupMode;
+  // Never-signed-in users (2026-10-02): their managing admin can Resend the
+  // invite and generate a Login code to read over the phone. The server
+  // (lib/user-access.ts) re-checks role, scope and never-signed-in.
+  const isAccessManager = ["super_admin", "dealer_admin", "group_admin", "group_user"].includes(viewerRole);
+  const showSendInvite = (u: UserRow) => canSendInvite || (isAccessManager && !!u.never_signed_in);
+  const showLoginCode = (u: UserRow) => isAccessManager && !!u.never_signed_in;
 
   async function handleInviteAll() {
     if (!viewerDealerId) return;
@@ -1195,9 +1209,23 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
                     </div>
                   ) : (
                   <div className="flex items-center gap-1 justify-end">
-                    {canSendInvite && (
+                    {showLoginCode(u) && (
                       <button
-                        title={u.last_sign_in_at ? "Send reset email" : "Send invite"}
+                        title="Login code — generate a code to read to them over the phone (never signed in)"
+                        onClick={() => setLoginCodeUser(u)}
+                        style={{ width: 28, height: 28, borderRadius: 4, border: "1px solid var(--border)", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#1976d2" }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="7.5" cy="15.5" r="4.5" />
+                          <path d="M10.7 12.3L21 2" />
+                          <path d="M16 7l3 3" />
+                          <path d="M18.5 4.5l2 2" />
+                        </svg>
+                      </button>
+                    )}
+                    {showSendInvite(u) && (
+                      <button
+                        title={u.never_signed_in ? "Resend invite" : u.last_sign_in_at ? "Send reset email" : "Send invite"}
                         onClick={() => setSendInviteUser(u)}
                         style={{ width: 28, height: 28, borderRadius: 4, border: "1px solid var(--border)", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#1976d2" }}
                       >
@@ -1399,6 +1427,9 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
           onClose={() => setDeleteUser(null)}
           onSuccess={handleSuccess}
         />
+      )}
+      {loginCodeUser && (
+        <LoginCodeModal user={loginCodeUser} onClose={() => { setLoginCodeUser(null); void fetchUsers(); }} />
       )}
       {sendInviteUser && (
         <SendInviteModal
