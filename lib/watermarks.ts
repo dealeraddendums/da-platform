@@ -15,7 +15,7 @@ export const WATERMARK_BRANDS: string[] = [
   "Cadillac", "CDJR", "Chevrolet", "Chrysler", "Dodge", "Ferrari", "Fiat",
   "Fiskers", "Ford", "Genesis", "GM", "GMC", "Honda", "Hyundai", "Infiniti",
   "Jaguar", "Jeep", "Kia", "Lamborghini", "Land Rover", "Lexus", "Lincoln",
-  "Lotus", "Maybach", "Mazda", "Mercedes-Benz", "Mercury", "Mini", "Mitsubishi",
+  "Lotus", "Maybach", "Mazda", "McLaren", "Mercedes-Benz", "Mercury", "Mini", "Mitsubishi",
   "Nissan", "Polestar", "Pontiac", "Porsche", "Ram", "Saab", "Subaru", "Suzuki",
   "Tesla", "Toyota", "VW", "Volvo",
 ];
