@@ -29,7 +29,7 @@ export default function GroupExportsPanel({ groupId }: { groupId: string }) {
   const [editing, setEditing] = useState<NonNullable<GroupExport> | "new" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [rowMsg, setRowMsg] = useState<Record<string, { ok: boolean; msg: string }>>({});
-  // Download picker per export: "all" (ZIP) or one dealer_uuid.
+  // Download picker per export: "combined" (one CSV, as sent), "zip", or one dealer_uuid.
   const [dlPick, setDlPick] = useState<Record<string, string>>({});
   const base = `/api/groups/${groupId}/exports`;
 
@@ -53,7 +53,7 @@ export default function GroupExportsPanel({ groupId }: { groupId: string }) {
     setBusy(null); load();
   };
   const download = async (e: NonNullable<GroupExport>) => {
-    const pick = dlPick[e.id] ?? "all";
+    const pick = dlPick[e.id] ?? "combined";
     setBusy(`dl:${e.id}`);
     const problem = await downloadExportFile(`${base}/${e.id}/download?dealer=${encodeURIComponent(pick)}`);
     setRowMsg((m) => ({ ...m, [e.id]: problem ? { ok: false, msg: problem } : { ok: true, msg: "Downloaded — nothing was sent." } }));
@@ -107,10 +107,11 @@ export default function GroupExportsPanel({ groupId }: { groupId: string }) {
                         <button type="button" style={btn()} disabled={busy === `dl:${e.id}` || e.plan.dealers.length === 0} onClick={() => download(e)}
                           title="Download the file this export sends, without sending it">{busy === `dl:${e.id}` ? "Preparing…" : "Download CSV"}</button>
                         {e.plan.dealers.length > 1 && (
-                          <select aria-label="Which dealership to download" value={dlPick[e.id] ?? "all"}
+                          <select aria-label="Which dealership to download" value={dlPick[e.id] ?? "combined"}
                             onChange={(ev) => setDlPick((m) => ({ ...m, [e.id]: ev.target.value }))}
                             style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "4px 6px", fontSize: 12, fontFamily: "inherit", maxWidth: 180 }}>
-                            <option value="all">All dealerships (ZIP)</option>
+                            <option value="combined">All dealerships — one CSV (as sent)</option>
+                            <option value="zip">All dealerships — one CSV each (ZIP)</option>
                             {e.plan.dealers.map((d) => <option key={d.dealer_uuid} value={d.dealer_uuid}>{d.name} ({d.feed_dealer_id})</option>)}
                           </select>
                         )}
@@ -124,7 +125,7 @@ export default function GroupExportsPanel({ groupId }: { groupId: string }) {
               {editing ? (
                 <ExportEditor
                   cfg={meta}
-                  urls={{ create: base, item: (id) => `${base}/${id}`, test: `${base}/test`, download: (id) => `${base}/${id}/download?dealer=all` }}
+                  urls={{ create: base, item: (id) => `${base}/${id}`, test: `${base}/test`, download: (id) => `${base}/${id}/download?dealer=combined` }}
                   initial={editing === "new" ? null : editing}
                   override={false}
                   onCancel={() => setEditing(null)}

@@ -29,16 +29,20 @@ function file(body: string | ArrayBuffer, name: string, type: string): NextRespo
 }
 
 /**
- * `dealer` = one of the export's covered dealers (dealer_uuid) → that dealer's
- * CSV; "all" (or omitted on a single-dealer export) → the one CSV if the export
- * covers a single dealer, else a ZIP with one CSV per dealer plus the combined
- * file a push sends, byte for byte.
+ * `dealer`:
+ *   - omitted / "combined" → ONE CSV, exactly the file a push sends (every
+ *     covered dealer in one file) — the default, since that's what the
+ *     provider receives;
+ *   - a dealer_uuid → that dealer's rows only;
+ *   - "zip" (or legacy "all") → a ZIP with one CSV per dealer plus the
+ *     combined file. A single-dealer export always returns plain CSV.
  */
 export async function exportDownload(feed: FeedCompanyRow, dealer: string | null): Promise<NextResponse> {
   const name = slug(feed.name);
   const day = stamp();
   try {
-    if (dealer && dealer !== "all") {
+    const wantZip = dealer === "zip" || dealer === "all";
+    if (dealer && dealer !== "combined" && !wantZip) {
       if (!/^[0-9a-f-]{36}$/i.test(dealer)) return NextResponse.json({ error: "Not found" }, { status: 404 });
       const r = await generateFeedCsv(feed.id, { onlyDealerUuids: [dealer] });
       const d = r.perDealer[0];
@@ -52,6 +56,7 @@ export async function exportDownload(feed: FeedCompanyRow, dealer: string | null
       // One dealer: its file IS the combined file a push sends.
       return file(r.csv, `${name}-${slug(r.perDealer[0].feedDealerId)}-${day}.csv`, "text/csv; charset=utf-8");
     }
+    if (!wantZip) return file(r.csv, `${name}-ALL-DEALERS-${day}.csv`, "text/csv; charset=utf-8");
     const zip = new JSZip();
     const used = new Set<string>();
     for (const d of r.perDealer) {
