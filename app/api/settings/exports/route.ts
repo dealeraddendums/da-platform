@@ -3,7 +3,7 @@ import { fireWrite } from "@/lib/db";
 import { encryptSecret } from "@/lib/secret-box";
 import { checkPublicFtpHost } from "@/lib/ftp-host-guard";
 import {
-  exportContext, exportCoverage, parseExportInput, serializeExport,
+  exportContext, exportCoverage, parseExportInput, serializeExport, splitLeaveOutNames,
   STANDARD_MAPPING, DEALER_EXPORT_FIELDS, LIST_FIELDS, type ExportContext,
 } from "@/lib/dealer-exports";
 import { LIST_FIELD_DEFAULT_SEPARATOR, type FeedCompanyRow } from "@/lib/feed-export";
@@ -11,26 +11,21 @@ import { LIST_FIELD_DEFAULT_SEPARATOR, type FeedCompanyRow } from "@/lib/feed-ex
 // Self-service dealer exports (Phase 2) — My Profile → Website Integrations →
 // Exports. Authorization + precedence live in lib/dealer-exports.ts.
 
-/** Plain-text product/fee names the dealer actually uses, for the exclusion
- *  picker: its library, its group's corporate products, and (for dealers
- *  still fed by 4.0) the names on its legacy addendum data. */
-async function productNames(ctx: ExportContext): Promise<string[]> {
-  const toText = (s: unknown) => String(s ?? "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
-    .replace(/&#0*39;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&")
-    .replace(/\s+/g, " ").trim();
-  const names = new Map<string, string>();
-  const add = (n: unknown) => { const t = toText(n); if (t && t.length <= 200 && !names.has(t.toLowerCase())) names.set(t.toLowerCase(), t); };
-  const { data: lib } = await ctx.admin.from("addendum_library").select("option_name").eq("dealer_id", ctx.dealer.dealer_id).limit(1000);
-  (lib ?? []).forEach((r: { option_name: string }) => add(r.option_name));
+/** Product/fee names the dealer actually uses, for the leave-out picker: its
+ *  library, its group's corporate products, and (for dealers still fed by
+ *  4.0) its legacy addendum items — minus discounts and mark-ups, which the
+ *  export already handles (returned as `handled`). */
+async function productNames(ctx: ExportContext): Promise<{ names: string[]; handled: string[] }> {
+  const rows: Array<{ name: unknown; price: unknown }> = [];
+  const { data: lib } = await ctx.admin.from("addendum_library").select("option_name, item_price").eq("dealer_id", ctx.dealer.dealer_id).limit(1000);
+  (lib ?? []).forEach((r: { option_name: string; item_price: string | null }) => rows.push({ name: r.option_name, price: r.item_price }));
   if (ctx.dealer.group_id) {
-    const { data: grp } = await ctx.admin.from("group_options").select("option_name").eq("group_id", ctx.dealer.group_id).eq("active", true).limit(1000);
-    (grp ?? []).forEach((r: { option_name: string }) => add(r.option_name));
+    const { data: grp } = await ctx.admin.from("group_options").select("option_name, option_price").eq("group_id", ctx.dealer.group_id).eq("active", true).limit(1000);
+    (grp ?? []).forEach((r: { option_name: string; option_price: string | null }) => rows.push({ name: r.option_name, price: r.option_price }));
   }
-  const { data: legacy } = await ctx.admin.from("addendum_data").select("item_name").eq("legacy_dealer_id", ctx.dealer.dealer_id).in("active", ["1", "yes"]).order("created_at", { ascending: false }).limit(1000);
-  (legacy ?? []).forEach((r: { item_name: string }) => add(r.item_name));
-  return Array.from(names.values()).sort((a, b) => a.localeCompare(b));
+  const { data: legacy } = await ctx.admin.from("addendum_data").select("item_name, item_price").eq("legacy_dealer_id", ctx.dealer.dealer_id).in("active", ["1", "yes"]).order("created_at", { ascending: false }).limit(1000);
+  (legacy ?? []).forEach((r: { item_name: string; item_price: string | null }) => rows.push({ name: r.item_name, price: r.item_price }));
+  return splitLeaveOutNames(rows);
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -57,7 +52,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     can_create: covering.length === 0,
     can_override: ctx.isSuperAdmin,
     exports: ((feeds ?? []) as Array<FeedCompanyRow & Record<string, unknown>>).map((f) => serializeExport(f, fdIds.get(f.id) ?? null)),
-    product_names: names,
+    product_names: names.names,
+    handled_names: names.handled,
     standard_mapping: STANDARD_MAPPING,
     fields: DEALER_EXPORT_FIELDS,
     list_fields: LIST_FIELDS,

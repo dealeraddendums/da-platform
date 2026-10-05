@@ -337,7 +337,7 @@ export function ruleFields(options: EffectiveOption[], matches: (name: string) =
 // is also what fixes the SA250377 leak where "ADDED MARK-UP" landed in the WO
 // field with 0 in ADDED_MARKUP.
 const ADDED_MARKUP_RE = /mark[\s-]?up/i;
-function isAddedMarkup(name: string): boolean {
+export function isAddedMarkup(name: string): boolean {
   return ADDED_MARKUP_RE.test(name || "");
 }
 
