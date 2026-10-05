@@ -74,6 +74,75 @@ export interface FeedCompanyRow {
   export_exclusions?: string[] | null;
   export_exclusion_match?: RuleMatchType | null;
   ftp_path?: string | null; // migration 165
+  covers_all_members?: boolean; // migration 166 (group feeds)
+}
+
+// ── Which dealers a feed covers ──────────────────────────────────────────────
+
+type FeedDealerJoin = { id: string; dealer_id: string; name: string; group_id: string | null; migration_status: string | null };
+export interface ResolvedFeedDealer {
+  dealer_uuid: string;
+  feed_dealer_id: string;
+  dealers: FeedDealerJoin | null;
+}
+export interface FeedDealerPlan {
+  rows: ResolvedFeedDealer[];
+  /** Group feeds only: members left out because a SuperAdmin (platform) feed
+   *  already covers them — platform > group > dealer. */
+  excluded: Array<{ dealer_uuid: string; name: string; covered_by: string }>;
+}
+
+/**
+ * The dealers a feed exports, in output order.
+ *
+ * Platform and dealer feeds: exactly the attached feed_company_dealers rows
+ * (the pre-Phase-3 query, unchanged). Group feeds (migration 166):
+ *   - only dealers CURRENTLY in the owning group — a dealer that moved groups
+ *     drops out of the old group's export by itself;
+ *   - covers_all_members = every active member at push time (future members
+ *     included); attach rows are just Feed Dealer ID overrides;
+ *   - otherwise the attached members;
+ *   - a member already covered by a platform feed is left out (precedence).
+ * Feed Dealer ID = the attach row's value, else inventory_dealer_id, else dealer_id.
+ */
+export async function resolveFeedDealers(admin: Admin, feed: FeedCompanyRow): Promise<FeedDealerPlan> {
+  const { data: attached } = await admin
+    .from("feed_company_dealers")
+    .select("dealer_uuid, feed_dealer_id, dealers(id, dealer_id, name, group_id, migration_status)")
+    .eq("feed_company_id", feed.id) as { data: ResolvedFeedDealer[] | null };
+  if (feed.owner_scope !== "group" || !feed.owner_id) return { rows: attached ?? [], excluded: [] };
+
+  const { data: members } = await admin
+    .from("dealers")
+    .select("id, dealer_id, name, group_id, migration_status, inventory_dealer_id, active")
+    .eq("group_id", feed.owner_id)
+    .order("name") as { data: Array<FeedDealerJoin & { inventory_dealer_id: string | null; active: boolean | null }> | null };
+  const memberById = new Map((members ?? []).map((m) => [m.id, m]));
+  const override = new Map((attached ?? []).map((a) => [a.dealer_uuid, a.feed_dealer_id]));
+  const candidates = feed.covers_all_members
+    ? (members ?? []).filter((m) => m.active !== false)
+    : (attached ?? []).map((a) => memberById.get(a.dealer_uuid)).filter((m): m is NonNullable<typeof m> => Boolean(m));
+  if (candidates.length === 0) return { rows: [], excluded: [] };
+
+  const { data: platformRows } = await admin
+    .from("feed_company_dealers")
+    .select("dealer_uuid, feed_companies!inner(name, owner_scope)")
+    .in("dealer_uuid", candidates.map((c) => c.id))
+    .eq("feed_companies.owner_scope", "platform") as { data: Array<{ dealer_uuid: string; feed_companies: { name: string } }> | null };
+  const platformBy = new Map((platformRows ?? []).map((r) => [r.dealer_uuid, r.feed_companies.name]));
+
+  const rows: ResolvedFeedDealer[] = [];
+  const excluded: FeedDealerPlan["excluded"] = [];
+  for (const m of candidates) {
+    const by = platformBy.get(m.id);
+    if (by) { excluded.push({ dealer_uuid: m.id, name: m.name, covered_by: by }); continue; }
+    rows.push({
+      dealer_uuid: m.id,
+      feed_dealer_id: override.get(m.id) || m.inventory_dealer_id || m.dealer_id,
+      dealers: { id: m.id, dealer_id: m.dealer_id, name: m.name, group_id: m.group_id, migration_status: m.migration_status },
+    });
+  }
+  return { rows, excluded };
 }
 
 // ── DA field catalog ─────────────────────────────────────────────────────────
@@ -505,16 +574,7 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
     m.separator && LIST_SEPARATORS[m.separator] !== undefined ? LIST_SEPARATORS[m.separator] : null,
   );
 
-  const { data: feedDealers } = await admin
-    .from("feed_company_dealers")
-    .select("dealer_uuid, feed_dealer_id, dealers(id, dealer_id, name, group_id, migration_status)")
-    .eq("feed_company_id", feedId) as {
-      data: Array<{
-        dealer_uuid: string;
-        feed_dealer_id: string;
-        dealers: { id: string; dealer_id: string; name: string; group_id: string | null; migration_status: string | null } | null;
-      }> | null;
-    };
+  const feedDealers = (await resolveFeedDealers(admin, feed)).rows;
 
   const rows: string[][] = [mappings.map((m) => m.recipientColumn)];
   let vehicleCount = 0;

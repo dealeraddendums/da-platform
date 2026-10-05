@@ -12,7 +12,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveDealerForRequest } from "@/lib/dealer-authz";
 import {
-  RAW_FIELDS, COMPUTED_FIELDS, LIST_FIELD_DEFAULT_SEPARATOR, LIST_SEPARATORS,
+  RAW_FIELDS, COMPUTED_FIELDS, LIST_FIELD_DEFAULT_SEPARATOR, LIST_SEPARATORS, resolveFeedDealers,
   type ColumnMapping, type FeedCompanyRow, type ListSeparator,
 } from "@/lib/feed-export";
 
@@ -87,26 +87,48 @@ export interface CoveringExport {
 }
 
 /**
- * Exports run by someone ELSE that already include this dealer. While any
- * exist the dealer can't create or edit its own (two feeds to the same
- * provider would conflict). Phase 2 = platform (SuperAdmin) feeds; Phase 3
- * adds group-owned feeds here and nowhere else.
+ * Exports run by someone ELSE that already include this dealer, in precedence
+ * order: platform (SuperAdmin) feeds, then the dealer's group's exports. While
+ * any exist the dealer can't create or edit its own (two feeds to the same
+ * provider would conflict), and the cron pauses the dealer's own exports.
+ *
+ * Group coverage = an export owned by the dealer's CURRENT group that either
+ * covers all members (covers_all_members, so future members too) or has the
+ * dealer attached. An attach row left behind on an old group's export doesn't
+ * count once the dealer has moved groups.
  */
 export async function exportCoverage(admin: Admin, dealerUuid: string): Promise<CoveringExport[]> {
-  const { data } = await admin
-    .from("feed_company_dealers")
-    .select("feed_companies(id, name, owner_scope, push_schedule, last_push_at)")
-    .eq("dealer_uuid", dealerUuid);
-  const out: CoveringExport[] = [];
-  for (const row of (data ?? []) as Array<{ feed_companies: { id: string; name: string; owner_scope: string | null; push_schedule: string; last_push_at: string | null } | null }>) {
+  type F = { id: string; name: string; owner_scope: string | null; owner_id: string | null; push_schedule: string; last_push_at: string | null; covers_all_members?: boolean };
+  const [{ data: attached }, { data: dealer }] = await Promise.all([
+    admin.from("feed_company_dealers")
+      .select("feed_companies(id, name, owner_scope, owner_id, push_schedule, last_push_at)")
+      .eq("dealer_uuid", dealerUuid),
+    admin.from("dealers").select("group_id, groups(name)").eq("id", dealerUuid).maybeSingle(),
+  ]);
+  const groupId: string | null = dealer?.group_id ?? null;
+  const groupName: string = (dealer?.groups as { name?: string } | null)?.name ?? "your group";
+
+  const platform: CoveringExport[] = [];
+  const group = new Map<string, CoveringExport>();
+  const asGroup = (f: F): CoveringExport => ({ id: f.id, name: f.name, owner_scope: "group", managed_by: groupName, push_schedule: f.push_schedule, last_push_at: f.last_push_at });
+  for (const row of (attached ?? []) as Array<{ feed_companies: F | null }>) {
     const f = row.feed_companies;
     if (!f) continue;
     const scope = f.owner_scope ?? "platform";
     if (scope === "platform") {
-      out.push({ id: f.id, name: f.name, owner_scope: "platform", managed_by: "DealerAddendums", push_schedule: f.push_schedule, last_push_at: f.last_push_at });
+      platform.push({ id: f.id, name: f.name, owner_scope: "platform", managed_by: "DealerAddendums", push_schedule: f.push_schedule, last_push_at: f.last_push_at });
+    } else if (scope === "group" && groupId && f.owner_id === groupId) {
+      group.set(f.id, asGroup(f));
     }
   }
-  return out;
+  if (groupId) {
+    const { data: allMember } = await admin
+      .from("feed_companies")
+      .select("id, name, owner_scope, owner_id, push_schedule, last_push_at, covers_all_members")
+      .eq("owner_scope", "group").eq("owner_id", groupId).eq("covers_all_members", true);
+    for (const f of (allMember ?? []) as F[]) group.set(f.id, asGroup(f));
+  }
+  return [...platform, ...Array.from(group.values())];
 }
 
 // ── Standard mapping ─────────────────────────────────────────────────────────
@@ -157,7 +179,7 @@ const cleanList = (v: unknown): string[] =>
   Array.isArray(v) ? Array.from(new Set(v.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean))).slice(0, 200) : [];
 
 /** Validate a create/update body. `requirePassword` on create. */
-export function parseExportInput(body: Record<string, unknown>, requirePassword: boolean): { input: ExportInput } | { error: string } {
+export function parseExportInput(body: Record<string, unknown>, requirePassword: boolean, mode: "dealer" | "group" = "dealer"): { input: ExportInput } | { error: string } {
   const s = (k: string) => (typeof body[k] === "string" ? (body[k] as string).trim() : "");
   const name = s("name");
   if (!name || name.length > 80) return { error: "Give the export a name (up to 80 characters)." };
@@ -180,7 +202,7 @@ export function parseExportInput(body: Record<string, unknown>, requirePassword:
   const sched = s("push_schedule");
   const push_schedule = sched === "hourly" || sched === "daily" ? sched : "manual";
   const feed_dealer_id = s("feed_dealer_id");
-  if (!feed_dealer_id || feed_dealer_id.length > 100) return { error: "Enter the dealer ID your provider uses for you." };
+  if (mode === "dealer" && (!feed_dealer_id || feed_dealer_id.length > 100)) return { error: "Enter the dealer ID your provider uses for you." };
 
   if (!Array.isArray(body.column_mappings) || body.column_mappings.length === 0) return { error: "Add at least one column." };
   if (body.column_mappings.length > 100) return { error: "Too many columns (100 max)." };
@@ -233,5 +255,110 @@ export function serializeExport(f: FeedCompanyRow & Record<string, unknown>, fee
     export_exclusion_match: f.export_exclusion_match ?? "exact",
     last_push_at: f.last_push_at,
     last_push_status: f.last_push_status,
+    covers_all_members: Boolean(f.covers_all_members),
+  };
+}
+
+/**
+ * Group-export target from a request body: covers_all_members, or a list of
+ * specific members. `dealers` carries Feed Dealer IDs ({dealer_uuid,
+ * feed_dealer_id}); for an all-members export they are optional overrides.
+ * Every dealer must be a CURRENT member, and a specific target may not be a
+ * dealer a platform feed already covers (platform > group).
+ */
+export function parseGroupTarget(body: Record<string, unknown>, members: GroupMember[]):
+  { coversAll: boolean; dealers: Array<{ dealer_uuid: string; feed_dealer_id: string }> } | { error: string; status: number } {
+  const coversAll = body.covers_all_members === true;
+  const byId = new Map(members.map((m) => [m.id, m]));
+  const raw = Array.isArray(body.dealers) ? (body.dealers as Array<Record<string, unknown>>) : [];
+  const dealers: Array<{ dealer_uuid: string; feed_dealer_id: string }> = [];
+  const seen = new Set<string>();
+  for (const d of raw) {
+    const id = typeof d?.dealer_uuid === "string" ? d.dealer_uuid : "";
+    const m = byId.get(id);
+    if (!m) return { error: "One of the selected dealerships isn't in this group.", status: 400 };
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const fid = typeof d.feed_dealer_id === "string" && d.feed_dealer_id.trim() ? d.feed_dealer_id.trim() : m.default_feed_dealer_id;
+    if (fid.length > 100) return { error: `Dealer ID for ${m.name} is too long.`, status: 400 };
+    if (!coversAll && m.platform_covered_by) {
+      return { error: `${m.name} is already exported by DealerAddendums ("${m.platform_covered_by}"), which takes precedence over a group export.`, status: 409 };
+    }
+    dealers.push({ dealer_uuid: id, feed_dealer_id: fid });
+  }
+  if (!coversAll && dealers.length === 0) return { error: "Choose at least one dealership, or All dealerships.", status: 400 };
+  return { coversAll, dealers };
+}
+
+// ── Group exports (Phase 3) ──────────────────────────────────────────────────
+
+export interface GroupExportContext {
+  admin: Admin;
+  role: string;
+  userId: string;
+  isSuperAdmin: boolean;
+  group: { id: string; name: string };
+}
+
+/**
+ * Group exports are managed by that group's group_admin, or super_admin. A
+ * group-ghosting super_admin is confined to the ghosted group. Anyone else —
+ * including a group_admin of another group — gets a 404 (never reveal another
+ * group's exports exist); dealer roles and group_user get a 403.
+ */
+export async function groupExportContext(groupId: string): Promise<{ ctx: GroupExportContext } | { response: NextResponse }> {
+  const { claims, error } = await requireAuth();
+  if (error) return { response: error };
+  if (claims.role !== "super_admin" && claims.role !== "group_admin") {
+    return { response: NextResponse.json({ error: "Only a group admin can manage group exports." }, { status: 403 }) };
+  }
+  if (!/^[0-9a-f-]{36}$/i.test(groupId)) return { response: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  if (claims.role === "group_admin" && claims.group_id !== groupId) return { response: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  const ghostGroup = (claims as { ghost_group_uuid?: string | null }).ghost_group_uuid ?? null;
+  if (claims.role === "super_admin" && ghostGroup && ghostGroup !== groupId) return { response: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  const admin: Admin = createAdminSupabaseClient();
+  const { data: group } = await admin.from("groups").select("id, name").eq("id", groupId).maybeSingle();
+  if (!group) return { response: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  return { ctx: { admin, role: claims.role, userId: claims.sub, isSuperAdmin: claims.role === "super_admin", group } };
+}
+
+export async function loadOwnedGroupExport(ctx: GroupExportContext, id: string): Promise<FeedCompanyRow | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const { data } = await ctx.admin.from("feed_companies").select("*")
+    .eq("id", id).eq("owner_scope", "group").eq("owner_id", ctx.group.id).maybeSingle();
+  return (data as FeedCompanyRow | null) ?? null;
+}
+
+export interface GroupMember {
+  id: string; dealer_id: string; name: string; active: boolean;
+  default_feed_dealer_id: string;
+  /** A platform feed already covers this dealer — group exports leave it out. */
+  platform_covered_by: string | null;
+}
+
+export async function groupMembers(admin: Admin, groupId: string): Promise<GroupMember[]> {
+  const { data: members } = await admin.from("dealers")
+    .select("id, dealer_id, name, active, inventory_dealer_id").eq("group_id", groupId).order("name");
+  const ids = (members ?? []).map((m: { id: string }) => m.id);
+  const platformBy = new Map<string, string>();
+  if (ids.length) {
+    const { data: rows } = await admin.from("feed_company_dealers")
+      .select("dealer_uuid, feed_companies!inner(name, owner_scope)")
+      .in("dealer_uuid", ids).eq("feed_companies.owner_scope", "platform");
+    (rows ?? []).forEach((r: { dealer_uuid: string; feed_companies: { name: string } }) => platformBy.set(r.dealer_uuid, r.feed_companies.name));
+  }
+  return (members ?? []).map((m: { id: string; dealer_id: string; name: string; active: boolean | null; inventory_dealer_id: string | null }) => ({
+    id: m.id, dealer_id: m.dealer_id, name: m.name, active: m.active !== false,
+    default_feed_dealer_id: m.inventory_dealer_id || m.dealer_id,
+    platform_covered_by: platformBy.get(m.id) ?? null,
+  }));
+}
+
+/** Who a group export currently sends for, for the UI. */
+export async function groupExportPlan(admin: Admin, feed: FeedCompanyRow) {
+  const plan = await resolveFeedDealers(admin, feed);
+  return {
+    dealers: plan.rows.map((r) => ({ dealer_uuid: r.dealer_uuid, name: r.dealers?.name ?? "", feed_dealer_id: r.feed_dealer_id })),
+    excluded: plan.excluded,
   };
 }

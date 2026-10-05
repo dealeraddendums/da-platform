@@ -8,6 +8,7 @@ import type { GroupRow } from "@/lib/db";
 import GroupProfileCard, { GroupDealers } from "@/components/GroupProfileCard";
 import GroupOptionsPanel from "@/components/GroupOptionsPanel";
 import GroupImagesPanel from "@/components/GroupImagesPanel";
+import GroupExportsPanel from "@/components/GroupExportsPanel";
 
 type Props = { params: { id: string } };
 
@@ -98,6 +99,9 @@ export default async function GroupPage({ params }: Props) {
       )}
       {(isSuperAdmin || isGroupAdmin) && (
         <GroupImagesPanel groupId={params.id} />
+      )}
+      {(isSuperAdmin || isGroupAdmin) && (
+        <GroupExportsPanel groupId={params.id} />
       )}
       {(isSuperAdmin || isGroupAdmin) && (
         <div className="mt-6">

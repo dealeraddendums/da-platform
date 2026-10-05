@@ -16,7 +16,16 @@ interface Exp {
   push_schedule: "manual" | "hourly" | "daily"; feed_dealer_id: string | null; column_mappings: Col[];
   export_exclusions: string[]; export_exclusion_match: "exact" | "contains"; last_push_at: string | null; last_push_status: string | null;
 }
-interface Covering { id: string; name: string; managed_by: string; push_schedule: string; last_push_at: string | null }
+interface Covering { id: string; name: string; owner_scope: "platform" | "group"; managed_by: string; push_schedule: string; last_push_at: string | null }
+export interface GroupMember { id: string; dealer_id: string; name: string; active: boolean; default_feed_dealer_id: string; platform_covered_by: string | null }
+/** What the editor needs. `members` present = group mode. */
+export interface EditorCfg {
+  product_names: string[]; standard_mapping: Col[]; fields: string[]; list_fields: string[]; list_field_defaults: Record<string, string>;
+  default_feed_dealer_id?: string;
+  members?: GroupMember[];
+}
+export interface EditorUrls { create: string; item: (id: string) => string; test: string }
+type Initial = Exp & { covers_all_members?: boolean; dealers?: Array<{ dealer_uuid: string; feed_dealer_id: string }> };
 interface Meta {
   dealer: { name: string; default_feed_dealer_id: string };
   covered_by: Covering[]; can_create: boolean; can_override: boolean; exports: Exp[]; product_names: string[];
@@ -34,11 +43,11 @@ const btn = (primary = false, danger = false): React.CSSProperties => ({
 const SEP_LABEL: Record<string, string> = { "\n": "new line", ", ": "comma", "|": "pipe", "\t": "tab" };
 const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleString() : "never");
 
-function blankExport(meta: Meta): Omit<Exp, "id" | "has_password" | "last_push_at" | "last_push_status"> & { ftp_password: string } {
+function blankExport(cfg: EditorCfg): Omit<Exp, "id" | "has_password" | "last_push_at" | "last_push_status"> & { ftp_password: string } {
   return {
     name: "", protocol: "ftp", ftp_url: "", ftp_port: 21, ftp_path: "", ftp_username: "", ftp_password: "",
     filename: "inventory", include_vehicles: "printed", push_schedule: "daily",
-    feed_dealer_id: meta.dealer.default_feed_dealer_id, column_mappings: meta.standard_mapping.map((c) => ({ ...c })),
+    feed_dealer_id: cfg.default_feed_dealer_id ?? "", column_mappings: cfg.standard_mapping.map((c) => ({ ...c })),
     export_exclusions: [], export_exclusion_match: "exact",
   };
 }
@@ -70,12 +79,21 @@ function NamePicker({ names, value, onChange, listId }: { names: string[]; value
   );
 }
 
-function ExportEditor({ meta, initial, qs, override, onDone, onCancel }: {
-  meta: Meta; initial: Exp | null; qs: string; override: boolean; onDone: () => void; onCancel: () => void;
+export function ExportEditor({ cfg, urls, initial, override, onDone, onCancel }: {
+  cfg: EditorCfg; urls: EditorUrls; initial: Initial | null; override: boolean; onDone: () => void; onCancel: () => void;
 }) {
+  const meta = cfg;
+  const groupMode = Boolean(cfg.members);
   const [f, setF] = useState(() => initial
-    ? { ...initial, ftp_path: initial.ftp_path ?? "", feed_dealer_id: initial.feed_dealer_id ?? meta.dealer.default_feed_dealer_id, ftp_password: "" }
-    : blankExport(meta));
+    ? { ...initial, ftp_path: initial.ftp_path ?? "", feed_dealer_id: initial.feed_dealer_id ?? cfg.default_feed_dealer_id ?? "", ftp_password: "" }
+    : blankExport(cfg));
+  // Group mode: all members (dynamic) or specific ones, each with its Feed Dealer ID.
+  const [coversAll, setCoversAll] = useState<boolean>(initial?.covers_all_members ?? false);
+  const [picked, setPicked] = useState<Record<string, string>>(() => {
+    const out: Record<string, string> = {};
+    (initial?.dealers ?? []).forEach((d) => { out[d.dealer_uuid] = d.feed_dealer_id; });
+    return out;
+  });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [test, setTest] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -88,8 +106,6 @@ function ExportEditor({ meta, initial, qs, override, onDone, onCancel }: {
     [cols[i], cols[j]] = [cols[j], cols[i]];
     return { ...p, column_mappings: cols };
   });
-  const sep = qs ? "&" : "?";
-
   const payload = () => ({
     ...f,
     ftp_path: f.ftp_path || null,
@@ -100,12 +116,21 @@ function ExportEditor({ meta, initial, qs, override, onDone, onCancel }: {
       return out;
     }),
     override,
+    ...(groupMode ? {
+      covers_all_members: coversAll,
+      // All-members: every row carries an ID (defaults included, so a later
+      // inventory-ID change on a dealer doesn't silently change what's sent).
+      dealers: (cfg.members ?? [])
+        .filter((m) => (coversAll ? true : picked[m.id] !== undefined))
+        .filter((m) => !(coversAll && m.platform_covered_by))
+        .map((m) => ({ dealer_uuid: m.id, feed_dealer_id: (picked[m.id] ?? "").trim() || m.default_feed_dealer_id })),
+    } : {}),
   });
 
   const testConn = async () => {
     setTesting(true); setTest(null);
     try {
-      const res = await fetch(`/api/settings/exports/test${qs}`, {
+      const res = await fetch(urls.test, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...payload(), export_id: initial?.id }),
       });
@@ -118,7 +143,7 @@ function ExportEditor({ meta, initial, qs, override, onDone, onCancel }: {
   const save = async () => {
     setSaving(true); setErr(null);
     try {
-      const res = await fetch(initial ? `/api/settings/exports/${initial.id}${qs}` : `/api/settings/exports${qs}`, {
+      const res = await fetch(initial ? urls.item(initial.id) : urls.create, {
         method: initial ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()),
       });
       const j = await res.json();
@@ -157,8 +182,41 @@ function ExportEditor({ meta, initial, qs, override, onDone, onCancel }: {
       </div>
       <div style={grid2}>
         <div><span style={label}>File name</span><input style={input} value={f.filename} onChange={(e) => set("filename", e.target.value)} /><div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>Uploaded as {(f.filename || "inventory").replace(/\.csv$/i, "")}.csv</div></div>
-        <div><span style={label}>Your dealer ID at this provider</span><input style={input} value={f.feed_dealer_id ?? ""} onChange={(e) => set("feed_dealer_id", e.target.value)} /></div>
+        {!groupMode && <div><span style={label}>Your dealer ID at this provider</span><input style={input} value={f.feed_dealer_id ?? ""} onChange={(e) => set("feed_dealer_id", e.target.value)} /></div>}
       </div>
+      {groupMode && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.navy, margin: "8px 0 6px" }}>Dealerships</div>
+          <div style={{ display: "flex", gap: 16, fontSize: 13, marginBottom: 8 }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+              <input type="radio" name="exp-target" checked={coversAll} onChange={() => setCoversAll(true)} /> All dealerships (includes ones added later)
+            </label>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+              <input type="radio" name="exp-target" checked={!coversAll} onChange={() => setCoversAll(false)} /> Specific dealerships
+            </label>
+          </div>
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, maxHeight: 280, overflowY: "auto" }}>
+            {(cfg.members ?? []).map((m) => {
+              const blocked = Boolean(m.platform_covered_by);
+              const on = coversAll ? !blocked && m.active : picked[m.id] !== undefined;
+              return (
+                <div key={m.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr 170px", gap: 8, alignItems: "center", padding: "6px 10px", borderBottom: `1px solid ${C.border}`, opacity: blocked ? 0.6 : 1 }}>
+                  <input type="checkbox" aria-label={`Include ${m.name}`} disabled={coversAll || blocked} checked={on}
+                    onChange={(e) => setPicked((p) => { const n = { ...p }; if (e.target.checked) n[m.id] = m.default_feed_dealer_id; else delete n[m.id]; return n; })} />
+                  <span style={{ fontSize: 13 }}>
+                    {m.name}{!m.active && <span style={{ color: C.muted }}> (inactive)</span>}
+                    {blocked && <span style={{ display: "block", fontSize: 11, color: C.muted }}>Exported by DealerAddendums ({m.platform_covered_by}) — left out</span>}
+                  </span>
+                  <input style={{ ...input, padding: "4px 7px" }} aria-label={`Dealer ID for ${m.name}`} disabled={!on}
+                    value={picked[m.id] ?? m.default_feed_dealer_id}
+                    onChange={(e) => setPicked((p) => ({ ...p, [m.id]: e.target.value }))} />
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>Right column: each dealership&apos;s ID at this provider.</div>
+        </div>
+      )}
       <div style={grid2}>
         <div><span style={label}>Vehicles</span>
           <select style={input} value={f.include_vehicles} onChange={(e) => set("include_vehicles", e.target.value as "printed" | "all")}>
@@ -291,10 +349,13 @@ export default function ExportsCard({ qs }: { qs: string }) {
         <div style={{ background: "#f5f7fa", border: `1px solid ${C.border}`, borderRadius: 6, padding: 12, marginBottom: 12, fontSize: 13 }}>
           {meta.covered_by.map((c) => (
             <div key={c.id} style={{ marginBottom: 4 }}>
-              <b>{c.name}</b> — managed by your provider ({c.managed_by}) · {c.push_schedule} · last sent {fmtDate(c.last_push_at)}
+              <b>{c.name}</b> — {c.owner_scope === "group" ? <>Managed by {c.managed_by}</> : <>managed by your provider ({c.managed_by})</>} · {c.push_schedule} · last sent {fmtDate(c.last_push_at)}
             </div>
           ))}
-          <div style={{ color: C.muted, marginTop: 6 }}>Your inventory export is already handled for you, so exports can&apos;t be added or changed here. Contact support to make changes.</div>
+          <div style={{ color: C.muted, marginTop: 6 }}>
+            Your inventory export is already handled for you, so exports can&apos;t be added or changed here.{" "}
+            {meta.covered_by[0]?.owner_scope === "group" ? "Ask your group administrator to make changes." : "Contact support to make changes."}
+          </div>
           {meta.can_override && (
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, color: C.red, fontSize: 12 }}>
               <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} /> SuperAdmin override — allow a dealer export anyway
@@ -329,7 +390,10 @@ export default function ExportsCard({ qs }: { qs: string }) {
       ))}
 
       {editing ? (
-        <ExportEditor meta={meta} initial={editing === "new" ? null : editing} qs={qs} override={override}
+        <ExportEditor
+          cfg={{ ...meta, default_feed_dealer_id: meta.dealer.default_feed_dealer_id }}
+          urls={{ create: `/api/settings/exports${qs}`, item: (id) => `/api/settings/exports/${id}${qs}`, test: `/api/settings/exports/test${qs}` }}
+          initial={editing === "new" ? null : editing} override={override}
           onCancel={() => setEditing(null)} onDone={() => { setEditing(null); load(); }} />
       ) : (
         <button type="button" style={{ ...btn(true), opacity: readOnly ? 0.5 : 1, cursor: readOnly ? "not-allowed" : "pointer" }}
