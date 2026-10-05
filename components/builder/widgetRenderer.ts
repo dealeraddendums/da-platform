@@ -1,4 +1,4 @@
-import { IB_DEFAULT, VEHICLE_PHOTO_COMING_SOON } from './constants';
+import { IB_DEFAULT, VEHICLE_PHOTO_COMING_SOON, VEHICLE_HEADER_FIELDS } from './constants';
 import { sanitizeProductHtml, sanitizeProductDescription, normalizeProductHtmlSource } from '@/lib/product-name';
 import { watermarkUrl } from '@/lib/watermarks';
 import { code128Svg } from '@/lib/code128';
@@ -134,7 +134,13 @@ export function renderW(type: string, d: D, fontScale: number): string {
     // Header line: collapse to non-empty tokens so a missing trim doesn't
     // leave a trailing space and an empty year/make/model doesn't expand into
     // weird gaps. Always-show fields can still be empty for edge cases.
-    const headerText = [vd.year, vd.make, vd.model, vd.trim]
+    // d.headerFields picks which of Year/Make/Model/Trim compose it, always in
+    // that order; a field that isn't set counts as ON, so every template saved
+    // before the setting existed still renders Year Make Model Trim.
+    const hf = (d.headerFields as Record<string, boolean> | undefined) || {};
+    const headerText = VEHICLE_HEADER_FIELDS
+      .filter(f => hf[f] !== false)
+      .map(f => vd[f])
       .map(v => (v == null ? '' : String(v).trim()))
       .filter(Boolean)
       .join(' ');

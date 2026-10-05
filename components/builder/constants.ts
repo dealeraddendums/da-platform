@@ -28,6 +28,10 @@ export const SAMPLE_SUGGESTED_ITEMS = [
 export const BG_DEFAULT = 'https://new-addendum-backgrounds.s3.us-east-1.amazonaws.com/1782499385214_Standard_Medium.png';
 export const IS_BG_DEFAULT = 'https://new-infosheet-backgrounds.s3.us-east-1.amazonaws.com/BaseTemplate.png';
 export const IB_DEFAULT = 'https://new-infobox-images.s3.us-east-1.amazonaws.com/EPA_Infobox_Default.png';
+
+// Vehicle Data widget header line — the fields it can be composed from, in
+// render order. d.headerFields toggles each one; unset means ON.
+export const VEHICLE_HEADER_FIELDS = ['year', 'make', 'model', 'trim'] as const;
 // Vehicle Photo fallback — shown whenever ChromeData has no image for the
 // VIN, the VIN is missing, or the SOAP/MediaGallery calls fail. Same bucket
 // as the rest of the infobox imagery so dealers' allowlisted CDN paths still work.

@@ -7,7 +7,7 @@ import {
   PAPERS, LAYOUT, LAYOUT_INFOSHEET, WIDGET_LABELS, UNIQUE_WIDGETS,
   PALETTE_HIDDEN_IN_ADDENDUM, PALETTE_HIDDEN_IN_INFOSHEET,
   DEFS, DEFAULT_CUSTOM_WIDGETS, snapV, makeWidget, getPaperDims,
-  SAMPLE_SUGGESTED_ITEMS,
+  SAMPLE_SUGGESTED_ITEMS, VEHICLE_HEADER_FIELDS,
 } from './constants';
 import { renderW } from './widgetRenderer';
 import RichTextEditor from '@/components/RichTextEditor';
@@ -2948,9 +2948,23 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           ))}
           <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid #e0e0e0' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0' }}>
-              <span style={{ fontSize: 11, color: '#55595c' }}>Show header (Year Make Model)</span>
+              <span style={{ fontSize: 11, color: '#55595c' }}>Show header</span>
               <TogSwitch checked={d.showHeader !== false} onChange={v => u('showHeader', v)} />
             </div>
+            {d.showHeader !== false && (
+              <div style={{ paddingLeft: 10 }}>
+                {VEHICLE_HEADER_FIELDS.map(f => {
+                  // Unset = ON, so templates saved before this setting keep Year Make Model Trim.
+                  const hf = (d.headerFields as Record<string, boolean> | undefined) || {};
+                  return (
+                    <div key={f} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0' }}>
+                      <span style={{ fontSize: 11, color: '#55595c', textTransform: 'capitalize' }}>Header: {f}</span>
+                      <TogSwitch checked={hf[f] !== false} onChange={v => u('headerFields', { ...hf, [f]: v })} />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </EpSection>
       )}
