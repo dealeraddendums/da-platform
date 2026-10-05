@@ -1,8 +1,14 @@
 name: Deploy to Production
 
+# Manual trigger only (2026-10-05). It used to run on every push to main, but the
+# documented deploy is ALSO manual (push, then `bash /var/www/da-platform/deploy.sh`
+# on the box — CLAUDE.md and da-ops/docs/runbooks/deploy.md), so most pushes fired
+# two deploys at once: the flock in deploy.sh aborted whichever started second, and
+# when that was this workflow GitHub emailed a failure notice. Nothing was ever
+# half-deployed. To deploy from GitHub instead of SSH: Actions -> Deploy to
+# Production -> Run workflow. To restore deploy-on-push, put the `push:` trigger back.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 # One deploy at a time. Rapid pushes (or a manual deploy racing the workflow)
 # caused npm install / next build to fight for the same node_modules path on
