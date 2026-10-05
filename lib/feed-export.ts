@@ -31,9 +31,26 @@ import {
   pruneOrphanedDefaultRows,
 } from "@/lib/options-engine";
 
+/** Item separator for a list column. `comma` is ", " (the comma style every
+ *  comma-joined list already uses); `newline` is what OPTION_LIST and
+ *  OPTIONS_WITH_PRICE use today. */
+export type ListSeparator = "pipe" | "comma" | "tab" | "newline";
+export const LIST_SEPARATORS: Record<ListSeparator, string> = {
+  pipe: "|",
+  comma: ", ",
+  tab: "\t",
+  newline: "\n",
+};
+
 export interface ColumnMapping {
   recipientColumn: string;
   daField: string;
+  /** List columns only. Unset = the field's own default (LIST_FIELD_DEFAULT_SEPARATOR). */
+  separator?: ListSeparator;
+  /** Names to drop from this column's items + sums. When present (even empty)
+   *  it REPLACES the export-level list for this column. */
+  exclusions?: string[];
+  exclusionMatch?: RuleMatchType;
 }
 
 export interface FeedCompanyRow {
@@ -50,6 +67,12 @@ export interface FeedCompanyRow {
   column_mappings: ColumnMapping[];
   last_push_at: string | null;
   last_push_status: string | null;
+  // Migration 164 — self-service exports. Defaults (platform / none / [] /
+  // exact) reproduce the pre-164 output exactly.
+  owner_scope?: "platform" | "group" | "dealer";
+  owner_id?: string | null;
+  export_exclusions?: string[] | null;
+  export_exclusion_match?: RuleMatchType | null;
 }
 
 // ── DA field catalog ─────────────────────────────────────────────────────────
@@ -225,11 +248,11 @@ export function makeRuleMatcher(patterns: string[] | null | undefined, matchType
  *     negative lines; price sums the matched line values (negatives sum
  *     naturally).
  */
-export function ruleFields(options: EffectiveOption[], matches: (name: string) => boolean, mode: RuleMode): { price: string; list: string } {
+export function ruleFields(options: EffectiveOption[], matches: (name: string) => boolean, mode: RuleMode, sep = ", "): { price: string; list: string } {
   const sel = mode === "include"
     ? options.filter((o) => matches(o.name))
     : options.filter((o) => o.price >= 0 && !matches(o.name));
-  return { price: money(sel.reduce((s, o) => s + o.price, 0)), list: sel.map((o) => o.name).join(", ") };
+  return { price: money(sel.reduce((s, o) => s + o.price, 0)), list: sel.map((o) => o.name).join(sep) };
 }
 
 // "Added Mark-Up" detection. The legacy 4.0 HUB feed split "Added Mark-Up"
@@ -256,11 +279,25 @@ function isAddedMarkup(name: string): boolean {
  *   are untouched — mirroring the existing symmetry where the WO fields exclude
  *   discounts (negatives) and the rest include everything.
  */
+// The item lists among the computed fields, with the separator each has always
+// used. A column's `separator` overrides this; unset keeps today's output.
+export const LIST_FIELD_DEFAULT_SEPARATOR: Record<string, string> = {
+  OPTION_LIST: "\n",
+  OPTIONS_WITH_PRICE: "\n",
+  OPTION_LIST_COMMA: ", ",
+  DEALER_DISCOUNTS_TEXT: ", ",
+  OPTIONS_WO_DISCOUNT_MARKUP: ", ",
+  ADDED_MARKUP_TEXT: ", ",
+};
+const RULE_LIST_DEFAULT_SEPARATOR = ", ";
+
+interface ComputedParts { scalars: Record<string, string>; lists: Record<string, string[]> }
+
 function computeFields(
   dv: Dv,
   options: EffectiveOption[],
   isCustomExcluded: (name: string) => boolean = () => false,
-): Record<string, string> {
+): ComputedParts {
   // Classification (matches 4.0): a line is a DISCOUNT when its parsed price is
   // negative; an ADDED MARK-UP when its name matches the markup regex; otherwise
   // a regular positive option. Zero/|-excluded/NC lines (price 0) contribute to
@@ -289,21 +326,25 @@ function computeFields(
   const hasBase = msrp > 0;
 
   return {
-    TOTAL_ADDS: money(totalAdds),
-    SELLING_PRICE: hasBase ? money(msrp - discounts) : "",
-    OPTION_LIST: options.map((o) => o.name).join("\n"),
-    OPTION_LIST_COMMA: options.map((o) => o.name).join(", "),
-    OPTION_PRICE: money(totalAdds),
-    OPTIONS_WITH_PRICE: options.map((o) => `${o.name}: $${money(o.price)}`).join("\n"),
-    ADDED_MARKUP: money(markupTotal),
-    OPTIONS_WO_ADDED_MARKUP: money(woTotal),
-    DEALER_DISCOUNTS: money(discounts),
-    DEALER_DISCOUNTS_NUM: money(discounts),
-    DEALER_DISCOUNTS_TEXT: negatives.map((o) => o.name).join(", "),
-    OP_PRICE_WO_DISCOUNT_MARKUP: money(woTotal),
-    OPTIONS_WO_DISCOUNT_MARKUP: woPositives.map((o) => o.name).join(", "),
-    ADDED_MARKUP_TEXT: markups.map((o) => o.name).join(", "),
-    GRAND_TOTAL: hasBase ? money(msrp + totalAdds - discounts) : "",
+    scalars: {
+      TOTAL_ADDS: money(totalAdds),
+      SELLING_PRICE: hasBase ? money(msrp - discounts) : "",
+      OPTION_PRICE: money(totalAdds),
+      ADDED_MARKUP: money(markupTotal),
+      OPTIONS_WO_ADDED_MARKUP: money(woTotal),
+      DEALER_DISCOUNTS: money(discounts),
+      DEALER_DISCOUNTS_NUM: money(discounts),
+      OP_PRICE_WO_DISCOUNT_MARKUP: money(woTotal),
+      GRAND_TOTAL: hasBase ? money(msrp + totalAdds - discounts) : "",
+    },
+    lists: {
+      OPTION_LIST: options.map((o) => o.name),
+      OPTION_LIST_COMMA: options.map((o) => o.name),
+      OPTIONS_WITH_PRICE: options.map((o) => `${o.name}: $${money(o.price)}`),
+      DEALER_DISCOUNTS_TEXT: negatives.map((o) => o.name),
+      OPTIONS_WO_DISCOUNT_MARKUP: woPositives.map((o) => o.name),
+      ADDED_MARKUP_TEXT: markups.map((o) => o.name),
+    },
   };
 }
 
@@ -441,6 +482,27 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
       });
     }
   }
+
+  // Owner exclusions (migration 164). Each column resolves to ONE exclusion
+  // set: its own `exclusions` if present (an override, even when empty), else
+  // the export-level list. Excluded items are dropped from that column's
+  // items AND sums — itemized lists, Subtotal (OPTION_PRICE / TOTAL_ADDS),
+  // Total (GRAND_TOTAL), SELLING_PRICE, the WO columns and custom-rule
+  // columns — on top of the built-in discount/markup handling. Columns that
+  // share a set share one computation per vehicle. With no exclusions
+  // anywhere every column resolves to the empty set: today's output.
+  const feedExclusions = feed.export_exclusions ?? [];
+  const feedMatch: RuleMatchType = feed.export_exclusion_match ?? "exact";
+  const colExclusion = mappings.map((m) => {
+    const list = Array.isArray(m.exclusions) ? m.exclusions : feedExclusions;
+    const match: RuleMatchType = Array.isArray(m.exclusions) ? (m.exclusionMatch ?? feedMatch) : feedMatch;
+    const pats = list.map((x) => String(x ?? "").trim().toLowerCase()).filter(Boolean);
+    const key = pats.length === 0 ? "" : `${match}:${Array.from(new Set(pats)).sort().join("\u0001")}`;
+    return { key, matches: makeRuleMatcher(pats, match) };
+  });
+  const colSeparator = mappings.map((m) =>
+    m.separator && LIST_SEPARATORS[m.separator] !== undefined ? LIST_SEPARATORS[m.separator] : null,
+  );
 
   const { data: feedDealers } = await admin
     .from("feed_company_dealers")
@@ -694,24 +756,32 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
       // match rather than differing only by entity encoding.
       effective = effective.map((o) => ({ name: decodeEntities(o.name), price: o.price }));
 
-      // Standard computed fields use built-in exclusion only (no custom rule).
-      const computed = computeFields(dv, effective);
-      // Per-rule WO variants, computed on demand and memoized per vehicle.
-      const ruleFieldCache = new Map<string, string>();
-      rows.push(mappings.map((m) => {
+      // Computed fields per exclusion set, memoized per vehicle (key "" = no
+      // owner exclusions = the pre-164 computation).
+      const bySet = new Map<string, { opts: EffectiveOption[]; parts: ComputedParts }>();
+      const forSet = (ci: number) => {
+        const ex = colExclusion[ci];
+        let hit = bySet.get(ex.key);
+        if (!hit) {
+          const opts = ex.key === "" ? effective : effective.filter((o) => !ex.matches(o.name));
+          hit = { opts, parts: computeFields(dv, opts) };
+          bySet.set(ex.key, hit);
+        }
+        return hit;
+      };
+      rows.push(mappings.map((m, ci) => {
         const raw = RAW_FIELD_EXTRACTORS[m.daField];
         if (raw) return raw(dv, ctx);
-        if (m.daField in computed) return computed[m.daField];
+        const { opts, parts } = forSet(ci);
+        if (m.daField in parts.scalars) return parts.scalars[m.daField];
+        if (m.daField in parts.lists) {
+          return parts.lists[m.daField].join(colSeparator[ci] ?? LIST_FIELD_DEFAULT_SEPARATOR[m.daField]);
+        }
         const rf = parseRuleField(m.daField);
         if (rf) {
-          const key = m.daField;
-          if (!ruleFieldCache.has(key)) {
-            const resolver = ruleResolvers.get(rf.ruleId)!; // presence guaranteed above
-            const rfv = ruleFields(effective, resolver.matches, resolver.mode);
-            ruleFieldCache.set(`rule:${rf.ruleId}:price`, rfv.price);
-            ruleFieldCache.set(`rule:${rf.ruleId}:list`, rfv.list);
-          }
-          return ruleFieldCache.get(key) ?? "";
+          const resolver = ruleResolvers.get(rf.ruleId)!; // presence guaranteed above
+          const rfv = ruleFields(opts, resolver.matches, resolver.mode, colSeparator[ci] ?? RULE_LIST_DEFAULT_SEPARATOR);
+          return rf.variant === "price" ? rfv.price : rfv.list;
         }
         return "";
       }));
