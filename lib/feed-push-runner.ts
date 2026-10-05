@@ -5,6 +5,8 @@
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { generateFeedCsv, type FeedCompanyRow } from "@/lib/feed-export";
 import { pushFeedCsv } from "@/lib/feed-push";
+import { checkPublicFtpHost } from "@/lib/ftp-host-guard";
+import { exportCoverage } from "@/lib/dealer-exports";
 import { sendMandrillEmail } from "@/lib/mandrill";
 
 // admin_audit.admin_user_id is NOT NULL (migration 127, no FK) — cron runs
@@ -87,6 +89,20 @@ export async function runFeedPush(
 ): Promise<FeedPushRunResult> {
   const trigger = opts?.trigger ?? "manual";
   try {
+    // A dealer's own export pauses while someone else's feed (SuperAdmin now,
+    // group in Phase 3) already covers that dealer — two feeds to the same
+    // provider would conflict. Only the scheduled run is held here; the
+    // dealer-facing Push button enforces the same rule itself.
+    if (feed.owner_scope === "dealer" && feed.owner_id && trigger === "cron") {
+      const covering = await exportCoverage(admin, feed.owner_id);
+      if (covering.length > 0) {
+        const message = `paused — dealer is covered by "${covering[0].name}"`;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any).from("feed_companies").update({ last_push_status: message }).eq("id", feed.id);
+        return { success: false, message, vehicleCount: 0, dealerCount: 0 };
+      }
+    }
+
     const { csv, vehicleCount, dealerCount, pricelessByDealer } = await generateFeedCsv(feed.id);
 
     if (opts?.skipIfEmpty && vehicleCount === 0) {
@@ -100,7 +116,12 @@ export async function runFeedPush(
       return { success: false, message, vehicleCount, dealerCount, pricelessDealers: pricelessByDealer.length };
     }
 
-    const result = await pushFeedCsv(feed, csv);
+    // Dealer/group-owned exports: the host was typed in by a customer, so it
+    // is re-checked at send time (DNS can change after it was saved).
+    const hostProblem = feed.owner_scope && feed.owner_scope !== "platform"
+      ? await checkPublicFtpHost(feed.ftp_url)
+      : null;
+    const result = hostProblem ? { success: false, message: hostProblem } : await pushFeedCsv(feed, csv);
     const message = result.success
       ? `${result.message} — ${vehicleCount.toLocaleString("en-US")} vehicles across ${dealerCount} dealer(s)`
       : result.message;

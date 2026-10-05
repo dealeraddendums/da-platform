@@ -73,6 +73,7 @@ export interface FeedCompanyRow {
   owner_id?: string | null;
   export_exclusions?: string[] | null;
   export_exclusion_match?: RuleMatchType | null;
+  ftp_path?: string | null; // migration 165
 }
 
 // ── DA field catalog ─────────────────────────────────────────────────────────

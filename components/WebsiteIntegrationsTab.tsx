@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ExportsCard from "@/components/ExportsCard";
 
 // Dealer-facing config for the public Website Integrations widgets.
 // Two cards (more coming — all load COLLAPSED, matching Print Settings):
@@ -233,6 +234,9 @@ export default function WebsiteIntegrationsTab({ dealerId, role }: { dealerId: s
       <DealerComCard qs={qs} />
       <ApiButtonCard qs={qs} />
       <IconButtonCard qs={qs} />
+      <IntegrationCard title="Exports" hint="Send your inventory + pricing to a provider by FTP">
+        <ExportsCard qs={qs} />
+      </IntegrationCard>
     </div>
   );
 }
