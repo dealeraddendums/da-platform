@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ExportEditor, type EditorCfg } from "@/components/ExportsCard";
+import { ExportEditor, downloadExportFile, type EditorCfg } from "@/components/ExportsCard";
 
 // Group page → Exports (self-service exports, Phase 3). A group admin sends
 // inventory for one, several or ALL member dealerships (all = members as they
@@ -29,6 +29,8 @@ export default function GroupExportsPanel({ groupId }: { groupId: string }) {
   const [editing, setEditing] = useState<NonNullable<GroupExport> | "new" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [rowMsg, setRowMsg] = useState<Record<string, { ok: boolean; msg: string }>>({});
+  // Download picker per export: "all" (ZIP) or one dealer_uuid.
+  const [dlPick, setDlPick] = useState<Record<string, string>>({});
   const base = `/api/groups/${groupId}/exports`;
 
   const load = useCallback(async () => {
@@ -49,6 +51,13 @@ export default function GroupExportsPanel({ groupId }: { groupId: string }) {
       setRowMsg((m) => ({ ...m, [e.id]: { ok: res.ok && j.success, msg: j.message ?? j.error ?? "Push failed" } }));
     } catch { setRowMsg((m) => ({ ...m, [e.id]: { ok: false, msg: "Push failed" } })); }
     setBusy(null); load();
+  };
+  const download = async (e: NonNullable<GroupExport>) => {
+    const pick = dlPick[e.id] ?? "all";
+    setBusy(`dl:${e.id}`);
+    const problem = await downloadExportFile(`${base}/${e.id}/download?dealer=${encodeURIComponent(pick)}`);
+    setRowMsg((m) => ({ ...m, [e.id]: problem ? { ok: false, msg: problem } : { ok: true, msg: "Downloaded — nothing was sent." } }));
+    setBusy(null);
   };
   const remove = async (e: NonNullable<GroupExport>) => {
     if (!window.confirm(`Delete the "${e.name}" export? It will stop sending for every dealership it covers.`)) return;
@@ -92,8 +101,20 @@ export default function GroupExportsPanel({ groupId }: { groupId: string }) {
                       </div>
                       {rowMsg[e.id] && <div style={{ fontSize: 12, color: rowMsg[e.id].ok ? C.green : C.red, marginTop: 4 }}>{rowMsg[e.id].msg}</div>}
                     </div>
-                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "flex-start" }}>
                       <button type="button" style={btn()} disabled={busy === e.id} onClick={() => pushNow(e)}>{busy === e.id ? "Sending…" : "Push now"}</button>
+                      <span style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
+                        <button type="button" style={btn()} disabled={busy === `dl:${e.id}` || e.plan.dealers.length === 0} onClick={() => download(e)}
+                          title="Download the file this export sends, without sending it">{busy === `dl:${e.id}` ? "Preparing…" : "Download CSV"}</button>
+                        {e.plan.dealers.length > 1 && (
+                          <select aria-label="Which dealership to download" value={dlPick[e.id] ?? "all"}
+                            onChange={(ev) => setDlPick((m) => ({ ...m, [e.id]: ev.target.value }))}
+                            style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "4px 6px", fontSize: 12, fontFamily: "inherit", maxWidth: 180 }}>
+                            <option value="all">All dealerships (ZIP)</option>
+                            {e.plan.dealers.map((d) => <option key={d.dealer_uuid} value={d.dealer_uuid}>{d.name} ({d.feed_dealer_id})</option>)}
+                          </select>
+                        )}
+                      </span>
                       <button type="button" style={btn()} onClick={() => setEditing(e)}>Edit</button>
                       <button type="button" style={btn(false, true)} disabled={busy === e.id} onClick={() => remove(e)}>Delete</button>
                     </div>
@@ -103,7 +124,7 @@ export default function GroupExportsPanel({ groupId }: { groupId: string }) {
               {editing ? (
                 <ExportEditor
                   cfg={meta}
-                  urls={{ create: base, item: (id) => `${base}/${id}`, test: `${base}/test` }}
+                  urls={{ create: base, item: (id) => `${base}/${id}`, test: `${base}/test`, download: (id) => `${base}/${id}/download?dealer=all` }}
                   initial={editing === "new" ? null : editing}
                   override={false}
                   onCancel={() => setEditing(null)}

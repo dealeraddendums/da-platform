@@ -510,9 +510,27 @@ export interface FeedCsvResult {
     vehicles: number;
     priceless: number;
   }>;
+  /**
+   * The same output split per dealer, for the owner "Download CSV" proof:
+   * each `csv` is the shared header + exactly that dealer's rows from `rows`
+   * (dealers with no exported vehicles get a header-only file). The combined
+   * `csv` above — what a push sends — is unaffected.
+   */
+  perDealer: Array<{
+    dealerUuid: string;
+    feedDealerId: string;
+    dealerName: string;
+    vehicles: number;
+    csv: string;
+  }>;
 }
 
-export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
+/**
+ * `opts.onlyDealerUuids` restricts generation to those of the feed's resolved
+ * dealers (download proofs of one dealer). Pushes never pass it, so a push is
+ * the full feed exactly as before.
+ */
+export async function generateFeedCsv(feedId: string, opts?: { onlyDealerUuids?: string[] }): Promise<FeedCsvResult> {
   const admin: Admin = createAdminSupabaseClient();
 
   const { data: feed } = await admin
@@ -574,15 +592,22 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
     m.separator && LIST_SEPARATORS[m.separator] !== undefined ? LIST_SEPARATORS[m.separator] : null,
   );
 
-  const feedDealers = (await resolveFeedDealers(admin, feed)).rows;
+  const only = opts?.onlyDealerUuids ? new Set(opts.onlyDealerUuids) : null;
+  const feedDealers = (await resolveFeedDealers(admin, feed)).rows
+    .filter((fd) => !only || only.has(fd.dealer_uuid));
 
-  const rows: string[][] = [mappings.map((m) => m.recipientColumn)];
+  const header = mappings.map((m) => m.recipientColumn);
+  const rows: string[][] = [header];
   let vehicleCount = 0;
   const pricelessByDealer: FeedCsvResult["pricelessByDealer"] = [];
+  const perDealer: FeedCsvResult["perDealer"] = [];
 
   for (const fd of feedDealers ?? []) {
     const dealer = fd.dealers;
     if (!dealer) continue;
+    const firstRow = rows.length;
+    const slice = { dealerUuid: fd.dealer_uuid, feedDealerId: fd.feed_dealer_id, dealerName: dealer.name, vehicles: 0, csv: toCsv([header]) };
+    perDealer.push(slice);
     const dealerTextId = dealer.dealer_id;
     const ctx = { feedDealerId: fd.feed_dealer_id, dealerTextId };
     let dealerVehicles = 0;
@@ -853,6 +878,9 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
       if (!(baseMsrp > 0)) dealerPriceless++;
     }
 
+    slice.vehicles = dealerVehicles;
+    slice.csv = toCsv([header, ...rows.slice(firstRow)]);
+
     if (dealerPriceless > 0) {
       pricelessByDealer.push({
         dealerId: dealerTextId,
@@ -863,5 +891,5 @@ export async function generateFeedCsv(feedId: string): Promise<FeedCsvResult> {
     }
   }
 
-  return { csv: toCsv(rows), vehicleCount, dealerCount: (feedDealers ?? []).length, pricelessByDealer };
+  return { csv: toCsv(rows), vehicleCount, dealerCount: (feedDealers ?? []).length, pricelessByDealer, perDealer };
 }

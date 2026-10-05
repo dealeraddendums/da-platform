@@ -26,7 +26,32 @@ export interface EditorCfg {
   default_feed_dealer_id?: string;
   members?: GroupMember[];
 }
-export interface EditorUrls { create: string; item: (id: string) => string; test: string }
+export interface EditorUrls { create: string; item: (id: string) => string; test: string; download?: (id: string) => string }
+
+/**
+ * Fetch an export's "Download CSV" proof (the file a push would send, from the
+ * saved config) and hand it to the browser. Returns an error message, or null.
+ * fetch + blob rather than a plain link so a server error shows inline instead
+ * of navigating to a JSON page.
+ */
+export async function downloadExportFile(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      return (j as { error?: string }).error ?? "Download failed";
+    }
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    const name = /filename="([^"]+)"/.exec(cd)?.[1] ?? "export.csv";
+    const blob = await res.blob();
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 10_000);
+    return null;
+  } catch { return "Download failed — please try again."; }
+}
 type Initial = Exp & { covers_all_members?: boolean; dealers?: Array<{ dealer_uuid: string; feed_dealer_id: string }> };
 interface Meta {
   dealer: { name: string; default_feed_dealer_id: string };
@@ -115,6 +140,7 @@ export function ExportEditor({ cfg, urls, initial, override, onDone, onCancel }:
   const [err, setErr] = useState<string | null>(null);
   const [test, setTest] = useState<{ ok: boolean; msg: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
   const setCol = (i: number, patch: Partial<Col>) => setF((p) => ({ ...p, column_mappings: p.column_mappings.map((c, j) => (j === i ? { ...c, ...patch } : c)) }));
   const moveCol = (i: number, d: number) => setF((p) => {
@@ -157,16 +183,35 @@ export function ExportEditor({ cfg, urls, initial, override, onDone, onCancel }:
     setTesting(false);
   };
 
-  const save = async () => {
+  const save = async (close = true): Promise<boolean> => {
     setSaving(true); setErr(null);
     try {
       const res = await fetch(initial ? urls.item(initial.id) : urls.create, {
         method: initial ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()),
       });
       const j = await res.json();
-      if (!res.ok) { setErr(j.error ?? "Save failed"); setSaving(false); return; }
-      onDone();
-    } catch { setErr("Save failed — please try again."); setSaving(false); }
+      if (!res.ok) { setErr(j.error ?? "Save failed"); setSaving(false); return false; }
+      setSaving(false);
+      if (close) onDone();
+      return true;
+    } catch { setErr("Save failed — please try again."); setSaving(false); return false; }
+  };
+
+  // The download is generated from the SAVED export, so unsaved edits would
+  // not be in it — offer to save first. (A typed password isn't compared: it
+  // never affects the file's contents.)
+  const [savedSnapshot, setSavedSnapshot] = useState(() => JSON.stringify({ ...payload(), ftp_password: "" }));
+  const download = async () => {
+    if (!initial || !urls.download) return;
+    if (JSON.stringify({ ...payload(), ftp_password: "" }) !== savedSnapshot) {
+      if (!window.confirm("You have unsaved changes. The download uses the saved export — save your changes now and download?")) return;
+      if (!(await save(false))) return;
+      setSavedSnapshot(JSON.stringify({ ...payload(), ftp_password: "" }));
+    }
+    setDownloading(true); setErr(null);
+    const problem = await downloadExportFile(urls.download(initial.id));
+    if (problem) setErr(problem);
+    setDownloading(false);
   };
 
   const grid2: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 };
@@ -312,7 +357,11 @@ export function ExportEditor({ cfg, urls, initial, override, onDone, onCancel }:
 
       {err && <div style={{ color: C.red, fontSize: 13, marginTop: 12 }}>{err}</div>}
       <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-        <button type="button" onClick={save} disabled={saving} style={btn(true)}>{saving ? "Saving…" : initial ? "Save changes" : "Create export"}</button>
+        <button type="button" onClick={() => save()} disabled={saving} style={btn(true)}>{saving ? "Saving…" : initial ? "Save changes" : "Create export"}</button>
+        {initial && urls.download && (
+          <button type="button" onClick={download} disabled={saving || downloading} style={btn()}
+            title="Download the file this export sends, without sending it">{downloading ? "Preparing…" : "Download CSV"}</button>
+        )}
         <button type="button" onClick={onCancel} style={btn()}>Cancel</button>
       </div>
     </div>
@@ -351,6 +400,12 @@ export default function ExportsCard({ qs }: { qs: string }) {
       setRowMsg((m) => ({ ...m, [e.id]: { ok: res.ok && j.success, msg: j.message ?? j.error ?? "Push failed" } }));
     } catch { setRowMsg((m) => ({ ...m, [e.id]: { ok: false, msg: "Push failed" } })); }
     setBusy(null); load();
+  };
+  const download = async (e: Exp) => {
+    setBusy(`dl:${e.id}`);
+    const problem = await downloadExportFile(`/api/settings/exports/${e.id}/download${qs}`);
+    setRowMsg((m) => ({ ...m, [e.id]: problem ? { ok: false, msg: problem } : { ok: true, msg: "Downloaded — nothing was sent." } }));
+    setBusy(null);
   };
   const remove = async (e: Exp) => {
     if (!window.confirm(`Delete the "${e.name}" export? It will stop sending.`)) return;
@@ -401,6 +456,8 @@ export default function ExportsCard({ qs }: { qs: string }) {
             {!readOnly && (
               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                 <button type="button" style={btn()} disabled={busy === e.id} onClick={() => pushNow(e)}>{busy === e.id ? "Sending…" : "Push now"}</button>
+                <button type="button" style={btn()} disabled={busy === `dl:${e.id}`} onClick={() => download(e)}
+                  title="Download the file this export sends, without sending it">{busy === `dl:${e.id}` ? "Preparing…" : "Download CSV"}</button>
                 <button type="button" style={btn()} onClick={() => setEditing(e)}>Edit</button>
                 <button type="button" style={btn(false, true)} disabled={busy === e.id} onClick={() => remove(e)}>Delete</button>
               </div>
@@ -412,7 +469,7 @@ export default function ExportsCard({ qs }: { qs: string }) {
       {editing ? (
         <ExportEditor
           cfg={{ ...meta, default_feed_dealer_id: meta.dealer.default_feed_dealer_id }}
-          urls={{ create: `/api/settings/exports${qs}`, item: (id) => `/api/settings/exports/${id}${qs}`, test: `/api/settings/exports/test${qs}` }}
+          urls={{ create: `/api/settings/exports${qs}`, item: (id) => `/api/settings/exports/${id}${qs}`, test: `/api/settings/exports/test${qs}`, download: (id) => `/api/settings/exports/${id}/download${qs}` }}
           initial={editing === "new" ? null : editing} override={override}
           onCancel={() => setEditing(null)} onDone={() => { setEditing(null); load(); }} />
       ) : (
