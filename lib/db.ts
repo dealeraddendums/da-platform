@@ -522,6 +522,10 @@ export type BuyersGuideDefaults = {
    *  other duplex flip mode. Never applied to single-side prints or to the
    *  website copy in S3. See lib/buyers-guide-duplex.ts. */
   flip_back_page?: boolean;
+  /** Page order of printed guides: back page first, then front (Fowler
+   *  Honda, 2026-10-06). Opt-in; independent of flip_back_page, which still
+   *  turns the BACK page wherever it lands. Same scope: printed output only. */
+  back_page_first?: boolean;
 };
 
 export type DealerCustomSizeRow = {

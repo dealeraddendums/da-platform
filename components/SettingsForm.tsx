@@ -437,6 +437,15 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
               </p>
             </div>
             <div className="mb-3">
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={settings.buyers_guide_defaults?.back_page_first ?? false} onChange={e => setBgDefaults("back_page_first", e.target.checked)} />
+                <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Print back page first</span>
+              </label>
+              <p className="text-xs" style={{ color: "var(--text-muted)", marginTop: 4 }}>
+                Arranges each guide Back/Front instead of Front/Back. Works with the flip setting above — the back page is flipped wherever it lands.
+              </p>
+            </div>
+            <div className="mb-3">
               <label className="label">Default Warranty Type</label>
               <select className="input w-full" value={settings.buyers_guide_defaults?.warranty_type ?? "as_is"} onChange={e => setBgDefaults("warranty_type", e.target.value as BuyersGuideDefaults["warranty_type"])}>
                 {Object.entries(WARRANTY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}

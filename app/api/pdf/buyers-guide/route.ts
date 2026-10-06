@@ -9,7 +9,7 @@ import { getBuyersGuidePdfBytes } from "@/lib/buyers-guide-storage";
 import type { BgKey } from "@/lib/buyers-guide-constants";
 import JSZip from "jszip";
 import { PDFDocument } from "pdf-lib";
-import { flipBackPages } from "@/lib/buyers-guide-duplex";
+import { arrangeForPrint, printArrangement } from "@/lib/buyers-guide-duplex";
 
 /**
  * POST /api/pdf/buyers-guide
@@ -96,10 +96,11 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     : null;
 
   const savedDefaults = settings?.buyers_guide_defaults ?? null;
-  // Duplex flip (opt-in): applied to the PRINTED output only, after the
-  // service has uploaded the upright guide to S3. Single-side prints skip it.
-  const flipBack = savedDefaults?.flip_back_page === true;
-  const forPrint = (buf: Buffer) => (flipBack ? flipBackPages(buf) : Promise.resolve(buf));
+  // Duplex flip + back-page-first (both opt-in): applied to the PRINTED
+  // output only, after the service has uploaded the upright, front-first
+  // guide to S3. Single-side prints skip it.
+  const arrangement = printArrangement(savedDefaults);
+  const forPrint = (buf: Buffer) => arrangeForPrint(buf, arrangement);
   const warranty: BuyersGuideDefaults = {
     warranty_type: 'as_is',
     ...savedDefaults,
