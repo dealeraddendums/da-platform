@@ -99,12 +99,27 @@ export async function recordPrint(admin: Admin, printedBy: string, p: PrintRecor
   // Canonical print flags on dealer_vehicles — dashboard counts, filters, and
   // the per-document button states read these. Doc type controls the column:
   // addendum → print_status, infosheet → print_info, buyer_guide → print_guide.
-  // (Single buyer-guide prints never flipped flags — parity preserved.)
-  if (p.source !== "buyer_guide") {
+  // Every source flips them, single Buyer's Guide prints included (they used
+  // to be skipped, so a used vehicle that only ever got a Buyer's Guide never
+  // showed as printed — Fowler Honda, 2026-10-06).
+  //
+  // print_status stays ADDENDUM-only on purpose: feed exports ("printed"
+  // scope), the ChromeData usage report, the Fortellis no-overwrite rule and
+  // the Prints card all read it. print_date is shared, so an Info Sheet /
+  // Buyer's Guide print only sets it when the vehicle has no addendum print —
+  // it must not re-date an addendum print into a newer window.
+  {
     const todayDate = new Date().toISOString().split("T")[0];
+    const isAddendum = p.docType === "addendum";
+    let setDate = isAddendum;
+    if (!isAddendum) {
+      const { data: cur } = await admin.from("dealer_vehicles").select("print_status").eq("id", p.vehicleId).maybeSingle();
+      setDate = (cur as { print_status?: number | null } | null)?.print_status !== 1;
+    }
     const dvUpdate: Partial<{ print_status: number; print_info: number; print_guide: number; print_date: string; print_user: string; print_queue: number; print_queue_at: string | null; print_queue_by: string | null }> = {
-      print_date: todayDate,
-      print_user: printedBy,
+      // print_date/print_user describe the vehicle's headline print — kept
+      // on the addendum when there is one.
+      ...(setDate ? { print_date: todayDate, print_user: printedBy } : {}),
     };
     if (p.docType === "addendum") {
       dvUpdate.print_status = 1;

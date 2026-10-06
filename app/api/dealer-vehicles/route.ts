@@ -105,12 +105,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const orTree = buildVehicleSearchOr(searchTerms);
     if (orTree) query = query.or(orTree);
   }
-  // Print status reads dealer_vehicles.print_status — matches dashboard counts
-  // and surfaces both legacy ETL-printed and platform-printed vehicles.
+  // Printed = ANY document printed (Addendum, Info Sheet or Buyer's Guide) —
+  // the same rule as the row's Print Now indicator and the Coverage card, so a
+  // used vehicle that only got a Buyer's Guide is "printed". Reads the
+  // dealer_vehicles flags, so legacy ETL-printed vehicles count too.
   if (printStatus === "printed") {
-    query = query.eq("print_status", 1);
+    query = query.or("print_status.eq.1,print_info.eq.1,print_guide.eq.1");
   } else if (printStatus === "unprinted") {
-    query = query.or("print_status.is.null,print_status.neq.1");
+    query = query
+      .or("print_status.is.null,print_status.neq.1")
+      .or("print_info.is.null,print_info.neq.1")
+      .or("print_guide.is.null,print_guide.neq.1");
   }
 
   const { data, count, error: dbErr } = await query;

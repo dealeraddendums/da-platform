@@ -181,11 +181,13 @@ async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId:
       .gte("date_added", startOfToday.toISOString()),
     printedVehicleUnionCount(admin, { dealerId, since: iso30 }),
     printedVehicleUnionCount(admin, { dealerId, since: iso365 }),
-    // Coverage — big number AND % numerator: active vehicles carrying the
-    // printed flag (legacy ETL-printed + platform-printed uniformly).
+    // Coverage — big number AND % numerator: active vehicles with ANY document
+    // printed (Addendum, Info Sheet or Buyer's Guide — used vehicles are
+    // often only ever given the latter two), legacy ETL-printed + platform-
+    // printed uniformly. Same rule as the inventory Printed filter.
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active")
-      .eq("print_status", 1),
+      .or("print_status.eq.1,print_info.eq.1,print_guide.eq.1"),
     // Mobile print queue (dealer_vehicles.print_queue, IOS-APP-SPEC §8.1)
     admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
       .eq("dealer_id", dealerId).eq("status", "active")
@@ -373,7 +375,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: {
       admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
         .neq("status", "inactive"),
       admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-        .neq("status", "inactive").eq("print_status", 1),
+        .neq("status", "inactive").or("print_status.eq.1,print_info.eq.1,print_guide.eq.1"),
       // DISTINCT vehicles printed this month, not print_history rows
       // (multiprint-qa Issue B — reprints inflate row counts).
       printedVehicleCount(admin, { since: startOfMonth.toISOString() }),

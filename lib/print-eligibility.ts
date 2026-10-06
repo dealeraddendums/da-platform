@@ -17,7 +17,7 @@ import { NextResponse } from "next/server";
 import { normalizeSubscriptionType, isPayingAccount } from "@/lib/hubspot";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { billingConfigured, getBillingStatus } from "@/lib/billing";
-import { printedVehicleCount } from "@/lib/print-counts";
+import { trialPrintCount } from "@/lib/print-counts";
 
 export const TRIAL_DAYS_CAP = 30;
 export const TRIAL_PRINTS_CAP = 30;
@@ -220,7 +220,7 @@ export async function canPrintForDealer(dealerTextId: string): Promise<CanPrintR
   // Downgraded blocks outright, so skip the query for both.
   let lifetimePrints = 0;
   if (isTrialAccountType(dealer.account_type) || hasActiveTrialOverride(dealer)) {
-    lifetimePrints = await printedVehicleCount(admin, { dealerId: dealerTextId });
+    lifetimePrints = await trialPrintCount(admin, dealerTextId);
   }
 
   // Trial/Free gate (pure) — any block here wins; no need to hit da-billing.

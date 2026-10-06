@@ -14,7 +14,7 @@ import {
   type BillingExtensionState,
 } from "@/lib/billing";
 import { isOverAllowance, TRIAL_DAYS_CAP, TRIAL_PRINTS_CAP } from "@/lib/print-eligibility";
-import { printedVehicleCount } from "@/lib/print-counts";
+import { trialPrintCount } from "@/lib/print-counts";
 import { getDealerFeedStatus } from "@/lib/dealer-feed-status";
 
 interface SubscriptionInfo {
@@ -195,7 +195,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Trial progress (lifetime DISTINCT vehicles printed, same source as
   // canPrintForDealer — reprints don't inflate it) — drives the "Free"/"Trial"
   // card copy.
-  const lifetimePrints = await printedVehicleCount(admin, { dealerId: resolved.dealerTextId });
+  const lifetimePrints = await trialPrintCount(admin, resolved.dealerTextId);
   const trial = computeTrial(dealer.created_at, lifetimePrints, { trial_ends_at: dealer.trial_ends_at, trial_prints_cap: dealer.trial_prints_cap });
 
   // ── Group-billed dealer ───────────────────────────────────────────────────

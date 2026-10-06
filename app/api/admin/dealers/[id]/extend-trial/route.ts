@@ -6,7 +6,7 @@ import {
   TRIAL_DAYS_CAP,
   TRIAL_PRINTS_CAP,
 } from "@/lib/print-eligibility";
-import { printedVehicleCount } from "@/lib/print-counts";
+import { trialPrintCount } from "@/lib/print-counts";
 import { fireDealerSync } from "@/lib/sync-hubspot";
 
 // POST /api/admin/dealers/[id]/extend-trial — super_admin only.
@@ -77,7 +77,7 @@ export async function POST(
 
   // Prints axis: grant a fresh 30-print allowance on top of whatever has been
   // used, never shrinking an existing cap.
-  const printsUsed = await printedVehicleCount(admin, { dealerId: dealer.dealer_id });
+  const printsUsed = await trialPrintCount(admin, dealer.dealer_id);
   const newPrintsCap = Math.max(dealer.trial_prints_cap ?? TRIAL_PRINTS_CAP, printsUsed) + TRIAL_PRINTS_CAP;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

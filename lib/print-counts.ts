@@ -30,6 +30,18 @@ export interface PrintedVehicleCountOpts {
 }
 
 /**
+ * The TRIAL print count — distinct vehicles with an ADDENDUM print. Info Sheet
+ * and Buyer's Guide prints are recorded and shown in print history but never
+ * consume the trial cap (Allan, 2026-10-06, Fowler Honda). Every trial / print-
+ * eligibility consumer uses this — canPrint gate, Billing tab trial progress,
+ * extend-trial grant, and both HubSpot Trial-Expired derivations — so they
+ * can't disagree.
+ */
+export function trialPrintCount(admin: Admin, dealerId: string): Promise<number> {
+  return printedVehicleCount(admin, { dealerId, docType: "addendum" });
+}
+
+/**
  * count(DISTINCT vehicle_id) over print_history, via the printed_vehicle_count
  * SQL function (migration 098). No filters = platform-wide.
  *

@@ -24,7 +24,7 @@ import {
   upsertObject,
 } from "@/lib/hubspot";
 import { isOverAllowance, isFreeAccountType, hasActiveTrialOverride } from "@/lib/print-eligibility";
-import { printedVehicleCount } from "@/lib/print-counts";
+import { trialPrintCount } from "@/lib/print-counts";
 
 // ── Property builders ───────────────────────────────────────────────────────
 
@@ -526,7 +526,7 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
     // matters when the dealer isn't paid and isn't already Free — paid
     // wins outright via isPayingAccount, so this is bounded to legacy
     // trials and ex-trials.
-    const lifetimePrints = await printedVehicleCount(admin, { dealerId: dealer.dealer_id });
+    const lifetimePrints = await trialPrintCount(admin, dealer.dealer_id);
 
     const properties = dealerCompanyProperties(dealer, groupName, groupNumericId, lifetimePrints);
     payload = properties;

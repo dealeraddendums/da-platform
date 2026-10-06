@@ -57,9 +57,22 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
 }
 
-function PrintNowBtn({ vehicleId, printed, queued, printDate, canPrint, blockedMsg, onNavigate }: {
+/** Which documents a vehicle has printed, from its dealer_vehicles flags.
+ *  A used vehicle often only ever gets an Info Sheet or a Buyer's Guide —
+ *  any printed document counts as "printed" for the row indicator. */
+function printedDocs(v: DealerVehicleRow): string[] {
+  const docs: string[] = [];
+  if (v.print_status === 1) docs.push("Addendum");
+  if (v.print_info === 1) docs.push("Info Sheet");
+  if (v.print_guide === 1) docs.push("Buyer's Guide");
+  return docs;
+}
+
+function PrintNowBtn({ vehicleId, printed, printedWhat, queued, printDate, canPrint, blockedMsg, onNavigate }: {
   vehicleId: string;
   printed: boolean;
+  /** Printed document names, for the tooltip ("Addendum, Buyer's Guide"). */
+  printedWhat?: string[];
   /** Vehicle is in the mobile print queue (print_queue = 1) — orange cue. */
   queued?: boolean;
   printDate: string | null;
@@ -72,8 +85,11 @@ function PrintNowBtn({ vehicleId, printed, queued, printDate, canPrint, blockedM
     ? blockedMsg
     : queued
       ? "Queued from mobile — waiting to be printed"
-      : printed && printDate
-        ? `Last printed ${new Date(`${printDate}T12:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`
+      : printed
+        ? [
+            printedWhat?.length ? `Printed: ${printedWhat.join(", ")}` : "Printed",
+            printDate ? `Last printed ${new Date(`${printDate}T12:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}` : null,
+          ].filter(Boolean).join(" — ")
         : undefined;
   // Queued wins over printed: the mobile user is waiting on this print
   // (#ffa500 = the active-nav orange token).
@@ -630,7 +646,7 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
                         </button>
                       </td>
                       <td className="px-3 py-2">
-                        <PrintNowBtn vehicleId={v.id} printed={v.print_status === 1} queued={v.print_queue === 1} printDate={v.print_date ?? null} canPrint={canPrint} blockedMsg={printBlockedMsg} onNavigate={() => { printNavRef.current = true; }} />
+                        <PrintNowBtn vehicleId={v.id} printed={printedDocs(v).length > 0} printedWhat={printedDocs(v)} queued={v.print_queue === 1} printDate={v.print_date ?? null} canPrint={canPrint} blockedMsg={printBlockedMsg} onNavigate={() => { printNavRef.current = true; }} />
                       </td>
                     </tr>
                   );

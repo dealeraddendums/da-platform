@@ -13,7 +13,7 @@ import {
   isPayingAccount,
 } from "@/lib/hubspot";
 import { isOverAllowance, isFreeAccountType, hasActiveTrialOverride } from "@/lib/print-eligibility";
-import { printedVehicleCount } from "@/lib/print-counts";
+import { printedVehicleCount, trialPrintCount } from "@/lib/print-counts";
 
 /**
  * POST /api/cron/sync-hubspot-computed
@@ -174,7 +174,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           // event-driven sync.
           stage = LIFECYCLE.ACCOUNT_DOWNGRADED;
         } else {
-          const lifetimePrints = await printedVehicleCount(admin, { dealerId: d.dealer_id });
+          const lifetimePrints = await trialPrintCount(admin, d.dealer_id);
           const expired = isOverAllowance({ created_at: d.created_at, lifetime_prints: lifetimePrints, trial_ends_at: d.trial_ends_at, trial_prints_cap: d.trial_prints_cap });
           stage = expired ? LIFECYCLE.TRIAL_EXPIRED : LIFECYCLE.DEALER_TRIAL;
           if (expired) stats.dealers_expired++;
