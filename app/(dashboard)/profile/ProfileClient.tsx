@@ -1892,6 +1892,9 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
           <p style={{ fontSize: 14, color: "#555", lineHeight: 1.6, margin: 0 }}>
             Billed by your group: <strong>{groupName}</strong>. Contact your group administrator for billing changes.
           </p>
+          <p style={{ fontSize: 13, color: "#78828c", lineHeight: 1.6, margin: "8px 0 0" }}>
+            Invoices go to your group, so an Accounts Payable email for them is set up by your group.
+          </p>
         </div>
       </div>
     );
@@ -2266,6 +2269,8 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
         </div>
       )}
 
+      <ApEmailCard />
+
       {/* ── Invoice History ──────────────────────────────────────────────── */}
       <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: 20, background: "#fff" }}>
         <div style={{ fontWeight: 600, fontSize: 15, color: "#2a2b3c", marginBottom: 12 }}>
@@ -2305,6 +2310,87 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
           </table>
         )}
       </div>
+    </div>
+  );
+}
+
+// Accounts Payable email — an extra address that receives this dealership's
+// invoices and billing notices alongside the main billing contact. Self-billed
+// dealers only (the group-billed view shows a note instead). Server:
+// /api/billing/me/ap-email (stored as a da-billing additional recipient).
+function ApEmailCard() {
+  const [state, setState] = useState<{ apEmail: string | null; mainContact: string | null; canEdit: boolean } | null>(null);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/billing/me/ap-email");
+        const j = await res.json().catch(() => ({})) as { apEmail?: string | null; mainContact?: string | null; canEdit?: boolean; billedBy?: string; noCustomer?: boolean; error?: string };
+        if (!alive) return;
+        if (!res.ok || j.billedBy !== "self" || j.noCustomer) { setUnavailable(j.error ?? "Unavailable right now."); return; }
+        setState({ apEmail: j.apEmail ?? null, mainContact: j.mainContact ?? null, canEdit: j.canEdit === true });
+        setDraft(j.apEmail ?? "");
+      } catch { if (alive) setUnavailable("Unavailable right now."); }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  async function send(method: "PUT" | "DELETE") {
+    setBusy(true); setMsg(null);
+    try {
+      const res = await fetch("/api/billing/me/ap-email", {
+        method,
+        headers: method === "PUT" ? { "Content-Type": "application/json" } : undefined,
+        body: method === "PUT" ? JSON.stringify({ email: draft.trim() }) : undefined,
+      });
+      const j = await res.json().catch(() => ({})) as { apEmail?: string | null; error?: string };
+      if (!res.ok) { setMsg({ ok: false, text: j.error ?? "Couldn't save the AP email." }); return; }
+      setState((s) => (s ? { ...s, apEmail: j.apEmail ?? null } : s));
+      setDraft(j.apEmail ?? "");
+      setMsg({ ok: true, text: method === "DELETE" ? "AP email removed." : "Saved — invoices will also go to this address." });
+    } catch { setMsg({ ok: false, text: "Couldn't save the AP email." }); }
+    finally { setBusy(false); }
+  }
+
+  const changed = state ? draft.trim().toLowerCase() !== (state.apEmail ?? "").toLowerCase() : false;
+  return (
+    <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: 20, background: "#fff" }}>
+      <div style={{ fontWeight: 600, fontSize: 15, color: "#2a2b3c", marginBottom: 4 }}>Accounts Payable (AP) email</div>
+      <div style={{ fontSize: 13, color: "#78828c", marginBottom: 12 }}>
+        Invoices and billing notices are also sent here, in addition to your main billing contact{state?.mainContact ? <> (<strong style={{ color: "#55595c" }}>{state.mainContact}</strong>)</> : null}.
+      </div>
+      {unavailable ? (
+        <div style={{ fontSize: 13, color: "#78828c" }}>{unavailable}</div>
+      ) : !state ? (
+        <div style={{ fontSize: 13, color: "#78828c" }}>Loading…</div>
+      ) : state.canEdit ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input
+            type="email" value={draft} placeholder="ap@yourdealership.com" aria-label="Accounts Payable email"
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && changed && draft.trim()) void send("PUT"); }}
+            style={{ flex: "1 1 260px", maxWidth: 360, border: "1px solid #e0e0e0", borderRadius: 4, padding: "7px 9px", fontSize: 13, fontFamily: "inherit" }}
+          />
+          <button type="button" disabled={busy || !changed || !draft.trim()} onClick={() => void send("PUT")}
+            style={{ padding: "7px 14px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: busy || !changed || !draft.trim() ? 0.5 : 1 }}>
+            {busy ? "Saving…" : state.apEmail ? "Update" : "Add"}
+          </button>
+          {state.apEmail && (
+            <button type="button" disabled={busy} onClick={() => void send("DELETE")}
+              style={{ padding: "7px 14px", background: "#fff", color: "#c62828", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+              Remove
+            </button>
+          )}
+        </div>
+      ) : (
+        <div style={{ fontSize: 13, color: "#55595c" }}>{state.apEmail ?? "None set."}</div>
+      )}
+      {msg && <div style={{ fontSize: 12, marginTop: 8, color: msg.ok ? "#2e7d32" : "#c62828" }}>{msg.text}</div>}
     </div>
   );
 }

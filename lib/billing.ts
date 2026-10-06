@@ -346,6 +346,19 @@ export async function addCustomerEmail(
   }
 }
 
+/** DELETE /customers/emails/:emailId — remove an additional invoice recipient.
+ *  The Main Contact (customer.email) is not a customer_email record and is
+ *  never touched by this. */
+export async function deleteCustomerEmail(emailId: string): Promise<void> {
+  const res = await fetch(`${BASE}/customers/emails/${encodeURIComponent(emailId)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (res.status === 404) return;
+  const text = await readBody(res);
+  if (!res.ok) throw new BillingError(res.status, `deleteCustomerEmail ${res.status}`, text);
+}
+
 export async function archiveCustomer(customerId: string): Promise<void> {
   const res = await fetch(`${BASE}/customers/${encodeURIComponent(customerId)}/archive`, {
     method: "POST",
