@@ -33,6 +33,27 @@ const IMPERSONATION_WINDOW_MS = 10 * 60_000;
 // log in; the STRICT map excludes it (display keeps it — "last seen" is fine).
 // Any later real login moves the stamp out of the window and counts again.
 const RECOVERY_WINDOW_MS = 30 * 60_000;
+// …but recovery_sent_at is NOT only stamped by reset emails. Every server-side
+// generateLink({type:"magiclink"}) for a confirmed user stamps it too — and
+// that is how invite-accept (setup-code path), passkey login and the OTP flow
+// mint their sessions. So a genuine login lands within a second of
+// recovery_sent_at and the window rule above nulled it (Millennium Dealer
+// Services' Aaron Smith, 2026-10-06: accepted his invite, registered a
+// passkey, used the group — Gate A said "no real sign-in"; 381 of 563
+// signed-in users were nulled fleet-wide).
+//
+// The only path that emails a CLICKABLE recovery link (the thing a mail
+// scanner or abandoned reset page consumes) is POST /api/users/[id]/
+// reset-password → resetPasswordForEmail, which writes an admin_audit
+// 'send_user_reset_email' row with metadata.target_email in the same request
+// since dcf1bae (deployed 2026-08-24 ~18:11 UTC). So the rule now only vetoes
+// a sign-in when that reset email is the source of recovery_sent_at. Stamps
+// older than the audit cannot be told apart and keep the old behavior.
+// (send-invite's "reset" mode also logs send_user_reset_email, but it mails a
+// setup CODE and never stamps recovery_sent_at — its rows carry metadata.mode
+// and are ignored here.)
+const RESET_AUDIT_SINCE_MS = Date.parse("2026-08-25T00:00:00Z");
+const RESET_AUDIT_MATCH_MS = 2 * 60_000;
 // FORCED-RESET EXCLUSION (2026-09-01, Straub / michaelh@): middleware pins any
 // session whose app_metadata.force_password_reset is true to /reset-password —
 // such a user cannot reach the dashboard at all, and completing a real sign-in
@@ -82,6 +103,41 @@ async function impersonationEventsByEmail(
       break;
     }
     for (const row of data ?? []) {
+      const email = (row.metadata?.target_email ?? "").trim().toLowerCase();
+      const ts = row.created_at ? Date.parse(row.created_at) : NaN;
+      if (!email || Number.isNaN(ts)) continue;
+      const arr = map.get(email) ?? [];
+      arr.push(ts);
+      map.set(email, arr);
+    }
+    if ((data ?? []).length < 1000) break;
+  }
+  return map;
+}
+
+/** email (lowercase) → times a clickable GoTrue recovery link was emailed
+ *  (POST /api/users/[id]/reset-password audit rows; see RESET_AUDIT_SINCE_MS). */
+async function resetEmailEventsByEmail(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+): Promise<Map<string, number[]>> {
+  const map = new Map<string, number[]>();
+  for (let from = 0; ; from += 1000) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (admin as any)
+      .from("admin_audit")
+      .select("created_at, metadata")
+      .eq("action", "send_user_reset_email")
+      .order("created_at", { ascending: true })
+      .range(from, from + 999) as {
+        data: { created_at: string | null; metadata: { target_email?: string; mode?: string } | null }[] | null;
+        error: { message: string } | null;
+      };
+    if (error) {
+      console.error("[last-sign-in] reset audit read failed:", error.message);
+      break;
+    }
+    for (const row of data ?? []) {
+      if (row.metadata?.mode) continue; // send-invite setup-code mail, not a GoTrue link
       const email = (row.metadata?.target_email ?? "").trim().toLowerCase();
       const ts = row.created_at ? Date.parse(row.created_at) : NaN;
       if (!email || Number.isNaN(ts)) continue;
@@ -160,12 +216,18 @@ async function buildSignInMaps(): Promise<{ display: Map<string, string | null>;
   // STRICT map: polluted entries are simply null — no legacy fallback.
   const strict = new Map(raw);
   for (const email of polluted) strict.set(email, null);
-  // STRICT-only: recovery-coincident sign-ins are not working logins either.
+  // STRICT-only: a sign-in that consumed an emailed reset link is not a
+  // working login. Only when the reset email is what stamped recovery_sent_at
+  // — our own magic-link session mints stamp it too (see RESET_AUDIT_SINCE_MS).
+  const resetEmails = await resetEmailEventsByEmail(admin);
   recoverySent.forEach((sentMs: number, email: string) => {
     const signIn = strict.get(email);
     if (!signIn) return;
     const signInMs = Date.parse(signIn);
-    if (signInMs >= sentMs && signInMs - sentMs <= RECOVERY_WINDOW_MS) strict.set(email, null);
+    if (!(signInMs >= sentMs && signInMs - sentMs <= RECOVERY_WINDOW_MS)) return;
+    const fromResetEmail = sentMs < RESET_AUDIT_SINCE_MS
+      || (resetEmails.get(email) ?? []).some(t => Math.abs(t - sentMs) <= RESET_AUDIT_MATCH_MS);
+    if (fromResetEmail) strict.set(email, null);
   });
   // STRICT-only: a still-set force_password_reset flag means the human is
   // pinned to /reset-password and has never completed a login (see header).

@@ -250,6 +250,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     recordAuthEvent({ event: "invite_accept", result: "success", email: inv.email, detail: "manual login required", req });
     return NextResponse.json({ ok: true, manualLogin: true });
   }
+  recordAuthEvent({ event: "invite_accept", result: "success", email: inv.email, req });
   return NextResponse.json({
     ok: true,
     tokenHash: linkData.properties.hashed_token,
