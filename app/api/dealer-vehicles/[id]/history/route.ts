@@ -93,15 +93,20 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
     source: "audit_log" as const,
   }));
 
-  // Supplement with print_history entries not already covered by audit_log
-  const auditPrintTimes = auditEntries
+  // Supplement with print_history entries not already covered by audit_log.
+  // "Covered" = an audit print of the SAME document type within 30s — without
+  // the type match, a Buyer's Guide printed right after an Info Sheet (the
+  // usual used-vehicle sequence) was swallowed by the Info Sheet's audit row.
+  const docKey = (d: unknown) => (d === "buyers_guide" ? "buyer_guide" : String(d ?? "addendum"));
+  const auditPrints = auditEntries
     .filter((e) => e.action === "print")
-    .map((e) => new Date(e.created_at).getTime());
+    .map((e) => ({ t: new Date(e.created_at).getTime(), doc: docKey(e.document_type) }));
 
   const supplementPrints: HistoryEntry[] = (printRows ?? [])
     .filter((ph) => {
       const t = new Date(ph.created_at as string).getTime();
-      return !auditPrintTimes.some((at) => Math.abs(at - t) < 30_000);
+      const doc = docKey(ph.document_type);
+      return !auditPrints.some((a) => a.doc === doc && Math.abs(a.t - t) < 30_000);
     })
     .map((ph) => ({
       id: ph.id as string,
