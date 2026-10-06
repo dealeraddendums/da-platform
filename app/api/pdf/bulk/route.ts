@@ -13,6 +13,7 @@ import { resolveTemplate, resolveSecondAddendum, createTemplateResolverCache, SE
 // the PDF service too, the single buyers-guide route's pattern shows
 // how (fetch BG bytes from Supabase Storage, ship to service).
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
+import { flipBackPages } from "@/lib/buyers-guide-duplex";
 import { useService as usePdfService, renderBulkViaService, type BulkItem, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, autoMatchedLibraryRows, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
@@ -234,7 +235,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             docType: "buyer_guide",
           });
           bgJobs.push({ vehicleId, pdfBuffer, s3Key, dvDealerId: dv.dealer_id, dvVin: dv.vin ?? null, dealerUuid: dealer?.id ?? null, docType: "buyer_guide", options: [] });
-          pdfBuffers.push(pdfBuffer);
+          // Duplex flip (opt-in) on the PRINTED copy only — bgJobs keeps the
+          // upright guide for the per-vehicle S3 upload the website links.
+          pdfBuffers.push(warranty.flip_back_page === true ? await flipBackPages(pdfBuffer) : pdfBuffer);
           console.log(`[BULK]   buyers_guide rendered vehicleId=${vehicleId}`);
           continue;
         }

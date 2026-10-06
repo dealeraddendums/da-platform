@@ -9,6 +9,7 @@ import { getBuyersGuidePdfBytes } from "@/lib/buyers-guide-storage";
 import type { BgKey } from "@/lib/buyers-guide-constants";
 import JSZip from "jszip";
 import { PDFDocument } from "pdf-lib";
+import { flipBackPages } from "@/lib/buyers-guide-duplex";
 
 /**
  * POST /api/pdf/buyers-guide
@@ -95,6 +96,10 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     : null;
 
   const savedDefaults = settings?.buyers_guide_defaults ?? null;
+  // Duplex flip (opt-in): applied to the PRINTED output only, after the
+  // service has uploaded the upright guide to S3. Single-side prints skip it.
+  const flipBack = savedDefaults?.flip_back_page === true;
+  const forPrint = (buf: Buffer) => (flipBack ? flipBackPages(buf) : Promise.resolve(buf));
   const warranty: BuyersGuideDefaults = {
     warranty_type: 'as_is',
     ...savedDefaults,
@@ -224,7 +229,7 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
         const pages = await merged.copyPages(src, src.getPageIndices());
         for (const page of pages) merged.addPage(page);
       }
-      const mergedBytes = await merged.save();
+      const mergedBytes = await forPrint(Buffer.from(await merged.save()));
       return new NextResponse(Buffer.from(mergedBytes) as unknown as BodyInit, {
         status: 200,
         headers: {
@@ -238,8 +243,8 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     }
 
     const zip = new JSZip();
-    zip.file(`${base}_english.pdf`, enBuffer);
-    zip.file(`${base}_spanish.pdf`, esBuffer);
+    zip.file(`${base}_english.pdf`, await forPrint(enBuffer));
+    zip.file(`${base}_spanish.pdf`, await forPrint(esBuffer));
     const zipBuffer = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 
     return new NextResponse(zipBuffer as BodyInit, {
@@ -261,7 +266,7 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
     docType: 'buyer_guide',
   });
   const rendered = await generateOneLang(language, s3Key);
-  const buffer = pages === 'all' ? rendered : await trimToSide(rendered, pages);
+  const buffer = pages === 'all' ? await forPrint(rendered) : await trimToSide(rendered, pages);
   const printToken = await stashPrint(s3Key);
   return new NextResponse(buffer as unknown as BodyInit, {
     status: 200,

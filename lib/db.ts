@@ -516,6 +516,12 @@ export type BuyersGuideDefaults = {
    *  Display/workflow only: it never changes what a guide contains, and the
    *  operator can switch modes for a single guide without saving. */
   print_mode?: 'single_sides' | 'both_sides';
+  /** Double-sided (duplex) printing: turn the BACK page 180° in printed
+   *  guides so both sides come out upright on one sheet (Fowler Honda,
+   *  2026-10-06). Opt-in — it would print upside down single-sided or on the
+   *  other duplex flip mode. Never applied to single-side prints or to the
+   *  website copy in S3. See lib/buyers-guide-duplex.ts. */
+  flip_back_page?: boolean;
 };
 
 export type DealerCustomSizeRow = {

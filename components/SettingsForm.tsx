@@ -428,6 +428,15 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
               </p>
             </div>
             <div className="mb-3">
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={settings.buyers_guide_defaults?.flip_back_page ?? false} onChange={e => setBgDefaults("flip_back_page", e.target.checked)} />
+                <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Flip back page for double-sided printing</span>
+              </label>
+              <p className="text-xs" style={{ color: "var(--text-muted)", marginTop: 4 }}>
+                Turn this on if the back of the guide prints upside down when you print front and back on one sheet. Leave it off for single-sided printing.
+              </p>
+            </div>
+            <div className="mb-3">
               <label className="label">Default Warranty Type</label>
               <select className="input w-full" value={settings.buyers_guide_defaults?.warranty_type ?? "as_is"} onChange={e => setBgDefaults("warranty_type", e.target.value as BuyersGuideDefaults["warranty_type"])}>
                 {Object.entries(WARRANTY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
