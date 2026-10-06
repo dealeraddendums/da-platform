@@ -21,8 +21,6 @@ export interface GroupMember { id: string; dealer_id: string; name: string; acti
 /** What the editor needs. `members` present = group mode. */
 export interface EditorCfg {
   product_names: string[]; standard_mapping: Col[]; fields: string[]; list_fields: string[]; list_field_defaults: Record<string, string>;
-  /** Discount / mark-up names — already handled by the export, so the picker turns them away. */
-  handled_names?: string[];
   default_feed_dealer_id?: string;
   members?: GroupMember[];
 }
@@ -55,7 +53,7 @@ export async function downloadExportFile(url: string): Promise<string | null> {
 type Initial = Exp & { covers_all_members?: boolean; dealers?: Array<{ dealer_uuid: string; feed_dealer_id: string }> };
 interface Meta {
   dealer: { name: string; default_feed_dealer_id: string };
-  covered_by: Covering[]; can_create: boolean; can_override: boolean; exports: Exp[]; product_names: string[]; handled_names?: string[];
+  covered_by: Covering[]; can_create: boolean; can_override: boolean; exports: Exp[]; product_names: string[];
   standard_mapping: Col[]; fields: string[]; list_fields: string[]; list_field_defaults: Record<string, string>;
 }
 
@@ -79,26 +77,12 @@ function blankExport(cfg: EditorCfg): Omit<Exp, "id" | "has_password" | "last_pu
   };
 }
 
-// Same test the export generator uses to recognise an added mark-up line.
-const MARKUP_RE = /mark[\s-]?up/i;
-
-// Name chips + a picker of the dealer's own product/fee names (free-add
-// allowed). Discounts and mark-ups are already handled by the export itself,
-// so they're never offered and a typed one is turned away with a note.
-function NamePicker({ names, handled = [], value, onChange, listId }: {
-  names: string[]; handled?: string[]; value: string[]; onChange: (v: string[]) => void; listId: string;
-}) {
+// Name chips + a picker of the dealer's own product/fee names (free-add allowed).
+function NamePicker({ names, value, onChange, listId }: { names: string[]; value: string[]; onChange: (v: string[]) => void; listId: string }) {
   const [draft, setDraft] = useState("");
-  const [note, setNote] = useState<string | null>(null);
   const add = () => {
     const t = draft.trim();
-    setNote(null);
-    if (!t) return;
-    if (MARKUP_RE.test(t) || handled.some((h) => h.toLowerCase() === t.toLowerCase())) {
-      setNote(`"${t}" is a discount or mark-up — those are already handled, so there's no need to add it.`);
-      return;
-    }
-    if (!value.some((v) => v.toLowerCase() === t.toLowerCase())) onChange([...value, t]);
+    if (t && !value.some((v) => v.toLowerCase() === t.toLowerCase())) onChange([...value, t]);
     setDraft("");
   };
   return (
@@ -116,7 +100,6 @@ function NamePicker({ names, handled = [], value, onChange, listId }: {
         <datalist id={listId}>{names.map((n) => <option key={n} value={n} />)}</datalist>
         <button type="button" onClick={add} style={btn()}>Add</button>
       </div>
-      {note && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{note}</div>}
     </div>
   );
 }
@@ -290,14 +273,11 @@ export function ExportEditor({ cfg, urls, initial, override, onDone, onCancel }:
           </select></div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "16px 0 4px" }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: C.navy }}>Leave out of prices</span>
-        <span style={{ fontSize: 12, color: C.muted }}>(discounts and mark-ups are already handled)</span>
-      </div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: C.navy, margin: "16px 0 4px" }}>Leave out of prices</div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
-        Add other products or fees, such as a Doc Fee. They&apos;re removed from the item lists <b>and</b> from the subtotal and total, in every column.
+        Everything is sent unless you add it here — including discounts and mark-ups. Anything you add is removed from the item lists <b>and</b> from the subtotal and total, in every column.
       </div>
-      <NamePicker names={meta.product_names} handled={meta.handled_names} value={f.export_exclusions} onChange={(v) => set("export_exclusions", v)} listId="exp-names-main" />
+      <NamePicker names={meta.product_names} value={f.export_exclusions} onChange={(v) => set("export_exclusions", v)} listId="exp-names-main" />
       <div style={{ display: "flex", gap: 16, fontSize: 12, marginTop: 8 }}>
         {(["exact", "contains"] as const).map((m) => (
           <label key={m} style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
@@ -346,7 +326,7 @@ export function ExportEditor({ cfg, urls, initial, override, onDone, onCancel }:
               )}
               {c.exclusions && (
                 <div style={{ marginTop: 6 }}>
-                  <NamePicker names={meta.product_names} handled={meta.handled_names} value={c.exclusions} onChange={(v) => setCol(i, { exclusions: v })} listId={`exp-names-${i}`} />
+                  <NamePicker names={meta.product_names} value={c.exclusions} onChange={(v) => setCol(i, { exclusions: v })} listId={`exp-names-${i}`} />
                 </div>
               )}
             </div>

@@ -3,7 +3,7 @@ import { fireWrite } from "@/lib/db";
 import { encryptSecret } from "@/lib/secret-box";
 import { checkPublicFtpHost } from "@/lib/ftp-host-guard";
 import {
-  groupExportContext, groupMembers, groupExportPlan, parseExportInput, parseGroupTarget, serializeExport, splitLeaveOutNames,
+  groupExportContext, groupMembers, groupExportPlan, parseExportInput, parseGroupTarget, serializeExport,
   STANDARD_MAPPING, DEALER_EXPORT_FIELDS, LIST_FIELDS,
 } from "@/lib/dealer-exports";
 import { LIST_FIELD_DEFAULT_SEPARATOR, type FeedCompanyRow } from "@/lib/feed-export";
@@ -12,17 +12,20 @@ import { LIST_FIELD_DEFAULT_SEPARATOR, type FeedCompanyRow } from "@/lib/feed-ex
 // owner_scope='group', owner_id = the group. Access rules: groupExportContext.
 
 /** Product/fee names across the group's corporate products and its members'
- *  libraries, for the leave-out picker — minus discounts and mark-ups, which
- *  the export already handles (returned as `handled`). */
-async function groupProductNames(admin: import("@/lib/dealer-exports").Admin, groupId: string, dealerTextIds: string[]): Promise<{ names: string[]; handled: string[] }> {
-  const rows: Array<{ name: unknown; price: unknown }> = [];
-  const { data: grp } = await admin.from("group_options").select("option_name, option_price").eq("group_id", groupId).eq("active", true).limit(1000);
-  (grp ?? []).forEach((r: { option_name: string; option_price: string | null }) => rows.push({ name: r.option_name, price: r.option_price }));
+ *  libraries, for the leave-out picker. */
+async function groupProductNames(admin: import("@/lib/dealer-exports").Admin, groupId: string, dealerTextIds: string[]): Promise<string[]> {
+  const toText = (s: unknown) => String(s ?? "").replace(/<[^>]*>/g, " ")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0*39;/g, "'")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+  const names = new Map<string, string>();
+  const add = (n: unknown) => { const t = toText(n); if (t && t.length <= 200 && !names.has(t.toLowerCase())) names.set(t.toLowerCase(), t); };
+  const { data: grp } = await admin.from("group_options").select("option_name").eq("group_id", groupId).eq("active", true).limit(1000);
+  (grp ?? []).forEach((r: { option_name: string }) => add(r.option_name));
   if (dealerTextIds.length) {
-    const { data: lib } = await admin.from("addendum_library").select("option_name, item_price").in("dealer_id", dealerTextIds.slice(0, 300)).limit(3000);
-    (lib ?? []).forEach((r: { option_name: string; item_price: string | null }) => rows.push({ name: r.option_name, price: r.item_price }));
+    const { data: lib } = await admin.from("addendum_library").select("option_name").in("dealer_id", dealerTextIds.slice(0, 300)).limit(3000);
+    (lib ?? []).forEach((r: { option_name: string }) => add(r.option_name));
   }
-  return splitLeaveOutNames(rows);
+  return Array.from(names.values()).sort((a, b) => a.localeCompare(b));
 }
 
 export async function GET(_req: Request, { params }: { params: { id: string } }): Promise<NextResponse> {
@@ -43,7 +46,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     members,
     exports: exportsOut,
     can_override: ctx.isSuperAdmin,
-    ...(await groupProductNames(ctx.admin, ctx.group.id, members.map((m) => m.dealer_id)).then((n) => ({ product_names: n.names, handled_names: n.handled }))),
+    product_names: await groupProductNames(ctx.admin, ctx.group.id, members.map((m) => m.dealer_id)),
     standard_mapping: STANDARD_MAPPING,
     fields: DEALER_EXPORT_FIELDS,
     list_fields: LIST_FIELDS,

@@ -11,9 +11,8 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveDealerForRequest } from "@/lib/dealer-authz";
-import { parseOptionPriceValue } from "@/lib/options-engine";
 import {
-  RAW_FIELDS, COMPUTED_FIELDS, LIST_FIELD_DEFAULT_SEPARATOR, LIST_SEPARATORS, resolveFeedDealers, isAddedMarkup,
+  RAW_FIELDS, COMPUTED_FIELDS, LIST_FIELD_DEFAULT_SEPARATOR, LIST_SEPARATORS, resolveFeedDealers,
   type ColumnMapping, type FeedCompanyRow, type ListSeparator,
 } from "@/lib/feed-export";
 
@@ -362,34 +361,4 @@ export async function groupExportPlan(admin: Admin, feed: FeedCompanyRow) {
     dealers: plan.rows.map((r) => ({ dealer_uuid: r.dealer_uuid, name: r.dealers?.name ?? "", feed_dealer_id: r.feed_dealer_id })),
     excluded: plan.excluded,
   };
-}
-
-// ── Leave-out picker names ───────────────────────────────────────────────────
-
-const nameToText = (s: unknown) => String(s ?? "").replace(/<[^>]*>/g, " ")
-  .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0*39;/g, "'")
-  .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
-
-/**
- * Split candidate product/fee names for the "leave out of prices" picker.
- * Discounts (negative-priced lines) and mark-ups (names the generator's own
- * isAddedMarkup matches) are ALREADY handled by the built-in export logic, so
- * they're kept out of the picker and returned separately as `handled` — the
- * editor uses that list to turn a typed discount/mark-up name away instead of
- * adding it (owner leave-outs are for other items: Doc Fee, EVR, …). A name
- * that is a discount anywhere counts as handled.
- */
-export function splitLeaveOutNames(rows: Array<{ name: unknown; price: unknown }>): { names: string[]; handled: string[] } {
-  const names = new Map<string, string>();
-  const handled = new Map<string, string>();
-  for (const r of rows) {
-    const t = nameToText(r.name);
-    if (!t || t.length > 200) continue;
-    const key = t.toLowerCase();
-    const isHandled = isAddedMarkup(t) || parseOptionPriceValue(r.price == null ? null : String(r.price)) < 0;
-    if (isHandled) { handled.set(key, t); names.delete(key); }
-    else if (!handled.has(key) && !names.has(key)) names.set(key, t);
-  }
-  const sort = (m: Map<string, string>) => Array.from(m.values()).sort((a, b) => a.localeCompare(b));
-  return { names: sort(names), handled: sort(handled) };
 }
