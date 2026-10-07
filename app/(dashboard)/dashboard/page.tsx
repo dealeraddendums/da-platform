@@ -10,6 +10,7 @@ import { printedVehicleCount, printedVehicleUnionCount } from "@/lib/print-count
 import { accountTier } from "@/lib/account-tiers";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import { PageHeader } from "@/components/PageHeader";
+import DocumentTitle from "@/components/DocumentTitle";
 import ActivitySection from "@/components/dashboard/ActivitySection";
 import type { DealerMapPoint } from "@/components/dashboard/ActivitySection";
 
@@ -232,7 +233,8 @@ async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId:
 
   return (
     <div>
-      <PageHeader title="Dashboard" />
+      <DocumentTitle title="Inventory — DA Platform" />
+      <PageHeader title="Inventory" />
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
         {dealerStats.map((s) => (
           <div key={s.label} className="card p-4">
@@ -494,7 +496,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: {
   if (!dealerId) {
     return (
       <div>
-        <PageHeader title="Dashboard" />
+        <PageHeader title="Inventory" />
         <div className="card p-6"><p style={{ color: "var(--text-muted)" }}>No dealer assigned to your account. Contact your administrator.</p></div>
       </div>
     );

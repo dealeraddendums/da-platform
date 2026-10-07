@@ -22,6 +22,8 @@ type NavSection = {
 
 type NavEntry = NavItem | NavSection;
 
+const DEALER_NAV_ROLES = new Set<string>(["dealer_admin", "dealer_user", "dealer_restricted"]);
+
 const nav: NavEntry[] = [
   // ── Main ─────────────────────────────────────────────────────────────────────
   {
@@ -180,7 +182,7 @@ const nav: NavEntry[] = [
     ),
   },
   // Divider sits between Print Settings and Order Supplies per the
-  // documented dealer-role nav: Dashboard → Products → Builder → Users →
+  // documented dealer-role nav: Inventory (/dashboard) → Products → Builder → Users →
   // My Profile → Print Settings → [divider] → Order Supplies → Help.
   {
     section: "",
@@ -575,7 +577,10 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
               </div>
             );
           }
-          const item = entry as NavItem;
+          const raw = entry as NavItem;
+          // The dealer view's /dashboard IS the inventory list — call it that.
+          // Operator dashboards (super_admin, group) keep "Dashboard".
+          const item = raw.href === "/dashboard" && DEALER_NAV_ROLES.has(role) ? { ...raw, label: "Inventory" } : raw;
           const isActive = getIsActive(item);
           return item.disabled ? (
             <div key={item.href} className="nav-item disabled" style={item.itemStyle}>
