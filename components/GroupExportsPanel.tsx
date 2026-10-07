@@ -22,8 +22,9 @@ type GroupExport = Parameters<typeof ExportEditor>[0]["initial"] & {
 };
 interface Meta extends EditorCfg { group: { id: string; name: string }; exports: NonNullable<GroupExport>[]; can_override: boolean }
 
-export default function GroupExportsPanel({ groupId }: { groupId: string }) {
-  const [open, setOpen] = useState(false);
+export default function GroupExportsPanel({ groupId, inTab = false }: { groupId: string; inTab?: boolean }) {
+  // inTab: rendered as the My Group page's "Exports" tab — open, no top gap.
+  const [open, setOpen] = useState(inTab);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState<NonNullable<GroupExport> | "new" | null>(null);
@@ -67,7 +68,7 @@ export default function GroupExportsPanel({ groupId }: { groupId: string }) {
   };
 
   return (
-    <div className="mt-6" style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 6, padding: "16px 24px", fontFamily: "Roboto, sans-serif" }}>
+    <div className={inTab ? "" : "mt-6"} style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 6, padding: "16px 24px", fontFamily: "Roboto, sans-serif" }}>
       <button type="button" onClick={() => setOpen((o) => !o)}
         style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
         <span style={{ display: "flex", alignItems: "baseline", gap: 10 }}>

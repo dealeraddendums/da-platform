@@ -18,8 +18,9 @@ const CATEGORIES: { bucket: string; label: string; maxMB: number }[] = [
   { bucket: "new-infobox-images", label: "Infobox / Logo Images", maxMB: 5 },
 ];
 
-export default function GroupImagesPanel({ groupId }: { groupId: string }) {
-  const [open, setOpen] = useState(false);
+export default function GroupImagesPanel({ groupId, inTab = false }: { groupId: string; inTab?: boolean }) {
+  // inTab: rendered as the My Group page's "Group Image Library" tab — open, no top gap.
+  const [open, setOpen] = useState(inTab);
   const [images, setImages] = useState<GroupImage[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -77,7 +78,7 @@ export default function GroupImagesPanel({ groupId }: { groupId: string }) {
   const maxMB = CATEGORIES.find((c) => c.bucket === category)?.maxMB ?? 5;
 
   return (
-    <div className="card" style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: 0, marginTop: 24 }}>
+    <div className="card" style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: 0, marginTop: inTab ? 0 : 24 }}>
       <div
         onClick={() => setOpen((o) => !o)}
         style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", padding: "16px 20px" }}

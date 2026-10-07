@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useEffect, useCallback } from "react";
+import { Fragment, useState, useEffect, useCallback, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { GroupOptionRow, GroupDisclaimerRow, GroupTemplateRow } from "@/lib/db";
 import CorporateProductModal from "@/components/CorporateProductModal";
@@ -17,9 +17,16 @@ import LoginCodeModal from "@/components/LoginCodeModal";
 type Props = {
   groupId: string;
   isSuperAdmin?: boolean;
+  /** Feature panels rendered by the page and shown as their own tabs (the
+   *  page used to stack them under the tab bar, all visible at once). */
+  memberDealers?: ReactNode;
+  imageLibrary?: ReactNode;
+  imageBuilder?: ReactNode;
+  exports?: ReactNode;
 };
 
-type Tab = "users" | "billing" | "options" | "disclaimers" | "templates";
+type Tab = "users" | "members" | "templates" | "options" | "disclaimers" | "images" | "imageBuilder" | "exports" | "billing";
+const TAB_IDS: Tab[] = ["users", "members", "templates", "options", "disclaimers", "images", "imageBuilder", "exports", "billing"];
 
 // Open the Builder in GROUP mode. If the viewer is a group_admin currently
 // switched into a member dealer (active_dealer_id set), clear that first —
@@ -37,22 +44,37 @@ async function openGroupBuilder(url: string): Promise<void> {
   window.location.href = url;
 }
 
-export default function GroupOptionsPanel({ groupId, isSuperAdmin = false }: Props) {
+export default function GroupOptionsPanel({ groupId, isSuperAdmin = false, memberDealers, imageLibrary, imageBuilder, exports }: Props) {
 
-  const [tab, setTab] = useState<Tab>("users");
+  const [tab, setTabState] = useState<Tab>("users");
+  // ?tab=… keeps the selected tab across a refresh and makes tabs linkable.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab") as Tab | null;
+    if (t && TAB_IDS.includes(t)) setTabState(t);
+  }, []);
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", t);
+    window.history.replaceState(null, "", url.toString());
+  };
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "users", label: "Users" },
-    { id: "billing", label: "Billing" },
+    ...(memberDealers ? [{ id: "members" as Tab, label: "Member Dealers" }] : []),
+    { id: "templates", label: "Templates" },
     { id: "options", label: "Corporate Products" },
     { id: "disclaimers", label: "Disclaimers" },
-    { id: "templates", label: "Templates" },
+    ...(imageLibrary ? [{ id: "images" as Tab, label: "Group Image Library" }] : []),
+    ...(imageBuilder ? [{ id: "imageBuilder" as Tab, label: "Image Builder" }] : []),
+    ...(exports ? [{ id: "exports" as Tab, label: "Exports" }] : []),
+    { id: "billing", label: "Billing" },
   ];
 
   return (
     <div className="mt-6">
       {/* Tab bar */}
-      <div className="flex gap-1 mb-0" style={{ borderBottom: "1px solid var(--border)" }}>
+      <div className="flex flex-wrap gap-1 mb-0" style={{ borderBottom: "1px solid var(--border)" }}>
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -77,6 +99,10 @@ export default function GroupOptionsPanel({ groupId, isSuperAdmin = false }: Pro
         {tab === "options" && <OptionsTab groupId={groupId} />}
         {tab === "disclaimers" && <DisclaimersTab groupId={groupId} />}
         {tab === "templates" && <TemplatesTab groupId={groupId} />}
+        {tab === "members" && memberDealers}
+        {tab === "images" && imageLibrary}
+        {tab === "imageBuilder" && imageBuilder}
+        {tab === "exports" && exports}
       </div>
     </div>
   );
@@ -973,7 +999,7 @@ const assignButtonStyle: React.CSSProperties = {
   color: "#78828c", cursor: "pointer", whiteSpace: "nowrap",
 };
 
-function assignmentBadge(allDealers: boolean, count: number): React.ReactNode {
+function assignmentBadge(allDealers: boolean, count: number): ReactNode {
   if (allDealers) {
     return (
       <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #c8e6c9", whiteSpace: "nowrap" }}>
