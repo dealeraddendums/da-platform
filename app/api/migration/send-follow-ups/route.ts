@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMigrationFollowUp } from "@/lib/migration-invite-otp";
+import { retryPendingLegacyLockouts } from "@/lib/first-login-migration";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // sync-hubspot-computed); results land in the PM2 log.
   const responseData = { queued: dealers.length };
   void processFollowUps(dealers);
+  // Same daily tick: finish any 4.0 lockout that failed or timed out at
+  // migration time (first-login migrations land the user before 4.0 answers).
+  void retryPendingLegacyLockouts(admin).catch((e) => console.error("[lockout-sweep] failed:", e instanceof Error ? e.message : e));
   return NextResponse.json(responseData);
 }
 

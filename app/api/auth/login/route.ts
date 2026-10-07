@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { isUsableOnV5 } from "@/lib/v5-usable";
 import { rateLimit } from "@/lib/rate-limit";
 import { recordAuthEvent, clientIp } from "@/lib/auth-events";
+import { migrateOnFirstDealerLogin, LIVE_ON_5_COOKIE, LIVE_ON_5_COOKIE_MAX_AGE } from "@/lib/first-login-migration";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -169,8 +170,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // Cookies already attached by the ssr client. Success returns immediately.
         return NextResponse.json({ ok: true, redirect: next });
       }
-      // Correct password but the dealer isn't usable on 5.0 (would hit
-      // /not-migrated), or the dealer_id resolves to no dealers row. Discard the
+      // Correct 5.0 password on a dealer that isn't on 5.0 yet. If this is the
+      // dealer's OWN user and the dealer is provisioned, this login IS the
+      // migration (lib/first-login-migration.ts): migrate, lock 4.0, land on
+      // the 5.0 dashboard with a one-time notice. Operators never reach here
+      // (isUsableOnV5 is always true for them).
+      const first = await migrateOnFirstDealerLogin({ userId: data.user.id, email, via: "password", admin });
+      if (first.usable) {
+        clearFails(lockKey);
+        recordAuthEvent({
+          event: "password_verify", result: "success", email, userId: data.user?.id, req,
+          detail: first.migratedNow ? `first-login migration (4.0 lockout ${first.lockout})` : null,
+        });
+        const res = NextResponse.json({ ok: true, redirect: next });
+        if (first.migratedNow) {
+          res.cookies.set(LIVE_ON_5_COOKIE, "1", { path: "/", maxAge: LIVE_ON_5_COOKIE_MAX_AGE, sameSite: "lax", secure: true });
+        }
+        return res;
+      }
+      // Not a first-login migration (unprovisioned dealer, restricted role, or
+      // the write failed and changed nothing). Today's behavior: discard the
       // 5.0 session so NO cookie is set, and fall through to the 4.0 handoff where
       // they have a working login. Not a credential failure -> no lockout strike.
       await supabase.auth.signOut({ scope: "local" });

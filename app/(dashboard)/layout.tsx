@@ -11,6 +11,8 @@ import Topbar from "@/components/Topbar";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import PlatformBanner from "@/components/PlatformBanner";
 import UnmigratedNotice from "@/components/UnmigratedNotice";
+import LiveOn5Notice from "@/components/LiveOn5Notice";
+import { LIVE_ON_5_COOKIE } from "@/lib/first-login-migration";
 import { isDealerMigratedOnV5 } from "@/lib/v5-usable";
 import MainContent from "@/components/MainContent";
 import ProductFruitsWidget from "@/components/ProductFruitsWidget";
@@ -120,6 +122,10 @@ export default async function DashboardLayout({
   // a dismissible "you're not fully migrated yet" notice; migrated and
   // V5-native (ss_/ga_) dealers see nothing, and super_admin/group roles
   // were never gated.
+  // One-time "you're live on 5.0" notice — set only by the login that
+  // migrated this dealer (lib/first-login-migration.ts), cleared on first show.
+  const showLiveOn5 = isDealerRole && !isImpersonating && cookieStore.get(LIVE_ON_5_COOKIE)?.value === "1"
+    && isDealerMigratedOnV5(dealerData);
   let unmigratedNoticeStatus: string | null = null;
   if (isDealerRole && !isImpersonating) {
     // V5-native prefixes: ss_ = self-serve trial (lib/provisioning.ts),
@@ -212,6 +218,7 @@ export default async function DashboardLayout({
       <div className="flex flex-col flex-1 overflow-hidden">
         <ImpersonationBanner />
         <PlatformBanner />
+        {showLiveOn5 && <LiveOn5Notice cookieName={LIVE_ON_5_COOKIE} />}
         {unmigratedNoticeStatus && (
           <UnmigratedNotice status={unmigratedNoticeStatus} dealerTextId={dealerData?.dealer_id ?? ""} />
         )}

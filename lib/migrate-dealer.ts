@@ -58,8 +58,13 @@ export async function migrateDealerRecord(
      *  (awaited, abort-on-failure) instead of this fire-and-forget one, so a
      *  4.0 failure can roll the whole force back. */
     skipLegacyLockout?: boolean;
+    /** First-login flow only: make the status write ATOMIC — it applies only
+     *  while the dealer is still not migrated, so two simultaneous first
+     *  logins (two PM2 workers, two users) can't both run the migration side
+     *  effects. Losing the race returns { ok:false, alreadyMigrated:true }. */
+    onlyIfNotMigrated?: boolean;
   },
-): Promise<{ ok: boolean; error?: string; plan: string }> {
+): Promise<{ ok: boolean; error?: string; plan: string; alreadyMigrated?: boolean }> {
   const plan = paidTierFor(dealer.inventory_provider_is_dms, dealer.inventory_provider);
   const patch: Record<string, unknown> = {
     migration_status: "migrated",
@@ -68,9 +73,19 @@ export async function migrateDealerRecord(
     downgraded_at: null,
     ...(opts.extraPatch ?? {}),
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (admin as any).from("dealers").update(patch).eq("id", dealer.id);
-  if (error) return { ok: false, error: error.message, plan };
+  if (opts.onlyIfNotMigrated) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: claimed, error } = await (admin as any).from("dealers").update(patch)
+      .eq("id", dealer.id)
+      .or("migration_status.is.null,migration_status.neq.migrated")
+      .select("id");
+    if (error) return { ok: false, error: error.message, plan };
+    if (!claimed || claimed.length === 0) return { ok: false, error: "already migrated", plan, alreadyMigrated: true };
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (admin as any).from("dealers").update(patch).eq("id", dealer.id);
+    if (error) return { ok: false, error: error.message, plan };
+  }
 
   // billing_cutover_at: stamp only if not already stamped — since 2026-08-17
   // the cutover fires at INVITE for self-billed dealers, and the invite-time

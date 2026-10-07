@@ -3,6 +3,7 @@ import { recordAuthEvent } from "@/lib/auth-events";
 import { verifyAuthenticationResponse } from "@simplewebauthn/server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { migrateOnFirstDealerLogin, LIVE_ON_5_COOKIE, LIVE_ON_5_COOKIE_MAX_AGE } from "@/lib/first-login-migration";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: { credential: AuthenticationResponseJSON; challengeId: string };
@@ -137,6 +138,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // the session exchange so a mint failure still leaves a trail of the attempt.
   recordAuthEvent({ event: "passkey_verify", result: "success", email: user.email, userId: passkey.user_id, req });
 
+  // First-login migration: a dealer's own user signing in to an unmigrated,
+  // provisioned dealer migrates it (lib/first-login-migration.ts). The passkey
+  // login proceeds either way — it never checked migration state before.
+  const first = await migrateOnFirstDealerLogin({ userId: passkey.user_id, email: user.email, via: "passkey", admin });
+  const migratedNow = first.usable && first.migratedNow;
+
   // Generate a magic link token and immediately exchange it server-side for a session
   const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
     type: "magiclink",
@@ -181,8 +188,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  return NextResponse.json({
+  const res = NextResponse.json({
     access_token: sessionData.access_token,
     refresh_token: sessionData.refresh_token,
   });
+  if (migratedNow) {
+    res.cookies.set(LIVE_ON_5_COOKIE, "1", { path: "/", maxAge: LIVE_ON_5_COOKIE_MAX_AGE, sameSite: "lax", secure: true });
+  }
+  return res;
 }

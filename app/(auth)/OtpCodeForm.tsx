@@ -83,10 +83,18 @@ export default function OtpCodeForm({
       setLoading(false);
       return;
     }
-    report("success");
-
     // Ensure the session is established (cookies written) before handing off.
     await supabase.auth.getSession();
+    // The success report is AWAITED (bounded): with the session cookie now set,
+    // the server may migrate this user's dealer on its first login
+    // (lib/first-login-migration.ts) and must finish before we navigate.
+    try {
+      await fetch("/api/auth/event", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "otp_verify", result: "success", email: cleanEmail }),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch { /* never block a login on this */ }
     setLoading(false);
     await onVerified();
   }
