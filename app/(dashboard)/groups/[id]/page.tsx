@@ -9,6 +9,7 @@ import GroupProfileCard, { GroupDealers } from "@/components/GroupProfileCard";
 import GroupOptionsPanel from "@/components/GroupOptionsPanel";
 import GroupImagesPanel from "@/components/GroupImagesPanel";
 import GroupExportsPanel from "@/components/GroupExportsPanel";
+import DesignList from "@/components/image-builder/DesignList";
 
 type Props = { params: { id: string } };
 
@@ -20,7 +21,7 @@ export default async function GroupPage({ params }: Props) {
   if (!session) redirect("/login");
 
   const admin = createAdminSupabaseClient();
-  const profile = await resolveSessionProfile<{ role: string; group_id: string | null; active_dealer_id: string | null; can_use_image_builder: boolean | null }>(admin, session, "role, group_id, active_dealer_id, can_use_image_builder");
+  const profile = await resolveSessionProfile<{ role: string; group_id: string | null; active_dealer_id: string | null }>(admin, session, "role, group_id, active_dealer_id");
 
   const role = profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
@@ -104,38 +105,9 @@ export default async function GroupPage({ params }: Props) {
           isSuperAdmin={isSuperAdmin}
           memberDealers={<GroupDealers groupId={params.id} isSuperAdmin={isSuperAdmin} isGroupAdmin={isGroupAdmin} isRestyler={(groupData as { is_restyler?: boolean } | null)?.is_restyler === true} />}
           imageLibrary={<GroupImagesPanel groupId={params.id} inTab />}
-          imageBuilder={<GroupImageBuilderTab canUse={isSuperAdmin || profile?.can_use_image_builder === true} />}
+          imageBuilder={<DesignList groupId={params.id} />}
           exports={<GroupExportsPanel groupId={params.id} inTab />}
         />
-      )}
-    </div>
-  );
-}
-
-/**
- * Image Builder tab. The Image Builder (/admin/image-builder, migration 163)
- * is a STAFF tool today — super_admin or a per-user grant — and its exports
- * land in the platform image library. A group-scoped builder (designs saved to
- * the group's own library, usable by group admins) is not built yet, so this
- * tab opens the real tool for staff and says so plainly for everyone else.
- */
-function GroupImageBuilderTab({ canUse }: { canUse: boolean }) {
-  return (
-    <div className="card p-6" style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6 }}>
-      <p className="font-semibold" style={{ color: "var(--text-primary)", marginBottom: 8 }}>Image Builder</p>
-      {canUse ? (
-        <>
-          <p style={{ color: "var(--text-secondary)", fontSize: 14, marginBottom: 16 }}>
-            Design backgrounds and images for addendums. Exported images are saved to the platform image library.
-          </p>
-          <Link href="/admin/image-builder" className="btn btn-primary">Open Image Builder →</Link>
-        </>
-      ) : (
-        <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>
-          The Image Builder isn&apos;t available for groups yet. To have a custom background or image made for your group,
-          contact <a href="mailto:support@dealeraddendums.com" style={{ color: "#1976d2" }}>support@dealeraddendums.com</a> — or upload
-          your own images on the Group Image Library tab.
-        </p>
       )}
     </div>
   );

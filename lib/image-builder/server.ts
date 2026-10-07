@@ -6,7 +6,7 @@
 // never overwritten.
 
 import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { REGION, s3Client } from "@/lib/image-library";
+import { REGION, s3Client, scopedKey } from "@/lib/image-library";
 import { fireWrite } from "@/lib/db";
 import { builderDb } from "./access";
 import { IMAGE_TYPES, type DesignDoc, type ImageType } from "./spec";
@@ -14,7 +14,7 @@ import { IMAGE_TYPES, type DesignDoc, type ImageType } from "./spec";
 export { checkExport } from "./export-check";
 
 export const DESIGN_LIST_COLUMNS =
-  "id, dealer_uuid, image_type, name, is_template, exported_image_id, replaces_image_id, created_by, created_at, updated_at";
+  "id, dealer_uuid, group_id, image_type, name, is_template, exported_image_id, replaces_image_id, created_by, created_at, updated_at";
 
 /**
  * Append a version row for `designId` holding `doc`. Version numbers are
@@ -51,17 +51,24 @@ export async function saveToLibrary(
   imageType: ImageType,
   name: string,
   uploadedBy: string,
+  /** Group Image Builder: write into THIS group's image library (scope='group'),
+   *  the same key shape + row shape as a Group Image Library upload. Omitted =
+   *  the platform library, exactly as before. */
+  groupId?: string,
 ): Promise<{ id: string; url: string; display_name: string; bucket: string; s3_key: string }> {
   const bucket = IMAGE_TYPES[imageType].bucket;
   const cleanName = `${name.trim() || "image"}`.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120) + ".png";
-  const key = `${Date.now()}_${cleanName}`;
+  const key = groupId ? scopedKey("group", { group_id: groupId }, { name: cleanName, type: "image/png" }) : `${Date.now()}_${cleanName}`;
   await s3Client().send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: bytes, ContentType: "image/png" }));
   const url = `https://${bucket}.s3.${REGION}.amazonaws.com/${key}`;
   const displayName = cleanName.replace(/\.png$/, "");
   const { data, error } = await builderDb()
     .from("image_library")
     .upsert(
-      { bucket, s3_key: key, url, display_name: displayName, file_size: bytes.length, uploaded_by: uploadedBy },
+      {
+        bucket, s3_key: key, url, display_name: displayName, file_size: bytes.length, uploaded_by: uploadedBy,
+        ...(groupId ? { scope: "group", group_id: groupId } : {}),
+      },
       { onConflict: "bucket,s3_key" },
     )
     .select("id, url, display_name, bucket, s3_key")

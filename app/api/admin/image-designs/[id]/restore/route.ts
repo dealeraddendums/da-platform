@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { builderDb, requireImageBuilder } from "@/lib/image-builder/access";
+import { builderDb, designInScope, requireBuilderScope } from "@/lib/image-builder/access";
 import { audit, writeVersion } from "@/lib/image-builder/server";
 
 /**
@@ -8,15 +8,15 @@ import { audit, writeVersion } from "@/lib/image-builder/server";
  * saved as a NEW version (a copy of the old JSON), so nothing is ever lost.
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
-  const { claims, error } = await requireImageBuilder();
+  const { claims, scope, error } = await requireBuilderScope(req);
   if (error) return error;
   const body = await req.json().catch(() => ({}));
   const n = Number(body?.version_no);
   if (!Number.isInteger(n) || n < 1) return NextResponse.json({ error: "version_no required" }, { status: 400 });
 
   const db = builderDb();
-  const { data: cur } = await db.from("image_designs").select("id, is_template").eq("id", params.id).maybeSingle();
-  if (!cur) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const { data: cur } = await db.from("image_designs").select("id, is_template, group_id").eq("id", params.id).maybeSingle();
+  if (!cur || !designInScope(cur, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (cur.is_template) return NextResponse.json({ error: "Starter templates are read-only" }, { status: 409 });
 
   const { data: v } = await db

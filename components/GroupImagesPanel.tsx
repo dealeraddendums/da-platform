@@ -107,6 +107,11 @@ export default function GroupImagesPanel({ groupId, inTab = false }: { groupId: 
               {uploading ? "Uploading…" : "Upload Image"}
             </button>
             <span style={{ fontSize: 12, color: "#78828c" }}>PNG/JPG/WebP, up to {maxMB} MB</span>
+            {/* Group Image Builder (migration 167): designs saved there land in this library. */}
+            <a href={`/groups/${groupId}/image-builder`}
+              style={{ marginLeft: "auto", padding: "7px 14px", border: "1px solid #1976d2", color: "#1976d2", borderRadius: 4, fontSize: 13, fontWeight: 500, textDecoration: "none" }}>
+              Create in Image Builder
+            </a>
           </div>
 
           {error && <div style={{ padding: "8px 12px", background: "#fdecea", color: "#c62828", fontSize: 12, borderRadius: 4, marginBottom: 12 }}>{error}</div>}

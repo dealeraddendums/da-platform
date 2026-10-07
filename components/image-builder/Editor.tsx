@@ -43,7 +43,12 @@ function fmtDate(s: string): string {
   try { return new Date(s).toLocaleString(); } catch { return s; }
 }
 
-export default function ImageBuilderEditor({ id }: { id: string }) {
+/** Group Image Builder (migration 167): with `groupId`, every API call is scoped
+ *  to that group (?group=), links stay inside the group's builder, and exports
+ *  land in the group's own image library. Without it: the staff tool, unchanged. */
+export default function ImageBuilderEditor({ id, groupId }: { id: string; groupId?: string }) {
+  const q = groupId ? `?group=${encodeURIComponent(groupId)}` : "";
+  const home = groupId ? `/groups/${groupId}/image-builder` : "/admin/image-builder";
   const [meta, setMeta] = useState<Meta | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [doc, setDoc] = useState<DesignDoc | null>(null);
@@ -85,7 +90,7 @@ export default function ImageBuilderEditor({ id }: { id: string }) {
 
   // ── load ───────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
-    const res = await fetch(`/api/admin/image-designs/${id}`, { cache: "no-store" });
+    const res = await fetch(`/api/admin/image-designs/${id}${q}`, { cache: "no-store" });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) { setLoadError(j.error ?? `Load failed (${res.status})`); return; }
     const d = j.data;
@@ -103,14 +108,17 @@ export default function ImageBuilderEditor({ id }: { id: string }) {
   useEffect(() => {
     if (!meta) return;
     const bucket = IMAGE_TYPES[meta.image_type].bucket;
-    fetch(`/api/admin/image-library/${bucket}`, { cache: "no-store" })
+    // "Replaces image" choices: staff → the platform library bucket; a group →
+    // its OWN group images in this bucket (never another group's or the platform's).
+    fetch(groupId ? `/api/groups/${groupId}/images` : `/api/admin/image-library/${bucket}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => {
-        const list = (j.images ?? j.data ?? []) as Array<{ id: string | null; url: string; display_name: string }>;
+        const raw = (j.images ?? j.data ?? []) as Array<{ id: string | null; url: string; display_name: string; bucket?: string }>;
+        const list = groupId ? raw.filter((x) => x.bucket === bucket) : raw;
         setLibImages(list.filter((x) => x.id).map((x) => ({ id: x.id as string, url: x.url, display_name: x.display_name })));
       })
       .catch(() => setLibImages([]));
-  }, [meta]);
+  }, [meta, groupId]);
 
   // unsaved-changes guard
   useEffect(() => {
@@ -215,7 +223,7 @@ export default function ImageBuilderEditor({ id }: { id: string }) {
     if (!doc || readOnly || saving) return;
     setSaving(true); setNotice(null);
     try {
-      const res = await fetch(`/api/admin/image-designs/${id}`, {
+      const res = await fetch(`/api/admin/image-designs/${id}${q}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ design_json: doc }),
       });
@@ -234,7 +242,7 @@ export default function ImageBuilderEditor({ id }: { id: string }) {
   }, [doc, readOnly, saving, id, showHistory]);
 
   async function patchMeta(body: Record<string, unknown>) {
-    const res = await fetch(`/api/admin/image-designs/${id}`, {
+    const res = await fetch(`/api/admin/image-designs/${id}${q}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     const j = await res.json().catch(() => ({}));
@@ -254,7 +262,7 @@ export default function ImageBuilderEditor({ id }: { id: string }) {
       }
       const fd = new FormData();
       fd.append("file", new Blob([png as BlobPart], { type: "image/png" }), `${meta.name}.png`);
-      const res = await fetch(`/api/admin/image-designs/${id}/export`, { method: "POST", body: fd });
+      const res = await fetch(`/api/admin/image-designs/${id}/export${q}`, { method: "POST", body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error ?? `Export failed (${res.status})`);
       setExportResult(j.data);
@@ -268,14 +276,14 @@ export default function ImageBuilderEditor({ id }: { id: string }) {
 
   // ── versions ─────────────────────────────────────────────────────────────
   async function loadVersions() {
-    const res = await fetch(`/api/admin/image-designs/${id}/versions`, { cache: "no-store" });
+    const res = await fetch(`/api/admin/image-designs/${id}/versions${q}`, { cache: "no-store" });
     const j = await res.json().catch(() => ({}));
     if (res.ok) setVersions(j.data ?? []);
   }
   useEffect(() => { if (showHistory) void loadVersions(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [showHistory]);
 
   async function doRestore(n: number) {
-    const res = await fetch(`/api/admin/image-designs/${id}/restore`, {
+    const res = await fetch(`/api/admin/image-designs/${id}/restore${q}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version_no: n }),
     });
     const j = await res.json().catch(() => ({}));
@@ -289,13 +297,13 @@ export default function ImageBuilderEditor({ id }: { id: string }) {
   }
 
   async function duplicateAndEdit() {
-    const res = await fetch(`/api/admin/image-designs`, {
+    const res = await fetch(`/api/admin/image-designs${q}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ from_id: id, name: dupName.trim() || undefined }),
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) { setNotice({ kind: "err", text: j.error ?? "Duplicate failed" }); setShowDuplicate(false); return; }
-    window.location.href = `/admin/image-builder/${j.data.id}`;
+    window.location.href = `${home}/${j.data.id}`;
   }
 
   // ── add elements ─────────────────────────────────────────────────────────
@@ -419,7 +427,7 @@ export default function ImageBuilderEditor({ id }: { id: string }) {
     return (
       <div style={{ ...card, padding: 24 }}>
         <div style={{ color: "#c62828", marginBottom: 12 }}>{loadError}</div>
-        <Link href="/admin/image-builder" style={{ color: BLUE }}>← Back to Image Builder</Link>
+        <Link href={home} style={{ color: BLUE }}>← Back to Image Builder</Link>
       </div>
     );
   }
@@ -432,7 +440,7 @@ export default function ImageBuilderEditor({ id }: { id: string }) {
     <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 110px)", minHeight: 560 }}>
       {/* toolbar */}
       <div style={{ ...card, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        <Link href="/admin/image-builder" style={{ color: BLUE, fontSize: 13, textDecoration: "none", marginRight: 4 }}>← Designs</Link>
+        <Link href={home} style={{ color: BLUE, fontSize: 13, textDecoration: "none", marginRight: 4 }}>← Designs</Link>
         <NameEditor name={meta.name} disabled={readOnly} onSave={async (n) => {
           if (await patchMeta({ name: n })) setMeta((m) => (m ? { ...m, name: n } : m));
         }} />
@@ -606,9 +614,9 @@ export default function ImageBuilderEditor({ id }: { id: string }) {
         onChange={(e) => { void onImagePicked(e.target.files?.[0], true); e.target.value = ""; }} />
 
       {exportResult && (
-        <Modal title="Saved to Image Library" width={480}
+        <Modal title={groupId ? "Saved to your Group Image Library" : "Saved to Image Library"} width={480}
           footer={<>
-            <a href="/admin/image-library" style={{ ...btn(), textDecoration: "none" }}>Open Image Library</a>
+            {!groupId && <a href="/admin/image-library" style={{ ...btn(), textDecoration: "none" }}>Open Image Library</a>}
             <button style={btn("primary")} onClick={() => setExportResult(null)}>Done</button>
           </>}>
           <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>

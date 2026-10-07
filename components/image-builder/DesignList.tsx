@@ -14,7 +14,7 @@ interface Row {
 }
 
 /** Client-rendered thumbnail from the design itself (same renderer as export). */
-function Thumb({ id, imageType }: { id: string; imageType: ImageType }) {
+function Thumb({ id, imageType, q }: { id: string; imageType: ImageType; q: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const spec = IMAGE_TYPES[imageType];
   const boxH = 150;
@@ -22,7 +22,7 @@ function Thumb({ id, imageType }: { id: string; imageType: ImageType }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const res = await fetch(`/api/admin/image-designs/${id}`, { cache: "no-store" });
+      const res = await fetch(`/api/admin/image-designs/${id}${q}`, { cache: "no-store" });
       if (!res.ok || cancelled) return;
       const doc = (await res.json()).data.design_json as DesignDoc;
       await ensureFonts(doc);
@@ -36,7 +36,7 @@ function Thumb({ id, imageType }: { id: string; imageType: ImageType }) {
       if (ctx) drawDesign(ctx, doc, spec.width, spec.height, s * dpr, images);
     })();
     return () => { cancelled = true; };
-  }, [id, spec.width, spec.height, s]);
+  }, [id, spec.width, spec.height, s, q]);
   return (
     <div style={{ height: boxH + 16, display: "flex", alignItems: "center", justifyContent: "center", background: "#f5f6f7", borderBottom: "1px solid #e0e0e0" }}>
       <canvas ref={ref} style={{ width: spec.width * s, height: spec.height * s, border: "1px solid #e0e0e0", background: "#e0e0e0" }} />
@@ -44,11 +44,11 @@ function Thumb({ id, imageType }: { id: string; imageType: ImageType }) {
   );
 }
 
-function DesignCard({ r, onDuplicate, onDelete }: { r: Row; onDuplicate: (r: Row) => void; onDelete: (r: Row) => void }) {
+function DesignCard({ r, onDuplicate, onDelete, q, home }: { r: Row; onDuplicate: (r: Row) => void; onDelete: (r: Row) => void; q: string; home: string }) {
   const spec = IMAGE_TYPES[r.image_type];
   return (
     <div style={{ ...card, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      <Thumb id={r.id} imageType={r.image_type} />
+      <Thumb id={r.id} imageType={r.image_type} q={q} />
       <div style={{ padding: 10, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#333" }}>{r.name}</div>
         <div><TypeChip>{spec.label}</TypeChip></div>
@@ -63,11 +63,11 @@ function DesignCard({ r, onDuplicate, onDelete }: { r: Row; onDuplicate: (r: Row
           {r.is_template ? (
             <>
               <button style={btn("primary")} onClick={() => onDuplicate(r)}>Duplicate &amp; edit</button>
-              <Link href={`/admin/image-builder/${r.id}`} style={{ ...btn(), textDecoration: "none" }}>View</Link>
+              <Link href={`${home}/${r.id}`} style={{ ...btn(), textDecoration: "none" }}>View</Link>
             </>
           ) : (
             <>
-              <Link href={`/admin/image-builder/${r.id}`} style={{ ...btn("primary"), textDecoration: "none" }}>Open</Link>
+              <Link href={`${home}/${r.id}`} style={{ ...btn("primary"), textDecoration: "none" }}>Open</Link>
               <button style={btn()} onClick={() => onDuplicate(r)}>Duplicate</button>
               <button style={btn("danger")} onClick={() => onDelete(r)}>Delete</button>
             </>
@@ -78,7 +78,11 @@ function DesignCard({ r, onDuplicate, onDelete }: { r: Row; onDuplicate: (r: Row
   );
 }
 
-export default function DesignList() {
+/** `groupId` = the Group Image Builder (migration 167): that group's designs only,
+ *  no starter templates (Allan, 2026-10-07), exports go to the group's library. */
+export default function DesignList({ groupId }: { groupId?: string } = {}) {
+  const q = groupId ? `?group=${encodeURIComponent(groupId)}` : "";
+  const home = groupId ? `/groups/${groupId}/image-builder` : "/admin/image-builder";
   const [rows, setRows] = useState<Row[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [filter, setFilter] = useState<ImageType | "">("");
@@ -87,11 +91,11 @@ export default function DesignList() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/admin/image-designs", { cache: "no-store" });
+    const res = await fetch(`/api/admin/image-designs${q}`, { cache: "no-store" });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) { setErr(j.error ?? "Load failed"); return; }
     setRows(j.data);
-  }, []);
+  }, [q]);
   useEffect(() => { void load(); }, [load]);
 
   async function create() {
@@ -100,18 +104,18 @@ export default function DesignList() {
     const body = creating.fromId
       ? { from_id: creating.fromId, name: creating.name.trim() || undefined }
       : { name: creating.name.trim(), image_type: creating.type };
-    const res = await fetch("/api/admin/image-designs", {
+    const res = await fetch(`/api/admin/image-designs${q}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) { setErr(j.error ?? "Create failed"); setCreating(null); return; }
-    window.location.href = `/admin/image-builder/${j.data.id}`;
+    window.location.href = `${home}/${j.data.id}`;
   }
 
   async function doDelete(r: Row) {
     setBusy(true);
-    const res = await fetch(`/api/admin/image-designs/${r.id}`, { method: "DELETE" });
+    const res = await fetch(`/api/admin/image-designs/${r.id}${q}`, { method: "DELETE" });
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     setDeleting(null);
@@ -134,7 +138,9 @@ export default function DesignList() {
           <option value="">All image types</option>
           {IMAGE_TYPE_LIST.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
         </select>
-        <Link href="/admin/image-library" style={{ color: "#fff", fontSize: 13, marginLeft: "auto" }}>Open Image Library →</Link>
+        {groupId
+          ? <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginLeft: "auto" }}>Saved images go to your Group Image Library — every store in the group can use them.</span>
+          : <Link href="/admin/image-library" style={{ color: "#fff", fontSize: 13, marginLeft: "auto" }}>Open Image Library →</Link>}
       </div>
 
       {err && <div style={{ ...card, padding: 10, marginBottom: 12, color: "#c62828", fontSize: 13 }}>{err}</div>}
@@ -144,13 +150,15 @@ export default function DesignList() {
         <>
           <h2 style={{ color: "#fff", fontSize: 16, fontWeight: 600, margin: "0 0 10px" }}>My designs</h2>
           {designs.length === 0
-            ? <div style={{ ...card, padding: 16, fontSize: 13, color: "#666", marginBottom: 24 }}>No designs yet. Start from a template below, or create a blank design.</div>
-            : <div style={{ ...grid, marginBottom: 24 }}>{designs.map((r) => <DesignCard key={r.id} r={r} onDuplicate={dup} onDelete={setDeleting} />)}</div>}
+            ? <div style={{ ...card, padding: 16, fontSize: 13, color: "#666", marginBottom: 24 }}>{groupId ? "No designs yet — click + New design to start one." : "No designs yet. Start from a template below, or create a blank design."}</div>
+            : <div style={{ ...grid, marginBottom: 24 }}>{designs.map((r) => <DesignCard key={r.id} r={r} onDuplicate={dup} onDelete={setDeleting} q={q} home={home} />)}</div>}
 
+          {!groupId && <>
           <h2 style={{ color: "#fff", fontSize: 16, fontWeight: 600, margin: "0 0 10px" }}>Starter templates</h2>
           {templates.length === 0
             ? <div style={{ ...card, padding: 16, fontSize: 13, color: "#666" }}>No starter templates{filter ? " for this image type" : ""}.</div>
-            : <div style={grid}>{templates.map((r) => <DesignCard key={r.id} r={r} onDuplicate={dup} onDelete={setDeleting} />)}</div>}
+            : <div style={grid}>{templates.map((r) => <DesignCard key={r.id} r={r} onDuplicate={dup} onDelete={setDeleting} q={q} home={home} />)}</div>}
+          </>}
         </>
       )}
 

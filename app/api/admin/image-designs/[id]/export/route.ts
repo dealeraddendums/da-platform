@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { builderDb, requireImageBuilder } from "@/lib/image-builder/access";
+import { builderDb, designInScope, requireBuilderScope } from "@/lib/image-builder/access";
 import { audit, checkExport, saveToLibrary } from "@/lib/image-builder/server";
 import { isImageType } from "@/lib/image-builder/spec";
 
@@ -11,13 +11,13 @@ import { isImageType } from "@/lib/image-builder/spec";
  * never overwrites an existing PNG.
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
-  const { claims, error } = await requireImageBuilder();
+  const { claims, scope, error } = await requireBuilderScope(req);
   if (error) return error;
 
   const db = builderDb();
   const { data: design } = await db
-    .from("image_designs").select("id, name, image_type").eq("id", params.id).maybeSingle();
-  if (!design) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    .from("image_designs").select("id, name, image_type, group_id, is_template").eq("id", params.id).maybeSingle();
+  if (!design || !designInScope(design, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!isImageType(design.image_type)) return NextResponse.json({ error: "Bad image type" }, { status: 500 });
 
   let form: FormData;
@@ -29,8 +29,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const bad = checkExport(bytes, design.image_type);
   if (bad) return NextResponse.json({ error: bad }, { status: 422 });
 
-  const lib = await saveToLibrary(bytes, design.image_type, design.name, claims.sub);
+  // Group scope → the group's own image library (Group Image Library tab + every
+  // member dealer's Builder picker). Platform scope → the platform library, unchanged.
+  const lib = await saveToLibrary(bytes, design.image_type, design.name, claims.sub, scope.kind === "group" ? scope.groupId : undefined);
   await db.from("image_designs").update({ exported_image_id: lib.id }).eq("id", params.id);
-  audit(claims.sub, "image_design_exported", { design_id: params.id, image_library_id: lib.id, bucket: lib.bucket, bytes: bytes.length });
+  audit(claims.sub, "image_design_exported", { design_id: params.id, image_library_id: lib.id, bucket: lib.bucket, bytes: bytes.length, group_id: scope.kind === "group" ? scope.groupId : null });
   return NextResponse.json({ data: lib }, { status: 201 });
 }

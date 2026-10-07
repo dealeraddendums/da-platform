@@ -201,6 +201,21 @@ const nav: NavEntry[] = [
     ),
   },
   {
+    // Group Image Builder (migration 167). Regional managers can't open My Group,
+    // so they get a direct entry; /group-image-builder resolves their group.
+    // group_admin reaches it from My Group → Image Builder.
+    label: "Image Builder",
+    href: "/group-image-builder",
+    roles: ["group_user"],
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <circle cx="8.5" cy="8.5" r="1.5" />
+        <polyline points="21 15 16 10 5 21" />
+      </svg>
+    ),
+  },
+  {
     label: "Get the App",
     href: "/get-the-app",
     roles: ["dealer_admin", "dealer_user", "dealer_restricted", "group_admin", "group_user"],

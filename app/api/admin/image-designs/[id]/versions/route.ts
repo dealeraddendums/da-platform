@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { builderDb, requireImageBuilder } from "@/lib/image-builder/access";
+import { builderDb, designInScope, requireBuilderScope } from "@/lib/image-builder/access";
 
 /** GET /api/admin/image-designs/[id]/versions — version history, newest first (no design_json). */
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
-  const { error } = await requireImageBuilder();
+export async function GET(req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
+  const { scope, error } = await requireBuilderScope(req);
   if (error) return error;
   const db = builderDb();
+  const { data: cur } = await db.from("image_designs").select("group_id, is_template").eq("id", params.id).maybeSingle();
+  if (!cur || !designInScope(cur, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const { data, error: dbErr } = await db
     .from("image_design_versions")
     .select("id, version_no, saved_by, saved_at")

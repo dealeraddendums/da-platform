@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { builderDb, requireImageBuilder } from "@/lib/image-builder/access";
+import { builderDb, designInScope, replacesImageAllowed, requireBuilderScope } from "@/lib/image-builder/access";
 import { audit, DESIGN_LIST_COLUMNS, writeVersion } from "@/lib/image-builder/server";
 import { validateDesign, MAX_DESIGN_JSON_BYTES, type DesignDoc } from "@/lib/image-builder/spec";
 
 type Params = { params: { id: string } };
 
 /** GET /api/admin/image-designs/[id] — full design incl. design_json + latest version no. */
-export async function GET(_req: NextRequest, { params }: Params): Promise<NextResponse> {
-  const { error } = await requireImageBuilder();
+export async function GET(req: NextRequest, { params }: Params): Promise<NextResponse> {
+  const { scope, error } = await requireBuilderScope(req);
   if (error) return error;
   const db = builderDb();
   const { data, error: dbErr } = await db
@@ -16,7 +16,7 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
     .eq("id", params.id)
     .maybeSingle();
   if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
-  if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!data || !designInScope(data, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const { data: last } = await db
     .from("image_design_versions").select("version_no").eq("design_id", params.id)
     .order("version_no", { ascending: false }).limit(1).maybeSingle();
@@ -30,7 +30,7 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
  * Starter templates are read-only — duplicate them to edit.
  */
 export async function PATCH(req: NextRequest, { params }: Params): Promise<NextResponse> {
-  const { claims, error } = await requireImageBuilder();
+  const { claims, scope, error } = await requireBuilderScope(req);
   if (error) return error;
   const raw = await req.text();
   if (raw.length > MAX_DESIGN_JSON_BYTES) return NextResponse.json({ error: "Design too large" }, { status: 413 });
@@ -38,8 +38,8 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
   try { body = JSON.parse(raw); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
 
   const db = builderDb();
-  const { data: cur } = await db.from("image_designs").select("id, is_template").eq("id", params.id).maybeSingle();
-  if (!cur) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const { data: cur } = await db.from("image_designs").select("id, is_template, group_id").eq("id", params.id).maybeSingle();
+  if (!cur || !designInScope(cur, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (cur.is_template) {
     return NextResponse.json({ error: "Starter templates are read-only — use Duplicate & edit." }, { status: 409 });
   }
@@ -59,6 +59,9 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     if (body.replaces_image_id !== null && typeof body.replaces_image_id !== "string") {
       return NextResponse.json({ error: "Invalid replaces_image_id" }, { status: 400 });
     }
+    if (!(await replacesImageAllowed(body.replaces_image_id as string | null, scope))) {
+      return NextResponse.json({ error: "That image isn't in this group's library" }, { status: 400 });
+    }
     patch.replaces_image_id = body.replaces_image_id;
   }
 
@@ -75,12 +78,12 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
 }
 
 /** DELETE /api/admin/image-designs/[id] — delete a design (never a template, never the library PNG). */
-export async function DELETE(_req: NextRequest, { params }: Params): Promise<NextResponse> {
-  const { claims, error } = await requireImageBuilder();
+export async function DELETE(req: NextRequest, { params }: Params): Promise<NextResponse> {
+  const { claims, scope, error } = await requireBuilderScope(req);
   if (error) return error;
   const db = builderDb();
-  const { data: cur } = await db.from("image_designs").select("id, is_template, name").eq("id", params.id).maybeSingle();
-  if (!cur) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const { data: cur } = await db.from("image_designs").select("id, is_template, name, group_id").eq("id", params.id).maybeSingle();
+  if (!cur || !designInScope(cur, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (cur.is_template) return NextResponse.json({ error: "Starter templates can't be deleted" }, { status: 409 });
   const { error: delErr } = await db.from("image_designs").delete().eq("id", params.id);
   if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 });

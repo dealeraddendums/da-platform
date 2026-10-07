@@ -10,13 +10,17 @@ type Params = { params: { id: string } };
 
 // Group Admin Image Library — manage the group-scoped images available to every
 // dealer in the group. super_admin: any group; group_admin: own group only.
-async function authorize(groupId: string) {
+// `readOnly` (the GET list) also admits a group_user for their own group — the
+// Group Image Builder (migration 167) lists the group's images for its
+// "Replaces image" picker; upload / rename / delete stay group_admin-only.
+async function authorize(groupId: string, readOnly = false) {
   const { claims, error } = await requireAuth();
   if (error) return { claims: null, error };
-  if (claims.role !== "super_admin" && claims.role !== "group_admin") {
+  const roleOk = claims.role === "super_admin" || claims.role === "group_admin" || (readOnly && claims.role === "group_user");
+  if (!roleOk) {
     return { claims: null, error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
-  if (claims.role === "group_admin" && claims.group_id !== groupId) {
+  if (claims.role !== "super_admin" && claims.group_id !== groupId) {
     return { claims: null, error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
   return { claims, error: null as null };
@@ -24,7 +28,7 @@ async function authorize(groupId: string) {
 
 /** GET /api/groups/[id]/images — list this group's images (all categories). */
 export async function GET(_req: NextRequest, { params }: Params): Promise<NextResponse> {
-  const { error } = await authorize(params.id);
+  const { error } = await authorize(params.id, true);
   if (error) return error;
 
   const admin = createAdminSupabaseClient();
