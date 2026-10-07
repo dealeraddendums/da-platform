@@ -30,6 +30,8 @@ interface MandrillMessage {
   track_clicks?: boolean;
   /** Mandrill open-tracking (pixel only — never rewrites a link). Left on. */
   track_opens?: boolean;
+  /** Extra headers — Mandrill accepts only Reply-To and X-* here. */
+  headers?: Record<string, string>;
 }
 
 interface MandrillSendResult {

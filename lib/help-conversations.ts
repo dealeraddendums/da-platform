@@ -90,6 +90,36 @@ export async function setFeedback(messageId: string, value: "up" | "down"): Prom
 }
 
 /**
+ * Who asked: the conversation's user_id resolved to the profile (name, email,
+ * role) plus the dealership and group in context. The escalation email used to
+ * carry only the dealer-context snapshot (role/plan/billing) — support could
+ * see WHAT account but never WHO, for every role. Profile role wins over the
+ * role stamped on the conversation (that one is the claims role at the time).
+ */
+async function resolveAsker(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  conv: { user_id: string | null; dealer_id: string | null; group_id: string | null; role: string | null },
+): Promise<{ name: string | null; email: string | null; role: string | null; dealership: string | null; group: string | null }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const a = admin as any;
+  const [prof, dealer] = await Promise.all([
+    conv.user_id ? a.from("profiles").select("full_name, email, role, group_id").eq("id", conv.user_id).maybeSingle() : { data: null },
+    conv.dealer_id ? a.from("dealers").select("name, group_id").eq("dealer_id", conv.dealer_id).maybeSingle() : { data: null },
+  ]);
+  const p = prof?.data as { full_name: string | null; email: string | null; role: string | null; group_id: string | null } | null;
+  const d = dealer?.data as { name: string | null; group_id: string | null } | null;
+  const groupId = conv.group_id ?? p?.group_id ?? d?.group_id ?? null;
+  const { data: g } = groupId ? await a.from("groups").select("name").eq("id", groupId).maybeSingle() : { data: null };
+  return {
+    name: p?.full_name?.trim() || null,
+    email: p?.email?.trim() || null,
+    role: p?.role ?? conv.role ?? null,
+    dealership: d?.name ?? null,
+    group: (g as { name: string | null } | null)?.name ?? null,
+  };
+}
+
+/**
  * Escalate to a human (async, Phase A): mark escalated and — once per escalation
  * (debounced via escalation_notified_at) — Mandrill-notify support with the
  * dealer context + a deep link to the review surface.
@@ -98,7 +128,7 @@ export async function escalateConversation(conversationId: string): Promise<void
   const admin = createAdminSupabaseClient();
   const { data: conv } = await (admin as any)
     .from("help_conversations")
-    .select("id, dealer_id, role, context_snapshot, status, escalation_notified_at")
+    .select("id, user_id, dealer_id, group_id, role, context_snapshot, status, escalation_notified_at")
     .eq("id", conversationId).maybeSingle();
   if (!conv) return;
 
@@ -114,15 +144,25 @@ export async function escalateConversation(conversationId: string): Promise<void
     .order("created_at", { ascending: true });
   const transcript = (msgs ?? []).slice(-8).map((m: any) => `<p><strong>${m.role}:</strong> ${escapeHtml(m.content).slice(0, 1200)}</p>`).join("");
   const link = `${APP_URL}/help/manage?tab=conversations&id=${conversationId}`;
+  const who = await resolveAsker(admin, conv);
 
   try {
     await sendMandrillEmail({
-      subject: `Help escalation — dealer needs a person`,
+      subject: `Help escalation — ${who.name ?? who.email ?? "a user"}${who.dealership ? ` (${who.dealership})` : who.group ? ` (${who.group})` : ""} needs a person`,
       from_email: "noreply@dealeraddendums.com",
       from_name: "DA Help",
       to: [{ email: SUPPORT_EMAIL, name: "DA Support", type: "to" }],
+      // Replying from the support inbox goes straight to the person who asked.
+      ...(who.email ? { headers: { "Reply-To": who.email } } : {}),
       html:
         `<p>A dealer asked for a person (or the assistant couldn't resolve it).</p>` +
+        `<h4>Asked by</h4><p>` +
+        `<strong>${escapeHtml(who.name ?? "(no name on profile)")}</strong>` +
+        (who.email ? ` &lt;<a href="mailto:${escapeHtml(who.email)}">${escapeHtml(who.email)}</a>&gt;` : " (no email on profile)") +
+        `<br>Role: ${escapeHtml(who.role ?? "unknown")}` +
+        (who.dealership ? `<br>Dealership: ${escapeHtml(who.dealership)}${conv.dealer_id ? ` — Dealer ID ${escapeHtml(conv.dealer_id)}` : ""}` : "") +
+        (who.group ? `<br>Group: ${escapeHtml(who.group)}` : "") +
+        `<br>User id: ${escapeHtml(conv.user_id ?? "unknown")}</p>` +
         `<p><strong>Review &amp; reply:</strong> <a href="${link}">${link}</a></p>` +
         `<h4>Dealer context</h4><pre style="white-space:pre-wrap">${escapeHtml(conv.context_snapshot ?? "")}</pre>` +
         `<h4>Recent conversation</h4>${transcript}`,
