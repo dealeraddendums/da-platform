@@ -76,3 +76,44 @@ export async function saveToLibrary(
   if (error || !data) throw new Error(error?.message ?? "image_library write failed");
   return data;
 }
+
+/**
+ * Seed a group's "My designs" with its own editable copies of the platform
+ * starter templates — once per group, the first time its Image Builder is
+ * opened (Allan, 2026-10-07: groups start from the base images, as their OWN
+ * designs, not a read-only starter section).
+ *
+ * Once-only is enforced by an admin_settings marker inserted FIRST (primary
+ * key → a concurrent second opener gets 23505 and skips), so a design the group
+ * later deletes never comes back. Copies are inserted in ONE statement; if that
+ * fails the marker is removed so the next open retries cleanly (no partial set).
+ */
+export async function ensureGroupSeeded(groupId: string, userId: string): Promise<number> {
+  const db = builderDb();
+  const key = `image_builder_seeded:${groupId}`;
+  const { error: markErr } = await db.from("admin_settings").insert({ key, value: new Date().toISOString() });
+  if (markErr) {
+    if (markErr.code === "23505") return 0; // already seeded (or seeding right now)
+    throw new Error(markErr.message);
+  }
+  const { data: starters, error: sErr } = await db
+    .from("image_designs").select("name, image_type, design_json")
+    .eq("is_template", true).is("group_id", null).order("created_at", { ascending: true });
+  if (sErr || !starters?.length) {
+    if (sErr) await db.from("admin_settings").delete().eq("key", key);
+    return 0;
+  }
+  const { data: rows, error: insErr } = await db.from("image_designs").insert(
+    starters.map((s: { name: string; image_type: string; design_json: DesignDoc }) => ({
+      group_id: groupId, name: s.name, image_type: s.image_type, design_json: s.design_json,
+      is_template: false, dealer_uuid: null, replaces_image_id: null, created_by: userId,
+    })),
+  ).select("id, design_json");
+  if (insErr || !rows) {
+    await db.from("admin_settings").delete().eq("key", key);
+    throw new Error(insErr?.message ?? "seed insert failed");
+  }
+  for (const r of rows as { id: string; design_json: DesignDoc }[]) await writeVersion(r.id, r.design_json, userId);
+  audit(userId, "image_designs_group_seeded", { group_id: groupId, count: rows.length });
+  return rows.length;
+}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { builderDb, designInScope, replacesImageAllowed, requireBuilderScope } from "@/lib/image-builder/access";
-import { audit, DESIGN_LIST_COLUMNS, writeVersion } from "@/lib/image-builder/server";
+import { audit, DESIGN_LIST_COLUMNS, ensureGroupSeeded, writeVersion } from "@/lib/image-builder/server";
 import { isImageType, validateDesign, MAX_DESIGN_JSON_BYTES, type DesignDoc } from "@/lib/image-builder/spec";
 
 // Image Builder designs (migration 163). Staff, or one group with ?group=<id>
@@ -9,10 +9,17 @@ import { isImageType, validateDesign, MAX_DESIGN_JSON_BYTES, type DesignDoc } fr
 const EMPTY_DOC: DesignDoc = { version: 1, background: "#ffffff", elements: [] };
 
 /** GET /api/admin/image-designs — designs + starter templates (no design_json).
- *  Staff: platform designs + starters. ?group=: that group's designs only (no starters). */
+ *  Staff: platform designs + starters. ?group=: that group's designs only — seeded on
+ *  first visit with the group's own editable copies of the base images. */
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const { scope, error } = await requireBuilderScope(req);
+  const { claims, scope, error } = await requireBuilderScope(req);
   if (error) return error;
+  // A group's first visit seeds its "My designs" with its own copies of the
+  // base images (once per group — see ensureGroupSeeded).
+  if (scope.kind === "group") {
+    try { await ensureGroupSeeded(scope.groupId, claims.sub); }
+    catch (e) { console.error("[image-designs] group seed failed:", e instanceof Error ? e.message : e); }
+  }
   let q = builderDb()
     .from("image_designs")
     .select(`${DESIGN_LIST_COLUMNS}, exported:image_library!image_designs_exported_image_id_fkey(url, display_name), replaces:image_library!image_designs_replaces_image_id_fkey(url, display_name)`);
