@@ -590,9 +590,8 @@ export default function ManualVehicleInventory({ dealerId, isSuperAdmin = false,
                       style={{ cursor: "pointer" }}
                     />
                   </th>
-                  {/* Stock # — not sortable */}
-                  <th className="text-left px-3 py-2.5" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", whiteSpace: "nowrap" }}>Stock #</th>
-                  {/* Year / Make / Model — sortable by year */}
+                  <SortTh label="Stock #" col="stock_number" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  {/* Year / Make / Model — server sorts year, then make, then model */}
                   <SortTh label="Year / Make / Model" col="year" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <SortTh label="VIN" col="vin" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <SortTh label="Condition" col="condition" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />

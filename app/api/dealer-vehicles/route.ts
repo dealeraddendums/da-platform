@@ -45,7 +45,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // queued=1 → mobile print queue (print_queue = 1), oldest queued first.
   // Shared by the iOS Bulk Print screen and the dashboard Queued filter.
   const queued = sp.get("queued") === "1" || printStatus === "queued";
-  const SORTABLE_COLS = ["date_added", "year", "vin", "condition", "msrp"];
+  // Every sort is SERVER-SIDE across the whole filtered set, then paged. Each
+  // column carries secondary keys and ALWAYS ends on the unique `id`: without a
+  // total order, rows that tie on the sort key (hundreds of cars share a year
+  // or a condition) come back in a different order per page request, so paging
+  // repeats some cars and skips others — which looks like a page-only sort.
+  const SORT_KEYS: Record<string, string[]> = {
+    date_added:   ["date_added"],
+    stock_number: ["stock_number"],
+    year:         ["year", "make", "model"],   // the Year / Make / Model column
+    vin:          ["vin"],
+    condition:    ["condition", "year", "make", "model"],
+    msrp:         ["msrp"],
+  };
+  const SORTABLE_COLS = Object.keys(SORT_KEYS);
   const rawSort = sp.get("sort_by") ?? "date_added";
   const sortCol = SORTABLE_COLS.includes(rawSort) ? rawSort : "date_added";
   const sortAsc = sp.get("sort_dir") === "asc";
@@ -66,11 +79,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // caller's sort as tiebreaker.
     query = query
       .eq("print_queue", 1)
-      .order("print_queue_at", { ascending: true, nullsFirst: false })
-      .order(sortCol, { ascending: sortAsc });
-  } else {
-    query = query.order(sortCol, { ascending: sortAsc });
+      .order("print_queue_at", { ascending: true, nullsFirst: false });
   }
+  // Blanks sort last in both directions so a few empty stock numbers / MSRPs
+  // can't push the real values off page 1.
+  for (const col of SORT_KEYS[sortCol]) {
+    query = query.order(col, { ascending: sortAsc, nullsFirst: false });
+  }
+  query = query.order("id", { ascending: true });
 
   if (status !== "all") query = query.eq("status", status);
   // Condition filter — New / Used / Certified are mutually exclusive.
