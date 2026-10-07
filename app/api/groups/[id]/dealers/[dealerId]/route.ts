@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerRow } from "@/lib/db";
-import { fireGroupAssignCascade, fireGroupUnassignCascade } from "@/lib/group-billing-cascade";
+import { fireGroupAssignCascade, fireBilledToDealerCascade } from "@/lib/group-billing-cascade";
 
 type Params = { params: { id: string; dealerId: string } };
 
@@ -95,7 +95,9 @@ export async function PATCH(
     if (patch.subscription_billed_to === "group") {
       fireGroupAssignCascade(params.dealerId, params.id);
     } else {
-      fireGroupUnassignCascade(params.dealerId, params.id);
+      // Removes the group line AND restores the store's own subscription —
+      // removing alone left the store billed nowhere (Uvalde / Vacaville).
+      fireBilledToDealerCascade(params.dealerId, params.id);
     }
   }
 

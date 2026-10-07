@@ -603,14 +603,25 @@ export async function appendToTemplate(customerId: string, products: BillingProd
 export async function appendToTemplateStagedIfNew(
   customerId: string,
   products: BillingProduct[],
-): Promise<{ createdPaused: boolean }> {
+  /** `createActive: true` mints a brand-new template LIVE (first invoice on
+   *  tonight's cron) instead of paused. Callers pass it ONLY when nothing else
+   *  bills the group — every group-billed store is 5.0-native, so there is no
+   *  FreshBooks cutover that would ever activate a paused one (Elite Auto
+   *  Marketing, 2026-10-05: paused-at-birth, never invoiced). An existing
+   *  template's active state is never touched here. */
+  opts: { createActive?: boolean } = {},
+): Promise<{ createdPaused: boolean; createdActive: boolean }> {
   const current = await getTemplate(customerId);
   if (!current) {
+    if (opts.createActive) {
+      await createTemplate({ customerId, products });
+      return { createdPaused: false, createdActive: true };
+    }
     await createTemplate({ customerId, products, active: false });
-    return { createdPaused: true };
+    return { createdPaused: true, createdActive: false };
   }
   await putTemplate(customerId, [...current.products, ...products]);
-  return { createdPaused: false };
+  return { createdPaused: false, createdActive: false };
 }
 
 /**

@@ -14,6 +14,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import {
   appendToTemplateStagedIfNew,
   archiveCustomer,
+  createTemplate,
   createCustomer,
   customerExists,
   deleteTemplate,
@@ -62,6 +63,32 @@ interface GroupSnap {
 
 function dealerCustomerKey(d: DealerSnap): string | null {
   return d.billing_customer_id ?? d.internal_id ?? null;
+}
+
+/** 5.0-native = born on 5.0 (same rule as lib/v5-usable.ts). Migrated stores
+ *  are NOT native: FreshBooks may still be billing them until the operator's
+ *  FreshBooks stop, so they never count as "nothing else bills this". */
+function isNativeRow(d: { is_native: boolean | null; dealer_id: string | null }): boolean {
+  const id = d.dealer_id ?? "";
+  return d.is_native === true || id.startsWith("ss_") || id.startsWith("ga_");
+}
+
+/**
+ * True only when EVERY active store in the group is 5.0-native — i.e. the
+ * group has no 4.0 store at all, so no FreshBooks profile bills it and no
+ * cutover will ever come along to activate a paused template. That is the
+ * only case where a group's FIRST template may be born live. Any 4.0 or
+ * migrated store (or a failed read) keeps the safe paused staging — the
+ * ~670 FreshBooks-billed paused templates can never be touched by this.
+ */
+async function groupIsAllNative(admin: ReturnType<typeof createAdminSupabaseClient>, groupId: string): Promise<boolean> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (admin as any).from("dealers")
+    .select("is_native, dealer_id")
+    .eq("group_id", groupId)
+    .eq("active", true) as { data: { is_native: boolean | null; dealer_id: string | null }[] | null; error: unknown };
+  if (error || !data || data.length === 0) return false;
+  return data.every(isNativeRow);
 }
 
 /**
@@ -269,11 +296,19 @@ export async function cascadeOnGroupAssign(args: {
   // cascade fires for any group-billed dealer added to any group, including
   // groups still wholly billed in FreshBooks. Stage the first one paused and
   // let the cutover activate it. (Acrisure, 2026-09-05.)
-  const { createdPaused } = await appendToTemplateStagedIfNew(groupCustomerId, newLines);
+  //
+  // Exception (2026-10-07): a group with NO 4.0 store has no FreshBooks and no
+  // cutover, so a paused first template would simply never bill (Elite Auto
+  // Marketing / Matz Nissan). There, the first template is born live.
+  const allNative = await groupIsAllNative(admin, group.id);
+  const { createdPaused, createdActive } = await appendToTemplateStagedIfNew(groupCustomerId, newLines, { createActive: allNative });
   if (createdPaused) {
     console.warn(
       `[cascadeOnGroupAssign] created group ${group.id} (${group.name})'s FIRST da-billing template — staged PAUSED so it cannot invoice before the group is cut over. Activate it at cutover.`,
     );
+  }
+  if (createdActive) {
+    console.log(`[cascadeOnGroupAssign] created group ${group.id} (${group.name})'s FIRST da-billing template LIVE — every store is 5.0-native (no FreshBooks); first invoice on tonight's run.`);
   }
 
   // Mirror the group's billing_customer_id into groups.template_id so the
@@ -296,7 +331,7 @@ export async function cascadeOnGroupAssign(args: {
     dealer_id: dealer.id,
     event: "group_billing_line_added",
     billing_customer_id: groupCustomerId,
-    notes: `group-billing cascade: added "${subscriptionName}" (${descriptor.key}) to ${group.name}'s template, tagged ${dealer.internal_id}::${dealer.name}${createdPaused ? " — this was the group's FIRST template and was created PAUSED; activate it when the group is cut over from FreshBooks" : ""}`,
+    notes: `group-billing cascade: added "${subscriptionName}" (${descriptor.key}) to ${group.name}'s template, tagged ${dealer.internal_id}::${dealer.name}${createdPaused ? " — this was the group's FIRST template and was created PAUSED; activate it when the group is cut over from FreshBooks" : ""}${createdActive ? " — this was the group's FIRST template and was created LIVE (every store is 5.0-native; nothing in FreshBooks)" : ""}`,
   }), "migration_log group_billing_line_added");
 
   // Member count changed — recompute the group's auto-discount tier
@@ -353,6 +388,85 @@ export async function cascadeOnGroupUnassign(args: {
     return;
   }
   await putTemplate(group.billing_customer_id, remaining);
+}
+
+/**
+ * A store in a group switched its subscription from "billed to group" to
+ * "billed to dealer" (it stays in the group). Before 2026-10-07 this only
+ * removed the store's line from the group template — nothing rebuilt the
+ * store's own template, so it silently stopped being billed anywhere
+ * (Uvalde Chevrolet, Nissan of Vacaville).
+ *
+ * Order matters: the group line is removed FIRST (da-billing refuses the same
+ * internal_id tag on two templates), then the store's own template gets its
+ * subscription line back:
+ *   • 5.0-native store → LIVE. First own invoice lands on the group's next
+ *     invoice date when the group template was live (the group already billed
+ *     this period — no double bill), otherwise tonight.
+ *   • any other store → created PAUSED (FreshBooks may still bill it) and
+ *     logged for the operator. Never auto-activated.
+ */
+export async function cascadeOnBilledToDealer(args: { dealerUuid: string; groupId: string }): Promise<void> {
+  const admin = createAdminSupabaseClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: d } = await (admin as any).from("dealers")
+    .select("id, name, dealer_id, internal_id, billing_customer_id, account_type, is_native, subscription_billed_to, active")
+    .eq("id", args.dealerUuid).maybeSingle() as { data: {
+      id: string; name: string; dealer_id: string | null; internal_id: string | null; billing_customer_id: string | null;
+      account_type: string | null; is_native: boolean | null; subscription_billed_to: string | null; active: boolean | null;
+    } | null };
+  const { data: g } = await admin.from("groups").select("billing_customer_id").eq("id", args.groupId)
+    .maybeSingle<{ billing_customer_id: string | null }>();
+  const groupTmpl = g?.billing_customer_id ? await getTemplate(g.billing_customer_id) : null;
+
+  await cascadeOnGroupUnassign(args);
+
+  if (!d || d.subscription_billed_to !== "dealer" || d.active === false || !d.internal_id) return;
+  const descriptor = subscriptionDescriptorFor(d.account_type);
+  if (!descriptor) return; // Trial / Free / unknown plan — nothing to bill
+  const customerId = d.billing_customer_id;
+  if (!customerId || !(await customerExists(customerId))) {
+    console.warn(`[cascadeOnBilledToDealer] ${d.name} (${d.dealer_id}) has no da-billing customer — own subscription NOT restored; operator must set billing up.`);
+    return;
+  }
+  const line: BillingProduct & { lineItemDescription: string } = {
+    productId: descriptor.key,
+    name: `${descriptor.name} — ${d.name}`,
+    quantity: 1,
+    lineItemDescription: `${d.internal_id}::${d.name}`,
+  };
+  const own = await getTemplate(customerId);
+  if (own?.products.some(isSubscriptionProduct)) return; // already has its own subscription
+  const native = isNativeRow(d);
+  let outcome: string;
+  if (own) {
+    await putTemplate(customerId, [...own.products, line]);
+    outcome = `subscription line added to its existing ${own.active === false ? "PAUSED" : "live"} template`;
+  } else if (native) {
+    const groupNext = groupTmpl?.active !== false && groupTmpl?.nextInvoiceDate && Date.parse(groupTmpl.nextInvoiceDate) > Date.now()
+      ? groupTmpl.nextInvoiceDate : undefined;
+    await createTemplate({ customerId, products: [line], nextInvoiceDate: groupNext });
+    outcome = `own template created LIVE (5.0-native), first invoice ${groupNext ? `on the group's next date ${groupNext.slice(0, 10)}` : "tonight"}`;
+  } else {
+    await createTemplate({ customerId, products: [line], active: false });
+    outcome = "own template created PAUSED (not 5.0-native — FreshBooks may still bill it); activate at cutover";
+  }
+  console.log(`[cascadeOnBilledToDealer] ${d.name} (${d.dealer_id}): ${outcome}`);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fireWrite((admin as any).from("migration_log").insert({
+    dealer_id: d.id,
+    event: "own_billing_restored",
+    billing_customer_id: customerId,
+    notes: `billed-to switched group → dealer: ${outcome}`,
+  }), "migration_log own_billing_restored");
+}
+
+export function fireBilledToDealerCascade(dealerUuid: string, groupId: string): void {
+  fireAndForgetWrap(() => cascadeOnBilledToDealer({ dealerUuid, groupId }), "billing.template.upsert", {
+    dealerUuid,
+    groupId,
+    event: "billed_to.dealer",
+  });
 }
 
 /**
@@ -498,7 +612,8 @@ export async function cascadeSuperAdminGroupAssign(args: {
         }
       }
     }
-    const { createdPaused } = await appendToTemplateStagedIfNew(group.billing_customer_id, [subLine]);
+    const { createdPaused, createdActive } = await appendToTemplateStagedIfNew(group.billing_customer_id, [subLine], { createActive: await groupIsAllNative(admin, group.id) });
+    if (createdActive) console.log(`[cascadeSuperAdminGroupAssign] created group ${group.id} (${group.name})'s FIRST da-billing template LIVE — every store is 5.0-native.`);
     if (createdPaused) {
       console.warn(
         `[cascadeSuperAdminGroupAssign] created group ${group.id} (${group.name})'s FIRST da-billing template — staged PAUSED so it cannot invoice before the group is cut over.`,
@@ -522,7 +637,8 @@ export async function cascadeSuperAdminGroupAssign(args: {
       quantity: 1,
       lineItemDescription: `${dealer.internal_id}::${dealer.name}`,
     };
-    const { createdPaused } = await appendToTemplateStagedIfNew(group.billing_customer_id, [subLine, labelsLine]);
+    const { createdPaused, createdActive } = await appendToTemplateStagedIfNew(group.billing_customer_id, [subLine, labelsLine], { createActive: await groupIsAllNative(admin, group.id) });
+    if (createdActive) console.log(`[cascadeSuperAdminGroupAssign] created group ${group.id} (${group.name})'s FIRST da-billing template LIVE — every store is 5.0-native.`);
     if (createdPaused) {
       console.warn(
         `[cascadeSuperAdminGroupAssign] created group ${group.id} (${group.name})'s FIRST da-billing template — staged PAUSED so it cannot invoice before the group is cut over.`,
