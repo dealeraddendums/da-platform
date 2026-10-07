@@ -46,8 +46,13 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       return NextResponse.json({ ok: true });
     }
     case "escalate": {
-      await escalateConversation(params.id);
-      return NextResponse.json({ ok: true, message: "I've notified our team — someone will follow up by email." });
+      const esc = await escalateConversation(params.id);
+      return NextResponse.json({
+        ok: esc.channel !== "none", live: esc.live, at: esc.at ?? null,
+        message: esc.live
+          ? "You're connected to our support team — someone will reply right here."
+          : "I've notified our team — someone will follow up by email.",
+      });
     }
     case "close": {
       void logConversationToHubspot(params.id); // fire-and-forget; never blocks

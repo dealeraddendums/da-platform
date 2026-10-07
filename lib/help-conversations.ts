@@ -13,16 +13,17 @@ import type { JwtClaims } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { hubspotConfigured, createConversationNote, updateConversationNote } from "@/lib/hubspot";
+import { hubspotHandoffEnabled, handoffSummary, publishToInbox, type HelpAttachment } from "@/lib/help-handoff";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com";
 const SUPPORT_EMAIL = "support@dealeraddendums.com";
 
 /** Create a conversation row; returns its id. */
-export async function createConversation(claims: JwtClaims, dealerId: string | null, contextSnapshot: string): Promise<string | null> {
+export async function createConversation(claims: JwtClaims, dealerId: string | null, contextSnapshot: string, page: string | null = null): Promise<string | null> {
   const admin = createAdminSupabaseClient();
   const { data } = await (admin as any)
     .from("help_conversations")
-    .insert({ user_id: claims.sub, dealer_id: dealerId, role: claims.role, group_id: claims.group_id, context_snapshot: contextSnapshot })
+    .insert({ user_id: claims.sub, dealer_id: dealerId, role: claims.role, group_id: claims.group_id, context_snapshot: contextSnapshot, page })
     .select("id").single();
   return data?.id ?? null;
 }
@@ -72,10 +73,20 @@ export async function listConversations(
   return { data: data ?? [], error: error ?? null };
 }
 
-export async function appendMessage(conversationId: string, role: "user" | "assistant" | "agent", content: string): Promise<string | null> {
+export async function appendMessage(
+  conversationId: string,
+  role: "user" | "assistant" | "agent",
+  content: string,
+  extra: { attachments?: HelpAttachment[]; senderName?: string | null; externalId?: string | null } = {},
+): Promise<string | null> {
   const admin = createAdminSupabaseClient();
-  const { data } = await (admin as any)
-    .from("help_messages").insert({ conversation_id: conversationId, role, content }).select("id").single();
+  const { data, error } = await (admin as any)
+    .from("help_messages").insert({
+      conversation_id: conversationId, role, content,
+      attachments: extra.attachments ?? [], sender_name: extra.senderName ?? null, external_id: extra.externalId ?? null,
+    }).select("id").single();
+  // 23505 on external_id = a retried relay for a reply already stored.
+  if (error && error.code !== "23505") console.error("[help] appendMessage failed:", error.message);
   await (admin as any).from("help_conversations").update({ updated_at: new Date().toISOString() }).eq("id", conversationId);
   return data?.id ?? null;
 }
@@ -96,7 +107,7 @@ export async function setFeedback(messageId: string, value: "up" | "down"): Prom
  * see WHAT account but never WHO, for every role. Profile role wins over the
  * role stamped on the conversation (that one is the claims role at the time).
  */
-async function resolveAsker(
+export async function resolveAsker(
   admin: ReturnType<typeof createAdminSupabaseClient>,
   conv: { user_id: string | null; dealer_id: string | null; group_id: string | null; role: string | null },
 ): Promise<{ name: string | null; email: string | null; role: string | null; dealership: string | null; group: string | null }> {
@@ -119,12 +130,62 @@ async function resolveAsker(
   };
 }
 
+export interface EscalationResult {
+  channel: "hubspot" | "email" | "none";
+  /** True when a person can now reply inside the bubble (HubSpot). */
+  live: boolean;
+  /** Poll cursor — the moment the conversation went live. */
+  at?: string;
+}
+
 /**
- * Escalate to a human (async, Phase A): mark escalated and — once per escalation
- * (debounced via escalation_notified_at) — Mandrill-notify support with the
- * dealer context + a deep link to the review surface.
+ * THE escalation target — the one function the bubble, the [[ESCALATE]]
+ * sentinel and the escalate action all call. Live HubSpot hand-off when
+ * HELP_HANDOFF_PROVIDER=hubspot; email otherwise, and email whenever the
+ * HubSpot publish fails. Idempotent: an already-live conversation just returns
+ * its cursor.
  */
-export async function escalateConversation(conversationId: string): Promise<void> {
+export async function escalateConversation(conversationId: string): Promise<EscalationResult> {
+  const admin = createAdminSupabaseClient();
+  const { data: conv } = await (admin as any)
+    .from("help_conversations")
+    .select("id, user_id, dealer_id, group_id, role, context_snapshot, status, handoff_provider, live_at, page")
+    .eq("id", conversationId).maybeSingle();
+  if (!conv) return { channel: "none", live: false };
+
+  if (conv.handoff_provider === "hubspot" && conv.live_at) {
+    return { channel: "hubspot", live: true, at: new Date(new Date(conv.live_at).getTime() - 1000).toISOString() };
+  }
+
+  if (hubspotHandoffEnabled(conv.dealer_id)) {
+    const who = await resolveAsker(admin, conv);
+    const { data: msgs } = await (admin as any)
+      .from("help_messages").select("role, content").eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true });
+    const pub = await publishToInbox({
+      conversationId, idempotencyId: `${conversationId}:open`, who, userId: conv.user_id,
+      text: handoffSummary({ who, dealerId: conv.dealer_id, page: conv.page, contextSnapshot: conv.context_snapshot, messages: msgs ?? [] }),
+    });
+    if (pub.ok) {
+      const now = new Date().toISOString();
+      await (admin as any).from("help_conversations").update({
+        status: "escalated", escalated_at: now, handoff_provider: "hubspot", live_at: now, escalation_notified_at: now,
+      }).eq("id", conversationId);
+      return { channel: "hubspot", live: true, at: new Date(Date.now() - 1000).toISOString() };
+    }
+    // fall through to email — a person must still hear about it
+  }
+
+  await escalateByEmail(conversationId);
+  return { channel: "email", live: false };
+}
+
+/**
+ * Email escalation: mark escalated and — once per escalation (debounced via
+ * escalation_notified_at) — Mandrill-notify support with the dealer context +
+ * a deep link to the review surface.
+ */
+export async function escalateByEmail(conversationId: string): Promise<void> {
   const admin = createAdminSupabaseClient();
   const { data: conv } = await (admin as any)
     .from("help_conversations")
@@ -133,7 +194,7 @@ export async function escalateConversation(conversationId: string): Promise<void
   if (!conv) return;
 
   await (admin as any).from("help_conversations")
-    .update({ status: "escalated", escalated_at: new Date().toISOString() })
+    .update({ status: "escalated", escalated_at: new Date().toISOString(), handoff_provider: "email" })
     .eq("id", conversationId);
 
   if (conv.escalation_notified_at) return; // already notified — debounce

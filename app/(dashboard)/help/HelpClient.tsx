@@ -280,8 +280,14 @@ function DealerTrack() {
 }
 
 // ─── Assistant (Part 2: streaming /api/help/chat) ────────────────────────────
+// Trailing server control markers ([[MID:…]] for feedback, [[LIVE:…]] for a
+// live hand-off) — consumed by the Steven bubble, never shown as text here.
+const MARKERS_RE = /\n?\[\[(MID|LIVE):[^\]]*\]\]/g;
+const PARTIAL_TAIL_RE = /\n?\[\[?[A-Z]*:?[^\]]*$/;
+
 function Assistant() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const convId = useRef<string | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -297,8 +303,11 @@ function Assistant() {
     setBusy(true);
     try {
       const res = await fetch("/api/help/chat", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: next }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: next, conversationId: convId.current, page: "/help" }),
       });
+      const hdr = res.headers.get("X-Conversation-Id");
+      if (hdr) convId.current = hdr; // one chat = one conversation thread
       if (!res.ok || !res.body) {
         const j = await res.json().catch(() => ({ error: "Something went wrong." }));
         setMessages((m) => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: j.error ?? "Sorry, something went wrong." }; return c; });
@@ -311,8 +320,10 @@ function Assistant() {
         const { done, value } = await reader.read();
         if (done) break;
         acc += dec.decode(value, { stream: true });
-        setMessages((m) => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: acc }; return c; });
+        const shown = acc.replace(MARKERS_RE, "").replace(PARTIAL_TAIL_RE, "");
+        setMessages((m) => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: shown }; return c; });
       }
+      setMessages((m) => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: acc.replace(MARKERS_RE, "").trim() }; return c; });
     } catch {
       setMessages((m) => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: "Connection problem — please try again." }; return c; });
     } finally {

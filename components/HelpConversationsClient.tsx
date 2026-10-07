@@ -13,6 +13,7 @@ type Conversation = {
   escalated_at: string | null;
   resolved_at: string | null;
   hubspot_logged_at: string | null;
+  hubspot_ticket_id?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -36,6 +37,7 @@ export default function HelpConversationsClient({
   const [openId, setOpenId] = useState<string | null>(initialId ?? null);
   const [detail, setDetail] = useState<{ conversation: Conversation; messages: Message[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ticketMsg, setTicketMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const qs = filter === "flagged" ? "?flagged=1" : filter === "all" ? "" : `?status=${filter}`;
@@ -56,6 +58,20 @@ export default function HelpConversationsClient({
     setBusy(false);
     await loadDetail(id);
     await load();
+  }
+
+  // Fallback ticket trigger (the primary one is the card on the HubSpot contact
+  // record). Explicit, one chat at a time; idempotent server-side.
+  async function makeTicket(id: string) {
+    setBusy(true);
+    setTicketMsg(null);
+    const res = await fetch("/api/help/make-ticket", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: id }),
+    });
+    const j = await res.json().catch(() => null);
+    setBusy(false);
+    setTicketMsg(j?.ok ? `${j.existing ? "Already a ticket" : "Ticket created"}: #${j.ticketId}` : `Couldn't create the ticket: ${j?.error ?? res.status}`);
+    await loadDetail(id);
   }
 
   function correctFromThread() {
@@ -100,6 +116,12 @@ export default function HelpConversationsClient({
 
         <div style={{ display: "flex", gap: 10 }}>
           <button onClick={correctFromThread} style={{ padding: "9px 16px", border: "1px solid #1976d2", borderRadius: 6, background: "#fff", color: "#1976d2", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600 }}>Correct into KB →</button>
+          {detail.conversation.hubspot_ticket_id ? (
+            <span style={{ alignSelf: "center", fontSize: 13, color: "#2e7d32", fontWeight: 600 }}>Ticket #{detail.conversation.hubspot_ticket_id}</span>
+          ) : (
+            <button onClick={() => void makeTicket(detail.conversation.id)} disabled={busy} style={{ padding: "9px 16px", border: "1px solid #1976d2", borderRadius: 6, background: "#fff", color: "#1976d2", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, opacity: busy ? 0.6 : 1 }}>Make this a ticket</button>
+          )}
+          {ticketMsg && <span style={{ alignSelf: "center", fontSize: 12.5, color: "#55595c" }}>{ticketMsg}</span>}
           {detail.conversation.status !== "resolved" && (
             <button onClick={() => void resolve(detail.conversation.id)} disabled={busy} style={{ padding: "9px 16px", border: "none", borderRadius: 6, background: "#2e7d32", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, opacity: busy ? 0.6 : 1 }}>Mark resolved</button>
           )}

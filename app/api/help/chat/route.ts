@@ -4,16 +4,22 @@ import { requireAuth } from "@/lib/auth";
 import { resolveEffectiveDealer } from "@/lib/dealer-authz";
 import { buildDealerContext, getRelevantArticles } from "@/lib/help-context";
 import { buildSystemPrompt } from "@/lib/help-knowledge";
-import { createConversation, ownsConversation, appendMessage, escalateConversation } from "@/lib/help-conversations";
+import { createConversation, ownsConversation, appendMessage, escalateConversation, resolveAsker } from "@/lib/help-conversations";
+import { createAdminSupabaseClient } from "@/lib/db";
+import { publishToInbox } from "@/lib/help-handoff";
 
 // Sentinel the model appends (own final line) when it can't resolve and the user
 // needs a person. Buffered out of the stream (never shown), then triggers escalation.
 const ESCALATE_RE = /\n*\[\[ESCALATE\]\]\s*/g;
 
 export const dynamic = "force-dynamic";
+// Live-chat state is read on every message; never serve a cached read.
+export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
 
-const MODEL = "claude-haiku-4-5-20251001"; // Haiku by default (cost+latency @ ~1,600 dealers)
+// Same model as the homepage Steven (da-marketing-os lib/ai.ts MODEL) so both
+// surfaces answer at the same quality. Overridable without a deploy.
+const MODEL = process.env.HELP_AI_MODEL || "claude-sonnet-5";
 const MAX_TOKENS = 700;
 const MAX_HISTORY = 12;        // cap conversation turns sent to the model
 const MAX_MSG_CHARS = 4000;    // cap per-message length
@@ -47,7 +53,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     return Response.json({ error: "The help assistant is not configured. Please contact support@dealeraddendums.com." }, { status: 503 });
   }
 
-  let body: { messages?: unknown };
+  let body: { messages?: unknown; page?: unknown };
   try { body = await req.json(); } catch { return Response.json({ error: "Invalid JSON" }, { status: 400 }); }
 
   // Sanitize + cap history; keep only user/assistant turns, last MAX_HISTORY.
@@ -64,12 +70,40 @@ export async function POST(req: NextRequest): Promise<Response> {
     return Response.json({ error: "Ask a question to get started." }, { status: 400 });
   }
 
+  // Page the dealer is on — context for the answer, never trusted for access.
+  const page = typeof body.page === "string" ? body.page.slice(0, 300) : null;
+
+  // ── A person has this conversation: Steven stays quiet ──────────────────
+  // The message goes to the agent in the HubSpot inbox instead of the model;
+  // X-Help-Live tells the bubble it's talking to a person (and from when).
+  const reqConvIdEarly = typeof (body as { conversationId?: unknown }).conversationId === "string"
+    ? (body as { conversationId: string }).conversationId : null;
+  if (reqConvIdEarly && (await ownsConversation(reqConvIdEarly, claims))) {
+    const admin = createAdminSupabaseClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: conv } = await (admin as any).from("help_conversations")
+      .select("id, user_id, dealer_id, group_id, role, handoff_provider, live_at").eq("id", reqConvIdEarly).maybeSingle();
+    if (conv?.handoff_provider === "hubspot" && conv.live_at) {
+      const mid = await appendMessage(conv.id, "user", lastUser.content);
+      const who = await resolveAsker(admin, conv);
+      await publishToInbox({ conversationId: conv.id, idempotencyId: mid ?? `${conv.id}:${Date.now()}`, text: lastUser.content, who, userId: conv.user_id });
+      return new Response("", {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store",
+          "X-Conversation-Id": conv.id, "X-Help-Live": "1",
+          "X-Help-Live-At": new Date(new Date(conv.live_at).getTime() - 1000).toISOString(),
+        },
+      });
+    }
+  }
+
   // Grounding + own-data-only context (both resolved server-side from claims).
   const [dealerContext, articles] = await Promise.all([
     buildDealerContext(claims),
     getRelevantArticles(lastUser.content),
   ]);
   const system = buildSystemPrompt({ dealerContext, articles }) +
+    (page ? `\n\nThe user is currently on this page of the app: ${page}` : "") +
     "\n\nESCALATION: If the user explicitly needs a human, or you genuinely cannot resolve their" +
     " issue from the material above, append the token [[ESCALATE]] on its own final line. The app" +
     " strips it and connects them to a person — do not mention the token itself.";
@@ -80,7 +114,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     ? (body as { conversationId: string }).conversationId : null;
   let conversationId: string | null = null;
   if (reqConvId && (await ownsConversation(reqConvId, claims))) conversationId = reqConvId;
-  if (!conversationId) conversationId = await createConversation(claims, resolveEffectiveDealer(claims), dealerContext);
+  if (!conversationId) conversationId = await createConversation(claims, resolveEffectiveDealer(claims), dealerContext, page);
   if (conversationId) await appendMessage(conversationId, "user", lastUser.content);
   const convId = conversationId;
 
@@ -108,16 +142,23 @@ export async function POST(req: NextRequest): Promise<Response> {
         const tailOut = full.slice(flushed).replace(ESCALATE_RE, "");
         if (tailOut) controller.enqueue(encoder.encode(tailOut));
 
-        // Persist the assistant answer (sentinel stripped); emit the message id
-        // (client parses [[MID:…]] for 👍/👎, then strips it) + an escalation
-        // notice + close, before kicking off the (slower) escalation side-effect.
+        // Persist the assistant answer (sentinel stripped). Trailing control
+        // markers the client consumes and never shows: [[MID:…]] (👍/👎) and,
+        // when the hand-off went live, [[LIVE:<cursor>]] (switch to live mode).
         const escalate = full.includes("[[ESCALATE]]");
         const answer = full.replace(ESCALATE_RE, "").trim();
         const mid = convId ? await appendMessage(convId, "assistant", answer) : null;
-        if (escalate) controller.enqueue(encoder.encode("\n\nI've notified our team — someone will follow up by email."));
-        if (mid) controller.enqueue(encoder.encode(`\n[[MID:${mid}]]`));
+        if (convId && escalate) {
+          const esc = await escalateConversation(convId);
+          controller.enqueue(encoder.encode(esc.live
+            ? "\n\nI'm connecting you with our support team now — someone will reply right here."
+            : "\n\nI've notified our team — someone will follow up by email."));
+          if (mid) controller.enqueue(encoder.encode(`\n[[MID:${mid}]]`));
+          if (esc.live && esc.at) controller.enqueue(encoder.encode(`\n[[LIVE:${esc.at}]]`));
+        } else if (mid) {
+          controller.enqueue(encoder.encode(`\n[[MID:${mid}]]`));
+        }
         controller.close();
-        if (convId && escalate) void escalateConversation(convId);
       } catch (err) {
         console.error("[help/chat] stream error:", err instanceof Error ? err.message : err);
         controller.enqueue(encoder.encode("\n\nSorry — I had a problem answering. Please try again, or email support@dealeraddendums.com."));

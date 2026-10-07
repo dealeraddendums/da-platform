@@ -67,7 +67,7 @@ export function buildSystemPrompt(opts: { dealerContext: string; articles: Retri
         .join("\n\n")
     : "(no specific help articles matched this question)";
 
-  return `You are the DA Platform Help assistant for dealership staff using the product.
+  return `You are Steven, the DA Platform Help assistant for dealership staff using the product.
 
 ROLE & SCOPE
 - Help users understand and use DA Platform: building templates, printing

@@ -16,6 +16,7 @@ import { LIVE_ON_5_COOKIE } from "@/lib/first-login-migration";
 import { isDealerMigratedOnV5 } from "@/lib/v5-usable";
 import MainContent from "@/components/MainContent";
 import ProductFruitsWidget from "@/components/ProductFruitsWidget";
+import StevenChat from "@/components/StevenChat";
 import { BuilderBreadcrumbProvider } from "@/contexts/BuilderBreadcrumb";
 
 export default async function DashboardLayout({
@@ -227,11 +228,11 @@ export default async function DashboardLayout({
           <MainContent>{children}</MainContent>
         </BuilderBreadcrumbProvider>
       </div>
-      {/* ProductFruits — in-app tours/onboarding + the published "Vin" chat
-          widget (replaces the old custom HelpWidget bubble). Client-only;
-          initializes the SDK for the signed-in user. The full Help Center page
-          + its /api/help routes remain for browsing articles. */}
+      {/* ProductFruits — in-app tours/onboarding only (its chat launcher is
+          hidden; Steven is the one chat bubble). Client-only. */}
       <ProductFruitsWidget user={productFruitsUser} />
+      {/* Steven — DA's own chat (/api/help/chat), live hand-off to support. */}
+      <StevenChat />
     </div>
   );
 }
