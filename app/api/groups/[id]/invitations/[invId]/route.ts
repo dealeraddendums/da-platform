@@ -1,11 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, type JwtClaims } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
+import { issueInvitationLoginCode } from "@/lib/invite-login-code";
 
 type Params = { params: { id: string; invId: string } };
+
+/** POST body { action: "login-code" } — generate a setup code to read out
+ *  instead of re-emailing (lib/invite-login-code.ts). Same guard as Resend. */
+async function wantsLoginCode(req: NextRequest): Promise<boolean> {
+  const b = await req.json().catch(() => null) as { action?: unknown } | null;
+  return b?.action === "login-code";
+}
+
+async function loginCode(claims: JwtClaims, invId: string, scope: { dealerUuid: string } | { groupId: string }): Promise<NextResponse> {
+  const r = await issueInvitationLoginCode(createAdminSupabaseClient(), claims, invId, scope);
+  if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
+  return NextResponse.json({ ok: true, code: r.code, email: r.email, expiresAt: r.expiresAt }, { headers: { "Cache-Control": "no-store" } });
+}
 
 // super_admin (any group) or group_admin (own group only).
 async function authorize(groupId: string) {
@@ -17,7 +31,7 @@ async function authorize(groupId: string) {
   if (claims.role === "group_admin" && groupId !== claims.group_id) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
-  return { error: null as null };
+  return { error: null as null, claims };
 }
 
 /**
@@ -25,9 +39,10 @@ async function authorize(groupId: string) {
  * refresh its 7-day expiry and re-email the existing token. Returns
  * { ok, emailSent, warning? }.
  */
-export async function POST(_req: NextRequest, { params }: Params): Promise<NextResponse> {
-  const { error } = await authorize(params.id);
+export async function POST(req: NextRequest, { params }: Params): Promise<NextResponse> {
+  const { error, claims } = await authorize(params.id);
   if (error) return error;
+  if (await wantsLoginCode(req)) return loginCode(claims!, params.invId, { groupId: params.id });
 
   const admin = createAdminSupabaseClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

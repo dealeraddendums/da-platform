@@ -840,6 +840,7 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
   const [deleteUser, setDeleteUser]   = useState<UserRow | null>(null);
   const [sendInviteUser, setSendInviteUser] = useState<UserRow | null>(null);
   const [loginCodeUser, setLoginCodeUser] = useState<UserRow | null>(null);
+  const [loginCodeInvite, setLoginCodeInvite] = useState<{ id: string; email: string; first_name: string | null; last_name: string | null } | null>(null);
   const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
   const [impersonating, setImpersonating] = useState<string | null>(null);
 
@@ -1320,6 +1321,14 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
                     </button>
                     <button
                       className="btn btn-secondary"
+                      style={{ marginRight: 8 }}
+                      title="Generate a code to read to them over the phone"
+                      onClick={() => setLoginCodeInvite(inv)}
+                    >
+                      Login code
+                    </button>
+                    <button
+                      className="btn btn-secondary"
                       onClick={() => void (async () => {
                         if (!confirm(`Revoke the invitation to ${inv.email}?`)) return;
                         const res = await fetch(`/api/dealers/${dealerUuid}/invitations/${inv.id}`, { method: "DELETE" });
@@ -1426,6 +1435,13 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
           user={deleteUser}
           onClose={() => setDeleteUser(null)}
           onSuccess={handleSuccess}
+        />
+      )}
+      {loginCodeInvite && dealerUuid && (
+        <LoginCodeModal
+          user={{ id: loginCodeInvite.id, email: loginCodeInvite.email, full_name: [loginCodeInvite.first_name, loginCodeInvite.last_name].filter(Boolean).join(" ") || null }}
+          invitationEndpoint={`/api/dealers/${dealerUuid}/invitations/${loginCodeInvite.id}`}
+          onClose={() => { setLoginCodeInvite(null); void fetchUsers(); }}
         />
       )}
       {loginCodeUser && (

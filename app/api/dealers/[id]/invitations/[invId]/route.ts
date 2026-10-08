@@ -1,12 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, type JwtClaims } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildInviteEmail } from "@/lib/invite-email";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
+import { issueInvitationLoginCode } from "@/lib/invite-login-code";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
 
 type Params = { params: { id: string; invId: string } };
+
+/** POST body { action: "login-code" } — generate a setup code to read out
+ *  instead of re-emailing (lib/invite-login-code.ts). Same guard as Resend. */
+async function wantsLoginCode(req: NextRequest): Promise<boolean> {
+  const b = await req.json().catch(() => null) as { action?: unknown } | null;
+  return b?.action === "login-code";
+}
+
+async function loginCode(claims: JwtClaims, invId: string, scope: { dealerUuid: string } | { groupId: string }): Promise<NextResponse> {
+  const r = await issueInvitationLoginCode(createAdminSupabaseClient(), claims, invId, scope);
+  if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
+  return NextResponse.json({ ok: true, code: r.code, email: r.email, expiresAt: r.expiresAt }, { headers: { "Cache-Control": "no-store" } });
+}
 
 // super_admin (any) / dealer_admin (own) / group_admin (in-group). Mirrors the
 // invite-creation guards in POST /api/dealers/[id]/users.
@@ -24,13 +38,14 @@ async function authorizeDealer(dealerUuid: string) {
     .maybeSingle<{ dealer_id: string }>();
   const authz = await authorizeDealerAction(claims, d?.dealer_id ?? null);
   if (!authz.ok) return { error: authz.response };
-  return { error: null as null };
+  return { error: null as null, claims };
 }
 
 /** POST — resend a pending dealer invitation (refresh expiry + re-email). */
-export async function POST(_req: NextRequest, { params }: Params): Promise<NextResponse> {
-  const { error } = await authorizeDealer(params.id);
+export async function POST(req: NextRequest, { params }: Params): Promise<NextResponse> {
+  const { error, claims } = await authorizeDealer(params.id);
   if (error) return error;
+  if (await wantsLoginCode(req)) return loginCode(claims!, params.invId, { dealerUuid: params.id });
 
   const admin = createAdminSupabaseClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

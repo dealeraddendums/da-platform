@@ -12,11 +12,15 @@ import { useState } from "react";
 type Props = {
   user: { id: string; email: string; full_name: string | null };
   onClose: () => void;
+  /** Pending-invitation variant (2026-10-08): POST here with
+   *  { action: "login-code" } instead of /api/users/[id]/login-code — the
+   *  person has no account yet, only an invitation. Same code, same rules. */
+  invitationEndpoint?: string;
 };
 
 const NAVY = "#2a2b3c";
 
-export default function LoginCodeModal({ user, onClose }: Props) {
+export default function LoginCodeModal({ user, onClose, invitationEndpoint }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [issued, setIssued] = useState<{ code: string; email: string; expiresAt: string } | null>(null);
@@ -26,7 +30,12 @@ export default function LoginCodeModal({ user, onClose }: Props) {
     setBusy(true);
     setErr(null);
     try {
-      const res = await fetch(`/api/users/${user.id}/login-code`, { method: "POST", cache: "no-store" });
+      const res = invitationEndpoint
+        ? await fetch(invitationEndpoint, {
+            method: "POST", cache: "no-store",
+            headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "login-code" }),
+          })
+        : await fetch(`/api/users/${user.id}/login-code`, { method: "POST", cache: "no-store" });
       const j = await res.json().catch(() => ({})) as { error?: string; code?: string; email?: string; expiresAt?: string };
       if (!res.ok || !j.code) { setErr(j.error ?? "Could not generate a code"); return; }
       setCopied("");

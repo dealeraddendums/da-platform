@@ -115,6 +115,7 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
   const [impersonating, setImpersonating] = useState<string | null>(null);
   const [pwUser, setPwUser] = useState<DealerUserProfile | null>(null);
   const [loginCodeUser, setLoginCodeUser] = useState<DealerUserProfile | null>(null);
+  const [loginCodeInvite, setLoginCodeInvite] = useState<PendingInvite | null>(null);
   const [resendingUserId, setResendingUserId] = useState<string | null>(null);
   const [pwValue, setPwValue] = useState("");
   const [pwShow, setPwShow] = useState(false);
@@ -400,6 +401,8 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
               ) : canInvite && (
                 <div className="flex gap-3 items-center">
                   <button className="btn btn-secondary text-xs" style={{ height: 28, padding: "0 10px" }} onClick={() => void resendInvite(inv)}>Resend</button>
+                  <button className="text-xs" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--blue)" }} onClick={() => setLoginCodeInvite(inv)}
+                    title="Generate a code to read to them over the phone">Login code</button>
                   <button className="text-xs" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--error)", fontWeight: 600 }} onClick={() => void revokeInvite(inv)}>Revoke</button>
                 </div>
               )}
@@ -534,6 +537,13 @@ export default function DealerUsersTab({ dealerId, dealerName, viewerRole }: Pro
         </table>
       )}
 
+      {loginCodeInvite && (
+        <LoginCodeModal
+          user={{ id: loginCodeInvite.id, email: loginCodeInvite.email, full_name: [loginCodeInvite.first_name, loginCodeInvite.last_name].filter(Boolean).join(" ") || null }}
+          invitationEndpoint={`/api/dealers/${dealerId}/invitations/${loginCodeInvite.id}`}
+          onClose={() => setLoginCodeInvite(null)}
+        />
+      )}
       {loginCodeUser && (
         <LoginCodeModal user={loginCodeUser} onClose={() => setLoginCodeUser(null)} />
       )}
