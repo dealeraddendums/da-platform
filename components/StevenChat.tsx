@@ -326,7 +326,7 @@ export default function StevenChat() {
               {tickets === null && <div style={{ color: "#78828c", fontSize: 13 }}>Loading…</div>}
               {tickets && tickets.length === 0 && (
                 <div style={{ color: "#55595c", fontSize: 13, lineHeight: 1.55 }}>
-                  {ticketsNote || "No support tickets yet. When our team turns one of your chats into a ticket, you'll see its status here."}
+                  {ticketsNote || "No support tickets yet. When our support team opens a ticket for you, you'll see its status here."}
                 </div>
               )}
               {tickets?.map((t) => (

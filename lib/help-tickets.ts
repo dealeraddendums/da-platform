@@ -37,6 +37,8 @@ export async function adoptInboxTickets(
       .eq("id", c.id).is("hubspot_ticket_id", null).select("id");
     if (!upd?.length) continue;
     adopted[c.id] = ticketId;
+    // Left in the portal's default pipeline (nobody chose one) → support pipeline.
+    await callGateway("/api/hubspot-chat/tickets", { action: "adopt-move", ticketId });
     if (c.dealer_id) {
       const { data: d } = await a.from("dealers").select("hubspot_company_id").eq("dealer_id", c.dealer_id).maybeSingle();
       if (d?.hubspot_company_id) {
@@ -133,11 +135,23 @@ export async function makeTicketForConversation(conversationId: string, requeste
 }
 
 export interface DealerTicket {
-  ticketId: string; conversationId: string; subject: string | null; status: string;
+  ticketId: string; conversationId: string | null; subject: string | null; status: string;
   state: "open" | "waiting" | "closed"; updatedAt: string | null; createdAt: string | null;
 }
 
-/** Tickets made from this dealership's chats, newest first, with live status. */
+/**
+ * "My support tickets": every DEALER-SUPPORT ticket for this dealership, newest
+ * first, with live status — both the ones made from its Steven chats AND any
+ * other support ticket linked to its HubSpot company (made in the CRM, from an
+ * email, by an agent). Before 2026-10-08 only chat-made tickets were listed, so
+ * a ticket made on the company record never showed.
+ *
+ * Only the support pipeline ("Customer Support") is ever shown — the portal's
+ * other pipelines hold internal, onboarding and billing-ops tickets ("Check
+ * FreshBooks for correct billing") that are about the dealer but not for them.
+ * The dealer is resolved from the session by the caller; nothing here takes a
+ * dealer from the client.
+ */
 export async function ticketsForDealer(dealerId: string): Promise<{ ok: boolean; tickets: DealerTicket[]; error?: string }> {
   const a = createAdminSupabaseClient() as any;
   // Pick up tickets agents made in the inbox since the last look.
@@ -147,22 +161,32 @@ export async function ticketsForDealer(dealerId: string): Promise<{ ok: boolean;
     .order("updated_at", { ascending: false }).limit(25);
   if (recent?.length) await adoptInboxTickets(recent);
 
-  const { data } = await a.from("help_conversations")
-    .select("id, hubspot_ticket_id, ticketed_at")
-    .eq("dealer_id", dealerId).not("hubspot_ticket_id", "is", null)
-    .order("ticketed_at", { ascending: false }).limit(50);
+  const [{ data }, { data: dealer }] = await Promise.all([
+    a.from("help_conversations").select("id, hubspot_ticket_id, ticketed_at")
+      .eq("dealer_id", dealerId).not("hubspot_ticket_id", "is", null)
+      .order("ticketed_at", { ascending: false }).limit(50),
+    a.from("dealers").select("hubspot_company_id").eq("dealer_id", dealerId).maybeSingle(),
+  ]);
   const rows = (data ?? []) as { id: string; hubspot_ticket_id: string }[];
-  if (!rows.length) return { ok: true, tickets: [] };
-  const r = await callGateway("/api/hubspot-chat/tickets", { action: "status", ids: rows.map((x) => x.hubspot_ticket_id) });
-  if (!r.ok || !r.data?.ok) return { ok: false, tickets: [], error: "Ticket status is unavailable right now." };
-  const byId = new Map<string, any>((r.data.tickets as any[]).map((t) => [String(t.id), t]));
-  const tickets = rows.map((x) => {
-    const t = byId.get(String(x.hubspot_ticket_id));
-    return t ? {
-      ticketId: String(x.hubspot_ticket_id), conversationId: x.id, subject: t.subject, status: t.status,
-      state: t.state, updatedAt: t.updatedAt, createdAt: t.createdAt,
-    } as DealerTicket : null;
-  }).filter((t): t is DealerTicket => !!t);
+  const convByTicket = new Map(rows.map((x) => [String(x.hubspot_ticket_id), x.id]));
+  const companyId = dealer?.hubspot_company_id ? String(dealer.hubspot_company_id) : null;
+
+  const [chatRes, companyRes] = await Promise.all([
+    rows.length ? callGateway("/api/hubspot-chat/tickets", { action: "status", ids: rows.map((x) => x.hubspot_ticket_id) }) : null,
+    companyId ? callGateway("/api/hubspot-chat/tickets", { action: "for-company", companyId }) : null,
+  ]);
+  const chatOk = !chatRes || (chatRes.ok && chatRes.data?.ok);
+  const companyOk = !companyRes || (companyRes.ok && companyRes.data?.ok);
+  if (!chatOk && !companyOk) return { ok: false, tickets: [], error: "Ticket status is unavailable right now." };
+
+  const byId = new Map<string, any>();
+  for (const t of [...(chatOk ? chatRes?.data?.tickets ?? [] : []), ...(companyOk ? companyRes?.data?.tickets ?? [] : [])] as any[]) {
+    if (t?.support === true) byId.set(String(t.id), t);
+  }
+  const tickets = Array.from(byId.values()).map((t) => ({
+    ticketId: String(t.id), conversationId: convByTicket.get(String(t.id)) ?? null, subject: t.subject, status: t.status,
+    state: t.state, updatedAt: t.updatedAt, createdAt: t.createdAt,
+  } as DealerTicket));
   tickets.sort((p, q) => (q.updatedAt || "").localeCompare(p.updatedAt || ""));
   return { ok: true, tickets };
 }
