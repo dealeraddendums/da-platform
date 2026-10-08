@@ -115,31 +115,42 @@ export async function buildDealerContext(
   return lines.join("\n");
 }
 
+const STOPWORDS = new Set(("the and for that this with what how can you your are was does have has from into only "
+  + "about there their them then than when where which who why will would could should our out get got any all "
+  + "not but use using need want just like make made more some also").split(" "));
+
 /**
  * Retrieve the most relevant PUBLISHED dealer help articles for a question.
- * Keyword ILIKE over title/body (article set is small); falls back to the core
- * guides when nothing matches so answers stay grounded.
+ *
+ * The dealer article set is small (8 as of 2026-10-07), so every article is
+ * scored in memory: a question word in the TITLE counts 3, in the body 1,
+ * filler words ignored. The old ILIKE-OR picked any 5 articles containing any
+ * 3-letter word ("how", "add") in arbitrary order — the "Product Rules"
+ * article never reached the model for "a product only for used vehicles".
+ * Falls back to the core guides (sort_order) when nothing scores.
  */
-export async function getRelevantArticles(query: string, limit = 5): Promise<RetrievedArticle[]> {
+export async function getRelevantArticles(query: string, limit = 4): Promise<RetrievedArticle[]> {
   const admin = createAdminSupabaseClient();
   // help_articles isn't in the generated Database type yet (migration 091).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const base = () =>
-    (admin as any).from("help_articles").select("title, category, body").eq("published", true).in("audience", ["dealer", "all"]);
+  const { data } = await (admin as any).from("help_articles")
+    .select("title, category, body, sort_order").eq("published", true).in("audience", ["dealer", "all"])
+    .order("sort_order", { ascending: true }).limit(500);
+  const all = ((data ?? []) as (RetrievedArticle & { sort_order: number | null })[])
+    .map((a) => ({ ...a, text: htmlToText(a.body) }));
 
-  const words = (query ?? "").toLowerCase().match(/[a-z0-9]{3,}/g)?.slice(0, 8) ?? [];
-  let articles: RetrievedArticle[] = [];
-  if (words.length) {
-    const ors = words.map((w) => `title.ilike.%${w}%,body.ilike.%${w}%`).join(",");
-    const { data } = await base().or(ors).limit(limit);
-    articles = (data as RetrievedArticle[] | null) ?? [];
-  }
-  if (articles.length === 0) {
-    const { data } = await base().order("sort_order", { ascending: true }).limit(limit);
-    articles = (data as RetrievedArticle[] | null) ?? [];
-  }
-  // de-dup by title, keep plain bodies trimmed (the prompt builder trims again)
-  const seen = new Set<string>();
-  return articles.filter((a) => (seen.has(a.title) ? false : (seen.add(a.title), true)))
-    .map((a) => ({ title: a.title, category: a.category, body: htmlToText(a.body) }));
+  const words = Array.from(new Set(((query ?? "").toLowerCase().match(/[a-z0-9]{3,}/g) ?? [])
+    .filter((w) => !STOPWORDS.has(w))))
+    // crude stem so "vehicles"/"products" match "vehicle"/"product"
+    .map((w) => (w.length > 4 && w.endsWith("s") ? w.slice(0, -1) : w));
+
+  const scored = all.map((a) => {
+    const title = a.title.toLowerCase();
+    const body = a.text.toLowerCase();
+    const score = words.reduce((n, w) => n + (title.includes(w) ? 3 : 0) + (body.includes(w) ? 1 : 0), 0);
+    return { a, score };
+  }).filter((x) => x.score > 0).sort((x, y) => y.score - x.score);
+
+  const picked = (scored.length ? scored.map((x) => x.a) : all).slice(0, limit);
+  return picked.map((a) => ({ title: a.title, category: a.category, body: a.text }));
 }

@@ -37,6 +37,15 @@ const PARTIAL_TAIL_RE = /\n?\[\[?[A-Z]*:?[^\]]*$/;
 
 const STORE_KEY = "da_steven_chat_v1";
 
+/** Steven writes light markdown; render **bold** and drop stray heading
+ *  marks. Plain text otherwise (no HTML is ever injected). */
+function renderText(text: string) {
+  return text.replace(/^#{1,6}\s+/gm, "").split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**") && part.length > 4
+      ? <strong key={i}>{part.slice(2, -2)}</strong>
+      : <span key={i}>{part}</span>);
+}
+
 function load(): { conversationId: string | null; messages: Msg[]; live: boolean; after: string | null } | null {
   try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; }
 }
@@ -356,7 +365,7 @@ export default function StevenChat() {
                         background: mine ? BLUE : "#fff", color: mine ? "#fff" : "#2a2b3c",
                         border: mine ? "none" : agent ? `1px solid ${NAVY}` : BORDER,
                       }}>
-                        {m.content || (m.files?.length ? null : (busy && i === messages.length - 1 ? "…" : ""))}
+                        {m.content ? renderText(m.content) : (m.files?.length ? null : (busy && i === messages.length - 1 ? "…" : ""))}
                         {m.files?.map((f, j) => (
                           <div key={j} style={{ marginTop: m.content || j ? 6 : 0 }}>
                             {f.url

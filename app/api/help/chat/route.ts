@@ -12,6 +12,11 @@ import { publishToInbox } from "@/lib/help-handoff";
 // needs a person. Buffered out of the stream (never shown), then triggers escalation.
 const ESCALATE_RE = /\n*\[\[ESCALATE\]\]\s*/g;
 
+// Only a dealer who ASKED for a person is connected automatically. When Steven
+// merely can't answer, it offers the "Talk to a person" button instead —
+// otherwise every gap in the Help Center would page the support team live.
+const WANTS_HUMAN = /\b(real person|human|a person|someone|support (team|rep|agent)|agent|representative|rep\b|call me|phone call|talk to (you|support|sales|somebody)|speak (to|with))\b/i;
+
 export const dynamic = "force-dynamic";
 // Live-chat state is read on every message; never serve a cached read.
 export const fetchCache = "force-no-store";
@@ -146,7 +151,8 @@ export async function POST(req: NextRequest): Promise<Response> {
         // Persist the assistant answer (sentinel stripped). Trailing control
         // markers the client consumes and never shows: [[MID:…]] (👍/👎) and,
         // when the hand-off went live, [[LIVE:<cursor>]] (switch to live mode).
-        const escalate = full.includes("[[ESCALATE]]");
+        const escalate = full.includes("[[ESCALATE]]") && WANTS_HUMAN.test(lastUser.content);
+        const offerPerson = full.includes("[[ESCALATE]]") && !escalate;
         const answer = full.replace(ESCALATE_RE, "").trim();
         const mid = convId ? await appendMessage(convId, "assistant", answer) : null;
         if (convId && escalate) {
@@ -156,8 +162,9 @@ export async function POST(req: NextRequest): Promise<Response> {
             : "\n\nI've notified our team — someone will follow up by email."));
           if (mid) controller.enqueue(encoder.encode(`\n[[MID:${mid}]]`));
           if (esc.live && esc.at) controller.enqueue(encoder.encode(`\n[[LIVE:${esc.at}]]`));
-        } else if (mid) {
-          controller.enqueue(encoder.encode(`\n[[MID:${mid}]]`));
+        } else {
+          if (offerPerson) controller.enqueue(encoder.encode("\n\nIf you'd like a person to help, tap **Talk to a person** below."));
+          if (mid) controller.enqueue(encoder.encode(`\n[[MID:${mid}]]`));
         }
         controller.close();
       } catch (err) {
