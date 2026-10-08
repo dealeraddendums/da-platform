@@ -361,11 +361,15 @@ async function templatesInfo(admin: Admin, dealerId: string) {
   const names = new Map<string, string>();
   for (const t of (own.data ?? []) as any[]) names.set(t.id, t.name);
   for (const t of (grp.data ?? []) as any[]) names.set(t.id, `${t.name} (group template)`);
-  const label = (id: string | null | undefined) => (id ? names.get(id) ?? "a template that no longer exists" : "none set (prints the starter layout)");
+  // An unset PRIMARY default prints the starter layout; an unset SECOND
+  // addendum just means no second page (Steven once told a dealer it would
+  // print the starter layout).
+  const label = (id: string | null | undefined, second = false) => (id ? names.get(id) ?? "a template that no longer exists"
+    : second ? "none (no second addendum prints)" : "none set (prints the starter layout)");
   const block = (doc: string, second = false) => ({
-    new: label(st?.[`default_${doc}_new${second ? "_second" : ""}`]),
-    used: label(st?.[`default_${doc}_used${second ? "_second" : ""}`]),
-    cpo: label(st?.[`default_${doc}_cpo${second ? "_second" : ""}`]),
+    new: label(st?.[`default_${doc}_new${second ? "_second" : ""}`], second),
+    used: label(st?.[`default_${doc}_used${second ? "_second" : ""}`], second),
+    cpo: label(st?.[`default_${doc}_cpo${second ? "_second" : ""}`], second),
   });
   const hasSecond = ["new", "used", "cpo"].some((c) => st?.[`default_addendum_${c}_second`]);
   return {
