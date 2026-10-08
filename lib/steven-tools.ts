@@ -117,6 +117,12 @@ export const STEVEN_TOOLS: Anthropic.Tool[] = [
       "The dealership's print queue (vehicles queued with Print Later in the mobile app): how many, and which ones (stock #, VIN, year/make/model). Use for 'what's in my print queue'.",
     input_schema: { type: "object", properties: { ...STORE_PARAM } },
   },
+  {
+    name: "get_label_orders",
+    description:
+      "The dealership's recent label / supply orders (same list as My Profile → Orders → Label Order History), newest first, up to 10: order date, who ordered, items with quantities (e.g. 'Regular Addendums × 250'), total, shipment status (Pending shipment / Shipped / Delivered) and tracking number + carrier. Use for 'when did I last order labels', 'what size did I order', 'has my label order shipped', 'what's my tracking number', 'how much were my last labels'. For how to order more, use the Order Supplies help article.",
+    input_schema: { type: "object", properties: { ...STORE_PARAM } },
+  },
 ];
 
 export const STEVEN_TOOL_NAMES = new Set(STEVEN_TOOLS.map((t) => t.name));
@@ -384,6 +390,33 @@ async function websiteIntegration(admin: Admin, dealerId: string) {
   };
 }
 
+// Same source + scoping as GET /api/orders/labels (the Orders tab): label_orders
+// is keyed by the dealer's UUID. Only the columns the tab shows — billing
+// routing/status and the ship-to address are deliberately left out.
+async function labelOrders(admin: Admin, dealerId: string) {
+  const { data: d } = await admin.from("dealers").select("id").eq("dealer_id", dealerId).maybeSingle<{ id: string }>();
+  if (!d) return { error: "dealership not found" };
+  const { data, error } = await (admin as any).from("label_orders")
+    .select("items, total_amount, xps_status, xps_tracking_number, xps_carrier, created_at, ordered_by_name")
+    .eq("dealer_id", d.id).order("created_at", { ascending: false }).limit(10);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as any[];
+  return {
+    orders: rows.map((o) => ({
+      ordered_on: String(o.created_at).slice(0, 10),
+      ordered_by: o.ordered_by_name ?? null,
+      items: (Array.isArray(o.items) ? o.items : []).map((it: any) => `${it.productName ?? it.sku} × ${Number(it.qty ?? 0).toLocaleString("en-US")}`),
+      total: o.total_amount != null ? `$${Number(o.total_amount).toFixed(2)}` : null,
+      status: o.xps_status === "delivered" ? "Delivered" : o.xps_status === "shipped" ? "Shipped" : "Pending shipment",
+      tracking_number: o.xps_tracking_number ?? null,
+      carrier: o.xps_carrier ?? null,
+    })),
+    shown: rows.length,
+    note: rows.length ? "newest first; at most the 10 most recent orders" : "no label orders on file for this store",
+    where: "My Profile → Orders (history) · Order Supplies (place a new order)",
+  };
+}
+
 const ROLE_LABEL: Record<string, string> = { dealer_admin: "Dealer Admin", dealer_user: "Dealer User", dealer_restricted: "Dealer Restricted" };
 
 async function usersList(admin: Admin, dealerId: string) {
@@ -453,6 +486,7 @@ export async function runStevenTool(
           result = await usersList(admin, scope.dealerId);
           break;
         case "get_print_queue": result = await printQueue(admin, scope.dealerId); break;
+        case "get_label_orders": result = await labelOrders(admin, scope.dealerId); break;
         default: result = { error: "unknown tool" };
       }
       audit("ok", scope.dealerId, null);
