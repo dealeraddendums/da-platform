@@ -397,6 +397,9 @@ async function usersList(admin: Admin, dealerId: string) {
     users: ((profs ?? []) as any[]).map((p) => ({ name: p.full_name || p.email, email: p.email, role: ROLE_LABEL[p.role] ?? p.role })),
     pending_invitations: pending.map((i) => ({ email: i.email, role: ROLE_LABEL[i.role] ?? i.role })),
     where: "Users (sidebar)",
+    // Stated here because Steven has twice invented "only a super admin can
+    // create a Dealer Admin" when answering from this list.
+    who_can_invite: "A Dealer Admin can invite any of the three roles — Dealer Admin, Dealer User, or Dealer Restricted (Users → + Invite User).",
   };
 }
 
