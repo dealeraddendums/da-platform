@@ -122,5 +122,5 @@ every article before the change: `help-articles-backup-20261008.json` (suite roo
 | help-article-vin-decode.md | Adding & editing vehicles (VIN decode) | body replaced (tour link kept) |
 | help-article-plan-and-trial.md | Your plan, trial, and upgrading | body replaced |
 
-Published dealer articles: **8 → 10**, and all 10 now carry text Steven can read. Still missing entirely: Buyer's
+Published dealer articles: **8 → 12** (2 drafts published + 2 new), and all 12 now carry text Steven can read. Still missing entirely: Buyer's
 Guide, Print Settings, Infosheet, Users & roles, Groups, mobile app, and billing beyond the plan.
