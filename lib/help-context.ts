@@ -130,6 +130,20 @@ const STOPWORDS = new Set(("the and for that this with what how can you your are
  * Falls back to the core guides (sort_order) when nothing scores.
  */
 export async function getRelevantArticles(query: string, limit = 4): Promise<RetrievedArticle[]> {
+  return (await getRelevantArticlesScored(query, limit)).articles;
+}
+
+export interface ScoredRetrieval {
+  articles: RetrievedArticle[];
+  /** False when no article scored at all — the answer falls back to the core
+   *  guides and is NOT grounded in anything about the question. */
+  matched: boolean;
+  top: { title: string; score: number } | null;
+}
+
+/** Same selection as getRelevantArticles, plus how good the best match was —
+ *  the knowledge-gap log needs to know when Steven had nothing to go on. */
+export async function getRelevantArticlesScored(query: string, limit = 4): Promise<ScoredRetrieval> {
   const admin = createAdminSupabaseClient();
   // help_articles isn't in the generated Database type yet (migration 091).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -152,5 +166,9 @@ export async function getRelevantArticles(query: string, limit = 4): Promise<Ret
   }).filter((x) => x.score > 0).sort((x, y) => y.score - x.score);
 
   const picked = (scored.length ? scored.map((x) => x.a) : all).slice(0, limit);
-  return picked.map((a) => ({ title: a.title, category: a.category, body: a.text }));
+  return {
+    articles: picked.map((a) => ({ title: a.title, category: a.category, body: a.text })),
+    matched: scored.length > 0,
+    top: scored.length ? { title: scored[0].a.title, score: scored[0].score } : null,
+  };
 }

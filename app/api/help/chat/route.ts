@@ -2,7 +2,8 @@ import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { requireAuth } from "@/lib/auth";
 import { resolveEffectiveDealer } from "@/lib/dealer-authz";
-import { buildDealerContext, getRelevantArticles } from "@/lib/help-context";
+import { buildDealerContext, getRelevantArticlesScored } from "@/lib/help-context";
+import { logKnowledgeGap, UNANSWERED_RE } from "@/lib/help-gaps";
 import { buildSystemPrompt } from "@/lib/help-knowledge";
 import { createConversation, ownsConversation, appendMessage, escalateConversation, resolveAsker } from "@/lib/help-conversations";
 import { createAdminSupabaseClient } from "@/lib/db";
@@ -103,10 +104,11 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   // Grounding + own-data-only context (both resolved server-side from claims).
-  const [dealerContext, articles] = await Promise.all([
+  const [dealerContext, retrieval] = await Promise.all([
     buildDealerContext(claims),
-    getRelevantArticles(lastUser.content),
+    getRelevantArticlesScored(lastUser.content),
   ]);
+  const articles = retrieval.articles;
   const system = buildSystemPrompt({ dealerContext, articles }) +
     (page ? `\n\nThe user is currently on this page of the app: ${page}` : "") +
     "\n\nESCALATION: If the user explicitly needs a human, or you genuinely cannot resolve their" +
@@ -167,6 +169,18 @@ export async function POST(req: NextRequest): Promise<Response> {
           if (mid) controller.enqueue(encoder.encode(`\n[[MID:${mid}]]`));
         }
         controller.close();
+
+        // Knowledge-gap log (after the reply is out; fire-and-forget).
+        const sentinel = full.includes("[[ESCALATE]]");
+        const gapReason = !retrieval.matched ? "no_article"
+          : sentinel ? "escalated"
+          : UNANSWERED_RE.test(answer) ? "unanswered" : null;
+        if (gapReason) {
+          logKnowledgeGap({
+            question: lastUser.content, reason: gapReason, top: retrieval.top, conversationId: convId,
+            userId: claims.sub, dealerId: resolveEffectiveDealer(claims), groupId: claims.group_id ?? null, role: claims.role,
+          });
+        }
       } catch (err) {
         console.error("[help/chat] stream error:", err instanceof Error ? err.message : err);
         controller.enqueue(encoder.encode("\n\nSorry — I had a problem answering. Please try again, or email support@dealeraddendums.com."));

@@ -6,6 +6,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import HelpConversationsClient from "@/components/HelpConversationsClient";
+import HelpKnowledgeGapsClient from "@/components/HelpKnowledgeGapsClient";
 import HelpCategoriesClient, { type HelpCategory } from "@/components/HelpCategoriesClient";
 import { useCollapsedSections, chevronStyle } from "@/lib/use-collapsed-sections";
 import HelpArticleBody, { type JwConfig } from "@/components/HelpArticleBody";
@@ -139,7 +140,7 @@ function toDraft(a: Article): Draft {
   };
 }
 
-type Tab = "articles" | "categories" | "conversations";
+type Tab = "articles" | "categories" | "conversations" | "gaps";
 
 export default function HelpAdminClient({ jw }: { jw: JwConfig }) {
   const [articles, setArticles] = useState<Article[]>([]);
@@ -167,6 +168,7 @@ export default function HelpAdminClient({ jw }: { jw: JwConfig }) {
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     if (sp.get("tab") === "conversations") setTab("conversations");
+    if (sp.get("tab") === "gaps") setTab("gaps");
     setInitialConvId(sp.get("id"));
   }, []);
 
@@ -398,7 +400,7 @@ export default function HelpAdminClient({ jw }: { jw: JwConfig }) {
     background: active ? "#1976d2" : "#fff", color: active ? "#fff" : "#333", fontFamily: "inherit",
   });
 
-  const TABS: Array<[Tab, string]> = [["articles", "Articles"], ["categories", "Categories"], ["conversations", "Conversations"]];
+  const TABS: Array<[Tab, string]> = [["articles", "Articles"], ["categories", "Categories"], ["conversations", "Conversations"], ["gaps", "Knowledge gaps"]];
 
   return (
     <div style={{ maxWidth: 900 }}>
@@ -411,8 +413,13 @@ export default function HelpAdminClient({ jw }: { jw: JwConfig }) {
         ))}
       </div>
 
-      {tab === "conversations" ? (
-        <HelpConversationsClient initialId={initialConvId} onCorrectIntoKb={correctIntoKb} />
+      {tab === "gaps" ? (
+        <HelpKnowledgeGapsClient
+          onWriteArticle={correctIntoKb}
+          onOpenConversation={(id) => { setInitialConvId(id); setTab("conversations"); }}
+        />
+      ) : tab === "conversations" ? (
+        <HelpConversationsClient key={initialConvId ?? "list"} initialId={initialConvId} onCorrectIntoKb={correctIntoKb} />
       ) : tab === "categories" ? (
         <HelpCategoriesClient categories={cats} articleCounts={articleCounts} onChanged={load} />
       ) : (
