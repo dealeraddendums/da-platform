@@ -102,3 +102,25 @@ for later: no synonyms ("spreadsheet"/"Excel", "logo"/"branding"), substring mat
 
 From 2026-10-08 every question Steven can't ground is logged to `help_knowledge_gaps` (migration 169), rolled up by
 question, and listed most-asked-first under **Help → Manage → Knowledge gaps** (super_admin).
+
+## Update — launch batch published (2026-10-08)
+
+Planning's launch-batch markdown (suite root `help-article-*.md`) is now published as dealer articles. Backup of
+every article before the change: `help-articles-backup-20261008.json` (suite root).
+
+| File | Article | Change |
+|---|---|---|
+| help-article-template-builder.md | Building an addendum or infosheet template | draft → **published**, body replaced |
+| help-article-printing.md | Printing an addendum, infosheet, or buyer's guide | draft → **published**, body replaced |
+| help-article-website-integrations-magic-button.md | Website integrations — the addendum button on your website | **new** (General) |
+| help-article-price-formatting.md | Product price formatting (No Charge, hidden prices, excluded from totals) | **new** (Products) |
+| help-article-suggested-products.md | Suggested Products | text added under the existing video |
+| help-article-required-products.md | Adding Required Products | text added under the existing video |
+| help-article-search-inventory.md | Search inventory | text added under the existing video |
+| help-article-add-vehicles-excel.md | Add vehicles (Excel) | text added under the existing video |
+| help-article-order-supplies-labels.md | Ordering label supplies | body replaced |
+| help-article-vin-decode.md | Adding & editing vehicles (VIN decode) | body replaced (tour link kept) |
+| help-article-plan-and-trial.md | Your plan, trial, and upgrading | body replaced |
+
+Published dealer articles: **8 → 10**, and all 10 now carry text Steven can read. Still missing entirely: Buyer's
+Guide, Print Settings, Infosheet, Users & roles, Groups, mobile app, and billing beyond the plan.
