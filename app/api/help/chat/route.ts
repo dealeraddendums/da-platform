@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { resolveEffectiveDealer } from "@/lib/dealer-authz";
 import { buildDealerContext, getRelevantArticlesScored } from "@/lib/help-context";
 import { logKnowledgeGap, UNANSWERED_RE } from "@/lib/help-gaps";
+import { STEVEN_TOOLS, runStevenTool } from "@/lib/steven-tools";
 import { buildSystemPrompt } from "@/lib/help-knowledge";
 import { createConversation, ownsConversation, appendMessage, escalateConversation, resolveAsker } from "@/lib/help-conversations";
 import { createAdminSupabaseClient } from "@/lib/db";
@@ -26,7 +27,8 @@ export const runtime = "nodejs";
 // Same model as the homepage Steven (da-marketing-os lib/ai.ts MODEL) so both
 // surfaces answer at the same quality. Overridable without a deploy.
 const MODEL = process.env.HELP_AI_MODEL || "claude-sonnet-5";
-const MAX_TOKENS = 700;
+const MAX_TOKENS = 900;
+const MAX_TOOL_ROUNDS = 3; // data-tool round trips before Steven must answer
 const MAX_HISTORY = 12;        // cap conversation turns sent to the model
 const MAX_MSG_CHARS = 4000;    // cap per-message length
 const RATE_MAX = 20;           // requests
@@ -113,7 +115,13 @@ export async function POST(req: NextRequest): Promise<Response> {
     (page ? `\n\nThe user is currently on this page of the app: ${page}` : "") +
     "\n\nESCALATION: If the user explicitly needs a human, or you genuinely cannot resolve their" +
     " issue from the material above, append the token [[ESCALATE]] on its own final line. The app" +
-    " strips it and connects them to a person — do not mention the token itself.";
+    " strips it and connects them to a person — do not mention the token itself." +
+    "\n\nDATA TOOLS: For questions about the user's OWN situation (\"what's my…\", \"why can't I…\", \"how many…\")," +
+    " call the matching tool and answer from its real values; keep using the help material above for \"how do I…\"." +
+    " The tools only ever return the signed-in user's own dealership (group admins may name one of their member" +
+    " stores). If the user asks about any other dealership, say plainly that you can only see their own account —" +
+    " never imply you can look up other dealers, and never invent figures. If a tool returns an error, answer" +
+    " without it and don't quote the error.";
 
   // Persist the turn (own-data-only). Reuse the conversation when the client
   // passes one it owns; otherwise start a new one. Snapshot = the context used.
@@ -133,18 +141,36 @@ export async function POST(req: NextRequest): Promise<Response> {
     async start(controller) {
       let full = "";
       let flushed = 0;
+      let usedTool = false;
       try {
-        const ms = client.messages.stream({
-          // No `temperature`: Sonnet 5 rejects it ("deprecated for this model").
-          model: MODEL, max_tokens: MAX_TOKENS, system,
-          messages: messages.map((m) => ({ role: m.role, content: m.content })),
-        });
-        for await (const ev of ms) {
-          if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
-            full += ev.delta.text;
-            const safe = full.length - TAIL;          // withhold the tail (may contain the sentinel)
-            if (safe > flushed) { controller.enqueue(encoder.encode(full.slice(flushed, safe))); flushed = safe; }
+        // Tool-use loop: Steven may call read-only data tools (lib/steven-tools)
+        // up to MAX_TOOL_ROUNDS times; text streams out as it's written. Which
+        // tool runs and whose data it reads is decided server-side from claims.
+        const convo: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }));
+        for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+          const ms = client.messages.stream({
+            // No `temperature`: Sonnet 5 rejects it ("deprecated for this model").
+            model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo,
+            ...(round < MAX_TOOL_ROUNDS ? { tools: STEVEN_TOOLS } : {}),
+          });
+          for await (const ev of ms) {
+            if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
+              full += ev.delta.text;
+              const safe = full.length - TAIL;          // withhold the tail (may contain the sentinel)
+              if (safe > flushed) { controller.enqueue(encoder.encode(full.slice(flushed, safe))); flushed = safe; }
+            }
           }
+          const final = await ms.finalMessage();
+          if (final.stop_reason !== "tool_use") break;
+          const calls = final.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+          convo.push({ role: "assistant", content: final.content });
+          const results = await Promise.all(calls.map(async (c) => {
+            const out = await runStevenTool(c.name, c.input, claims, convId);
+            if (!("error" in out)) usedTool = true;
+            return { type: "tool_result" as const, tool_use_id: c.id, content: JSON.stringify(out) };
+          }));
+          convo.push({ role: "user", content: results });
+          if (full && !/\s$/.test(full)) full += "\n\n"; // keep pre-tool text apart from the answer
         }
         // Flush the remaining tail with the sentinel removed.
         const tailOut = full.slice(flushed).replace(ESCALATE_RE, "");
@@ -172,7 +198,9 @@ export async function POST(req: NextRequest): Promise<Response> {
 
         // Knowledge-gap log (after the reply is out; fire-and-forget).
         const sentinel = full.includes("[[ESCALATE]]");
-        const gapReason = !retrieval.matched ? "no_article"
+        // Answered from the dealer's own data → not a Help Center gap.
+        const gapReason = usedTool ? null
+          : !retrieval.matched ? "no_article"
           : sentinel ? "escalated"
           : UNANSWERED_RE.test(answer) ? "unanswered" : null;
         if (gapReason) {

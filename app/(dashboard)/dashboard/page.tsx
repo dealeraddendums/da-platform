@@ -6,7 +6,8 @@ import { resolveSessionProfile } from "@/lib/profile-session";
 import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import { canPrintForDealer } from "@/lib/print-eligibility";
-import { printedVehicleCount, printedVehicleUnionCount } from "@/lib/print-counts";
+import { printedVehicleCount } from "@/lib/print-counts";
+import { getDealerCardStats } from "@/lib/dealer-stats";
 import { accountTier } from "@/lib/account-tiers";
 import ManualVehicleInventory from "@/components/ManualVehicleInventory";
 import { PageHeader } from "@/components/PageHeader";
@@ -161,47 +162,9 @@ function GroupAdminView({
 // (the old big number read lifetime print_history: 0-vs-44% at Honda).
 async function DealerDashboardView({ dealerId, bypassGate = false }: { dealerId: string; bypassGate?: boolean }) {
   const admin = createAdminSupabaseClient();
-  const now = new Date();
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
-
-  const iso30 = new Date(now.getTime() - 30 * 86_400_000).toISOString();
-  const iso365 = new Date(now.getTime() - 365 * 86_400_000).toISOString();
-  const [
-    { count: totalVehiclesCount },
-    { count: addedTodayCount },
-    printed30Count,
-    printed365Count,
-    { count: printedActiveCount },
-    { count: queuedCount },
-  ] = await Promise.all([
-    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId).eq("status", "active"),
-    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId).eq("status", "active")
-      .gte("date_added", startOfToday.toISOString()),
-    printedVehicleUnionCount(admin, { dealerId, since: iso30 }),
-    printedVehicleUnionCount(admin, { dealerId, since: iso365 }),
-    // Coverage — big number AND % numerator: active vehicles with ANY document
-    // printed (Addendum, Info Sheet or Buyer's Guide — used vehicles are
-    // often only ever given the latter two), legacy ETL-printed + platform-
-    // printed uniformly. Same rule as the inventory Printed filter.
-    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId).eq("status", "active")
-      .or("print_status.eq.1,print_info.eq.1,print_guide.eq.1"),
-    // Mobile print queue (dealer_vehicles.print_queue, IOS-APP-SPEC §8.1)
-    admin.from("dealer_vehicles").select("*", { count: "exact", head: true })
-      .eq("dealer_id", dealerId).eq("status", "active")
-      .eq("print_queue", 1),
-  ]);
-
-  const totalVehicles = totalVehiclesCount ?? 0;
-  const addedToday = addedTodayCount ?? 0;
-  const printed30 = printed30Count ?? 0;
-  const printed365 = printed365Count ?? 0;
-  const printedActive = printedActiveCount ?? 0;
-  const queued = queuedCount ?? 0;
-  const coveragePct = totalVehicles > 0 ? Math.round((printedActive / totalVehicles) * 100) : 0;
+  const {
+    totalVehicles, addedToday, printed30, printed365, printedActive, queued, coveragePct,
+  } = await getDealerCardStats(admin, dealerId);
   const coverageColor = coveragePct >= 75 ? "#4caf50" : coveragePct >= 50 ? "var(--text-muted)" : "#ffa500";
 
   const dealerStats: { label: string; value: string; note: string; noteColor?: string }[] = [
