@@ -128,7 +128,8 @@ export async function POST(req: NextRequest): Promise<Response> {
       let flushed = 0;
       try {
         const ms = client.messages.stream({
-          model: MODEL, max_tokens: MAX_TOKENS, temperature: 0.2, system,
+          // No `temperature`: Sonnet 5 rejects it ("deprecated for this model").
+          model: MODEL, max_tokens: MAX_TOKENS, system,
           messages: messages.map((m) => ({ role: m.role, content: m.content })),
         });
         for await (const ev of ms) {
