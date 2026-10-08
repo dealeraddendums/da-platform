@@ -31,6 +31,8 @@ import { explainVehicleProducts } from "@/lib/steven-products";
 import { getGroupOptionsForDealer } from "@/lib/options-engine";
 import { summarizeRules, NO_RULES_TEXT } from "@/lib/rule-summary";
 import { formatOptionPrice } from "@/lib/option-price";
+import { getDealerFeedStatus, type DealerFeedStatus } from "@/lib/dealer-feed-status";
+import { providerLabel } from "@/lib/inventory-providers";
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>;
 const GROUP_ROLES = new Set(["group_admin", "group_user"]);
@@ -121,6 +123,12 @@ export const STEVEN_TOOLS: Anthropic.Tool[] = [
     name: "get_label_orders",
     description:
       "The dealership's recent label / supply orders (same list as My Profile → Orders → Label Order History), newest first, up to 10: order date, who ordered, items with quantities (e.g. 'Regular Addendums × 250'), total, shipment status (Pending shipment / Shipped / Delivered) and tracking number + carrier. Use for 'when did I last order labels', 'what size did I order', 'has my label order shipped', 'what's my tracking number', 'how much were my last labels'. For how to order more, use the Order Supplies help article.",
+    input_schema: { type: "object", properties: { ...STORE_PARAM } },
+  },
+  {
+    name: "get_feed_provider",
+    description:
+      "The dealership's inventory feed: who the provider is (as on file, or inferred from recent inventory when nothing is on file — never guessed), whether a live feed is connected, and how fresh the inventory is (active vehicles, how many feed vehicles were refreshed in the last 3 days, newest vehicle the feed added). Use for 'who is my feed provider', 'is my inventory feed connected / working', 'why isn't my inventory updating'. Changing providers is done through support.",
     input_schema: { type: "object", properties: { ...STORE_PARAM } },
   },
 ];
@@ -417,6 +425,81 @@ async function labelOrders(admin: Admin, dealerId: string) {
   };
 }
 
+// Provider NAME: dealers.inventory_provider (what the dealer profile shows,
+// normalized via providerLabel). Connection: getDealerFeedStatus — the
+// platform's canonical "is a feed wired up" check (rosters + row provenance);
+// the stored provider alone is descriptive, not proof of a feed.
+const STALE_AFTER_DAYS = 3;
+
+function inferProvider(signals: DealerFeedStatus["signals"], recentCreatedBy: string[]): string | null {
+  if (signals.fortellis > 0) return "CDK (via Fortellis)";
+  if (signals.tekion > 0) return "Tekion";
+  if (signals.cdk > 0) return "CDK";
+  const counts = new Map<string, number>();
+  for (const c of recentCreatedBy) {
+    const k = /^FORTELLIS_/i.test(c) ? "CDK (via Fortellis)" : /^CDK_/i.test(c) ? "CDK"
+      : c === "csv_import" ? "CSV upload (no automatic feed)" : c === "APP" ? "added by hand in the app (no automatic feed)" : null;
+    if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const top = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0];
+  return top && top[1] * 2 > recentCreatedBy.length ? top[0] : null;
+}
+
+// Same set as FEED_PROVENANCE, in PostgREST filter form so the counts are
+// exact (no 1000-row clamp). Freshness is the SHARE of feed vehicles touched
+// recently: a feed sync refreshes nearly every row, whereas a print bumps
+// updated_at on one — so "newest updated_at" alone would let a dead feed on a
+// busy printer look healthy.
+const FEED_ROWS_OR = 'created_by.like.FORTELLIS_*,created_by.like.CDK_*,created_by.like.automatic*,created_by.eq."VIN API"';
+
+async function feedProvider(admin: Admin, dealerId: string) {
+  const { data: d } = await admin.from("dealers").select("inventory_provider, inventory_dealer_id")
+    .eq("dealer_id", dealerId).maybeSingle<{ inventory_provider: string | null; inventory_dealer_id: string | null }>();
+  if (!d) return { error: "dealership not found" };
+  const a = admin as any;
+  const active = () => a.from("dealer_vehicles").select("*", { count: "exact", head: true }).eq("dealer_id", dealerId).eq("status", "active");
+  const since = new Date(Date.now() - STALE_AFTER_DAYS * 86_400_000).toISOString();
+  const [status, all, feedAll, feedFresh, newestFeed, recentRes] = await Promise.all([
+    getDealerFeedStatus(admin, dealerId, d.inventory_dealer_id),
+    active(),
+    active().or(FEED_ROWS_OR),
+    active().or(FEED_ROWS_OR).gte("updated_at", since),
+    a.from("dealer_vehicles").select("date_added").eq("dealer_id", dealerId).eq("status", "active").or(FEED_ROWS_OR)
+      .order("date_added", { ascending: false, nullsFirst: false }).limit(1),
+    a.from("dealer_vehicles").select("created_by").eq("dealer_id", dealerId).eq("status", "active")
+      .order("date_added", { ascending: false, nullsFirst: false }).limit(100),
+  ]);
+  const feedCount = feedAll.count ?? 0;
+  const freshCount = feedFresh.count ?? 0;
+  const newestAdd = newestFeed.data?.[0]?.date_added ?? null;
+  const addedRecently = newestAdd ? Date.now() - Date.parse(newestAdd) <= 7 * 86_400_000 : false;
+
+  const onFile = providerLabel(d.inventory_provider);
+  const inferred = onFile ? null : inferProvider(status.signals, ((recentRes.data ?? []) as any[]).map((r) => String(r.created_by ?? "").trim()));
+  const health = !status.hasLiveFeed ? "no_live_feed_detected"
+    : feedCount === 0 ? "connected_no_vehicles_from_feed"
+    : freshCount * 2 >= feedCount || (freshCount >= 10 && addedRecently) ? "updating" : "stale";
+  return {
+    provider: onFile ?? inferred ?? "unknown",
+    provider_source: onFile ? "on file for the dealership (shown on the dealer profile)"
+      : inferred ? "inferred from recent inventory (nothing on file)" : "not on file and can't be determined — say so, don't guess a brand",
+    feed_dealer_id: d.inventory_dealer_id ?? null,
+    live_feed_connected: status.hasLiveFeed,
+    feed_health: health,
+    feed_health_meaning: {
+      updating: `the feed is refreshing this store's vehicles (most were updated in the last ${STALE_AFTER_DAYS} days)`,
+      stale: `the feed hasn't refreshed most of this store's vehicles in over ${STALE_AFTER_DAYS} days — it may be disconnected; contact support`,
+      connected_no_vehicles_from_feed: "a feed is configured but none of the current vehicles came from it — contact support",
+      no_live_feed_detected: "no automatic feed is delivering inventory; vehicles are added by CSV upload or by hand",
+    }[health],
+    active_vehicles: all.count ?? 0,
+    vehicles_from_feed: feedCount,
+    feed_vehicles_refreshed_last_3_days: freshCount,
+    newest_vehicle_from_feed: newestAdd ? String(newestAdd).slice(0, 10) : null,
+    to_change_provider: "contact support@dealeraddendums.com",
+  };
+}
+
 const ROLE_LABEL: Record<string, string> = { dealer_admin: "Dealer Admin", dealer_user: "Dealer User", dealer_restricted: "Dealer Restricted" };
 
 async function usersList(admin: Admin, dealerId: string) {
@@ -487,6 +570,7 @@ export async function runStevenTool(
           break;
         case "get_print_queue": result = await printQueue(admin, scope.dealerId); break;
         case "get_label_orders": result = await labelOrders(admin, scope.dealerId); break;
+        case "get_feed_provider": result = await feedProvider(admin, scope.dealerId); break;
         default: result = { error: "unknown tool" };
       }
       audit("ok", scope.dealerId, null);
