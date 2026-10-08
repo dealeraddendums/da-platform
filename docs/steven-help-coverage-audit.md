@@ -140,3 +140,10 @@ Backup before the change: `help-articles-backup-20261008-batch2.json` (suite roo
 | help-article-mobile-app.md | The DealerAddendums mobile app | **new** (General) |
 
 Published dealer articles: **12 → 19**. Every topic in the original audit now has at least one published article.
+
+## Update — batch 3 (email-mined) published (2026-10-08)
+
+Backup before the change: `help-articles-backup-20261008-batch3.json` (suite root). All four are new dealer articles:
+Inventory feeds — how your vehicles get into DealerAddendums (General) · Troubleshooting: blank addendum, or
+missing/wrong products (Printing) · Showing a discount, rebate, or price reduction (Products) · Pausing or
+cancelling your account (Billing). Published dealer articles: **19 → 23**.
