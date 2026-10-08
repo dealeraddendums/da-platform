@@ -124,3 +124,19 @@ every article before the change: `help-articles-backup-20261008.json` (suite roo
 
 Published dealer articles: **8 → 12** (2 drafts published + 2 new), and all 12 now carry text Steven can read. Still missing entirely: Buyer's
 Guide, Print Settings, Infosheet, Users & roles, Groups, mobile app, and billing beyond the plan.
+
+## Update — batch 2 published (2026-10-08)
+
+Backup before the change: `help-articles-backup-20261008-batch2.json` (suite root).
+
+| File | Article | Change |
+|---|---|---|
+| help-article-print-settings.md | Print Settings (was draft "Print settings, logo, and defaults") | draft → **published**, retitled, moved to Printing |
+| help-article-users-and-roles.md | Users and roles (was draft "Managing your team") | draft → **published**, retitled |
+| help-article-infosheet.md | Infosheets (was empty stub "Creating an Infosheet") | stub → **published**, retitled |
+| help-article-billing-invoices-payments.md | Billing, invoices, and payments (was empty stub "Paying your invoice") | stub → **published**, retitled |
+| help-article-buyers-guide.md | Printing a Buyer's Guide | **new** (Buyer's Guides category) |
+| help-article-groups.md | Dealer groups | **new** (General) |
+| help-article-mobile-app.md | The DealerAddendums mobile app | **new** (General) |
+
+Published dealer articles: **12 → 19**. Every topic in the original audit now has at least one published article.
