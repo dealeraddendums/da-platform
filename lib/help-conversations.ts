@@ -157,7 +157,7 @@ export async function escalateConversation(conversationId: string): Promise<Esca
     return { channel: "hubspot", live: true, at: new Date(new Date(conv.live_at).getTime() - 1000).toISOString() };
   }
 
-  if (hubspotHandoffEnabled(conv.dealer_id)) {
+  if (await hubspotHandoffEnabled(conv.dealer_id)) {
     const who = await resolveAsker(admin, conv);
     const { data: msgs } = await (admin as any)
       .from("help_messages").select("role, content").eq("conversation_id", conversationId)

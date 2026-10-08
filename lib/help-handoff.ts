@@ -30,15 +30,42 @@ function marketingBase(): string {
   return (process.env.MARKETING_SITE_URL || "https://www.dealeraddendums.com").replace(/\/$/, "");
 }
 
-/** Live HubSpot hand-off for this dealer? On for everyone with
- *  HELP_HANDOFF_PROVIDER=hubspot; before that, only for the dealer ids in
- *  HELP_HANDOFF_TEST_DEALERS (comma-separated text dealer_ids — QA Test Dealer
- *  A), so the bridge can be proven end to end while real dealers stay on email. */
-export function hubspotHandoffEnabled(dealerId?: string | null): boolean {
+/**
+ * Live HubSpot hand-off for this dealer? Decided by the `help_handoff` row in
+ * admin_settings — a switch that takes effect within a minute, no deploy:
+ *   {"mode":"off"}                                   kill switch: email for everyone
+ *   {"mode":"pilot","dealers":["dealer_id", ...]}    only these dealers go live
+ *   {"mode":"all"}                                   every dealer
+ * QA dealers in HELP_HANDOFF_TEST_DEALERS are always live so the bridge can be
+ * tested. With no row, HELP_HANDOFF_PROVIDER=hubspot means "all" (the original
+ * env switch). Anything that can't be read falls back to email.
+ */
+type HandoffSetting = { mode?: "off" | "pilot" | "all"; dealers?: string[] };
+let settingCache: { at: number; value: HandoffSetting | null } | null = null;
+
+async function handoffSetting(): Promise<HandoffSetting | null> {
+  if (settingCache && Date.now() - settingCache.at < 60_000) return settingCache.value;
+  let value: HandoffSetting | null = null;
+  try {
+    const { data } = await createAdminSupabaseClient().from("admin_settings")
+      .select("value").eq("key", "help_handoff").maybeSingle<{ value: string | null }>();
+    value = data?.value ? (JSON.parse(data.value) as HandoffSetting) : null;
+  } catch {
+    value = settingCache?.value ?? null; // keep the last good value on a read hiccup
+  }
+  settingCache = { at: Date.now(), value };
+  return value;
+}
+
+export async function hubspotHandoffEnabled(dealerId?: string | null): Promise<boolean> {
   if (!process.env.MARKETING_WEBHOOK_SECRET) return false;
-  if (process.env.HELP_HANDOFF_PROVIDER === "hubspot") return true;
   const testers = (process.env.HELP_HANDOFF_TEST_DEALERS || "").split(",").map((x) => x.trim()).filter(Boolean);
-  return !!dealerId && testers.includes(dealerId);
+  if (dealerId && testers.includes(dealerId)) return true;
+  const s = await handoffSetting();
+  if (s?.mode === "off") return false;
+  if (s?.mode === "all") return true;
+  if (s?.mode === "pilot") return !!dealerId && (s.dealers ?? []).includes(dealerId);
+  return process.env.HELP_HANDOFF_PROVIDER === "hubspot";
 }
 
 /** One bounded call to the marketing gateway. Never throws. */
