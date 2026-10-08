@@ -13,6 +13,40 @@ import { callGateway } from "@/lib/help-handoff";
 
 export interface TicketResult { ok: boolean; ticketId?: string; existing?: boolean; error?: string }
 
+/**
+ * Tickets an agent made with the inbox's own "Create ticket" are linked by
+ * HubSpot to the conversation THREAD and to the contact — not to the company.
+ * Adopt them: record the ticket on the conversation (so "My support tickets"
+ * shows it and "Make this a ticket" won't create a second one) and add the
+ * dealer's company link. Returns conversationId → ticketId for what it adopted.
+ */
+export async function adoptInboxTickets(
+  convs: { id: string; dealer_id: string | null; hubspot_thread_id: string | null; hubspot_ticket_id: string | null }[],
+): Promise<Record<string, string>> {
+  const pending = convs.filter((c) => c.hubspot_thread_id && !c.hubspot_ticket_id).slice(0, 25);
+  if (!pending.length) return {};
+  const r = await callGateway("/api/hubspot-chat/tickets", { action: "from-threads", threadIds: pending.map((c) => c.hubspot_thread_id) });
+  const byThread = (r.ok && r.data?.tickets) ? (r.data.tickets as Record<string, string>) : {};
+  const a = createAdminSupabaseClient() as any;
+  const adopted: Record<string, string> = {};
+  for (const c of pending) {
+    const ticketId = byThread[c.hubspot_thread_id as string];
+    if (!ticketId) continue;
+    const { data: upd } = await a.from("help_conversations")
+      .update({ hubspot_ticket_id: ticketId, ticketed_at: new Date().toISOString() })
+      .eq("id", c.id).is("hubspot_ticket_id", null).select("id");
+    if (!upd?.length) continue;
+    adopted[c.id] = ticketId;
+    if (c.dealer_id) {
+      const { data: d } = await a.from("dealers").select("hubspot_company_id").eq("dealer_id", c.dealer_id).maybeSingle();
+      if (d?.hubspot_company_id) {
+        await callGateway("/api/hubspot-chat/tickets", { action: "link-company", ticketId, companyId: String(d.hubspot_company_id) });
+      }
+    }
+  }
+  return adopted;
+}
+
 function transcriptText(msgs: { role: string; content: string; sender_name?: string | null; attachments?: { name: string }[]; created_at: string }[]): string {
   return msgs.map((m) => {
     const who = m.role === "assistant" ? "Steven" : m.role === "agent" ? (m.sender_name || "Support") : "Dealer";
@@ -35,6 +69,9 @@ export async function makeTicketForConversation(conversationId: string, requeste
     .eq("id", conversationId).maybeSingle();
   if (!conv) return { ok: false, error: "conversation not found" };
   if (conv.hubspot_ticket_id) return { ok: true, ticketId: conv.hubspot_ticket_id, existing: true };
+  // An agent may already have made one with the inbox's own Create ticket.
+  const adopted = await adoptInboxTickets([conv]);
+  if (adopted[conv.id]) return { ok: true, ticketId: adopted[conv.id], existing: true };
 
   // Claim the conversation before calling HubSpot, so two clicks at once can't
   // both create a ticket. The loser sees the claim and reports in-progress.
@@ -103,6 +140,13 @@ export interface DealerTicket {
 /** Tickets made from this dealership's chats, newest first, with live status. */
 export async function ticketsForDealer(dealerId: string): Promise<{ ok: boolean; tickets: DealerTicket[]; error?: string }> {
   const a = createAdminSupabaseClient() as any;
+  // Pick up tickets agents made in the inbox since the last look.
+  const { data: recent } = await a.from("help_conversations")
+    .select("id, dealer_id, hubspot_thread_id, hubspot_ticket_id")
+    .eq("dealer_id", dealerId).not("hubspot_thread_id", "is", null).is("hubspot_ticket_id", null)
+    .order("updated_at", { ascending: false }).limit(25);
+  if (recent?.length) await adoptInboxTickets(recent);
+
   const { data } = await a.from("help_conversations")
     .select("id, hubspot_ticket_id, ticketed_at")
     .eq("dealer_id", dealerId).not("hubspot_ticket_id", "is", null)
