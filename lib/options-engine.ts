@@ -149,34 +149,74 @@ type RulesRow = {
  * applies_to='none' is rejected outright.
  */
 export function matchesRulesRow(row: RulesRow, vehicle: VehicleRow): boolean {
+  return explainRulesRow(row, vehicle).ok;
+}
+
+export type RuleVerdict =
+  | { ok: true }
+  | { ok: false; rule: string; reason: string };
+
+const COND_WORD: Record<number, string> = { 1: "exactly", 2: "up to", 3: "at least" };
+
+/**
+ * matchesRulesRow, with the reason. THE single implementation of the
+ * per-vehicle rules: matchesRulesRow delegates here, so every print path and
+ * Steven's "why isn't this product on this vehicle?" read the same clauses in
+ * the same order — the first failing clause is the answer. Reasons are plain
+ * language for dealers.
+ */
+export function explainRulesRow(row: RulesRow, vehicle: VehicleRow): RuleVerdict {
   const cond = vehicleCondition(vehicle);
+  const fail = (rule: string, reason: string): RuleVerdict => ({ ok: false, rule, reason });
+  const list = (v: string | null | undefined) => (v ?? "").split(",").map((x) => x.trim()).filter(Boolean).join(", ");
 
-  if (row.applies_to === "none") return false;
-
-  if (row.ad_types && row.ad_types.length > 0) {
-    if (!row.ad_types.includes(cond)) return false;
+  if (row.applies_to === "none") {
+    return fail("applies_to", "its Applies To is set to No Vehicles (manual-only) — it never adds itself; it has to be added to a vehicle by hand");
   }
 
-  if (!listMatchesWithNot(vehicle.MAKE, row.makes ?? null, !!row.makes_not)) return false;
-  if (!listMatchesWithNot(vehicle.MODEL, row.models ?? null, !!row.models_not)) return false;
-  if (!listMatchesWithNot(vehicle.TRIM, row.trims ?? null, !!row.trims_not)) return false;
-  if (!listMatchesWithNot(vehicle.FUEL, row.fuel ?? null, !!row.fuel_not)) return false;
+  if (row.ad_types && row.ad_types.length > 0) {
+    if (!row.ad_types.includes(cond)) {
+      return fail("condition", `its Condition is ${row.ad_types.join("/")} and this vehicle is ${cond}`);
+    }
+  }
+
+  const listRule = (rule: string, label: string, value: string | null, field: string | null | undefined, not: boolean): RuleVerdict | null => {
+    if (listMatchesWithNot(value, field ?? null, not)) return null;
+    const lf = (field ?? "").trim().toUpperCase();
+    if (lf === "NONE" || lf === "-NONE") return fail(rule, `its ${label} rule is set to NONE (matches no vehicle)`);
+    if (!(value ?? "").trim()) return fail(rule, `it only applies to certain ${label.toLowerCase()}s (${list(field)}) and this vehicle's ${label.toLowerCase()} is blank`);
+    return not
+      ? fail(rule, `it excludes ${label.toLowerCase()} ${list(field)} and this vehicle's ${label.toLowerCase()} is ${value}`)
+      : fail(rule, `it only applies to ${label.toLowerCase()} ${list(field)} and this vehicle's ${label.toLowerCase()} is ${value}`);
+  };
+  const lr = listRule("make", "Make", vehicle.MAKE, row.makes, !!row.makes_not)
+    ?? listRule("model", "Model", vehicle.MODEL, row.models, !!row.models_not)
+    ?? listRule("trim", "Trim", vehicle.TRIM, row.trims, !!row.trims_not)
+    ?? listRule("fuel", "Fuel", vehicle.FUEL, row.fuel, !!row.fuel_not);
+  if (lr) return lr;
 
   if (row.body_styles && row.body_styles !== "") {
-    if (!listMatchesWithNot(vehicle.BODYSTYLE, row.body_styles, false)) return false;
+    const br = listRule("body_style", "Body style", vehicle.BODYSTYLE, row.body_styles, false);
+    if (br) return br;
   }
 
   const vehicleYear = vehicle.YEAR ? parseInt(vehicle.YEAR, 10) : null;
   if ((row.year_condition ?? 0) !== 0 && row.year_value != null && vehicleYear != null) {
-    if (row.year_condition === 1 && vehicleYear !== row.year_value) return false;
-    if (row.year_condition === 2 && vehicleYear > row.year_value) return false;
-    if (row.year_condition === 3 && vehicleYear < row.year_value) return false;
+    if ((row.year_condition === 1 && vehicleYear !== row.year_value)
+      || (row.year_condition === 2 && vehicleYear > row.year_value)
+      || (row.year_condition === 3 && vehicleYear < row.year_value)) {
+      return fail("year", `it applies to model year ${COND_WORD[row.year_condition] ?? ""} ${row.year_value} and this vehicle is a ${vehicleYear}`.replace(/\s+/g, " "));
+    }
   }
 
   const vehicleMiles = vehicle.MILEAGE ? parseInt(vehicle.MILEAGE, 10) : null;
   if ((row.miles_condition ?? 0) !== 0 && row.miles_value != null && vehicleMiles != null) {
-    if (row.miles_condition === 1 && vehicleMiles > row.miles_value) return false;
-    if (row.miles_condition === 2 && vehicleMiles < row.miles_value) return false;
+    if (row.miles_condition === 1 && vehicleMiles > row.miles_value) {
+      return fail("mileage", `it applies to vehicles with up to ${row.miles_value.toLocaleString()} miles and this one has ${vehicleMiles.toLocaleString()}`);
+    }
+    if (row.miles_condition === 2 && vehicleMiles < row.miles_value) {
+      return fail("mileage", `it applies to vehicles with at least ${row.miles_value.toLocaleString()} miles and this one has ${vehicleMiles.toLocaleString()}`);
+    }
   }
 
   // MSRP 0 / unparseable = UNPRICED, same as null (2026-08-12, null-MSRP
@@ -187,15 +227,22 @@ export function matchesRulesRow(row: RulesRow, vehicle: VehicleRow): boolean {
   // BOTH match an unpriced vehicle by design.
   const msrpNum = vehicle.MSRP ? parseFloat(vehicle.MSRP) : NaN;
   const vehicleMsrp = Number.isFinite(msrpNum) && msrpNum > 0 ? msrpNum : null;
+  const money = (n: number) => `$${n.toLocaleString()}`;
   if ((row.msrp_condition ?? 0) !== 0 && vehicleMsrp != null) {
-    if (row.msrp_condition === 1 && row.msrp1 != null && vehicleMsrp > row.msrp1) return false;
-    if (row.msrp_condition === 2 && row.msrp1 != null && vehicleMsrp < row.msrp1) return false;
+    if (row.msrp_condition === 1 && row.msrp1 != null && vehicleMsrp > row.msrp1) {
+      return fail("msrp", `it applies to vehicles with an MSRP under ${money(row.msrp1)} and this one is ${money(vehicleMsrp)}`);
+    }
+    if (row.msrp_condition === 2 && row.msrp1 != null && vehicleMsrp < row.msrp1) {
+      return fail("msrp", `it applies to vehicles with an MSRP over ${money(row.msrp1)} and this one is ${money(vehicleMsrp)}`);
+    }
     if (row.msrp_condition === 3 && row.msrp1 != null && row.msrp2 != null) {
-      if (vehicleMsrp < row.msrp1 || vehicleMsrp > row.msrp2) return false;
+      if (vehicleMsrp < row.msrp1 || vehicleMsrp > row.msrp2) {
+        return fail("msrp", `it applies to vehicles with an MSRP between ${money(row.msrp1)} and ${money(row.msrp2)} and this one is ${money(vehicleMsrp)}`);
+      }
     }
   }
 
-  return true;
+  return { ok: true };
 }
 
 function matchesLibraryRow(row: LibraryRow, vehicle: VehicleRow): boolean {

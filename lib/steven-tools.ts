@@ -27,10 +27,16 @@ import {
 import { trialPrintCount } from "@/lib/print-counts";
 import { getDealerCardStats } from "@/lib/dealer-stats";
 import { billingConfigured, getBillingStatus, getTemplate, listInvoices } from "@/lib/billing";
+import { explainVehicleProducts } from "@/lib/steven-products";
+import { getGroupOptionsForDealer } from "@/lib/options-engine";
+import { summarizeRules, NO_RULES_TEXT } from "@/lib/rule-summary";
+import { formatOptionPrice } from "@/lib/option-price";
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>;
 const GROUP_ROLES = new Set(["group_admin", "group_user"]);
 const BILLING_AMOUNT_ROLES = new Set(["dealer_admin", "group_admin", "super_admin"]);
+// The store's user list is admin-only — same people who see the Users page.
+const USER_LIST_ROLES = new Set(["dealer_admin", "group_admin", "super_admin"]);
 const TOOL_TIMEOUT_MS = 8000;
 
 const STORE_PARAM = {
@@ -65,6 +71,44 @@ export const STEVEN_TOOLS: Anthropic.Tool[] = [
     name: "get_print_activity",
     description:
       "Printing activity for the dealership: vehicles printed in the last 30 and 365 days, the most recently printed vehicle (stock #, VIN, date), and trial prints used if on a trial. Use for 'how much have we printed', 'what did we print last'.",
+    input_schema: { type: "object", properties: { ...STORE_PARAM } },
+  },
+  {
+    name: "explain_vehicle_products",
+    description:
+      "For ONE vehicle in the user's own inventory (by VIN — full or last 6+ characters — or stock number): which products print on its addendum (name, price, Required/Suggested) and, for products that DON'T apply, the exact rule that excludes each (condition, make/model/trim, MSRP range, mileage, year, manual-only, not assigned to the store, removed from the vehicle). Same product set Print Now uses. Use for 'why isn't X showing on this truck', 'what products are on VIN …'. Pass product_name when they ask about a specific product.",
+    input_schema: {
+      type: "object",
+      properties: {
+        vin_or_stock: { type: "string", description: "The vehicle's VIN (full or last 6+ characters) or stock number." },
+        product_name: { type: "string", description: "Optional: the product they're asking about." },
+        ...STORE_PARAM,
+      },
+      required: ["vin_or_stock"],
+    },
+  },
+  {
+    name: "get_products",
+    description:
+      "The dealership's product library (its own products plus the corporate/group products that apply to it): name, price, Required/Suggested, and a short summary of each product's vehicle rules. Use for 'what products do I have', 'what's my price on X', 'what are the rules on X'.",
+    input_schema: { type: "object", properties: { ...STORE_PARAM } },
+  },
+  {
+    name: "get_templates",
+    description:
+      "The dealership's default templates for New / Used / CPO vehicles (addendum, infosheet, buyer's guide, and any second addendum), any make-based overrides (e.g. Genesis vehicles use a different template), and whether each is the store's own template or a group template. Use for 'what's my default used template'.",
+    input_schema: { type: "object", properties: { ...STORE_PARAM } },
+  },
+  {
+    name: "get_website_integration",
+    description:
+      "Whether the dealership's website addendum button (Magic Button) is set up: which integration (Dealer.com, Generate Button API, Icon Button API), on or off, and what it shows. No keys or code.",
+    input_schema: { type: "object", properties: { ...STORE_PARAM } },
+  },
+  {
+    name: "get_users",
+    description:
+      "Who has a login for the dealership: name and role (Dealer Admin / Dealer User / Dealer Restricted), plus pending invitations. Only answered for admins; other users get a refusal.",
     input_schema: { type: "object", properties: { ...STORE_PARAM } },
   },
   {
@@ -263,6 +307,99 @@ async function printQueue(admin: Admin, dealerId: string) {
   };
 }
 
+async function productsList(admin: Admin, dealerId: string) {
+  const { data: lib } = await (admin as any).from("addendum_library")
+    .select("option_name, item_price, required, active, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
+    .eq("dealer_id", dealerId).order("sort_order", { ascending: true }).limit(300);
+  const rows = (lib ?? []) as any[];
+  const corporate = await getGroupOptionsForDealer(dealerId);
+  const shape = (r: any, price: string | null, required: boolean) => ({
+    name: r.option_name,
+    price: formatOptionPrice(price) || price || "",
+    type: required ? "Required" : "Suggested",
+    rules: (summarizeRules(r).join("; ")) || NO_RULES_TEXT,
+  });
+  const own = rows.filter((r) => r.active !== false);
+  return {
+    own_products: own.slice(0, 80).map((r) => shape(r, r.item_price, r.required !== false)),
+    own_products_total: own.length,
+    inactive_products: rows.length - own.length,
+    corporate_products: corporate.slice(0, 60).map((g) => shape(g, g.option_price, g.required)),
+    corporate_products_total: corporate.length,
+  };
+}
+
+async function templatesInfo(admin: Admin, dealerId: string) {
+  const a = admin as any;
+  const cols = ["default_addendum_new", "default_addendum_used", "default_addendum_cpo", "default_infosheet_new", "default_infosheet_used",
+    "default_infosheet_cpo", "default_buyersguide_new", "default_buyersguide_used", "default_buyersguide_cpo",
+    "default_addendum_new_second", "default_addendum_used_second", "default_addendum_cpo_second"];
+  const { data: st } = await a.from("dealer_settings").select(cols.join(",")).eq("dealer_id", dealerId).maybeSingle();
+  const { data: overrides } = await a.from("template_make_overrides").select("make_key, condition, doc_type, template_id").eq("dealer_id", dealerId);
+  const ids = new Set<string>();
+  for (const c of cols) if (st?.[c]) ids.add(st[c]);
+  for (const o of overrides ?? []) if (o.template_id) ids.add(o.template_id);
+  const idList = Array.from(ids);
+  const [own, grp] = await Promise.all([
+    idList.length ? a.from("templates").select("id, name").in("id", idList) : { data: [] },
+    idList.length ? a.from("group_templates").select("id, name").in("id", idList) : { data: [] },
+  ]);
+  const names = new Map<string, string>();
+  for (const t of (own.data ?? []) as any[]) names.set(t.id, t.name);
+  for (const t of (grp.data ?? []) as any[]) names.set(t.id, `${t.name} (group template)`);
+  const label = (id: string | null | undefined) => (id ? names.get(id) ?? "a template that no longer exists" : "none set (prints the starter layout)");
+  const block = (doc: string, second = false) => ({
+    new: label(st?.[`default_${doc}_new${second ? "_second" : ""}`]),
+    used: label(st?.[`default_${doc}_used${second ? "_second" : ""}`]),
+    cpo: label(st?.[`default_${doc}_cpo${second ? "_second" : ""}`]),
+  });
+  const hasSecond = ["new", "used", "cpo"].some((c) => st?.[`default_addendum_${c}_second`]);
+  return {
+    addendum_defaults: block("addendum"),
+    ...(hasSecond ? { second_addendum_defaults: block("addendum", true) } : {}),
+    infosheet_defaults: block("infosheet"),
+    buyers_guide_defaults: block("buyersguide"),
+    make_overrides: ((overrides ?? []) as any[]).map((o) => ({
+      make: o.make_key, condition: o.condition, document: o.doc_type, template: label(o.template_id),
+    })),
+  };
+}
+
+const PROVIDER_LABEL: Record<string, string> = { dealer_com: "Dealer.com", api: "Generate Button API", api_icon: "Icon Button API" };
+
+async function websiteIntegration(admin: Admin, dealerId: string) {
+  const { data } = await (admin as any).from("dealer_website_integrations")
+    .select("provider, enabled, feature, button_label, updated_at").eq("dealer_id", dealerId);
+  const rows = ((data ?? []) as any[]).filter((r) => PROVIDER_LABEL[r.provider]);
+  return {
+    configured: rows.length > 0,
+    integrations: rows.map((r) => ({
+      integration: PROVIDER_LABEL[r.provider],
+      on: r.enabled === true,
+      shows: r.feature ?? null,
+      button_label: r.button_label ?? null,
+      last_changed: r.updated_at ? String(r.updated_at).slice(0, 10) : null,
+    })),
+    where: "My Profile → Website Integrations",
+  };
+}
+
+const ROLE_LABEL: Record<string, string> = { dealer_admin: "Dealer Admin", dealer_user: "Dealer User", dealer_restricted: "Dealer Restricted" };
+
+async function usersList(admin: Admin, dealerId: string) {
+  const a = admin as any;
+  const [{ data: profs }, { data: invites }] = await Promise.all([
+    a.from("profiles").select("full_name, email, role").eq("dealer_id", dealerId).in("role", Object.keys(ROLE_LABEL)).order("full_name"),
+    a.from("invitations").select("email, role, expires_at, accepted_at").eq("dealer_id", dealerId).is("accepted_at", null).limit(50),
+  ]);
+  const pending = ((invites ?? []) as any[]).filter((i) => !i.expires_at || Date.parse(i.expires_at) > Date.now());
+  return {
+    users: ((profs ?? []) as any[]).map((p) => ({ name: p.full_name || p.email, email: p.email, role: ROLE_LABEL[p.role] ?? p.role })),
+    pending_invitations: pending.map((i) => ({ email: i.email, role: ROLE_LABEL[i.role] ?? i.role })),
+    where: "Users (sidebar)",
+  };
+}
+
 // ── Dispatcher (audited, time-boxed, never throws) ─────────────────────────
 
 export async function runStevenTool(
@@ -298,7 +435,22 @@ export async function runStevenTool(
         case "get_billing_status": result = await billingStatus(admin, claims, scope.dealerId); break;
         case "get_inventory_summary": result = await inventorySummary(admin, scope.dealerId); break;
         case "get_print_activity": result = await printActivity(admin, scope.dealerId); break;
-        default: result = await printQueue(admin, scope.dealerId);
+        case "explain_vehicle_products":
+          result = await explainVehicleProducts(admin, scope.dealerId, String(input.vin_or_stock ?? ""),
+            typeof input.product_name === "string" ? input.product_name.slice(0, 120) : null);
+          break;
+        case "get_products": result = await productsList(admin, scope.dealerId); break;
+        case "get_templates": result = await templatesInfo(admin, scope.dealerId); break;
+        case "get_website_integration": result = await websiteIntegration(admin, scope.dealerId); break;
+        case "get_users":
+          if (!USER_LIST_ROLES.has(claims.role)) {
+            audit("denied", scope.dealerId, "user list is admin-only");
+            return { error: "Only a Dealer Admin (or group admin) can see the account's user list.", role_refused: true };
+          }
+          result = await usersList(admin, scope.dealerId);
+          break;
+        case "get_print_queue": result = await printQueue(admin, scope.dealerId); break;
+        default: result = { error: "unknown tool" };
       }
       audit("ok", scope.dealerId, null);
       return { store: scope.dealerName, ...result };
