@@ -435,7 +435,7 @@ function UsersTab({ groupId, isSuperAdmin }: { groupId: string; isSuperAdmin: bo
             <label className="label">Role</label>
             <select className="input text-sm" style={{ height: 32 }} value={invFields.role}
               onChange={(e) => setInvFields((f) => ({ ...f, role: e.target.value }))}>
-              <option value="group_user">Group User (read-only)</option>
+              <option value="group_user">Group User — manages assigned stores</option>
               <option value="group_admin">Group Admin</option>
             </select>
           </div>
