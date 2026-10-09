@@ -18,7 +18,7 @@ async function wantsLoginCode(req: NextRequest): Promise<boolean> {
 async function loginCode(claims: JwtClaims, invId: string, scope: { dealerUuid: string } | { groupId: string }): Promise<NextResponse> {
   const r = await issueInvitationLoginCode(createAdminSupabaseClient(), claims, invId, scope);
   if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
-  return NextResponse.json({ ok: true, code: r.code, email: r.email, expiresAt: r.expiresAt }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ok: true, code: r.code, email: r.email, expiresAt: r.expiresAt, kind: r.kind ?? "setup", dealerName: r.dealerName ?? null }, { headers: { "Cache-Control": "no-store" } });
 }
 
 // super_admin (any group) or group_admin (own group only).

@@ -19,13 +19,14 @@
 import type { JwtClaims } from "@/lib/auth";
 import type { createAdminSupabaseClient } from "@/lib/db";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
-import { INVITE_TTL_MS, neverSignedInResolver, NOT_ON_V5_MESSAGE } from "@/lib/user-access";
+import { INVITE_TTL_MS, neverSignedInResolver } from "@/lib/user-access";
+import { issueMigrationLoginCode } from "@/lib/migration-login-code";
 import { DEALER_ROLES, isDealerMigratedOnV5 } from "@/lib/v5-usable";
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>;
 
 export type InviteLoginCodeResult =
-  | { ok: true; code: string; email: string; expiresAt: string }
+  | { ok: true; code: string; email: string; expiresAt: string; kind?: "setup" | "migration"; dealerName?: string }
   | { ok: false; status: number; error: string };
 
 export async function issueInvitationLoginCode(
@@ -36,21 +37,33 @@ export async function issueInvitationLoginCode(
 ): Promise<InviteLoginCodeResult> {
   const a = admin as any; // eslint-disable-line @typescript-eslint/no-explicit-any
   let q = a.from("invitations")
-    .select("id, email, role, dealer_id, group_id, purpose, accepted_at").eq("id", invitationId);
+    .select("id, email, first_name, last_name, role, dealer_id, group_id, purpose, accepted_at").eq("id", invitationId);
   q = "dealerUuid" in scope ? q.eq("dealer_id", scope.dealerUuid) : q.eq("group_id", scope.groupId);
   const { data: inv } = await q.maybeSingle() as {
-    data: { id: string; email: string; role: string; dealer_id: string | null; group_id: string | null; purpose: string | null; accepted_at: string | null } | null;
+    data: { id: string; email: string; first_name: string | null; last_name: string | null; role: string; dealer_id: string | null; group_id: string | null; purpose: string | null; accepted_at: string | null } | null;
   };
   if (!inv) return { ok: false, status: 404, error: "Invitation not found" };
   if (inv.accepted_at) return { ok: false, status: 409, error: "This invitation was already accepted — they have an account now." };
-  if (inv.purpose !== "user") return { ok: false, status: 409, error: NOT_ON_V5_MESSAGE };
 
   let dealerTextId: string | null = null;
+  let dealerOnV5 = true;
   if (inv.dealer_id) {
     const { data: d } = await a.from("dealers").select("dealer_id, migration_status, is_native").eq("id", inv.dealer_id).maybeSingle();
     dealerTextId = d?.dealer_id ?? null;
-    if (DEALER_ROLES.has(inv.role) && !isDealerMigratedOnV5(d)) return { ok: false, status: 409, error: NOT_ON_V5_MESSAGE };
+    dealerOnV5 = isDealerMigratedOnV5(d);
   }
+  // A dealer still on 4.0 (2026-10-09): the code to give is the dealer's
+  // MIGRATION code — the Migration Console's own mechanism (lib/migration-login-code.ts).
+  // A migration invite on an already-migrated dealer is an account-only
+  // migration invite and goes the same way (redeemed at /migrate).
+  if (inv.dealer_id && (inv.purpose === "migration" || (DEALER_ROLES.has(inv.role) && !dealerOnV5))) {
+    return issueMigrationLoginCode(admin, claims, {
+      dealerUuid: inv.dealer_id, email: inv.email, role: inv.role,
+      name: [inv.first_name, inv.last_name].filter(Boolean).join(" ") || null,
+      source: "invitation", sourceId: inv.id,
+    });
+  }
+  if (inv.purpose !== "user") return { ok: false, status: 409, error: "This invitation can't be given a login code here." };
 
   const neverSignedIn = await neverSignedInResolver(admin);
   if (!neverSignedIn(inv.email)) {
@@ -89,5 +102,5 @@ export async function issueInvitationLoginCode(
     console.error("[invite-login-code] code rotation failed for invitation", inv.id, upErr.message);
     return { ok: false, status: 500, error: "Could not set the new code. Try again." };
   }
-  return { ok: true, code, email: inv.email, expiresAt };
+  return { ok: true, code, email: inv.email, expiresAt, kind: "setup" };
 }

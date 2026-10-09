@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { loadAccessContext, refreshUserInvitation, NOT_ON_V5_MESSAGE } from "@/lib/user-access";
+import { loadAccessContext, refreshUserInvitation } from "@/lib/user-access";
+import { issueMigrationLoginCode } from "@/lib/migration-login-code";
 
 export const dynamic = "force-dynamic";
 
@@ -39,9 +40,19 @@ export async function POST(
   if (!ctx.neverSignedIn) {
     return NextResponse.json({ error: "This user has already signed in — a login code is only for someone who has never signed in. They can use \"Forgot password\" or an email sign-in code on the login page." }, { status: 409 });
   }
-  if (ctx.dealerNotOnV5) return NextResponse.json({ error: NOT_ON_V5_MESSAGE }, { status: 409 });
   if (ctx.target.active === false) {
     return NextResponse.json({ error: "This user is inactive — reactivate them first." }, { status: 409 });
+  }
+  // Dealer still on 4.0 → their code is the dealer's MIGRATION code, issued by
+  // the Migration Console's own mechanism (2026-10-09).
+  if (ctx.dealerNotOnV5 && ctx.dealer) {
+    const r = await issueMigrationLoginCode(admin, claims, {
+      dealerUuid: ctx.dealer.id, email: ctx.target.email, role: ctx.target.role,
+      name: ctx.target.full_name, source: "user", sourceId: ctx.target.id,
+    });
+    return r.ok
+      ? NextResponse.json({ ok: true, code: r.code, email: r.email, expiresAt: r.expiresAt, kind: r.kind, dealerName: r.dealerName }, { headers: { "Cache-Control": "no-store" } })
+      : NextResponse.json({ error: r.error }, { status: r.status });
   }
 
   const { error: auditErr } = await admin.from("admin_audit").insert({
@@ -71,7 +82,7 @@ export async function POST(
   }
 
   return NextResponse.json(
-    { ok: true, code: inv.code, email: ctx.target.email, expiresAt: inv.expiresAt, orgName: inv.orgName },
+    { ok: true, code: inv.code, email: ctx.target.email, expiresAt: inv.expiresAt, orgName: inv.orgName, kind: "setup" },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

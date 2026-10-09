@@ -47,17 +47,18 @@ export interface MigrationInviteResult {
   cutoverNote?: string;
 }
 
-const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14-day migration window
+export const MIGRATION_INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14-day migration window
+const INVITE_TTL_MS = MIGRATION_INVITE_TTL_MS;
 const MAX_RECIPIENTS = 10;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type Recipient = { email: string; firstName: string; lastName: string; name: string };
-type DealerRow = {
+export type Recipient = { email: string; firstName: string; lastName: string; name: string };
+export type DealerRow = {
   id: string; dealer_id: string; name: string; inventory_dealer_id: string | null;
   primary_contact: string | null; primary_contact_email: string | null;
 };
 
-function splitName(name: string): { firstName: string; lastName: string } {
+export function splitName(name: string): { firstName: string; lastName: string } {
   const [first, ...rest] = (name || "there").trim().split(/\s+/);
   return { firstName: first || "there", lastName: rest.join(" ") };
 }
@@ -108,7 +109,7 @@ async function resolveMigrationRecipients(
  * {token, code}. onConflict email+dealer_id: a re-send refreshes the same row —
  * the OLD code dies (hash replaced), the link token stays stable.
  */
-async function upsertRecipientInvite(
+export async function upsertRecipientInvite(
   admin: ReturnType<typeof createAdminSupabaseClient>,
   dealer: DealerRow,
   r: Recipient,

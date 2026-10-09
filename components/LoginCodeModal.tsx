@@ -23,7 +23,7 @@ const NAVY = "#2a2b3c";
 export default function LoginCodeModal({ user, onClose, invitationEndpoint }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [issued, setIssued] = useState<{ code: string; email: string; expiresAt: string } | null>(null);
+  const [issued, setIssued] = useState<{ code: string; email: string; expiresAt: string; kind: "setup" | "migration"; dealerName: string | null } | null>(null);
   const [copied, setCopied] = useState<"" | "ok" | "fail">("");
 
   async function generate() {
@@ -36,10 +36,10 @@ export default function LoginCodeModal({ user, onClose, invitationEndpoint }: Pr
             headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "login-code" }),
           })
         : await fetch(`/api/users/${user.id}/login-code`, { method: "POST", cache: "no-store" });
-      const j = await res.json().catch(() => ({})) as { error?: string; code?: string; email?: string; expiresAt?: string };
+      const j = await res.json().catch(() => ({})) as { error?: string; code?: string; email?: string; expiresAt?: string; kind?: string; dealerName?: string | null };
       if (!res.ok || !j.code) { setErr(j.error ?? "Could not generate a code"); return; }
       setCopied("");
-      setIssued({ code: j.code, email: j.email ?? user.email, expiresAt: j.expiresAt ?? "" });
+      setIssued({ code: j.code, email: j.email ?? user.email, expiresAt: j.expiresAt ?? "", kind: j.kind === "migration" ? "migration" : "setup", dealerName: j.dealerName ?? null });
     } catch {
       setErr("Could not generate a code");
     } finally {
@@ -77,6 +77,10 @@ export default function LoginCodeModal({ user, onClose, invitationEndpoint }: Pr
               For someone who hasn&apos;t received their invite email. This creates a <strong>new</strong> 8-digit code for{" "}
               <strong>{user.email}</strong> and shows it here so you can read it to them. It is <strong>not emailed</strong>.
             </p>
+            <p style={{ fontSize: 13, color: "#55595c", margin: "0 0 12px", lineHeight: 1.5 }}>
+              If their dealership is still on Platform 4.0, this will be the dealership&apos;s <strong>migration code</strong>{" "}
+              — the same code the Migration Console gives out.
+            </p>
             <p style={{ fontSize: 13, color: "#e65100", background: "#fff8e1", border: "1px solid #ffe0b2", borderRadius: 4, padding: "8px 12px", margin: "0 0 12px" }}>
               This replaces any code already emailed to them — that one stops working.
             </p>
@@ -102,14 +106,27 @@ export default function LoginCodeModal({ user, onClose, invitationEndpoint }: Pr
             {copied === "fail" && (
               <div style={{ fontSize: 12, color: "#c62828", margin: "-6px 0 10px" }}>Couldn&apos;t copy automatically — click the code to select it, then copy.</div>
             )}
-            <div style={{ fontSize: 14, color: "#333", lineHeight: 1.6 }}>
-              <div>Valid until <strong>{expiry}</strong> (7 days).</div>
-              <div>
-                They go to <strong>app.dealeraddendums.com/signup</strong>, click <strong>Enter your setup code</strong> (under
-                &ldquo;Were you invited?&rdquo;), then enter <strong>{issued.email}</strong> and this code — and they&apos;re signed in.
-                They can choose a password after that.
+            {issued.kind === "migration" ? (
+              <div style={{ fontSize: 14, color: "#333", lineHeight: 1.6 }}>
+                <p style={{ fontSize: 13, color: "#1565c0", background: "#e3f2fd", border: "1px solid #bbdefb", borderRadius: 4, padding: "8px 12px", margin: "0 0 10px" }}>
+                  {issued.dealerName ?? "This dealer"} is still on Platform 4.0 — this code is their <strong>migration code</strong>.
+                  When {who} uses it, the store moves to 5.0.
+                </p>
+                <div>Valid until <strong>{expiry}</strong> (14 days).</div>
+                <div>
+                  They go to <strong>app.dealeraddendums.com/migrate</strong>, enter <strong>{issued.email}</strong> and this code.
+                </div>
               </div>
-            </div>
+            ) : (
+              <div style={{ fontSize: 14, color: "#333", lineHeight: 1.6 }}>
+                <div>Valid until <strong>{expiry}</strong> (7 days).</div>
+                <div>
+                  They go to <strong>app.dealeraddendums.com/signup</strong>, click <strong>Enter your setup code</strong> (under
+                  &ldquo;Were you invited?&rdquo;), then enter <strong>{issued.email}</strong> and this code — and they&apos;re signed in.
+                  They can choose a password after that.
+                </div>
+              </div>
+            )}
             <p style={{ fontSize: 12, color: "#e65100", background: "#fff8e1", border: "1px solid #ffe0b2", borderRadius: 4, padding: "8px 12px", margin: "12px 0" }}>
               Shown only once. Sending another invite or generating another code replaces it.
             </p>
