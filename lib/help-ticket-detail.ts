@@ -5,9 +5,15 @@
 // ticketsForDealer() shows (chat-made tickets + Customer Support tickets on the
 // dealer's HubSpot company). Nothing here can change status, reassign or close.
 //
-// Activity = the transcript we already hold for the ticket's conversation(s)
-// (dealer messages, Steven, and agent replies relayed from the inbox). HubSpot
-// ticket notes/descriptions are internal and are never shown.
+// What the dealer sees (2026-10-09, Allan): the STATUS, the agents' progress
+// NOTES on the ticket, and the dealer's OWN additions — not the Steven chat
+// transcript. Which notes are dealer-visible is decided in ONE place, the
+// bridge's dealerVisibleTicketNotes() (da-marketing-os): human-written, newer
+// than the ticket, no `[internal]` / `#internal` marker, not a system note.
+// The marker is re-checked here so a bridge regression can't leak one.
+//
+// A dealer's own additions are help_messages tagged external_id
+// `ticket-add:{ticketId}:{uuid}` (written by addTicketComment below).
 //
 // Adding info posts a CUSTOMER MESSAGE into the ticket's Support-inbox thread
 // through the in-app custom channel (the bridge app can't write ticket notes —
@@ -20,9 +26,15 @@ import type { JwtClaims } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { ticketsForDealer, type DealerTicket } from "@/lib/help-tickets";
 import { appendMessage, createConversation, escalateByEmail, resolveAsker } from "@/lib/help-conversations";
-import { publishToInbox } from "@/lib/help-handoff";
+import { callGateway, publishToInbox } from "@/lib/help-handoff";
+import { randomUUID } from "crypto";
 
-export interface TicketActivity { role: "user" | "assistant" | "agent"; content: string; sender: string | null; at: string }
+export interface TicketNote { id: string; at: string; text: string }
+export interface TicketAddition { text: string; at: string }
+
+/** Same marker the bridge filters on — kept in step with INTERNAL_NOTE_MARKER there. */
+const INTERNAL_NOTE_MARKER = /[[#]\s*internal\b\]?/i;
+const ADDITION_TAG = "ticket-add:";
 
 async function findTicket(dealerId: string, ticketId: string): Promise<DealerTicket | null> {
   if (!/^\d+$/.test(ticketId)) return null;
@@ -30,20 +42,28 @@ async function findTicket(dealerId: string, ticketId: string): Promise<DealerTic
   return r.tickets.find((t) => t.ticketId === ticketId) ?? null;
 }
 
-export async function ticketDetail(dealerId: string, ticketId: string): Promise<{ ticket: DealerTicket; activity: TicketActivity[] } | null> {
+export async function ticketDetail(dealerId: string, ticketId: string): Promise<{ ticket: DealerTicket; notes: TicketNote[]; notesUnavailable: boolean; additions: TicketAddition[] } | null> {
   const ticket = await findTicket(dealerId, ticketId);
   if (!ticket) return null;
   const a = createAdminSupabaseClient() as any;
-  const { data: convs } = await a.from("help_conversations").select("id").eq("dealer_id", dealerId).eq("hubspot_ticket_id", ticketId);
-  const ids = ((convs ?? []) as { id: string }[]).map((c) => c.id);
-  let activity: TicketActivity[] = [];
+  const [gw, convs] = await Promise.all([
+    callGateway("/api/hubspot-chat/tickets", { action: "dealer-notes", ticketId }),
+    a.from("help_conversations").select("id").eq("dealer_id", dealerId).eq("hubspot_ticket_id", ticketId),
+  ]);
+  const notes: TicketNote[] = gw.ok && Array.isArray(gw.data?.notes)
+    ? (gw.data.notes as any[])
+      .filter((n) => typeof n?.text === "string" && n.text.trim() && !INTERNAL_NOTE_MARKER.test(n.text))
+      .map((n) => ({ id: String(n.id), at: String(n.at), text: String(n.text) }))
+    : [];
+  const ids = ((convs.data ?? []) as { id: string }[]).map((c) => c.id);
+  let additions: TicketAddition[] = [];
   if (ids.length) {
-    const { data: msgs } = await a.from("help_messages").select("role, content, sender_name, created_at")
-      .in("conversation_id", ids).in("role", ["user", "assistant", "agent"]).order("created_at", { ascending: true }).limit(200);
-    activity = ((msgs ?? []) as any[]).filter((m) => (m.content || "").trim())
-      .map((m) => ({ role: m.role, content: m.content, sender: m.sender_name ?? null, at: m.created_at }));
+    const { data: msgs } = await a.from("help_messages").select("content, created_at")
+      .in("conversation_id", ids).eq("role", "user").like("external_id", `${ADDITION_TAG}${ticketId}:%`)
+      .order("created_at", { ascending: true }).limit(100);
+    additions = ((msgs ?? []) as any[]).filter((m) => (m.content || "").trim()).map((m) => ({ text: m.content, at: m.created_at }));
   }
-  return { ticket, activity };
+  return { ticket, notes, notesUnavailable: !gw.ok, additions };
 }
 
 export async function addTicketComment(claims: JwtClaims, dealerId: string, ticketId: string, text: string): Promise<{ ok: boolean; status: number; error?: string; via?: "inbox" | "email" }> {
@@ -63,7 +83,7 @@ export async function addTicketComment(claims: JwtClaims, dealerId: string, tick
     if (!convId) return { ok: false, status: 500, error: "Could not save your note — please try again." };
     await a.from("help_conversations").update({ hubspot_ticket_id: ticketId, ticketed_at: new Date().toISOString() }).eq("id", convId);
   }
-  const mid = await appendMessage(convId, "user", body);
+  const mid = await appendMessage(convId, "user", body, { externalId: `${ADDITION_TAG}${ticketId}:${randomUUID()}` });
   const { data: conv } = await a.from("help_conversations").select("id, user_id, dealer_id, group_id, role").eq("id", convId).maybeSingle();
   const who = await resolveAsker(admin, conv);
   // A brand-new inbox thread needs the context an agent would otherwise lack.

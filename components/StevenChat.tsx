@@ -60,9 +60,10 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
   const [tab, setTab] = useState<"chat" | "tickets">("chat");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [liveAgent, setLiveAgent] = useState<{ name: string | null; photo: string | null } | null>(null);
-  // Ticket detail (My support tickets → open one): status + activity + add info.
+  // Ticket detail (My support tickets → open one): status + the agents' progress
+  // notes + the dealer's own additions (not the chat transcript) + add info.
   const [openTicket, setOpenTicket] = useState<string | null>(null);
-  const [ticketDetail, setTicketDetail] = useState<{ ticket: Ticket & { createdAt?: string | null }; activity: { role: string; content: string; sender: string | null; at: string }[] } | null>(null);
+  const [ticketDetail, setTicketDetail] = useState<{ ticket: Ticket & { createdAt?: string | null }; notes: { id: string; at: string; text: string }[]; notesUnavailable?: boolean; additions: { text: string; at: string }[] } | null>(null);
   const [ticketErr, setTicketErr] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [posting, setPosting] = useState(false);
@@ -388,7 +389,7 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
                   <>
                     <div style={{ fontSize: 14, fontWeight: 600, color: NAVY, margin: "6px 0 4px" }}>{ticketDetail.ticket.subject || "Support ticket"}</div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span style={{ color: stateColor(ticketDetail.ticket.state), fontWeight: 600 }}>{ticketDetail.ticket.status}</span>
+                      <span style={{ color: stateColor(ticketDetail.ticket.state), fontWeight: 700, fontSize: 14 }} aria-label="Ticket status">{ticketDetail.ticket.status}</span>
                       <span style={{ color: "#78828c" }}>
                         {ticketDetail.ticket.updatedAt ? `Updated ${new Date(ticketDetail.ticket.updatedAt).toLocaleDateString()}` : ""} · #{ticketDetail.ticket.ticketId}
                       </span>
@@ -399,18 +400,25 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
               <div style={{ flex: 1, overflowY: "auto", padding: 14, background: "#f5f6f7", display: "flex", flexDirection: "column", gap: 8 }}>
                 {!ticketDetail && !ticketErr && <div style={{ color: "#78828c", fontSize: 13 }}>Loading…</div>}
                 {ticketErr && <div style={{ color: "#c62828", fontSize: 13 }}>{ticketErr}</div>}
-                {ticketDetail && ticketDetail.activity.length === 0 && (
-                  <div style={{ color: "#55595c", fontSize: 13, lineHeight: 1.5 }}>Our team is working on this ticket. Anything you add below goes straight to them.</div>
+                {ticketDetail && ticketDetail.notes.length === 0 && ticketDetail.additions.length === 0 && (
+                  <div style={{ color: "#55595c", fontSize: 13, lineHeight: 1.5 }}>
+                    {ticketDetail.notesUnavailable
+                      ? "We couldn't load updates on this ticket just now. Anything you add below still goes straight to our team."
+                      : "No updates from our team yet. Anything you add below goes straight to them."}
+                  </div>
                 )}
-                {ticketDetail?.activity.map((m, i) => {
-                  const mine = m.role === "user";
+                {ticketDetail && [
+                  ...ticketDetail.notes.map((n) => ({ kind: "note" as const, at: n.at, text: n.text, key: `n${n.id}` })),
+                  ...ticketDetail.additions.map((x, i) => ({ kind: "mine" as const, at: x.at, text: x.text, key: `a${i}` })),
+                ].sort((x, y) => x.at.localeCompare(y.at)).map((e) => {
+                  const mine = e.kind === "mine";
                   return (
-                    <div key={i} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "88%" }}>
+                    <div key={e.key} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "88%" }}>
                       <div style={{ fontSize: 11, fontWeight: 600, color: NAVY, margin: "0 0 2px 4px", textAlign: mine ? "right" : "left" }}>
-                        {mine ? "You" : m.role === "agent" ? (m.sender || "DA Support") : "Steven"} · {new Date(m.at).toLocaleDateString()}
+                        {mine ? "You added" : "Update from DealerAddendums support"} · {new Date(e.at).toLocaleDateString()}
                       </div>
-                      <div style={{ padding: "7px 11px", borderRadius: 10, fontSize: 13, lineHeight: 1.45, whiteSpace: "pre-wrap", background: mine ? BLUE : "#fff", color: mine ? "#fff" : NAVY, border: mine ? "none" : m.role === "agent" ? `1px solid ${NAVY}` : BORDER }}>
-                        {renderText(m.content)}
+                      <div style={{ padding: "7px 11px", borderRadius: 10, fontSize: 13, lineHeight: 1.45, whiteSpace: "pre-wrap", background: mine ? BLUE : "#fff", color: mine ? "#fff" : NAVY, border: mine ? "none" : `1px solid ${NAVY}` }}>
+                        {e.text}
                       </div>
                     </div>
                   );
