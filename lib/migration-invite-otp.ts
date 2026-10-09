@@ -19,7 +19,7 @@
 import { createAdminSupabaseClient } from "@/lib/db";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 import { sendMandrillEmail } from "@/lib/mandrill";
-import { buildMigrationInviteEmail, buildMigrationFollowUpEmail } from "@/lib/invite-email";
+import { buildMigrationInviteEmail, buildMigrationFollowUpEmail, migrationInviteSubject } from "@/lib/invite-email";
 import { lastSignInByEmailStrict } from "@/lib/last-sign-in";
 import { isTrialTrackAccount } from "@/lib/migration-readiness";
 import { runInviteBillingCutover, type BillingCutoverResult } from "@/lib/billing-cutover";
@@ -336,7 +336,7 @@ export async function sendMigrationInvite(
     }
     try {
       await sendMandrillEmail({
-        subject: `You're invited to DealerAddendums Platform 5.0 — ${dealer.name}`,
+        subject: migrationInviteSubject(dealer.name),
         from_email: "noreply@dealeraddendums.com",
         from_name: "DealerAddendums",
         to: [{ email: r.email, name: r.name || undefined }],
@@ -462,8 +462,8 @@ export async function sendMigrationFollowUp(
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com";
   const invitedAt = dealer.invited_at ? new Date(dealer.invited_at) : new Date();
   const subjects: Record<number, string> = {
-    1: `Your Platform 5.0 account is ready — ${dealer.name}`,
-    2: `We're moving ${dealer.name} to Platform 5.0 soon`,
+    1: `Reminder: set up your Platform 5.0 login — ${dealer.name}`,
+    2: `${dealer.name}: your Platform 5.0 login still needs setting up`,
     3: `Final notice — ${dealer.name} moves to Platform 5.0 tomorrow`,
   };
 

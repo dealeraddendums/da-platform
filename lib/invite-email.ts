@@ -134,10 +134,15 @@ export function buildInviteReminderEmail(opts: {
 `;
 }
 
-// Migration self-serve invite (Phase 13a). Same scanner-proof one-time CODE +
-// inert link pattern as buildInviteEmail, but the copy is a soft "you're
-// invited to 5.0" pitch — both platforms run side by side until the 4.0
-// sunset (120 days from the invite).
+// Migration invite (Phase 13a; copy rewritten 2026-10-09 for FORCED migration —
+// 4.0 is switched off when this goes out, so it says "we've moved you, set up
+// your login", not "try it whenever you're ready"). Same scanner-proof one-time
+// CODE + inert link pattern as buildInviteEmail.
+/** Subject for the migration invite — the initial send and Resend both use it. */
+export function migrationInviteSubject(orgName: string): string {
+  return `${orgName} is moving to DealerAddendums Platform 5.0 — set up your login`;
+}
+
 export function buildMigrationInviteEmail(opts: {
   firstName: string;
   /** The dealership being migrated. */
@@ -148,42 +153,45 @@ export function buildMigrationInviteEmail(opts: {
   setupCode: string;
 }): string {
   const spacedCode = opts.setupCode.split("").join(" ");
-  const sunsetDate = new Date();
-  sunsetDate.setDate(sunsetDate.getDate() + 120);
-  const sunsetFormatted = sunsetDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const org = escapeHtml(opts.orgName);
   return `<div style="font-family:Roboto,Arial,sans-serif;max-width:560px;margin:0 auto;padding:0;color:#333;">
   <div style="background:#2a2b3c;border-radius:6px 6px 0 0;padding:28px 32px;text-align:center;">
     <img src="${APP_URL}/images/da-logo.png" alt="DA Platform" width="48" height="48" style="border-radius:50%;margin:0 auto 12px;display:block;" />
     <div style="color:#fff;font-size:20px;font-weight:700;">DealerAddendums Platform 5.0</div>
-    <div style="color:rgba(255,255,255,0.65);font-size:13px;margin-top:4px;">You're invited to try the new platform</div>
+    <div style="color:rgba(255,255,255,0.65);font-size:13px;margin-top:4px;">Your new platform is ready</div>
   </div>
   <div style="background:#fff;padding:32px;border-left:1px solid #e0e0e0;border-right:1px solid #e0e0e0;">
     <p style="font-size:16px;font-weight:500;color:#1a1a2e;margin:0 0 8px;">Hi ${escapeHtml(opts.firstName)},</p>
     <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 16px;">
-      We've set up a <strong>${escapeHtml(opts.orgName)}</strong> account on the new DealerAddendums Platform 5.0, and you're one of the first dealers invited to try it.
+      We've moved <strong>${org}</strong> to DealerAddendums Platform 5.0 — our faster, redesigned platform — and your account is ready to go.
+    </p>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 16px;">
+      Platform 4.0 is being retired, so 5.0 is where your dealership creates and prints addendums from here on. The good news: your templates, products, and inventory have already been carried over, so there's nothing to rebuild.
     </p>
     <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 24px;">
-      There's no pressure to switch today. <strong>You can use both platforms side by side</strong> — your existing account stays active and nothing changes about how you work now. Whenever you're ready, your account is waiting.
+      <strong>To keep printing, set up your 5.0 login now.</strong> It only takes a minute.
     </p>
-    <div style="background:#f5f6f7;border-radius:6px;padding:20px 24px;margin-bottom:24px;">
-      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#78828c;margin-bottom:14px;">What's new in 5.0</div>
-      <div style="padding:6px 0;font-size:14px;color:#333;">⚡&nbsp; <strong>Lightning-fast</strong> vehicle inventory and addendum printing</div>
-      <div style="padding:6px 0;font-size:14px;color:#333;">🎨&nbsp; <strong>Brand new template builder</strong> with pixel-perfect control</div>
-      <div style="padding:6px 0;font-size:14px;color:#333;">🔐&nbsp; <strong>Passkey login</strong> — sign in with Face ID or Touch ID, no password needed</div>
-      <div style="padding:6px 0;font-size:14px;color:#333;">📊&nbsp; <strong>Real-time dashboard</strong> with live activity tracking</div>
-    </div>
-    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 14px;text-align:center;">When you're ready, use this code to get started at <strong>${APP_HOST}/migrate</strong>:</p>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 14px;text-align:center;">Your setup code — good for 14 days — at <strong>${APP_HOST}/migrate</strong>:</p>
     <div style="text-align:center;margin:0 0 24px;">
       <div style="display:inline-block;background:#f5f6f7;border:1px solid #e0e0e0;border-radius:8px;padding:18px 28px;font-family:'Courier New',monospace;font-size:34px;font-weight:700;letter-spacing:6px;color:#1a1a2e;">${escapeHtml(spacedCode)}</div>
     </div>
-    <div style="text-align:center;margin-bottom:24px;">
-      <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">Get started &rarr;</a>
+    <div style="text-align:center;margin-bottom:16px;">
+      <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">Set up my login &rarr;</a>
     </div>
+    <p style="font-size:13px;color:#55595c;line-height:1.6;margin:0 0 24px;text-align:center;">Sign in with a passkey (Face ID / Touch ID) or a password — your choice.</p>
     ${manualFallbackHtml()}
     <p style="font-size:13px;color:#78828c;line-height:1.6;margin:0 0 24px;text-align:center;">Tip: use the link and code in this email to set up your account — the regular sign-in page won't work until your account is set up.</p>
-    <div style="background:#fff8ed;border:1px solid #ffe4a0;border-radius:6px;padding:14px 18px;">
-      <p style="font-size:13px;color:#7a5a00;margin:0;line-height:1.6;"><strong>Heads up:</strong> Platform 4.0 will remain available until <strong>${sunsetFormatted}</strong>. After that, the new platform will be your home. No rush — but it's good to know.</p>
+    <div style="background:#f5f6f7;border-radius:6px;padding:20px 24px;margin-bottom:24px;">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#78828c;margin-bottom:14px;">What's new in 5.0</div>
+      <div style="padding:6px 0;font-size:14px;color:#333;">⚡&nbsp; <strong>Lightning-fast</strong> vehicle inventory and addendum printing</div>
+      <div style="padding:6px 0;font-size:14px;color:#333;">🎨&nbsp; <strong>Brand-new template builder</strong> with pixel-perfect control</div>
+      <div style="padding:6px 0;font-size:14px;color:#333;">🔐&nbsp; <strong>Passkey login</strong> — sign in with Face ID or Touch ID, no password needed</div>
+      <div style="padding:6px 0;font-size:14px;color:#333;">📋&nbsp; <strong>Compliance built in</strong> — consistent, accurate pricing disclosures on every addendum, backed by a full, auditable print history</div>
     </div>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 16px;">
+      Need a hand getting signed in? Just reply to this email or reach us at <a href="mailto:support@dealeraddendums.com" style="color:#1976d2;">support@dealeraddendums.com</a> — we're happy to walk you through it.
+    </p>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0;">Welcome to 5.0,<br />The DealerAddendums Team</p>
   </div>
   <div style="background:#f5f6f7;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 6px 6px;padding:20px 32px;text-align:center;">
     <p style="font-size:12px;color:#78828c;margin:0 0 4px;">This code is good for 14 days. Questions? <a href="mailto:support@dealeraddendums.com" style="color:#1976d2;">support@dealeraddendums.com</a></p>
@@ -218,14 +226,14 @@ export function buildMigrationFollowUpEmail(opts: {
   const isFinal = opts.followUpNumber === 3;
 
   const headlines: Record<number, string> = {
-    1: `Your Platform 5.0 account is ready`,
-    2: `We're moving ${opts.orgName} to Platform 5.0 soon`,
-    3: `Final notice — you're being moved to Platform 5.0`,
+    1: `Your Platform 5.0 login is waiting`,
+    2: `Reminder: set up your Platform 5.0 login`,
+    3: `Final notice — set up your Platform 5.0 login`,
   };
   const bodies: Record<number, string> = {
-    1: `Your <strong>${org}</strong> account on DealerAddendums Platform 5.0 is set up and waiting. Everything came across — your products, templates, and settings. Use the code below to finish setting up your login.`,
-    2: `A quick heads-up: <strong>${org}</strong> is scheduled to move to Platform 5.0. You can make the switch yourself right now with the code below, which takes about a minute — or we'll move the account for you shortly.`,
-    3: `This is the last email before we move <strong>${org}</strong> to Platform 5.0 for you on <strong>${forceFormatted}</strong>. Your products, templates, and settings are already there. After the move, Platform 4.0 sign-in will redirect here — <strong>nothing is lost, but you will sign in at the new address.</strong>`,
+    1: `A friendly reminder: <strong>${org}</strong> is on DealerAddendums Platform 5.0, and your account is ready — your products, templates, and inventory are already there. Platform 4.0 is being retired, so set up your 5.0 login with the code below to keep printing. It only takes a minute.`,
+    2: `Just checking in — your 5.0 login for <strong>${org}</strong> still isn't set up. Platform 4.0 is being retired, so 5.0 is where your dealership prints addendums from here on. The code below takes about a minute, and we'll finish moving the account for you shortly either way.`,
+    3: `This is our last reminder before we finish moving <strong>${org}</strong> to Platform 5.0 for you on <strong>${forceFormatted}</strong>. Your products, templates, and settings are already there. After that, Platform 4.0 sign-in will redirect here — <strong>nothing is lost, but you will sign in at the new address.</strong>`,
   };
 
   const headline = headlines[opts.followUpNumber] ?? headlines[1];
@@ -234,8 +242,8 @@ export function buildMigrationFollowUpEmail(opts: {
   const bannerBorder = isFinal ? "#f5c2c0" : "#ffe4a0";
   const bannerText = isFinal ? "#8a1c14" : "#7a5a00";
   const bannerCopy = isFinal
-    ? `<strong>This is your final notice.</strong> On ${forceFormatted} this account moves to Platform 5.0 automatically. You don't need to do anything — but signing in below first means there's no interruption.`
-    : `Platform 4.0 still works today. Nothing changes until the move.`;
+    ? `<strong>This is your final notice.</strong> On ${forceFormatted} we finish moving this account to Platform 5.0. Setting up your login below first means there's no interruption to your printing.`
+    : `Platform 4.0 is being retired. Set up your 5.0 login now so there's no interruption to your printing. Need a hand? Reply to this email or write to support@dealeraddendums.com.`;
 
   // Stage 3 spells out how to get in AFTER the move, including the no-password path.
   const afterTheMove = isFinal ? `
@@ -262,12 +270,12 @@ export function buildMigrationFollowUpEmail(opts: {
   <div style="background:#fff;padding:32px;border-left:1px solid #e0e0e0;border-right:1px solid #e0e0e0;">
     <p style="font-size:16px;font-weight:500;color:#1a1a2e;margin:0 0 8px;">Hi ${escapeHtml(opts.firstName)},</p>
     <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 24px;">${body}</p>
-    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 14px;text-align:center;">${isFinal ? "Want to set it up yourself first? Use this code — good for 14 days:" : "Here's your migration code — good for 14 days:"}</p>
+    <p style="font-size:14px;color:#55595c;line-height:1.6;margin:0 0 14px;text-align:center;">${isFinal ? "Set up your login now with this code — good for 14 days:" : "Here's your setup code — good for 14 days:"}</p>
     <div style="text-align:center;margin:0 0 24px;">
       <div style="display:inline-block;background:#f5f6f7;border:1px solid #e0e0e0;border-radius:8px;padding:18px 28px;font-family:'Courier New',monospace;font-size:34px;font-weight:700;letter-spacing:6px;color:#1a1a2e;">${escapeHtml(spacedCode)}</div>
     </div>
     <div style="text-align:center;margin-bottom:24px;">
-      <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">${isFinal ? "Set up my login now &rarr;" : "Start migration &rarr;"}</a>
+      <a href="${opts.migrateUrl}" style="display:inline-block;background:#ffa500;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:6px;text-decoration:none;">${isFinal ? "Set up my login now &rarr;" : "Set up my login &rarr;"}</a>
     </div>
     ${manualFallbackHtml()}
     ${afterTheMove}

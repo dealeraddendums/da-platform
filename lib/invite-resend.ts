@@ -10,7 +10,7 @@
 
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
-import { buildInviteEmail, buildInviteReminderEmail, buildMigrationInviteEmail } from "@/lib/invite-email";
+import { buildInviteEmail, buildInviteReminderEmail, buildMigrationInviteEmail, migrationInviteSubject } from "@/lib/invite-email";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 
 export interface PendingInvitationRow {
@@ -149,7 +149,7 @@ export async function resendPendingInvitationEmail(
       orgName = d?.name ?? orgName;
     }
     await sendMandrillEmail({
-      subject: `You're invited to DealerAddendums Platform 5.0 — ${orgName}`,
+      subject: migrationInviteSubject(orgName),
       from_email: "noreply@dealeraddendums.com",
       from_name: "DealerAddendums",
       to: [{ email: inv.email, name: recipientName, type: "to" }],
