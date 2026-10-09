@@ -232,7 +232,7 @@ export default async function DashboardLayout({
           hidden; Steven is the one chat bubble). Client-only. */}
       <ProductFruitsWidget user={productFruitsUser} />
       {/* Steven — DA's own chat (/api/help/chat), live hand-off to support. */}
-      <StevenChat />
+      <StevenChat firstName={pfFirstName || null} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import HeadshotEditor from "@/components/HeadshotEditor";
 import { useState, useRef, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
@@ -985,6 +986,11 @@ export default function StaffProfileClient({
       {/* Security tab */}
       {tab === "security" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 640 }}>
+          <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: "24px", maxWidth: 560 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600, color: "#2a2b3c", margin: "0 0 4px" }}>Profile photo</h2>
+            <p style={{ fontSize: 12, color: "#78828c", margin: "0 0 12px" }}>Shown in a circle in the Steven chat when this person takes over a conversation.</p>
+            <HeadshotEditor userId={userId} name={profileFullName || userEmail} />
+          </div>
           <PasskeyCard />
           <AccountInfoCard userEmail={userEmail} userRole={userRole} memberSince={memberSince} />
         </div>

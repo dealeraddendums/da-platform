@@ -77,13 +77,13 @@ export async function appendMessage(
   conversationId: string,
   role: "user" | "assistant" | "agent",
   content: string,
-  extra: { attachments?: HelpAttachment[]; senderName?: string | null; externalId?: string | null } = {},
+  extra: { attachments?: HelpAttachment[]; senderName?: string | null; senderEmail?: string | null; externalId?: string | null } = {},
 ): Promise<string | null> {
   const admin = createAdminSupabaseClient();
   const { data, error } = await (admin as any)
     .from("help_messages").insert({
       conversation_id: conversationId, role, content,
-      attachments: extra.attachments ?? [], sender_name: extra.senderName ?? null, external_id: extra.externalId ?? null,
+      attachments: extra.attachments ?? [], sender_name: extra.senderName ?? null, sender_email: extra.senderEmail ?? null, external_id: extra.externalId ?? null,
     }).select("id").single();
   // 23505 on external_id = a retried relay for a reply already stored.
   if (error && error.code !== "23505") console.error("[help] appendMessage failed:", error.message);

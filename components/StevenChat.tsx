@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { Avatar } from "@/components/Avatar";
 
 const NAVY = "#2a2b3c";
 const ORANGE = "#ffa500";
@@ -23,6 +24,8 @@ type Msg = {
   mid?: string;
   feedback?: "up" | "down";
   sender?: string | null;
+  /** The agent's staff headshot (takeover header) — public URL or null. */
+  photo?: string | null;
   files?: ChatFile[];
 };
 type Ticket = { ticketId: string; subject: string | null; status: string; state: "open" | "waiting" | "closed"; updatedAt: string | null };
@@ -50,7 +53,8 @@ function load(): { conversationId: string | null; messages: Msg[]; live: boolean
   try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || "null"); } catch { return null; }
 }
 
-export default function StevenChat() {
+/** The person's first name from the session — only used in the greeting. */
+export default function StevenChat({ firstName }: { firstName?: string | null } = {}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"chat" | "tickets">("chat");
@@ -113,11 +117,11 @@ export default function StevenChat() {
         const data = await res.json();
         if (cancelled) return;
         if (data.at) afterRef.current = data.at;
-        const fresh = ((data.messages || []) as { id: string; body: string; sender: string | null; attachments: ChatFile[] }[])
+        const fresh = ((data.messages || []) as { id: string; body: string; sender: string | null; senderPhoto?: string | null; attachments: ChatFile[] }[])
           .filter((m) => !seen.current.has(m.id));
         fresh.forEach((m) => seen.current.add(m.id));
         if (fresh.length) {
-          setMessages((cur) => [...cur, ...fresh.map((m) => ({ role: "agent" as const, content: m.body, sender: m.sender, files: m.attachments }))]);
+          setMessages((cur) => [...cur, ...fresh.map((m) => ({ role: "agent" as const, content: m.body, sender: m.sender, photo: m.senderPhoto ?? null, files: m.attachments }))]);
         }
       } catch { /* keep polling */ }
     };
@@ -269,6 +273,13 @@ export default function StevenChat() {
     }
   }
 
+  // Once a team member has replied, the header is theirs for the rest of this
+  // conversation (Steven doesn't take it back). A newer reply from another
+  // agent hands the header to them.
+  const agent = [...messages].reverse().find((m) => m.role === "agent" && m.sender) ?? null;
+  const greetingName = (firstName ?? "").trim().split(/\s+/)[0] || "";
+  const canSend = !busy && !!input.trim();
+
   const stateColor = (s: Ticket["state"]) => (s === "closed" ? "#2e7d32" : s === "waiting" ? "#b06a00" : BLUE);
 
   return (
@@ -296,8 +307,14 @@ export default function StevenChat() {
             display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: "Roboto, sans-serif",
           }}>
           <div style={{ background: NAVY, padding: "11px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <strong style={{ color: "#fff", fontSize: 14 }}>Steven</strong>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              {agent ? (
+                <Avatar url={agent.photo ?? null} name={agent.sender} size={28} inverse />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src="/icon.png" alt="DealerAddendums" width={28} height={28} style={{ borderRadius: "50%", display: "block", flexShrink: 0 }} />
+              )}
+              <strong style={{ color: "#fff", fontSize: 14 }}>{agent ? agent.sender : "Steven"}</strong>
               <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 12 }}>DealerAddendums support</span>
               {live && (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "#aee9b8", fontSize: 12, fontWeight: 600 }}>
@@ -348,7 +365,7 @@ export default function StevenChat() {
               <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 10, background: "#f5f6f7" }}>
                 {messages.length === 0 && (
                   <div style={{ fontSize: 13, color: "#55595c", lineHeight: 1.55 }}>
-                    Hi, I&rsquo;m Steven. Ask me anything about DA Platform — templates, printing, inventory, billing. I can see your account, so I can answer things like &ldquo;why can&rsquo;t I print?&rdquo; Need a person? Tap <strong>Talk to a person</strong>.
+                    {greetingName ? `Hi ${greetingName}, I\u2019m Steven` : "Hi, I\u2019m Steven"} — ask me anything about DA Platform: templates, printing, inventory, billing. I can see your account, so I can answer things like &ldquo;why can&rsquo;t I print?&rdquo; If you&rsquo;d rather talk to a person, that&rsquo;s just below the box.
                   </div>
                 )}
                 {messages.map((m, i) => {
@@ -386,19 +403,10 @@ export default function StevenChat() {
               </div>
 
               <div style={{ borderTop: BORDER, padding: 10, background: "#fff" }}>
-                {live ? (
+                {live && (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginBottom: 8, padding: "6px 10px", borderRadius: 6, border: "1px solid #cfe8d2", background: "#f1faf2", color: "#2e7d32", fontSize: 12.5, fontWeight: 600 }}>
                     <span style={{ width: 7, height: 7, borderRadius: 4, background: "#4caf50", display: "inline-block" }} /> You&rsquo;re connected to our support team
                   </div>
-                ) : (
-                  <button onClick={talkToPerson} disabled={busy || escalating || escalated}
-                    style={{
-                      width: "100%", marginBottom: 8, padding: 7, borderRadius: 6, fontFamily: "inherit", fontSize: 12.5, fontWeight: 600,
-                      cursor: escalated ? "default" : "pointer",
-                      background: escalated ? "#f5f6f7" : "#fff", color: escalated ? "#78828c" : BLUE, border: `1px solid ${escalated ? "#cfd8dc" : BLUE}`,
-                    }}>
-                    {escalated ? "✓ Our team has been notified" : escalating ? "Connecting…" : "Talk to a person"}
-                  </button>
                 )}
                 <div style={{ display: "flex", gap: 6 }}>
                   {live && (
@@ -409,15 +417,28 @@ export default function StevenChat() {
                         style={{ width: 38, flexShrink: 0, border: BORDER, borderRadius: 6, background: "#fff", cursor: uploading ? "default" : "pointer", fontSize: 16, opacity: uploading ? 0.5 : 1 }}>📎</button>
                     </>
                   )}
+                  {/* The primary action: an inviting, clearly-live field + a blue Send. */}
                   <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void send(input); }}
                     placeholder={live ? "Message our team…" : "Ask Steven a question…"} disabled={busy} aria-label="Type your message"
-                    style={{ flex: 1, padding: "9px 11px", border: BORDER, borderRadius: 6, fontSize: 13.5, fontFamily: "inherit" }} />
-                  <button onClick={() => void send(input)} disabled={busy || !input.trim()}
-                    style={{ padding: "9px 14px", background: busy || !input.trim() ? "#9e9e9e" : BLUE, color: "#fff", border: "none", borderRadius: 6, fontSize: 13.5, fontWeight: 600, cursor: busy ? "wait" : "pointer", fontFamily: "inherit" }}>Send</button>
+                    onFocus={(e) => { e.currentTarget.style.borderColor = BLUE; }} onBlur={(e) => { e.currentTarget.style.borderColor = "#78828c"; }}
+                    style={{ flex: 1, padding: "10px 12px", border: "1px solid #78828c", borderRadius: 6, fontSize: 14, fontFamily: "inherit", color: NAVY, background: "#fff", outline: "none" }} />
+                  <button onClick={() => void send(input)} disabled={!canSend} aria-label="Send"
+                    style={{ padding: "10px 16px", background: BLUE, opacity: canSend ? 1 : 0.55, color: "#fff", border: "none", borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: busy ? "wait" : canSend ? "pointer" : "default", fontFamily: "inherit" }}>Send</button>
                 </div>
-                {messages.length > 0 && !busy && (
-                  <button onClick={newChat} style={{ marginTop: 6, background: "none", border: "none", color: "#78828c", fontSize: 11.5, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Start a new chat</button>
-                )}
+                {/* Secondary: a person is the fallback, not the first thing to reach for. */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 7, minHeight: 16 }}>
+                  {live ? <span /> : escalated ? (
+                    <span style={{ color: "#78828c", fontSize: 12 }}>✓ Our team has been notified</span>
+                  ) : (
+                    <button onClick={talkToPerson} disabled={busy || escalating}
+                      style={{ background: "none", border: "none", padding: 0, color: BLUE, fontSize: 12, cursor: busy || escalating ? "default" : "pointer", fontFamily: "inherit", textDecoration: "underline" }}>
+                      {escalating ? "Connecting…" : "Talk to a person"}
+                    </button>
+                  )}
+                  {messages.length > 0 && !busy && (
+                    <button onClick={newChat} style={{ background: "none", border: "none", color: "#78828c", fontSize: 11.5, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Start a new chat</button>
+                  )}
+                </div>
               </div>
             </>
           )}

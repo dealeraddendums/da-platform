@@ -21,7 +21,7 @@ function secretOk(given: string | null): boolean {
  * thread. Called ONLY by the marketing bridge (which receives HubSpot's
  * webhook); auth is the shared X-Webhook-Secret. Stores the reply (deduped on
  * the HubSpot message id) for the bubble's poll.
- * Body: { conversationId, messageId, text, senderName?, hubspotThreadId?,
+ * Body: { conversationId, messageId, text, senderName?, senderEmail?, hubspotThreadId?,
  *         hubspotContactId?, files?: [{ name, mime, base64 }] }
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -54,7 +54,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const text = typeof b.text === "string" ? b.text : "";
   if (!text && !attachments.length) return NextResponse.json({ ok: true, empty: true });
   await appendMessage(conv.id, "agent", text, {
-    attachments, senderName: typeof b.senderName === "string" ? b.senderName : null, externalId: b.messageId,
+    attachments, senderName: typeof b.senderName === "string" ? b.senderName : null,
+    senderEmail: typeof b.senderEmail === "string" ? b.senderEmail.slice(0, 200) : null, externalId: b.messageId,
   });
   return NextResponse.json({ ok: true });
 }

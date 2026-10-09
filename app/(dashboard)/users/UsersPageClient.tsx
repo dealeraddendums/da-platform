@@ -7,6 +7,7 @@ import Pager from "@/components/Pager";
 import { PageHeader } from "@/components/PageHeader";
 import StoreTagsEditor from "@/components/StoreTagsEditor";
 import LoginCodeModal from "@/components/LoginCodeModal";
+import HeadshotEditor from "@/components/HeadshotEditor";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -522,6 +523,11 @@ function EditUserModal({ user, onClose, onSuccess, dealerMode, canImpersonate, o
           <div>
             <label style={labelStyle}>Email</label>
             <input style={inputStyle} type="email" value={form.email} onChange={e => setField("email", e.target.value)} />
+          </div>
+          <div>
+            <label style={labelStyle}>Headshot / profile photo</label>
+            <HeadshotEditor userId={user.id} name={user.full_name || user.email} />
+            <div style={{ fontSize: 11, color: "#78828c", marginTop: 4 }}>Shown in a circle in the Steven chat when this person takes over a conversation.</div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { ownsConversation } from "@/lib/help-conversations";
+import { staffPhotosByEmail } from "@/lib/staff-photos";
 
 export const dynamic = "force-dynamic";
 // The same URL is polled every 3s with an unchanged cursor until a reply
@@ -20,13 +21,16 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const after = req.nextUrl.searchParams.get("after") || "1970-01-01T00:00:00.000Z";
   const admin = createAdminSupabaseClient();
   const { data } = await (admin as any).from("help_messages")
-    .select("id, role, content, sender_name, attachments, created_at")
+    .select("id, role, content, sender_name, sender_email, attachments, created_at")
     .eq("conversation_id", params.id).eq("role", "agent").gt("created_at", after)
     .order("created_at", { ascending: true }).limit(50);
-  const rows = (data ?? []) as { id: string; content: string; sender_name: string | null; attachments: { name: string; mime: string; size: number }[]; created_at: string }[];
+  const rows = (data ?? []) as { id: string; content: string; sender_name: string | null; sender_email: string | null; attachments: { name: string; mime: string; size: number }[]; created_at: string }[];
+  // The agent's staff headshot (takeover header). The email itself never leaves the server.
+  const photos = await staffPhotosByEmail(rows.map((m) => m.sender_email));
   return NextResponse.json({
     messages: rows.map((m) => ({
       id: m.id, body: m.content, sender: m.sender_name, created_at: m.created_at,
+      senderPhoto: photos.get((m.sender_email ?? "").trim().toLowerCase()) ?? null,
       attachments: (m.attachments ?? []).map((a, i) => ({
         name: a.name, mime: a.mime, size: a.size,
         url: `/api/help/conversations/${params.id}/file?message=${m.id}&i=${i}`,

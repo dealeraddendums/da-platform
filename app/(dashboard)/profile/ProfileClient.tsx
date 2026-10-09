@@ -11,6 +11,7 @@ import type { AddendumPaperSize } from "@/lib/recommended-labels";
 import { paperSizeWidthLabel, productMatchesPaperSize } from "@/lib/recommended-labels";
 import { DMS_PROVIDERS, OTHER_PROVIDERS, providerLabel } from "@/lib/inventory-providers";
 import WebsiteIntegrationsTab from "@/components/WebsiteIntegrationsTab";
+import HeadshotEditor from "@/components/HeadshotEditor";
 import { formatBillingDate } from "@/lib/billing-date";
 
 type Tab = "info" | "shipping" | "labels" | "orders" | "billing" | "hubspot" | "security" | "website";
@@ -674,6 +675,11 @@ function SecurityTab({
 }) {
   return (
     <div style={{ maxWidth: 640 }}>
+      <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: 20, marginBottom: 20 }}>
+        <div style={{ fontWeight: 600, fontSize: 15, color: "#2a2b3c", marginBottom: 4 }}>Profile photo</div>
+        <p style={{ fontSize: 12, color: "#78828c", margin: "0 0 12px" }}>Shown in a circle in the Steven chat when you take over a conversation.</p>
+        <HeadshotEditor userId="me" />
+      </div>
       <PasskeyCard />
       <div style={{ marginTop: 20 }}>
         <AccountInfoCard userEmail={userEmail} userRole={userRole} memberSince={memberSince} />
