@@ -51,14 +51,18 @@ export async function saveToLibrary(
   imageType: ImageType,
   name: string,
   uploadedBy: string,
-  /** Group Image Builder: write into THIS group's image library (scope='group'),
-   *  the same key shape + row shape as a Group Image Library upload. Omitted =
-   *  the platform library, exactly as before. */
-  groupId?: string,
+  /** Group Image Builder: write into THIS group's image library (scope='group');
+   *  dealer Image Builder: THIS dealer's My Images (scope='dealer', text
+   *  dealer_id). Same key + row shape as a library upload in that scope.
+   *  Omitted = the platform library, exactly as before. */
+  owner?: { groupId: string } | { dealerTextId: string },
 ): Promise<{ id: string; url: string; display_name: string; bucket: string; s3_key: string }> {
   const bucket = IMAGE_TYPES[imageType].bucket;
   const cleanName = `${name.trim() || "image"}`.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120) + ".png";
-  const key = groupId ? scopedKey("group", { group_id: groupId }, { name: cleanName, type: "image/png" }) : `${Date.now()}_${cleanName}`;
+  const file = { name: cleanName, type: "image/png" };
+  const key = owner && "groupId" in owner ? scopedKey("group", { group_id: owner.groupId }, file)
+    : owner && "dealerTextId" in owner ? scopedKey("dealer", { dealer_id: owner.dealerTextId }, file)
+    : `${Date.now()}_${cleanName}`;
   await s3Client().send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: bytes, ContentType: "image/png" }));
   const url = `https://${bucket}.s3.${REGION}.amazonaws.com/${key}`;
   const displayName = cleanName.replace(/\.png$/, "");
@@ -67,7 +71,8 @@ export async function saveToLibrary(
     .upsert(
       {
         bucket, s3_key: key, url, display_name: displayName, file_size: bytes.length, uploaded_by: uploadedBy,
-        ...(groupId ? { scope: "group", group_id: groupId } : {}),
+        ...(owner && "groupId" in owner ? { scope: "group", group_id: owner.groupId } : {}),
+        ...(owner && "dealerTextId" in owner ? { scope: "dealer", dealer_id: owner.dealerTextId } : {}),
       },
       { onConflict: "bucket,s3_key" },
     )
@@ -89,8 +94,19 @@ export async function saveToLibrary(
  * fails the marker is removed so the next open retries cleanly (no partial set).
  */
 export async function ensureGroupSeeded(groupId: string, userId: string): Promise<number> {
+  return ensureOwnerSeeded({ groupId }, userId);
+}
+
+/** Same once-only seeding for a DEALER's Image Builder (dealer_uuid owner). */
+export async function ensureDealerSeeded(dealerUuid: string, userId: string): Promise<number> {
+  return ensureOwnerSeeded({ dealerUuid }, userId);
+}
+
+async function ensureOwnerSeeded(owner: { groupId: string } | { dealerUuid: string }, userId: string): Promise<number> {
   const db = builderDb();
-  const key = `image_builder_seeded:${groupId}`;
+  const isGroup = "groupId" in owner;
+  const ownerId = isGroup ? owner.groupId : owner.dealerUuid;
+  const key = isGroup ? `image_builder_seeded:${ownerId}` : `image_builder_seeded:dealer:${ownerId}`;
   const { error: markErr } = await db.from("admin_settings").insert({ key, value: new Date().toISOString() });
   if (markErr) {
     if (markErr.code === "23505") return 0; // already seeded (or seeding right now)
@@ -98,15 +114,16 @@ export async function ensureGroupSeeded(groupId: string, userId: string): Promis
   }
   const { data: starters, error: sErr } = await db
     .from("image_designs").select("name, image_type, design_json")
-    .eq("is_template", true).is("group_id", null).order("created_at", { ascending: true });
+    .eq("is_template", true).is("group_id", null).is("dealer_uuid", null).order("created_at", { ascending: true });
   if (sErr || !starters?.length) {
     if (sErr) await db.from("admin_settings").delete().eq("key", key);
     return 0;
   }
   const { data: rows, error: insErr } = await db.from("image_designs").insert(
     starters.map((s: { name: string; image_type: string; design_json: DesignDoc }) => ({
-      group_id: groupId, name: s.name, image_type: s.image_type, design_json: s.design_json,
-      is_template: false, dealer_uuid: null, replaces_image_id: null, created_by: userId,
+      group_id: isGroup ? ownerId : null, dealer_uuid: isGroup ? null : ownerId,
+      name: s.name, image_type: s.image_type, design_json: s.design_json,
+      is_template: false, replaces_image_id: null, created_by: userId,
     })),
   ).select("id, design_json");
   if (insErr || !rows) {
@@ -114,6 +131,6 @@ export async function ensureGroupSeeded(groupId: string, userId: string): Promis
     throw new Error(insErr?.message ?? "seed insert failed");
   }
   for (const r of rows as { id: string; design_json: DesignDoc }[]) await writeVersion(r.id, r.design_json, userId);
-  audit(userId, "image_designs_group_seeded", { group_id: groupId, count: rows.length });
+  audit(userId, isGroup ? "image_designs_group_seeded" : "image_designs_dealer_seeded", isGroup ? { group_id: ownerId, count: rows.length } : { dealer_uuid: ownerId, count: rows.length });
   return rows.length;
 }

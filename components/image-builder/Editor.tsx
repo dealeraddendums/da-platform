@@ -46,9 +46,11 @@ function fmtDate(s: string): string {
 /** Group Image Builder (migration 167): with `groupId`, every API call is scoped
  *  to that group (?group=), links stay inside the group's builder, and exports
  *  land in the group's own image library. Without it: the staff tool, unchanged. */
-export default function ImageBuilderEditor({ id, groupId }: { id: string; groupId?: string }) {
-  const q = groupId ? `?group=${encodeURIComponent(groupId)}` : "";
-  const home = groupId ? `/groups/${groupId}/image-builder` : "/admin/image-builder";
+/** `dealerScope` = a dealer's own Image Builder (`?dealer=1`; the server resolves
+ *  the dealer from the session). Exports land in that dealer's My Images. */
+export default function ImageBuilderEditor({ id, groupId, dealerScope = false }: { id: string; groupId?: string; dealerScope?: boolean }) {
+  const q = groupId ? `?group=${encodeURIComponent(groupId)}` : dealerScope ? "?dealer=1" : "";
+  const home = groupId ? `/groups/${groupId}/image-builder` : dealerScope ? "/image-builder" : "/admin/image-builder";
   const [meta, setMeta] = useState<Meta | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [doc, setDoc] = useState<DesignDoc | null>(null);
@@ -109,16 +111,20 @@ export default function ImageBuilderEditor({ id, groupId }: { id: string; groupI
     if (!meta) return;
     const bucket = IMAGE_TYPES[meta.image_type].bucket;
     // "Replaces image" choices: staff → the platform library bucket; a group →
-    // its OWN group images in this bucket (never another group's or the platform's).
-    fetch(groupId ? `/api/groups/${groupId}/images` : `/api/admin/image-library/${bucket}`, { cache: "no-store" })
+    // its OWN group images in this bucket (never another group's or the platform's);
+    // a dealer → its OWN My Images in this bucket.
+    fetch(groupId ? `/api/groups/${groupId}/images`
+      : dealerScope ? `/api/image-library?bucket=${encodeURIComponent(bucket)}`
+      : `/api/admin/image-library/${bucket}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => {
-        const raw = (j.images ?? j.data ?? []) as Array<{ id: string | null; url: string; display_name: string; bucket?: string }>;
-        const list = groupId ? raw.filter((x) => x.bucket === bucket) : raw;
+        const raw = (j.images ?? j.data ?? []) as Array<{ id: string | null; url: string; display_name: string; bucket?: string; scope?: string }>;
+        const list = groupId ? raw.filter((x) => x.bucket === bucket)
+          : dealerScope ? raw.filter((x) => x.scope === "dealer") : raw;
         setLibImages(list.filter((x) => x.id).map((x) => ({ id: x.id as string, url: x.url, display_name: x.display_name })));
       })
       .catch(() => setLibImages([]));
-  }, [meta, groupId]);
+  }, [meta, groupId, dealerScope]);
 
   // unsaved-changes guard
   useEffect(() => {
@@ -614,9 +620,9 @@ export default function ImageBuilderEditor({ id, groupId }: { id: string; groupI
         onChange={(e) => { void onImagePicked(e.target.files?.[0], true); e.target.value = ""; }} />
 
       {exportResult && (
-        <Modal title={groupId ? "Saved to your Group Image Library" : "Saved to Image Library"} width={480}
+        <Modal title={groupId ? "Saved to your Group Image Library" : dealerScope ? "Saved to My Images" : "Saved to Image Library"} width={480}
           footer={<>
-            {!groupId && <a href="/admin/image-library" style={{ ...btn(), textDecoration: "none" }}>Open Image Library</a>}
+            {!groupId && !dealerScope && <a href="/admin/image-library" style={{ ...btn(), textDecoration: "none" }}>Open Image Library</a>}
             <button style={btn("primary")} onClick={() => setExportResult(null)}>Done</button>
           </>}>
           <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>

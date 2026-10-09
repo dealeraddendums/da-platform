@@ -16,7 +16,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const db = builderDb();
   const { data: design } = await db
-    .from("image_designs").select("id, name, image_type, group_id, is_template").eq("id", params.id).maybeSingle();
+    .from("image_designs").select("id, name, image_type, group_id, dealer_uuid, is_template").eq("id", params.id).maybeSingle();
   if (!design || !designInScope(design, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!isImageType(design.image_type)) return NextResponse.json({ error: "Bad image type" }, { status: 500 });
 
@@ -30,9 +30,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (bad) return NextResponse.json({ error: bad }, { status: 422 });
 
   // Group scope → the group's own image library (Group Image Library tab + every
-  // member dealer's Builder picker). Platform scope → the platform library, unchanged.
-  const lib = await saveToLibrary(bytes, design.image_type, design.name, claims.sub, scope.kind === "group" ? scope.groupId : undefined);
+  // member dealer's Builder picker). Dealer scope → that dealer's My Images only.
+  // Platform scope → the platform library, unchanged.
+  const owner = scope.kind === "group" ? { groupId: scope.groupId }
+    : scope.kind === "dealer" ? { dealerTextId: scope.dealerTextId } : undefined;
+  const lib = await saveToLibrary(bytes, design.image_type, design.name, claims.sub, owner);
   await db.from("image_designs").update({ exported_image_id: lib.id }).eq("id", params.id);
-  audit(claims.sub, "image_design_exported", { design_id: params.id, image_library_id: lib.id, bucket: lib.bucket, bytes: bytes.length, group_id: scope.kind === "group" ? scope.groupId : null });
+  audit(claims.sub, "image_design_exported", { design_id: params.id, image_library_id: lib.id, bucket: lib.bucket, bytes: bytes.length, group_id: scope.kind === "group" ? scope.groupId : null, dealer_id: scope.kind === "dealer" ? scope.dealerTextId : null });
   return NextResponse.json({ data: lib }, { status: 201 });
 }

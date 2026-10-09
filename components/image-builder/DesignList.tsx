@@ -80,9 +80,13 @@ function DesignCard({ r, onDuplicate, onDelete, q, home }: { r: Row; onDuplicate
 
 /** `groupId` = the Group Image Builder (migration 167): that group's designs only,
  *  no starter templates (Allan, 2026-10-07), exports go to the group's library. */
-export default function DesignList({ groupId }: { groupId?: string } = {}) {
-  const q = groupId ? `?group=${encodeURIComponent(groupId)}` : "";
-  const home = groupId ? `/groups/${groupId}/image-builder` : "/admin/image-builder";
+/** `dealerScope` = a dealer's own Image Builder (2026-10-09): the session's
+ *  dealer only (`?dealer=1` — the server resolves which dealer), same seeding as
+ *  a group, exports go to that dealer's My Images. */
+export default function DesignList({ groupId, dealerScope = false }: { groupId?: string; dealerScope?: boolean } = {}) {
+  const q = groupId ? `?group=${encodeURIComponent(groupId)}` : dealerScope ? "?dealer=1" : "";
+  const home = groupId ? `/groups/${groupId}/image-builder` : dealerScope ? "/image-builder" : "/admin/image-builder";
+  const owned = !!groupId || dealerScope; // a group's or a dealer's own builder: no starter section
   const [rows, setRows] = useState<Row[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [filter, setFilter] = useState<ImageType | "">("");
@@ -140,6 +144,8 @@ export default function DesignList({ groupId }: { groupId?: string } = {}) {
         </select>
         {groupId
           ? <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginLeft: "auto" }}>Saved images go to your Group Image Library — every store in the group can use them.</span>
+          : dealerScope
+          ? <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginLeft: "auto" }}>Saved images go to My Images — only this dealership can use them.</span>
           : <Link href="/admin/image-library" style={{ color: "#fff", fontSize: 13, marginLeft: "auto" }}>Open Image Library →</Link>}
       </div>
 
@@ -150,10 +156,10 @@ export default function DesignList({ groupId }: { groupId?: string } = {}) {
         <>
           <h2 style={{ color: "#fff", fontSize: 16, fontWeight: 600, margin: "0 0 10px" }}>My designs</h2>
           {designs.length === 0
-            ? <div style={{ ...card, padding: 16, fontSize: 13, color: "#666", marginBottom: 24 }}>{groupId ? "No designs yet — click + New design to start one." : "No designs yet. Start from a template below, or create a blank design."}</div>
+            ? <div style={{ ...card, padding: 16, fontSize: 13, color: "#666", marginBottom: 24 }}>{owned ? "No designs yet — click + New design to start one." : "No designs yet. Start from a template below, or create a blank design."}</div>
             : <div style={{ ...grid, marginBottom: 24 }}>{designs.map((r) => <DesignCard key={r.id} r={r} onDuplicate={dup} onDelete={setDeleting} q={q} home={home} />)}</div>}
 
-          {!groupId && <>
+          {!owned && <>
           <h2 style={{ color: "#fff", fontSize: 16, fontWeight: 600, margin: "0 0 10px" }}>Starter templates</h2>
           {templates.length === 0
             ? <div style={{ ...card, padding: 16, fontSize: 13, color: "#666" }}>No starter templates{filter ? " for this image type" : ""}.</div>

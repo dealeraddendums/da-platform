@@ -15,7 +15,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!Number.isInteger(n) || n < 1) return NextResponse.json({ error: "version_no required" }, { status: 400 });
 
   const db = builderDb();
-  const { data: cur } = await db.from("image_designs").select("id, is_template, group_id").eq("id", params.id).maybeSingle();
+  const { data: cur } = await db.from("image_designs").select("id, is_template, group_id, dealer_uuid").eq("id", params.id).maybeSingle();
   if (!cur || !designInScope(cur, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (cur.is_template) return NextResponse.json({ error: "Starter templates are read-only" }, { status: 409 });
 

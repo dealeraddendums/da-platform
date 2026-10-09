@@ -38,7 +38,7 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
   try { body = JSON.parse(raw); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
 
   const db = builderDb();
-  const { data: cur } = await db.from("image_designs").select("id, is_template, group_id").eq("id", params.id).maybeSingle();
+  const { data: cur } = await db.from("image_designs").select("id, is_template, group_id, dealer_uuid").eq("id", params.id).maybeSingle();
   if (!cur || !designInScope(cur, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (cur.is_template) {
     return NextResponse.json({ error: "Starter templates are read-only — use Duplicate & edit." }, { status: 409 });
@@ -82,7 +82,7 @@ export async function DELETE(req: NextRequest, { params }: Params): Promise<Next
   const { claims, scope, error } = await requireBuilderScope(req);
   if (error) return error;
   const db = builderDb();
-  const { data: cur } = await db.from("image_designs").select("id, is_template, name, group_id").eq("id", params.id).maybeSingle();
+  const { data: cur } = await db.from("image_designs").select("id, is_template, name, group_id, dealer_uuid").eq("id", params.id).maybeSingle();
   if (!cur || !designInScope(cur, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (cur.is_template) return NextResponse.json({ error: "Starter templates can't be deleted" }, { status: 409 });
   const { error: delErr } = await db.from("image_designs").delete().eq("id", params.id);

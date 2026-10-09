@@ -5,7 +5,7 @@ import { builderDb, designInScope, requireBuilderScope } from "@/lib/image-build
 export async function GET(req: NextRequest, { params }: { params: { id: string; versionNo: string } }): Promise<NextResponse> {
   const { scope, error } = await requireBuilderScope(req);
   if (error) return error;
-  const { data: cur } = await builderDb().from("image_designs").select("group_id, is_template").eq("id", params.id).maybeSingle();
+  const { data: cur } = await builderDb().from("image_designs").select("group_id, dealer_uuid, is_template").eq("id", params.id).maybeSingle();
   if (!cur || !designInScope(cur, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const n = Number(params.versionNo);
   if (!Number.isInteger(n) || n < 1) return NextResponse.json({ error: "Invalid version" }, { status: 400 });

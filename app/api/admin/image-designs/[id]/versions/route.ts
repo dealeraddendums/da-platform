@@ -6,7 +6,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const { scope, error } = await requireBuilderScope(req);
   if (error) return error;
   const db = builderDb();
-  const { data: cur } = await db.from("image_designs").select("group_id, is_template").eq("id", params.id).maybeSingle();
+  const { data: cur } = await db.from("image_designs").select("group_id, dealer_uuid, is_template").eq("id", params.id).maybeSingle();
   if (!cur || !designInScope(cur, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const { data, error: dbErr } = await db
     .from("image_design_versions")
