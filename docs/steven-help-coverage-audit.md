@@ -179,3 +179,12 @@ Billing, granted at once, once every 90 days; a group admin can request one for 
 whole group) and "A vehicle is missing from my inventory" (Vehicle Inventory; only cross-reference titles corrected).
 Published dealer articles: **31 → 33**. Steven combined "why can't I print" with the store's live billing status (group
 past due → contact the group admin) and gave the check-your-website test for a missing vehicle; no new gap rows.
+
+**Plans correction (2026-10-09):** "Your plan, trial, and upgrading" (Billing) retitled **"Plans and how to upgrade"** and its
+body replaced. Steven had described Trial/Paid/Free as "the three plans"; the article now separates the three SUBSCRIPTION
+plans (**Manual / Automatic Web / Automatic DMS** — how inventory is handled) from the account STATUS (Trial / Paid /
+Free-Downgraded — whether you can print). No prices (pointer to the site / call DA for group pricing). Verified against the
+screens: Change Plan is on the Current Subscription card under My Profile → Billing; "Upgrade Now" in the left menu opens
+it on a trial; group-billed stores have no Change Plan ("Billed by your group"). Kept the old article's "support can extend
+a trial". "Why can't I print?" cross-reference updated to the new title. One plan article only; dealer count unchanged (33).
+Backup: `help-articles-backup-20261009-plans.json`. Steven now names Manual / Automatic Web / Automatic DMS.
