@@ -20,6 +20,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Piggyback: the daily stale-feed digest (lib/feed-health-scan.ts) rides this
+  // daily schedule. Fire-and-forget and fully isolated — it can't delay or fail
+  // the trim harvest. Safe alongside a dedicated /api/cron/feed-health run
+  // (run lock + alert state de-dup).
+  void import("@/lib/feed-health-scan").then(({ runFeedHealthDigest }) => runFeedHealthDigest()).then(
+    (r) => console.log("[feed-health] digest (via harvest-vin-trims):", JSON.stringify(r)),
+    (e) => console.error("[feed-health] digest failed:", e instanceof Error ? e.message : e),
+  );
+
   const sinceHours = Math.max(1, parseInt(req.nextUrl.searchParams.get("hours") ?? "25", 10));
   const since = new Date(Date.now() - sinceHours * 3600_000).toISOString();
 
