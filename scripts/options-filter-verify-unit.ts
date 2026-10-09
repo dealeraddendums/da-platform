@@ -447,10 +447,19 @@ void test("priced vehicle: exactly one variant of a complementary pair, opt-in i
     assert.deepEqual([matchesRulesRow({ ...under, apply_when_no_msrp: flag }, cheap), matchesRulesRow({ ...over, apply_when_no_msrp: flag }, cheap)], [true, false]);
     assert.deepEqual([matchesRulesRow({ ...under, apply_when_no_msrp: flag }, dear), matchesRulesRow({ ...over, apply_when_no_msrp: flag }, dear)], [false, true]);
   }
-  // boundaries unchanged: under = <=, over = >=, between inclusive
-  assert.equal(matchesRulesRow(under, vehicle({ MSRP: "30000" })), true);
-  assert.equal(matchesRulesRow(over, vehicle({ MSRP: "30000" })), true);
-  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 3, msrp1: 30000, msrp2: 60000 }, vehicle({ MSRP: "60000" })), true);
+});
+
+void test("a car priced exactly on the line matches ONE variant: under/between include it, over doesn't", () => {
+  const under = { ...baseRule, msrp_condition: 1, msrp1: 30000 };
+  const over = { ...baseRule, msrp_condition: 2, msrp1: 30000 };
+  const between = { ...baseRule, msrp_condition: 3, msrp1: 30000, msrp2: 60000 };
+  const over60 = { ...baseRule, msrp_condition: 2, msrp1: 60000 };
+  const at = (n: string) => vehicle({ MSRP: n });
+  assert.deepEqual([matchesRulesRow(under, at("30000")), matchesRulesRow(over, at("30000"))], [true, false], "under/over pair at $30,000");
+  assert.deepEqual([matchesRulesRow(between, at("60000")), matchesRulesRow(over60, at("60000"))], [true, false], "between/over pair at $60,000");
+  assert.equal(matchesRulesRow(between, at("30000")), true, "between includes its lower bound");
+  assert.equal(matchesRulesRow(over, at("30000.01")), true, "a cent over the line is over");
+  assert.equal(matchesRulesRow(under, at("30000.01")), false);
 });
 
 void test("a vehicle that gets an MSRP later resolves normally again", () => {

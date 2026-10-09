@@ -244,7 +244,12 @@ export function explainRulesRow(row: RulesRow, vehicle: VehicleRow): RuleVerdict
     if (msrpCond === 1 && vehicleMsrp > (row.msrp1 as number)) {
       return fail("msrp", `it applies to vehicles with an MSRP under ${money(row.msrp1 as number)} and this one is ${money(vehicleMsrp)}`);
     }
-    if (msrpCond === 2 && vehicleMsrp < (row.msrp1 as number)) {
+    // "Over" is STRICTLY more than the amount; "under" and "between" include it
+    // (2026-10-09). With both sides inclusive, a car priced exactly on the
+    // line matched BOTH halves of a pair ("under $30k" + "over $30k",
+    // "between $30k–$60k" + "over $60k") — Napleton Lincoln of Schaumburg
+    // stock 6182 at $100,000 showed 4 pairs.
+    if (msrpCond === 2 && vehicleMsrp <= (row.msrp1 as number)) {
       return fail("msrp", `it applies to vehicles with an MSRP over ${money(row.msrp1 as number)} and this one is ${money(vehicleMsrp)}`);
     }
     if (msrpCond === 3 && (vehicleMsrp < (row.msrp1 as number) || vehicleMsrp > (row.msrp2 as number))) {
