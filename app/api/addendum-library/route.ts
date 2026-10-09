@@ -117,6 +117,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       msrp_condition: body.msrp_condition ?? 0,
       msrp1: body.msrp1 ?? null,
       msrp2: body.msrp2 ?? null,
+      apply_when_no_msrp: body.apply_when_no_msrp === true,
       applies_to: body.applies_to ?? "all",
       sort_order: nextOrder,
       active: body.active ?? true,

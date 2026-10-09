@@ -166,6 +166,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       msrp_condition: number | null;
       msrp1: number | null;
       msrp2: number | null;
+      apply_when_no_msrp?: boolean | null;
     };
     let dealerLib: GenLibRow[] = [];
     const libDescMap: Record<string, string | null> = {};
@@ -182,7 +183,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     {
       const { data: libRows } = await admin
         .from("addendum_library")
-        .select("id, option_name, item_price, description, required, active, created_at, separator_above, separator_below, spaces, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
+        .select("id, option_name, item_price, description, required, active, created_at, separator_above, separator_below, spaces, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2, apply_when_no_msrp")
         .eq("dealer_id", dv.dealer_id)
         .order("sort_order", { ascending: true });
       dealerLib = (libRows ?? []) as unknown as GenLibRow[];
@@ -223,6 +224,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           msrp_condition: lr.msrp_condition ?? 0,
           msrp1: lr.msrp1,
           msrp2: lr.msrp2,
+          apply_when_no_msrp: lr.apply_when_no_msrp ?? false,
         };
         const existingRules = libRulesByName.get(name);
         if (existingRules) existingRules.push(ruleRow);

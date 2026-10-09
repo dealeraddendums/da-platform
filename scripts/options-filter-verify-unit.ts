@@ -404,14 +404,69 @@ void test("the same rule applies to make / model / fuel / body_style", () => {
   assert.equal(matchesRulesRow({ ...baseRule, body_styles: "Sedan" }, v), false);
 });
 
-void test("NUMERIC null-skip is untouched — an unpriced/mileage-less vehicle still matches", () => {
+void test("mileage / year null-skip is untouched — a vehicle missing those still matches", () => {
   const v = vehicle({ MSRP: null, MILEAGE: null, YEAR: null });
-  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 1, msrp1: 40000 }, v), true, "null MSRP still skips");
-  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 2, msrp1: 60000 }, v), true, "both sides of a price pair still match");
   assert.equal(matchesRulesRow({ ...baseRule, miles_condition: 1, miles_value: 100 }, v), true);
   assert.equal(matchesRulesRow({ ...baseRule, year_condition: 1, year_value: 2024 }, v), true);
-  // MSRP 0 is still treated as unpriced, not as a real $0 (the LYRIQ fix).
-  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 1, msrp1: 40000 }, vehicle({ MSRP: "0" })), true);
+});
+
+// 2026-10-09 (migration 171): an UNPRICED vehicle no longer passes a product's
+// MSRP rule — that printed BOTH halves of every complementary price pair
+// (Napleton CR-V: Key Replacement $429 "under 30k" AND $629 "over 30k").
+void test("no MSRP + an MSRP rule → EXCLUDED by default (null, 0, \"0\", unparseable)", () => {
+  for (const MSRP of [null, "0", "", "N/A", "abc"]) {
+    const v = vehicle({ MSRP });
+    assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 1, msrp1: 30000 }, v), false, `under, MSRP=${MSRP}`);
+    assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 2, msrp1: 30000 }, v), false, `over, MSRP=${MSRP}`);
+    assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 3, msrp1: 30000, msrp2: 60000 }, v), false, `between, MSRP=${MSRP}`);
+  }
+  // 0 is not "cheap": an under-$40k product doesn't sneak in on a $0 car.
+  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 1, msrp1: 40000 }, vehicle({ MSRP: "0" })), false);
+});
+
+void test("no MSRP + an MSRP rule + apply_when_no_msrp → INCLUDED", () => {
+  const v = vehicle({ MSRP: null });
+  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 1, msrp1: 30000, apply_when_no_msrp: true }, v), true);
+  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 3, msrp1: 1, msrp2: 2, apply_when_no_msrp: true }, vehicle({ MSRP: "0" })), true);
+  // the opt-in only lifts the MSRP gate — other rules still decide
+  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 1, msrp1: 30000, apply_when_no_msrp: true, makes: "FORD" }, vehicle({ MSRP: null, MAKE: "Honda" })), false);
+});
+
+void test("no MSRP + NO msrp rule → unaffected (and a condition with no amount is not a rule)", () => {
+  const v = vehicle({ MSRP: null });
+  assert.equal(matchesRulesRow({ ...baseRule }, v), true);
+  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 1, msrp1: null }, v), true, "under with no amount never gated");
+  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 3, msrp1: 30000, msrp2: null }, v), true, "between with one bound never gated");
+});
+
+void test("priced vehicle: exactly one variant of a complementary pair, opt-in irrelevant", () => {
+  const under = { ...baseRule, msrp_condition: 1, msrp1: 30000 };
+  const over = { ...baseRule, msrp_condition: 2, msrp1: 30000 };
+  for (const flag of [false, true]) {
+    const cheap = vehicle({ MSRP: "25000" }), dear = vehicle({ MSRP: "45000" });
+    assert.deepEqual([matchesRulesRow({ ...under, apply_when_no_msrp: flag }, cheap), matchesRulesRow({ ...over, apply_when_no_msrp: flag }, cheap)], [true, false]);
+    assert.deepEqual([matchesRulesRow({ ...under, apply_when_no_msrp: flag }, dear), matchesRulesRow({ ...over, apply_when_no_msrp: flag }, dear)], [false, true]);
+  }
+  // boundaries unchanged: under = <=, over = >=, between inclusive
+  assert.equal(matchesRulesRow(under, vehicle({ MSRP: "30000" })), true);
+  assert.equal(matchesRulesRow(over, vehicle({ MSRP: "30000" })), true);
+  assert.equal(matchesRulesRow({ ...baseRule, msrp_condition: 3, msrp1: 30000, msrp2: 60000 }, vehicle({ MSRP: "60000" })), true);
+});
+
+void test("a vehicle that gets an MSRP later resolves normally again", () => {
+  const under = { ...baseRule, msrp_condition: 1, msrp1: 30000 };
+  assert.equal(matchesRulesRow(under, vehicle({ MSRP: null })), false);
+  assert.equal(matchesRulesRow(under, vehicle({ MSRP: "28000" })), true);
+});
+
+void test("saved rows follow the same gate (one choke point)", () => {
+  const def = { ...baseRule, id: "lib-1", option_name: "Key Replacement", msrp_condition: 1, msrp1: 30000 };
+  const saved = { option_price: "429", default_id: "lib-1", source: "default" };
+  assert.equal(savedRowSurvivesLibraryRules([def], vehicle({ MSRP: null }), "Key Replacement", saved), false);
+  assert.equal(savedRowSurvivesLibraryRules([{ ...def, apply_when_no_msrp: true }], vehicle({ MSRP: null }), "Key Replacement", saved), true);
+  assert.equal(savedRowSurvivesLibraryRules([def], vehicle({ MSRP: "25000" }), "Key Replacement", saved), true);
+  // a hand-added (manual) row is never gated
+  assert.equal(savedRowSurvivesLibraryRules([def], vehicle({ MSRP: null }), "Key Replacement", { ...saved, source: "manual" }), true);
 });
 
 void test("NONE / -NONE sentinels behave exactly as before on a blank-trim vehicle", () => {

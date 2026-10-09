@@ -740,6 +740,7 @@ export type AddendumLibraryRow = {
   msrp_condition: number;
   msrp1: number | null;
   msrp2: number | null;
+  apply_when_no_msrp?: boolean; // migration 171, DB default false
   applies_to: "all" | "rules" | "none";
   sort_order: number;
   active: boolean;
@@ -950,6 +951,7 @@ export type GroupOptionRow = {
   msrp_condition: number;
   msrp1: number | null;
   msrp2: number | null;
+  apply_when_no_msrp: boolean;
   show_models_only: boolean;
   separator_above: boolean;
   separator_below: boolean;
@@ -990,6 +992,7 @@ type GroupOptionInsert = {
   msrp_condition?: number;
   msrp1?: number | null;
   msrp2?: number | null;
+  apply_when_no_msrp?: boolean;
   show_models_only?: boolean;
   separator_above?: boolean;
   separator_below?: boolean;
@@ -1025,6 +1028,7 @@ type GroupOptionUpdate = {
   msrp_condition?: number;
   msrp1?: number | null;
   msrp2?: number | null;
+  apply_when_no_msrp?: boolean;
   show_models_only?: boolean;
   separator_above?: boolean;
   separator_below?: boolean;

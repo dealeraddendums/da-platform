@@ -631,7 +631,7 @@ export async function generateFeedCsv(feedId: string, opts?: { onlyDealerUuids?:
     //    the newly-added-matches merge, same as pdf/generate.
     const libRows = await fetchAllRows<Dv>((from, to) => admin
       .from("addendum_library")
-      .select("id, option_name, item_price, required, active, created_at, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
+      .select("id, option_name, item_price, required, active, created_at, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2, apply_when_no_msrp")
       .eq("dealer_id", dealerTextId)
       .range(from, to));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

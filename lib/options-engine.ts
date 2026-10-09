@@ -30,6 +30,7 @@ type LibraryRow = {
   msrp_condition: number;
   msrp1: number | null;
   msrp2: number | null;
+  apply_when_no_msrp?: boolean | null;
   sort_order: number;
   active: boolean;
   ad_types: string[] | null;
@@ -136,6 +137,8 @@ type RulesRow = {
   msrp_condition?: number;
   msrp1?: number | null;
   msrp2?: number | null;
+  /** Opt-in (migration 171): still apply on a vehicle with no usable MSRP. */
+  apply_when_no_msrp?: boolean | null;
 };
 
 /**
@@ -219,26 +222,33 @@ export function explainRulesRow(row: RulesRow, vehicle: VehicleRow): RuleVerdict
     }
   }
 
-  // MSRP 0 / unparseable = UNPRICED, same as null (2026-08-12, null-MSRP
-  // LYRIQ incident): a missing price must never gate a product in or out.
-  // With vehicleMsrp null the msrp clause below is skipped entirely (treated
-  // as passing) and the product's OTHER rules decide. Note the flip side:
-  // complementary price-pair products ("under $50k" / "over $50k" variants)
-  // BOTH match an unpriced vehicle by design.
+  // MSRP 0 / unparseable = UNPRICED, same as null — a missing price is never
+  // read as a cheap car (the 2026-08-11 "0 = under $40k" bug).
+  //
+  // An UNPRICED vehicle and a product with an MSRP rule (2026-10-09, supersedes
+  // the no-MSRP half of d3b15cf): the product is EXCLUDED unless it opted in
+  // with apply_when_no_msrp. Skipping the clause made BOTH halves of every
+  // complementary price pair print on an unpriced car (Napleton CR-V: Key
+  // Replacement $429 "under $30k" AND $629 "over $30k"). Only a rule that would
+  // actually gate counts — an MSRP condition with no amount never did.
   const msrpNum = vehicle.MSRP ? parseFloat(vehicle.MSRP) : NaN;
   const vehicleMsrp = Number.isFinite(msrpNum) && msrpNum > 0 ? msrpNum : null;
   const money = (n: number) => `$${n.toLocaleString()}`;
-  if ((row.msrp_condition ?? 0) !== 0 && vehicleMsrp != null) {
-    if (row.msrp_condition === 1 && row.msrp1 != null && vehicleMsrp > row.msrp1) {
-      return fail("msrp", `it applies to vehicles with an MSRP under ${money(row.msrp1)} and this one is ${money(vehicleMsrp)}`);
+  const msrpCond = row.msrp_condition ?? 0;
+  const hasMsrpRule = ((msrpCond === 1 || msrpCond === 2) && row.msrp1 != null) || (msrpCond === 3 && row.msrp1 != null && row.msrp2 != null);
+  if (hasMsrpRule && vehicleMsrp == null) {
+    if (!row.apply_when_no_msrp) {
+      return fail("msrp", "it has an MSRP rule and this vehicle has no MSRP in the system — products with a price rule don't apply to unpriced vehicles unless \"Also apply when the vehicle has no MSRP\" is turned on for the product");
     }
-    if (row.msrp_condition === 2 && row.msrp1 != null && vehicleMsrp < row.msrp1) {
-      return fail("msrp", `it applies to vehicles with an MSRP over ${money(row.msrp1)} and this one is ${money(vehicleMsrp)}`);
+  } else if (hasMsrpRule && vehicleMsrp != null) {
+    if (msrpCond === 1 && vehicleMsrp > (row.msrp1 as number)) {
+      return fail("msrp", `it applies to vehicles with an MSRP under ${money(row.msrp1 as number)} and this one is ${money(vehicleMsrp)}`);
     }
-    if (row.msrp_condition === 3 && row.msrp1 != null && row.msrp2 != null) {
-      if (vehicleMsrp < row.msrp1 || vehicleMsrp > row.msrp2) {
-        return fail("msrp", `it applies to vehicles with an MSRP between ${money(row.msrp1)} and ${money(row.msrp2)} and this one is ${money(vehicleMsrp)}`);
-      }
+    if (msrpCond === 2 && vehicleMsrp < (row.msrp1 as number)) {
+      return fail("msrp", `it applies to vehicles with an MSRP over ${money(row.msrp1 as number)} and this one is ${money(vehicleMsrp)}`);
+    }
+    if (msrpCond === 3 && (vehicleMsrp < (row.msrp1 as number) || vehicleMsrp > (row.msrp2 as number))) {
+      return fail("msrp", `it applies to vehicles with an MSRP between ${money(row.msrp1 as number)} and ${money(row.msrp2 as number)} and this one is ${money(vehicleMsrp)}`);
     }
   }
 
@@ -633,7 +643,7 @@ export async function matchOptionsToVehicle(
   const admin = createAdminSupabaseClient();
   const { data: rows } = await admin
     .from("addendum_library")
-    .select("id, dealer_id, option_name, item_price, description, applies_to, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2, sort_order, active, ad_types, required")
+    .select("id, dealer_id, option_name, item_price, description, applies_to, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2, apply_when_no_msrp, sort_order, active, ad_types, required")
     .eq("dealer_id", dealerId)
     .eq("active", true)
     .neq("applies_to", "none")
@@ -722,6 +732,7 @@ export type LockedOption = {
   msrp_condition?: number | null;
   msrp1?: number | null;
   msrp2?: number | null;
+  apply_when_no_msrp?: boolean | null;
 };
 
 /**
@@ -863,6 +874,7 @@ export async function getGroupOptionsForDealer(
         msrp_condition: r.msrp_condition ?? null,
         msrp1: r.msrp1 ?? null,
         msrp2: r.msrp2 ?? null,
+        apply_when_no_msrp: r.apply_when_no_msrp ?? false,
       };
     });
 }

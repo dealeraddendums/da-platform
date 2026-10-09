@@ -33,6 +33,7 @@ type FormData = {
   msrp_condition: number;
   msrp1: string;
   msrp2: string;
+  apply_when_no_msrp: boolean;
   show_models_only: boolean;
   separator_above: boolean;
   separator_below: boolean;
@@ -46,7 +47,7 @@ const BLANK: FormData = {
   makes: "", makes_not: false, body_styles: "", fuel: "", fuel_not: false,
   year_condition: 0, year_value: "",
   miles_condition: 0, miles_value: "",
-  msrp_condition: 0, msrp1: "", msrp2: "",
+  msrp_condition: 0, msrp1: "", msrp2: "", apply_when_no_msrp: false,
   show_models_only: false, separator_above: false, separator_below: false, spaces: 0,
   required: true,
 };
@@ -97,6 +98,7 @@ function rowToForm(r: AddendumLibraryRow): FormData {
     msrp_condition: r.msrp_condition,
     msrp1: r.msrp1 != null ? String(r.msrp1) : "",
     msrp2: r.msrp2 != null ? String(r.msrp2) : "",
+    apply_when_no_msrp: r.apply_when_no_msrp === true,
     show_models_only: r.show_models_only, separator_above: r.separator_above,
     separator_below: r.separator_below, spaces: r.spaces,
     required: r.required !== false,
@@ -407,7 +409,7 @@ export default function OptionsLibrary({ dealerId }: { dealerId: string }) {
         msrp2: form.msrp2 ? parseInt(form.msrp2) : null,
         required: form.required,
       };
-      const clearRules = { models: "", models_not: false, trims: "", trims_not: false, makes: "", makes_not: false, body_styles: "", fuel: "", fuel_not: false, year_condition: 0, year_value: null, miles_condition: 0, miles_value: null, msrp_condition: 0, msrp1: null, msrp2: null, show_models_only: false };
+      const clearRules = { models: "", models_not: false, trims: "", trims_not: false, makes: "", makes_not: false, body_styles: "", fuel: "", fuel_not: false, year_condition: 0, year_value: null, miles_condition: 0, miles_value: null, msrp_condition: 0, msrp1: null, msrp2: null, apply_when_no_msrp: false, show_models_only: false };
       const payload = appliesTo === "rules"
         ? { ...base, applies_to: "rules" }
         : { ...base, ...clearRules, applies_to: appliesTo };

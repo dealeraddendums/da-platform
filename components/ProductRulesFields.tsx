@@ -27,6 +27,8 @@ export type ProductRulesValue = {
   year_condition: number; year_value: string;
   miles_condition: number; miles_value: string;
   msrp_condition: number; msrp1: string; msrp2: string;
+  /** Migration 171: still apply on a vehicle with no MSRP (default off = excluded). */
+  apply_when_no_msrp: boolean;
   show_models_only: boolean;
 };
 
@@ -34,7 +36,7 @@ export const BLANK_RULES: ProductRulesValue = {
   makes: "", makes_not: false, models: "", models_not: false,
   trims: "", trims_not: false, body_styles: "", fuel: "", fuel_not: false,
   year_condition: 0, year_value: "", miles_condition: 0, miles_value: "",
-  msrp_condition: 0, msrp1: "", msrp2: "", show_models_only: false,
+  msrp_condition: 0, msrp1: "", msrp2: "", apply_when_no_msrp: false, show_models_only: false,
 };
 
 const inp: React.CSSProperties = {
@@ -201,6 +203,15 @@ export default function ProductRulesFields({ value, onChange }: {
               <input type="number" value={value.msrp2} onChange={e => onChange({ msrp2: e.target.value })}
                 style={{ ...inp, width: 120, flex: "none" }} placeholder="$" min={0} />
             </>
+          )}
+          {value.msrp_condition !== 0 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13, color: "#333", flexBasis: "100%" }}>
+              <input type="checkbox" checked={value.apply_when_no_msrp}
+                onChange={e => onChange({ apply_when_no_msrp: e.target.checked })}
+                style={{ width: 14, height: 14 }} />
+              Also apply when the vehicle has no MSRP
+              <span style={{ fontSize: 11, color: "#78828c" }}>— shows on vehicles with no MSRP in the system</span>
+            </label>
           )}
         </div>
       ))}

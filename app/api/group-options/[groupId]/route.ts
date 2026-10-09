@@ -7,7 +7,7 @@ type RichInsert = Partial<Pick<GroupOptionRow,
   "description" | "required" | "applies_to" | "ad_type" | "ad_types" |
   "makes" | "makes_not" | "models" | "models_not" | "trims" | "trims_not" |
   "body_styles" | "fuel" | "fuel_not" | "year_condition" | "year_value" | "miles_condition" |
-  "miles_value" | "msrp_condition" | "msrp1" | "msrp2" |
+  "miles_value" | "msrp_condition" | "msrp1" | "msrp2" | "apply_when_no_msrp" |
   "show_models_only" | "separator_above" | "separator_below" | "spaces" |
   "locked"
 >>;
@@ -35,6 +35,7 @@ function pickRich(body: Record<string, unknown>): RichInsert {
   if (typeof body.msrp_condition === "number") out.msrp_condition = body.msrp_condition;
   if (typeof body.msrp1 === "number" || body.msrp1 === null) out.msrp1 = body.msrp1 as number | null;
   if (typeof body.msrp2 === "number" || body.msrp2 === null) out.msrp2 = body.msrp2 as number | null;
+  if (typeof body.apply_when_no_msrp === "boolean") out.apply_when_no_msrp = body.apply_when_no_msrp;
   if (typeof body.show_models_only === "boolean") out.show_models_only = body.show_models_only;
   if (typeof body.separator_above === "boolean") out.separator_above = body.separator_above;
   if (typeof body.separator_below === "boolean") out.separator_below = body.separator_below;

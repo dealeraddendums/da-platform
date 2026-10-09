@@ -49,6 +49,7 @@ export interface RuleSummaryRow {
   msrp_condition?: number | null;
   msrp1?: number | null;
   msrp2?: number | null;
+  apply_when_no_msrp?: boolean | null;
 }
 
 const fmtNum = (n: number): string => n.toLocaleString("en-US");
@@ -104,6 +105,8 @@ export function summarizeRules(row: RuleSummaryRow): string[] {
     if (pc === 1 && row.msrp1 != null) out.push(`MSRP under ${fmtMoney(row.msrp1)}`);
     else if (pc === 2 && row.msrp1 != null) out.push(`MSRP over ${fmtMoney(row.msrp1)}`);
     else if (pc === 3 && row.msrp1 != null && row.msrp2 != null) out.push(`MSRP ${fmtMoney(row.msrp1)}–${fmtMoney(row.msrp2)}`);
+    const gated = ((pc === 1 || pc === 2) && row.msrp1 != null) || (pc === 3 && row.msrp1 != null && row.msrp2 != null);
+    if (gated) out.push(row.apply_when_no_msrp ? "also on vehicles with no MSRP" : "not on vehicles with no MSRP");
   }
 
   return out;

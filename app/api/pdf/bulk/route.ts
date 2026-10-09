@@ -390,7 +390,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               "body_styles", "fuel", "fuel_not",
               "year_condition", "year_value",
               "miles_condition", "miles_value",
-              "msrp_condition", "msrp1", "msrp2",
+              "msrp_condition", "msrp1", "msrp2", "apply_when_no_msrp",
               "required", "created_at",
               "separator_above", "separator_below", "spaces",
             ].join(", "))
@@ -522,7 +522,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 "makes", "makes_not", "models", "models_not", "trims", "trims_not", "body_styles",
                 "fuel", "fuel_not",
                 "year_condition", "year_value", "miles_condition", "miles_value",
-                "msrp_condition", "msrp1", "msrp2",
+                "msrp_condition", "msrp1", "msrp2", "apply_when_no_msrp",
               ].join(", "))
               .eq("dealer_id", dv.dealer_id)
               .eq("active", true)
@@ -571,6 +571,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               msrp_condition: (r.msrp_condition as number | undefined) ?? 0,
               msrp1: r.msrp1 as number | null,
               msrp2: r.msrp2 as number | null,
+              apply_when_no_msrp: (r.apply_when_no_msrp as boolean | undefined) ?? false,
             };
             const existingRules = libRuleByName.get(name);
             if (existingRules) existingRules.push(bulkRuleRow);

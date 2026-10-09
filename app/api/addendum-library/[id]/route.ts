@@ -69,6 +69,7 @@ export async function PATCH(
   if (body.msrp_condition !== undefined) patch.msrp_condition = body.msrp_condition;
   if (body.msrp1 !== undefined) patch.msrp1 = body.msrp1;
   if (body.msrp2 !== undefined) patch.msrp2 = body.msrp2;
+  if (body.apply_when_no_msrp !== undefined) patch.apply_when_no_msrp = body.apply_when_no_msrp === true;
   if (body.sort_order !== undefined) patch.sort_order = body.sort_order;
   if (body.active !== undefined) patch.active = body.active;
   if (body.show_models_only !== undefined) patch.show_models_only = body.show_models_only;

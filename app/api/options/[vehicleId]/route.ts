@@ -191,6 +191,7 @@ type DealerLibRow = {
   msrp_condition: number | null;
   msrp1: number | null;
   msrp2: number | null;
+  apply_when_no_msrp?: boolean | null;
 };
 
 // Fetch the dealer's whole library once. Name-scoped queries
@@ -203,7 +204,7 @@ async function loadDealerLibrary(
 ): Promise<DealerLibRow[]> {
   const { data } = await admin
     .from("addendum_library")
-    .select("id, option_name, item_price, description, required, active, created_at, sort_order, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2")
+    .select("id, option_name, item_price, description, required, active, created_at, sort_order, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2, apply_when_no_msrp")
     .eq("dealer_id", dealerId)
     .order("sort_order", { ascending: true });
   return (data ?? []) as unknown as DealerLibRow[];
@@ -231,6 +232,7 @@ const libRowToRulesRow = (rule: DealerLibRow) => ({
   msrp_condition: rule.msrp_condition ?? 0,
   msrp1: rule.msrp1,
   msrp2: rule.msrp2,
+  apply_when_no_msrp: rule.apply_when_no_msrp ?? false,
 });
 
 type SavedRow = {

@@ -25,7 +25,7 @@ import { vehicleConditionFields, vehicleCondition } from "@/lib/vehicles";
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>;
 
-const LIB_COLS = "id, option_name, item_price, description, required, active, created_at, sort_order, separator_above, separator_below, spaces, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2";
+const LIB_COLS = "id, option_name, item_price, description, required, active, created_at, sort_order, separator_above, separator_below, spaces, applies_to, ad_types, makes, makes_not, models, models_not, trims, trims_not, body_styles, fuel, fuel_not, year_condition, year_value, miles_condition, miles_value, msrp_condition, msrp1, msrp2, apply_when_no_msrp";
 
 function ruleRow(lr: any) {
   return {
@@ -35,7 +35,7 @@ function ruleRow(lr: any) {
     trims: lr.trims, trims_not: lr.trims_not ?? false, body_styles: lr.body_styles, fuel: lr.fuel, fuel_not: lr.fuel_not ?? false,
     year_condition: lr.year_condition ?? 0, year_value: lr.year_value,
     miles_condition: lr.miles_condition ?? 0, miles_value: lr.miles_value,
-    msrp_condition: lr.msrp_condition ?? 0, msrp1: lr.msrp1, msrp2: lr.msrp2,
+    msrp_condition: lr.msrp_condition ?? 0, msrp1: lr.msrp1, msrp2: lr.msrp2, apply_when_no_msrp: lr.apply_when_no_msrp ?? false,
   };
 }
 
