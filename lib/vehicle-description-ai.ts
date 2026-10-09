@@ -107,6 +107,7 @@ Vehicle: ${name || "Vehicle"}
 ${facts}
 
 Write 2-4 sentences for customers: specific, factual, professional. Use only the vehicle data above. ${angle}
+Do not make claims the data doesn't support — no reliability or durability promises, no "legendary", "best-in-class", "built to exacting standards", no guesses about features, packages or technology that aren't listed. If the data is thin, write a shorter description rather than padding it.
 Do not include a VIN or stock number unless a house rule asks for it. No markdown, no headings, no surrounding quotes.${modifierPromptBlock(lines)}
 
 Return only the description text.`;
