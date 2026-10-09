@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { imageBuilderHrefFor } from "@/lib/image-builder/page-gate";
 import { cookies } from "next/headers";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
 import { resolveSessionProfile } from "@/lib/profile-session";
@@ -132,5 +133,8 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
     ? await isRestylerGroup(admin, groupId)
     : await dealerInRestylerGroup(admin, dealerId);
 
-  return <BuilderPage customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={canAddCustomSize} canAdminUpload={role === 'super_admin'} restylerAttribution={restylerAttribution} />;
+  // "+ Create a background" in Choose Background — same gate as the Image Builder pages.
+  const imageBuilderHref = await imageBuilderHrefFor({ groupId: groupId && !dealerId ? groupId : null, dealerId });
+
+  return <BuilderPage imageBuilderHref={imageBuilderHref} customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={canAddCustomSize} canAdminUpload={role === 'super_admin'} restylerAttribution={restylerAttribution} />;
 }

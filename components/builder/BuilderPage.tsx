@@ -267,6 +267,8 @@ interface Props {
   dealerLogoUrl?: string | null;
   dealerInfo?: DealerInfo;
   groupId?: string;
+  /** "+ Create a background" link target in Choose Background (null = hidden). */
+  imageBuilderHref?: string | null;
   canAddCustomSize?: boolean;
   /** Gates super_admin-only controls (currently: the canvas background upload, which posts to a super_admin-only API). */
   canAdminUpload?: boolean;
@@ -319,7 +321,7 @@ function PreviewClippedContent({ html, w, h }: { html: string; w: number; h: num
   );
 }
 
-export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, canAddCustomSize = false, canAdminUpload = false, starterMode = false, starterTemplateId , restylerAttribution}: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, imageBuilderHref = null, canAddCustomSize = false, canAdminUpload = false, starterMode = false, starterTemplateId , restylerAttribution}: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
@@ -2796,6 +2798,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
           bucket={isInfosheet ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds'}
           title="Backgrounds"
           groupId={groupId && !dealerId ? groupId : null}
+          createHref={imageBuilderHref}
           onSelect={url => {
             setBgUrl(url);
             isDirtyRef.current = true;

@@ -26,11 +26,14 @@ interface ImagePickerModalProps {
   /** Group Builder (`?group=…`): list that group's library too. The server only
    *  honors it for a caller allowed to act for the group. */
   groupId?: string | null;
+  /** "+ Create a background" → the Image Builder, opened in a NEW tab so the
+   *  in-progress template is never disturbed. Omitted/null = no link. */
+  createHref?: string | null;
 }
 
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 
-export default function ImagePickerModal({ bucket, title, onSelect, onClose, groupId }: ImagePickerModalProps) {
+export default function ImagePickerModal({ bucket, title, onSelect, onClose, groupId, createHref }: ImagePickerModalProps) {
   const [images, setImages] = useState<ImageEntry[]>([]);
   const [groupName, setGroupName] = useState<string | null>(null);
   const [caller, setCaller] = useState<Caller>({ canUploadPlatform: false, canUploadGroup: false, canUploadDealer: false });
@@ -54,6 +57,14 @@ export default function ImagePickerModal({ bucket, title, onSelect, onClose, gro
   }, [bucket, groupId]);
 
   useEffect(() => { load(); }, [load]);
+  // Re-list when the tab regains focus — a background just made in the Image
+  // Builder tab ("+ Create a background") shows up without closing the picker.
+  useEffect(() => {
+    if (!createHref) return;
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [createHref, load]);
 
   // Which scope does this caller's upload land in? (dealer wins if acting as one.)
   const uploadScope: "platform" | "group" | "dealer" | null =
@@ -141,6 +152,13 @@ export default function ImagePickerModal({ bucket, title, onSelect, onClose, gro
                 {uploading ? "Uploading…" : uploadLabel}
               </button>
             </>
+          )}
+          {createHref && (
+            <a href={createHref} target="_blank" rel="noopener noreferrer"
+              title="Opens the Image Builder in a new tab — this template stays open"
+              style={{ whiteSpace: "nowrap", padding: "5px 12px", background: "#fff", color: "#1976d2", border: "1px solid #1976d2", borderRadius: 4, fontSize: 12, fontWeight: 600, textDecoration: "none" }}>
+              + Create a background
+            </a>
           )}
         </div>
 
