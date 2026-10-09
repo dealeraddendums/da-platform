@@ -26,7 +26,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     .order("created_at", { ascending: true }).limit(50);
   const rows = (data ?? []) as { id: string; content: string; sender_name: string | null; sender_email: string | null; attachments: { name: string; mime: string; size: number }[]; created_at: string }[];
   // The agent's staff headshot (takeover header). The email itself never leaves the server.
-  const photos = await staffPhotosByEmail(rows.map((m) => m.sender_email));
+  // `agent` is re-resolved on EVERY poll from the conversation's latest agent
+  // reply, not just on new messages: a photo saved after the agent first
+  // replied (Allan, 2026-10-09 — reply 16:22, headshot 16:29) must still show.
+  const { data: lastAgent } = await (admin as any).from("help_messages")
+    .select("sender_name, sender_email").eq("conversation_id", params.id).eq("role", "agent")
+    .not("sender_name", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const photos = await staffPhotosByEmail([...rows.map((m) => m.sender_email), lastAgent?.sender_email]);
   return NextResponse.json({
     messages: rows.map((m) => ({
       id: m.id, body: m.content, sender: m.sender_name, created_at: m.created_at,
@@ -37,5 +43,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       })),
     })),
     at: rows.length ? rows[rows.length - 1].created_at : after,
+    agent: lastAgent ? { name: lastAgent.sender_name, photo: photos.get((lastAgent.sender_email ?? "").trim().toLowerCase()) ?? null } : null,
   });
 }

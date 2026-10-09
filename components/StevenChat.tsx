@@ -59,6 +59,14 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"chat" | "tickets">("chat");
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [liveAgent, setLiveAgent] = useState<{ name: string | null; photo: string | null } | null>(null);
+  // Ticket detail (My support tickets → open one): status + activity + add info.
+  const [openTicket, setOpenTicket] = useState<string | null>(null);
+  const [ticketDetail, setTicketDetail] = useState<{ ticket: Ticket & { createdAt?: string | null }; activity: { role: string; content: string; sender: string | null; at: string }[] } | null>(null);
+  const [ticketErr, setTicketErr] = useState<string | null>(null);
+  const [note, setNote] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [posted, setPosted] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [escalating, setEscalating] = useState(false);
@@ -117,6 +125,7 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
         const data = await res.json();
         if (cancelled) return;
         if (data.at) afterRef.current = data.at;
+        if (data.agent) setLiveAgent(data.agent as { name: string | null; photo: string | null });
         const fresh = ((data.messages || []) as { id: string; body: string; sender: string | null; senderPhoto?: string | null; attachments: ChatFile[] }[])
           .filter((m) => !seen.current.has(m.id));
         fresh.forEach((m) => seen.current.add(m.id));
@@ -256,6 +265,7 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
 
   function newChat() {
     convId.current = null;
+    setLiveAgent(null);
     seen.current = new Set();
     setMessages([]);
     setLive(false);
@@ -276,9 +286,40 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
   // Once a team member has replied, the header is theirs for the rest of this
   // conversation (Steven doesn't take it back). A newer reply from another
   // agent hands the header to them.
-  const agent = [...messages].reverse().find((m) => m.role === "agent" && m.sender) ?? null;
+  const lastAgentMsg = [...messages].reverse().find((m) => m.role === "agent" && m.sender) ?? null;
+  // The poll's current view of the agent wins (fresh photo); else the last reply we saw.
+  const agent = lastAgentMsg
+    ? { sender: lastAgentMsg.sender, photo: (liveAgent && liveAgent.name === lastAgentMsg.sender ? liveAgent.photo : null) ?? lastAgentMsg.photo ?? null }
+    : null;
   const greetingName = (firstName ?? "").trim().split(/\s+/)[0] || "";
   const canSend = !busy && !!input.trim();
+
+  async function loadTicket(id: string) {
+    setOpenTicket(id); setTicketDetail(null); setTicketErr(null); setPosted(null);
+    try {
+      const res = await fetch(`/api/help/tickets/${encodeURIComponent(id)}`, { cache: "no-store" });
+      const j = await res.json();
+      if (!res.ok) { setTicketErr(j.error || "Couldn't open this ticket."); return; }
+      setTicketDetail(j);
+    } catch { setTicketErr("Couldn't open this ticket."); }
+  }
+
+  async function addNote() {
+    if (!openTicket || !note.trim() || posting) return;
+    setPosting(true); setPosted(null);
+    try {
+      const res = await fetch(`/api/help/tickets/${encodeURIComponent(openTicket)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: note }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setPosted(j.error || "Couldn't add that — please try again."); return; }
+      setNote("");
+      setPosted("Added — our team has it on your ticket.");
+      await loadTicket(openTicket);
+      setPosted("Added — our team has it on your ticket.");
+    } catch { setPosted("Couldn't add that — please try again."); }
+    finally { setPosting(false); }
+  }
 
   const stateColor = (s: Ticket["state"]) => (s === "closed" ? "#2e7d32" : s === "waiting" ? "#b06a00" : BLUE);
 
@@ -327,7 +368,7 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
 
           <div style={{ display: "flex", borderBottom: BORDER }}>
             {(["chat", "tickets"] as const).map((t) => (
-              <button key={t} onClick={() => setTab(t)}
+              <button key={t} onClick={() => { setTab(t); if (t === "tickets") { setOpenTicket(null); setTicketDetail(null); } }}
                 style={{
                   flex: 1, padding: "9px 0", background: "#fff", border: "none", cursor: "pointer", fontFamily: "inherit",
                   fontSize: 13, fontWeight: 600, color: tab === t ? NAVY : "#78828c",
@@ -338,7 +379,59 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
             ))}
           </div>
 
-          {tab === "tickets" ? (
+          {tab === "tickets" && openTicket ? (
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              <div style={{ padding: "10px 14px", borderBottom: BORDER }}>
+                <button onClick={() => { setOpenTicket(null); setTicketDetail(null); void loadTickets(); }}
+                  style={{ background: "none", border: "none", color: BLUE, fontSize: 12.5, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>← All tickets</button>
+                {ticketDetail && (
+                  <>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: NAVY, margin: "6px 0 4px" }}>{ticketDetail.ticket.subject || "Support ticket"}</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span style={{ color: stateColor(ticketDetail.ticket.state), fontWeight: 600 }}>{ticketDetail.ticket.status}</span>
+                      <span style={{ color: "#78828c" }}>
+                        {ticketDetail.ticket.updatedAt ? `Updated ${new Date(ticketDetail.ticket.updatedAt).toLocaleDateString()}` : ""} · #{ticketDetail.ticket.ticketId}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+              <div style={{ flex: 1, overflowY: "auto", padding: 14, background: "#f5f6f7", display: "flex", flexDirection: "column", gap: 8 }}>
+                {!ticketDetail && !ticketErr && <div style={{ color: "#78828c", fontSize: 13 }}>Loading…</div>}
+                {ticketErr && <div style={{ color: "#c62828", fontSize: 13 }}>{ticketErr}</div>}
+                {ticketDetail && ticketDetail.activity.length === 0 && (
+                  <div style={{ color: "#55595c", fontSize: 13, lineHeight: 1.5 }}>Our team is working on this ticket. Anything you add below goes straight to them.</div>
+                )}
+                {ticketDetail?.activity.map((m, i) => {
+                  const mine = m.role === "user";
+                  return (
+                    <div key={i} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "88%" }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: NAVY, margin: "0 0 2px 4px", textAlign: mine ? "right" : "left" }}>
+                        {mine ? "You" : m.role === "agent" ? (m.sender || "DA Support") : "Steven"} · {new Date(m.at).toLocaleDateString()}
+                      </div>
+                      <div style={{ padding: "7px 11px", borderRadius: 10, fontSize: 13, lineHeight: 1.45, whiteSpace: "pre-wrap", background: mine ? BLUE : "#fff", color: mine ? "#fff" : NAVY, border: mine ? "none" : m.role === "agent" ? `1px solid ${NAVY}` : BORDER }}>
+                        {renderText(m.content)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {ticketDetail && (
+                <div style={{ borderTop: BORDER, padding: 10, background: "#fff" }}>
+                  <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={4000}
+                    placeholder="Add more information for our team…" aria-label="Add information to this ticket"
+                    style={{ width: "100%", boxSizing: "border-box", resize: "vertical", padding: "9px 11px", border: "1px solid #78828c", borderRadius: 6, fontSize: 13.5, fontFamily: "inherit", color: NAVY }} />
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 8 }}>
+                    <span style={{ fontSize: 11.5, color: posted && /Couldn|try again|Write/.test(posted) ? "#c62828" : "#78828c" }}>{posted || "Your team sees this on the ticket."}</span>
+                    <button onClick={() => void addNote()} disabled={posting || !note.trim()}
+                      style={{ padding: "8px 14px", background: BLUE, opacity: posting || !note.trim() ? 0.55 : 1, color: "#fff", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: posting ? "wait" : note.trim() ? "pointer" : "default", fontFamily: "inherit", flexShrink: 0 }}>
+                      {posting ? "Adding…" : "Add to ticket"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : tab === "tickets" ? (
             <div style={{ flex: 1, overflowY: "auto", padding: 14 }}>
               {tickets === null && <div style={{ color: "#78828c", fontSize: 13 }}>Loading…</div>}
               {tickets && tickets.length === 0 && (
@@ -347,15 +440,16 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
                 </div>
               )}
               {tickets?.map((t) => (
-                <div key={t.ticketId} style={{ border: BORDER, borderRadius: 8, padding: "10px 12px", marginBottom: 8 }}>
+                <button key={t.ticketId} onClick={() => void loadTicket(t.ticketId)} aria-label={`Open ticket ${t.ticketId}`}
+                  style={{ display: "block", width: "100%", textAlign: "left", background: "#fff", border: BORDER, borderRadius: 8, padding: "10px 12px", marginBottom: 8, cursor: "pointer", fontFamily: "inherit" }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: NAVY, marginBottom: 4 }}>{t.subject || "Support ticket"}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
                     <span style={{ color: stateColor(t.state), fontWeight: 600 }}>{t.status}</span>
                     <span style={{ color: "#78828c" }}>
-                      {t.updatedAt ? `Updated ${new Date(t.updatedAt).toLocaleDateString()}` : ""} · #{t.ticketId}
+                      {t.updatedAt ? `Updated ${new Date(t.updatedAt).toLocaleDateString()}` : ""} · #{t.ticketId} · <span style={{ color: BLUE }}>View</span>
                     </span>
                   </div>
-                </div>
+                </button>
               ))}
               {tickets && tickets.length > 0 && ticketsNote && <div style={{ color: "#78828c", fontSize: 12 }}>{ticketsNote}</div>}
               <button onClick={() => void loadTickets()} style={{ marginTop: 6, background: "none", border: "none", color: BLUE, fontSize: 12.5, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Refresh</button>
