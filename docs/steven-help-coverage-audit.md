@@ -172,3 +172,10 @@ Also still unpublished, outside this batch: "Using the Image Builder" (one-sente
 
 Published dealer articles: **23 → 31**; published-but-empty: **0**. Steven answered all 8 test questions from the new
 articles; no new knowledge-gap rows.
+
+**Batch 4 addendum (2026-10-09):** two more new dealer articles from Allan's support answers —
+"Why can't I print?" (Printing; extension wording corrected to the real feature: Dealer Admin requests it on My Profile →
+Billing, granted at once, once every 90 days; a group admin can request one for a group-billed store and it covers the
+whole group) and "A vehicle is missing from my inventory" (Vehicle Inventory; only cross-reference titles corrected).
+Published dealer articles: **31 → 33**. Steven combined "why can't I print" with the store's live billing status (group
+past due → contact the group admin) and gave the check-your-website test for a missing vehicle; no new gap rows.
