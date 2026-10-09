@@ -147,3 +147,28 @@ Backup before the change: `help-articles-backup-20261008-batch3.json` (suite roo
 Inventory feeds — how your vehicles get into DealerAddendums (General) · Troubleshooting: blank addendum, or
 missing/wrong products (Printing) · Showing a discount, rebate, or price reduction (Products) · Pausing or
 cancelling your account (Billing). Published dealer articles: **19 → 23**.
+
+## Update — batch 4 published (2026-10-08)
+
+Backup before the change: `help-articles-backup-20261008-batch4.json` (suite root, all 42 articles). Published through
+the Help Manage API (super_admin), so the sanitizer + category-text sync ran as in the UI.
+
+| File | Article | Change |
+|---|---|---|
+| help-article-migration-4-to-5.md | Moving from Platform 4.0 to 5.0 | **new** (General, dealer) — internal "Getting Dealers Into Platform 5.0" untouched |
+| help-article-brand-make-templates.md | Brand-specific templates (make overrides) | stub "Brand-specific Templates and assignment" → **published** |
+| help-article-signing-in-passkeys.md | Signing in: codes, passwords, and passkeys | stub "Passkeys" → **published**, retitled |
+| help-article-changing-logo.md | Changing your dealership logo | stub "Changing logo" → **published** |
+| help-article-clearing-print-history.md | Clearing print history | stub → **published** |
+| help-article-invoice-recipients.md | Adding a recipient to your invoices (AP / billing email) | stub → **published** |
+| help-article-supply-order-status.md | Checking your supply order status | stub "Supply order status" → **published** |
+| help-article-pre-printed-stock.md | Printing on pre-printed stock | stub "Pre-printed addendums" → **published**, moved Template Builder → Printing |
+
+Redundant empty stubs (no text, media, PDF or tour — checked) are left **unpublished**: the article model has no archive
+state, and unpublished already hides them from dealers and Steven. Ordering supplies · Printing a single addendum ·
+Printing multiple addendums · Adding users · Upgrading · Creating a Basic template · Creating a Suggested product
+template · Setting defaults · Using a custom Buyer's Guide background · Configure to print on a pre-printed label.
+Also still unpublished, outside this batch: "Using the Image Builder" (one-sentence draft).
+
+Published dealer articles: **23 → 31**; published-but-empty: **0**. Steven answered all 8 test questions from the new
+articles; no new knowledge-gap rows.
