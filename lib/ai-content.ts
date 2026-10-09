@@ -3,6 +3,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { VinQueryData } from './vinquery';
+import { modifierPromptBlock } from './vehicle-description-ai';
 
 export interface AiContent {
   description: string;
@@ -24,7 +25,11 @@ export interface VehicleInput {
 
 export async function generateVehicleContent(
   vehicle: VehicleInput,
-  vinData: VinQueryData | null
+  vinData: VinQueryData | null,
+  /** The dealer's AI-description house rules (migration 173,
+   *  effectiveDescriptionModifiers). They steer the DESCRIPTION only — the
+   *  feature table stays plain facts. */
+  modifierLines: string[] = [],
 ): Promise<AiContent> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -77,6 +82,7 @@ Respond with a single JSON object containing exactly these two keys:
 1. "description": A 2-3 sentence compelling vehicle description for customers. Be specific, factual, and professional. Highlight key selling points. No markdown, no quotes around the field value.
 2. "features": An array of 10-14 pairs, each pair is [label, value]. Cover: engine/power, transmission, drivetrain, MPG (city/hwy if available), body style, exterior color, mileage (if used/CPO), seating, and 2-3 notable options if provided. Labels should be short (1-3 words). Values should be concise.
 
+${modifierLines.length ? `\nThese house rules apply to the "description" field ONLY (never to "features"):${modifierPromptBlock(modifierLines)}\n` : ''}
 Return only raw JSON with no markdown fences or extra text.`;
 
   const message = await client.messages.create({

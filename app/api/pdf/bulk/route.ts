@@ -19,6 +19,7 @@ import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from 
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, autoMatchedLibraryRows, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { enforceCanPrint } from "@/lib/print-eligibility";
+import { effectiveDescriptionModifiers } from "@/lib/vehicle-description-ai";
 import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
 import QRCode from "qrcode";
 import { PDFDocument } from "pdf-lib";
@@ -841,7 +842,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 trim: vehicleData.TRIM, colorExt: vehicleData.EXT_COLOR,
                 mileage: vehicleData.MILEAGE,
                 msrp: vehicleData.MSRP ? parseFloat(vehicleData.MSRP) : null,
-              }, null);
+              }, null, (await effectiveDescriptionModifiers(admin, dv.dealer_id as string)).lines);
               aiContent = generated;
               await admin.from("ai_content_cache").upsert({
                 vin: vehicleData.VIN_NUMBER, dealer_id: dv.dealer_id,
@@ -858,6 +859,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // enforceDbMileage). Applied before BOTH consumers: the features
         // widget and the {{ai.features}} custom-text token.
         if (aiContent) aiContent = { ...aiContent, features: enforceDbMileage(aiContent.features, dv.mileage as number | null) };
+        // The dealer's saved per-vehicle description (migration 173) wins for the
+        // description widget (pdf-html) AND the {{ai.description}} token.
+        const savedDescription = String((dv as Record<string, unknown>).infosheet_ai_description ?? "").trim() || null;
+        const tokenAiContent = savedDescription ? { description: savedDescription, features: aiContent?.features ?? [] } : aiContent;
 
         console.log(`[BULK]   aiEnabled=${aiEnabled} aiContent=${aiContent ? 'yes' : 'none'} dbDescription=${vehicleData.DESCRIPTION ? 'yes' : 'null'} dbOptions=${(dv as Record<string, unknown>).options ? 'yes' : 'null'}`);
 
@@ -867,7 +872,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             if (w.type !== "customtext") return w;
             const text = (w.d.text as string) || "";
             if (!text.includes("{{")) return w;
-            return { ...w, d: { ...w.d, text: resolveCustomTextTokens(text, vehicleData, options, aiContent) } };
+            return { ...w, d: { ...w.d, text: resolveCustomTextTokens(text, vehicleData, options, tokenAiContent) } };
           });
         }
 
@@ -893,6 +898,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           aiDescription: aiContent?.description ?? null,
           aiFeatures: (aiContent?.features as [string, string][] | undefined) ?? null,
           dbDescription: vehicleData.DESCRIPTION ?? null,
+          savedDescription,
           dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
           alwaysShowCents: (dealerSettings as Record<string, unknown> | null)?.always_show_cents === true,
         });
@@ -942,6 +948,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             aiDescription: aiContent?.description ?? null,
             aiFeatures: (aiContent?.features as [string, string][] | undefined) ?? null,
             dbDescription: vehicleData.DESCRIPTION ?? null,
+            savedDescription,
             dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
             alwaysShowCents: (dealerSettings as Record<string, unknown> | null)?.always_show_cents === true,
           });

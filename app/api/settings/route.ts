@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerSettingsUpdate } from "@/lib/db";
 import { resolveDealerForRequest } from "@/lib/dealer-authz";
+import { effectiveDescriptionModifiers } from "@/lib/vehicle-description-ai";
 
 const DEFAULTS = {
   ai_content_default: false,
@@ -50,7 +51,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .eq("dealer_id", dealerId)
     .single();
 
-  return NextResponse.json({ data: data ?? { dealer_id: dealerId, ...DEFAULTS, updated_at: null } });
+  // The group's default AI-description house rules, shown as inherited in
+  // Settings (read-only here — groups edit them on their Templates tab).
+  const mods = await effectiveDescriptionModifiers(admin, dealerId);
+  return NextResponse.json({
+    data: data ?? { dealer_id: dealerId, ...DEFAULTS, updated_at: null },
+    groupAiModifiers: mods.groupName || mods.groupLines.length ? { groupName: mods.groupName, lines: mods.groupLines } : null,
+  });
 }
 
 export async function PATCH(req: NextRequest): Promise<NextResponse> {
@@ -145,13 +152,31 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     ...("default_addendum_cpo_second" in body && { default_addendum_cpo_second: body.default_addendum_cpo_second ?? null }),
     ...("qr_url_template" in body && { qr_url_template: body.qr_url_template ?? null }),
     ...(body.always_show_cents !== undefined && { always_show_cents: body.always_show_cents === true }),
+    // Migration 173 — AI vehicle-description house rules (dealer lines) and
+    // the "don't apply my group's defaults" switch.
+    ...("ai_vehicle_desc_modifiers" in body && {
+      ai_vehicle_desc_modifiers: typeof body.ai_vehicle_desc_modifiers === "string" && body.ai_vehicle_desc_modifiers.trim()
+        ? body.ai_vehicle_desc_modifiers.slice(0, 2000) : null,
+    }),
+    ...(body.ai_vehicle_desc_ignore_group !== undefined && { ai_vehicle_desc_ignore_group: body.ai_vehicle_desc_ignore_group === true }),
   };
 
-  const { data, error: upsertErr } = await admin
+  let { data, error: upsertErr } = await admin
     .from("dealer_settings")
     .upsert(upsertPayload, { onConflict: "dealer_id" })
     .select()
     .single();
+  // Migration 173 not applied yet: the form always sends the AI house-rule
+  // fields, so retry without them rather than fail every Settings save.
+  if (upsertErr && /ai_vehicle_desc/.test(upsertErr.message ?? "")) {
+    const { ai_vehicle_desc_modifiers: _m, ai_vehicle_desc_ignore_group: _g, ...rest } = upsertPayload as Record<string, unknown>;
+    void _m; void _g;
+    ({ data, error: upsertErr } = await admin
+      .from("dealer_settings")
+      .upsert(rest as typeof upsertPayload, { onConflict: "dealer_id" })
+      .select()
+      .single());
+  }
 
   if (upsertErr) {
     return NextResponse.json({ error: upsertErr.message }, { status: 500 });

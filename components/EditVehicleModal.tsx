@@ -69,6 +69,7 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
     drivetrain: vehicle.drivetrain ?? "",
     fuel: vehicle.fuel ?? "",
     description: vehicle.description ?? "",
+    infosheet_ai_description: vehicle.infosheet_ai_description ?? "",
     options: vehicle.options ?? "",
     mileage: vehicle.mileage ? String(vehicle.mileage) : "0",
     msrp: vehicle.msrp ? String(vehicle.msrp) : "",
@@ -80,6 +81,32 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
   });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Infosheet AI description (migration 173): Generate = a fresh draft each
+  // click (re-roll); the text stays editable and is stored ONLY by Save
+  // Changes. Cancel discards a generated draft.
+  const [genBusy, setGenBusy] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const [generatedOnce, setGeneratedOnce] = useState(false);
+  const showInfosheetDesc = aiEnabled || !!(vehicle.infosheet_ai_description ?? "").trim();
+
+  async function generateInfosheetDesc() {
+    setGenBusy(true);
+    setGenError(null);
+    try {
+      const res = await fetch("/api/ai-content/vehicle-description", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vehicleId: vehicle.id }),
+      });
+      const j = await res.json().catch(() => ({})) as { description?: string; error?: string };
+      if (!res.ok || !j.description) { setGenError(j.error ?? "Couldn't generate a description — try again."); return; }
+      setForm((p) => ({ ...p, infosheet_ai_description: j.description as string }));
+      setGeneratedOnce(true);
+    } catch {
+      setGenError("Couldn't generate a description — try again.");
+    } finally {
+      setGenBusy(false);
+    }
+  }
 
   // Persistent modals (2026-09-02): no Escape-to-close and no backdrop-click
   // dismissal — this modal closes only via its × / Cancel buttons, so an
@@ -181,6 +208,41 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
                 placeholder="Vehicle description — auto-filled by AI if enabled"
               />
             </div>
+
+            {showInfosheetDesc && (
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                  <label style={{ ...LABEL_STYLE, marginBottom: 0 }}>
+                    Infosheet description
+                    <AiBadge />
+                  </label>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    {form.infosheet_ai_description.trim() && (
+                      <button type="button" onClick={() => setForm((p) => ({ ...p, infosheet_ai_description: "" }))}
+                        style={{ background: "none", border: "none", padding: 0, fontSize: 12, color: "var(--text-muted)", cursor: "pointer" }}>
+                        Clear
+                      </button>
+                    )}
+                    <button type="button" onClick={() => void generateInfosheetDesc()} disabled={genBusy}
+                      style={{ height: 28, padding: "0 12px", background: "#fff", border: "1px solid #1976d2", borderRadius: 4, fontSize: 12, fontWeight: 600, color: "#1976d2", cursor: genBusy ? "not-allowed" : "pointer" }}>
+                      {genBusy ? "Generating…" : generatedOnce || form.infosheet_ai_description.trim() ? "✦ Generate another" : "✦ Generate"}
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  value={form.infosheet_ai_description}
+                  onChange={(e) => setForm((p) => ({ ...p, infosheet_ai_description: e.target.value }))}
+                  style={{ ...TEXTAREA_STYLE, minHeight: 80 }}
+                  rows={4}
+                  maxLength={4000}
+                  aria-label="Infosheet description"
+                  placeholder="Click Generate for an AI description of this vehicle, then edit it as you like."
+                />
+                <div style={{ fontSize: 11, color: genError ? "#c62828" : "var(--text-muted)", marginTop: 4 }}>
+                  {genError ?? "Prints on this vehicle's infosheet. Saved only when you click Save Changes. Leave empty to use the standard description."}
+                </div>
+              </div>
+            )}
 
             <div style={{ gridColumn: "1 / -1" }}>
               <label style={LABEL_STYLE}>

@@ -67,6 +67,9 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     // half-set: the modal used to store condition='Certified' and never touch
     // the flag, producing a third shape (9 rows) that no reader recognised.
     "certified",
+    // Migration 173: the infosheet description the dealer generated/edited in
+    // Edit Vehicle. An empty string clears it (stored NULL → today's behavior).
+    "infosheet_ai_description",
   ];
 
   const update: Record<string, unknown> = {};
@@ -75,7 +78,11 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
   for (const field of EDITABLE) {
     if (!(field in body)) continue;
     const oldVal = (current as Record<string, unknown>)[field];
-    const newVal = body[field];
+    let newVal = body[field];
+    if (field === "infosheet_ai_description") {
+      const t = typeof newVal === "string" ? newVal.trim().slice(0, 4000) : "";
+      newVal = t || null;
+    }
     if (String(oldVal ?? "") !== String(newVal ?? "")) {
       update[field] = newVal;
       changes[field] = { old: oldVal ?? null, new: newVal ?? null };

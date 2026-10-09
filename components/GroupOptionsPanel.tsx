@@ -1,5 +1,6 @@
 "use client";
 
+import GroupAiModifiersCard from "@/components/GroupAiModifiersCard";
 import { Fragment, useState, useEffect, useCallback, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { GroupOptionRow, GroupDisclaimerRow, GroupTemplateRow } from "@/lib/db";
@@ -98,7 +99,7 @@ export default function GroupOptionsPanel({ groupId, isSuperAdmin = false, membe
         {tab === "billing" && <GroupBillingTab groupId={groupId} />}
         {tab === "options" && <OptionsTab groupId={groupId} />}
         {tab === "disclaimers" && <DisclaimersTab groupId={groupId} />}
-        {tab === "templates" && <TemplatesTab groupId={groupId} />}
+        {tab === "templates" && <><GroupAiModifiersCard groupId={groupId} /><TemplatesTab groupId={groupId} /></>}
         {tab === "members" && memberDealers}
         {tab === "images" && imageLibrary}
         {tab === "imageBuilder" && imageBuilder}

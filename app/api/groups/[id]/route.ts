@@ -110,6 +110,14 @@ export async function PATCH(
     patch.state = st || null;
   }
   if (body.zip !== undefined) patch.zip = body.zip;
+  // Migration 173 — the group's DEFAULT house rules for AI vehicle descriptions
+  // (every member store inherits them unless it opts out). group_admin of THIS
+  // group (checked above) or super_admin.
+  const rawMods = (body as Record<string, unknown>).ai_vehicle_desc_modifiers;
+  if (rawMods !== undefined) {
+    const t = typeof rawMods === "string" ? rawMods.trim().slice(0, 2000) : "";
+    (patch as Record<string, unknown>).ai_vehicle_desc_modifiers = t || null;
+  }
   if (body.country !== undefined) patch.country = body.country;
   if (body.active !== undefined && claims.role === "super_admin") patch.active = body.active;
   if (body.is_test !== undefined && claims.role === "super_admin") patch.is_test = body.is_test;

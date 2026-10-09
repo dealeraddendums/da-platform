@@ -67,6 +67,11 @@ export interface BuildPdfHtmlInput {
   aiDescription?: string | null;
   aiFeatures?: [string, string][] | null;
   dbDescription?: string | null;
+  /** The dealer's saved per-vehicle infosheet description
+   *  (dealer_vehicles.infosheet_ai_description, migration 173) — generated in
+   *  Edit Vehicle and possibly hand-edited. When set it WINS over both sources:
+   *  the dealer chose this exact text for this vehicle. */
+  savedDescription?: string | null;
   dbOptionsText?: string | null;  /** Print-Now-entered price for a Retail/Wholesale widget in 'ask' mode.
    *  Render-only — never persisted to the vehicle. Absent (bulk/mobile/cancel)
    *  ⇒ the widget renders a plain retail line with no strikethrough. */
@@ -103,6 +108,7 @@ export async function buildPdfHtml({
   aiDescription,
   aiFeatures,
   dbDescription,
+  savedDescription,
   dbOptionsText,
   retailWholesalePrice,
   alwaysShowCents,
@@ -288,7 +294,13 @@ export async function buildPdfHtml({
       if (isPlaceholder) {
         let text: string | null = null;
         let source: 'db' | 'ai' | null = null;
-        if (d.aiMode !== 'ai') {
+        const saved = (savedDescription ?? '').trim();
+        if (saved) {
+          // Per-vehicle choice beats the template's DB/AI setting. Badged AI:
+          // it started as AI copy, even if the dealer then edited it.
+          text = saved;
+          source = 'ai';
+        } else if (d.aiMode !== 'ai') {
           text = dbDescription ?? '';
           source = 'db';
         } else if (aiEnabled) {

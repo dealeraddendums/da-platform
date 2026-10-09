@@ -559,6 +559,8 @@ export type AccountClosureInsert = {
 export type DealerSettingsRow = {
   dealer_id: string;
   ai_content_default: boolean;
+  ai_vehicle_desc_modifiers?: string | null;
+  ai_vehicle_desc_ignore_group?: boolean;
   nudge_left: number;
   nudge_right: number;
   nudge_top: number;
@@ -594,6 +596,8 @@ export type DealerSettingsRow = {
 type DealerSettingsInsert = {
   dealer_id: string;
   ai_content_default?: boolean;
+  ai_vehicle_desc_modifiers?: string | null;
+  ai_vehicle_desc_ignore_group?: boolean;
   nudge_left?: number;
   nudge_right?: number;
   nudge_top?: number;
@@ -621,6 +625,8 @@ type DealerSettingsInsert = {
 
 export type DealerSettingsUpdate = {
   ai_content_default?: boolean;
+  ai_vehicle_desc_modifiers?: string | null;
+  ai_vehicle_desc_ignore_group?: boolean;
   nudge_left?: number;
   nudge_right?: number;
   nudge_top?: number;
@@ -1144,6 +1150,8 @@ export type DealerVehicleRow = {
   decode_flagged: boolean;
   description: string | null;
   options: string | null;
+  /** Migration 173: the dealer's saved infosheet description (Edit Vehicle → Generate/edit → Save). */
+  infosheet_ai_description?: string | null;
   created_by: string | null;
   date_added: string;
   updated_at: string;
@@ -1205,6 +1213,7 @@ export type DealerVehicleInsert = {
   decode_flagged?: boolean;
   description?: string | null;
   options?: string | null;
+  infosheet_ai_description?: string | null;
   created_by?: string | null;
   // Extended fields (migration 020)
   doors?: string | null;
