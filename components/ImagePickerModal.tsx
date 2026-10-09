@@ -23,11 +23,14 @@ interface ImagePickerModalProps {
   title?: string;
   onSelect: (url: string) => void;
   onClose: () => void;
+  /** Group Builder (`?group=…`): list that group's library too. The server only
+   *  honors it for a caller allowed to act for the group. */
+  groupId?: string | null;
 }
 
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 
-export default function ImagePickerModal({ bucket, title, onSelect, onClose }: ImagePickerModalProps) {
+export default function ImagePickerModal({ bucket, title, onSelect, onClose, groupId }: ImagePickerModalProps) {
   const [images, setImages] = useState<ImageEntry[]>([]);
   const [groupName, setGroupName] = useState<string | null>(null);
   const [caller, setCaller] = useState<Caller>({ canUploadPlatform: false, canUploadGroup: false, canUploadDealer: false });
@@ -39,7 +42,7 @@ export default function ImagePickerModal({ bucket, title, onSelect, onClose }: I
 
   const load = useCallback(() => {
     setLoading(true);
-    fetch(`/api/image-library?bucket=${encodeURIComponent(bucket)}`)
+    fetch(`/api/image-library?bucket=${encodeURIComponent(bucket)}${groupId ? `&group=${encodeURIComponent(groupId)}` : ""}`)
       .then((r) => r.json())
       .then((d) => {
         setImages(d.images ?? []);
@@ -48,7 +51,7 @@ export default function ImagePickerModal({ bucket, title, onSelect, onClose }: I
       })
       .catch(() => setImages([]))
       .finally(() => setLoading(false));
-  }, [bucket]);
+  }, [bucket, groupId]);
 
   useEffect(() => { load(); }, [load]);
 

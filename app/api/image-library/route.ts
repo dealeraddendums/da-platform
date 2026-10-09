@@ -20,7 +20,9 @@ type OutImage = {
   deletable: boolean;
 };
 
-/** GET /api/image-library?bucket=<category> */
+/** GET /api/image-library?bucket=<category>[&group=<uuid>]
+ *  `group` = the group the Builder is editing; resolveViewContext only honors it
+ *  for a caller allowed to act for that group (super_admin / that group's admins). */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
   if (error) return error;
@@ -31,7 +33,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const admin = createAdminSupabaseClient();
-  const { dealerId, groupId } = await resolveViewContext(claims);
+  const { dealerId, groupId } = await resolveViewContext(claims, req.nextUrl.searchParams.get("group"));
 
   const isSuper = claims.role === "super_admin";
   const canManageGroup = claims.role === "group_admin" && !claims.active_dealer_id;

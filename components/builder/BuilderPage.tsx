@@ -2773,6 +2773,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         <ImagePickerModal
           bucket="new-infobox-images"
           title="Choose Custom Image"
+          groupId={groupId && !dealerId ? groupId : null}
           onSelect={url => {
             if (selId) {
               const selected = widgetsRef.current[selId];
@@ -2793,7 +2794,8 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       {showBgLibPicker && (
         <ImagePickerModal
           bucket={isInfosheet ? 'new-infosheet-backgrounds' : 'new-addendum-backgrounds'}
-          title="Platform Backgrounds"
+          title="Backgrounds"
+          groupId={groupId && !dealerId ? groupId : null}
           onSelect={url => {
             setBgUrl(url);
             isDirtyRef.current = true;

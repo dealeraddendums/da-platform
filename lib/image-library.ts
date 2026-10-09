@@ -99,13 +99,30 @@ export function scopedKey(
  * (uuid). A dealer's group lives on the dealers row, not the profile, so we
  * resolve it here. A group_admin acting as a dealer also gets that dealer's group.
  */
-export async function resolveViewContext(claims: JwtClaims): Promise<{ dealerId: string | null; groupId: string | null }> {
+export async function resolveViewContext(
+  claims: JwtClaims,
+  /** The group the Builder is editing (`/builder?group=…`). A SELECTOR, not a
+   *  trusted scope: honored only when the caller may act for that group —
+   *  super_admin (any group), or a group_admin / group_user of that same group.
+   *  Anything else is ignored and the session context stands. Needed because a
+   *  super_admin in the group Builder has no group on the session at all, so
+   *  that group's own backgrounds never listed (Glockner, 2026-10-09). */
+  requestedGroupId?: string | null,
+): Promise<{ dealerId: string | null; groupId: string | null }> {
   const dealerId = claims.dealer_id ?? null;
   let groupId = claims.group_id ?? null;
   if (!groupId && dealerId) {
     const admin = createAdminSupabaseClient();
     const { data } = await admin.from("dealers").select("group_id").eq("dealer_id", dealerId).maybeSingle<{ group_id: string | null }>();
     groupId = data?.group_id ?? null;
+  }
+  // super_admin in group-ghost mode: the ghosted group is the context.
+  if (!groupId && !dealerId && claims.role === "super_admin" && claims.ghost_group_uuid) groupId = claims.ghost_group_uuid;
+  const req = (requestedGroupId ?? "").trim();
+  if (req && /^[0-9a-f-]{36}$/i.test(req) && !dealerId) {
+    const may = claims.role === "super_admin"
+      || ((claims.role === "group_admin" || claims.role === "group_user") && claims.group_id === req);
+    if (may) groupId = req;
   }
   return { dealerId, groupId };
 }
