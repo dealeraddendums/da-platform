@@ -16,10 +16,14 @@ import { createAdminSupabaseClient } from "@/lib/db";
 
 export const REGION = process.env.AWS_REGION || "us-east-1";
 
-export const ALLOWED_BUCKETS: Record<string, { maxMB: number }> = {
+export const ALLOWED_BUCKETS: Record<string, { maxMB: number; platform?: false }> = {
   "new-infobox-images": { maxMB: 5 },
   "new-addendum-backgrounds": { maxMB: 5 },
   "new-infosheet-backgrounds": { maxMB: 10 },
+  // Logos (Logo Composer, migration 174): dealer / group scope ONLY. The
+  // bucket root holds years of individual dealers' raw logo uploads, so it must
+  // never be listed (or auto-registered) as a shared "Platform" section.
+  "new-dealer-logos": { maxMB: 5, platform: false },
 };
 
 export const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"];

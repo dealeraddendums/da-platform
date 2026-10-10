@@ -418,6 +418,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [showCustomSizesModal, setShowCustomSizesModal] = useState(false);
   const [showAddSizeModal, setShowAddSizeModal] = useState(false);
   const [showLogoPicker, setShowLogoPicker] = useState(false);
+  const [showLogoLibPicker, setShowLogoLibPicker] = useState(false);
   const [showInfoboxLibPicker, setShowInfoboxLibPicker] = useState(false);
   const [showBgLibPicker, setShowBgLibPicker] = useState(false);
   // "+ New" starter picker (dealer/group Builder only). List of platform
@@ -2383,6 +2384,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                   onDelete={deleteWidget}
                   onUpdatePos={updateWidgetPos}
                   onPickLogoImage={() => setShowLogoPicker(true)}
+                  onPickLogoLibrary={() => setShowLogoLibPicker(true)}
                   onLayerChange={handleLayerChange}
                   onPickInfolibImage={() => setShowInfoboxLibPicker(true)}
                 />
@@ -2752,6 +2754,25 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         />
       )}
 
+      {/* LOGO LIBRARY PICKER (Logo Composer) — composed logos: the group's
+          library + this dealer's My Images, logos only (bucket = category). */}
+      {showLogoLibPicker && (
+        <ImagePickerModal
+          bucket="new-dealer-logos"
+          title="Logos"
+          groupId={groupId && !dealerId ? groupId : null}
+          createHref={imageBuilderHref}
+          createLabel="+ Create a logo"
+          thumbAspect="3 / 1"
+          emptyText="No logos yet — create one in the Image Builder."
+          onSelect={url => {
+            if (selId) updateWidget(selId, 'imgUrl', url);
+            setShowLogoLibPicker(false);
+          }}
+          onClose={() => setShowLogoLibPicker(false)}
+        />
+      )}
+
       {/* LOGO IMAGE PICKER */}
       {showLogoPicker && (
         <ImageUploadPicker
@@ -2854,7 +2875,7 @@ function ModalRow({ icon, label, children }: { icon: React.ReactNode; label: Rea
 }
 
 // ── Widget Edit Panel ──────────────────────────────────────────────────
-function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, onDelete, onUpdatePos, onPickLogoImage, onLayerChange, onPickInfolibImage }: {
+function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, onDelete, onUpdatePos, onPickLogoImage, onPickLogoLibrary, onLayerChange, onPickInfolibImage }: {
   widget: Widget;
   fontScale: number;
   dealerId: string | null;
@@ -2863,6 +2884,8 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
   onDelete: (id: string) => void;
   onUpdatePos: (id: string, key: 'x'|'y'|'w'|'h', value: number) => void;
   onPickLogoImage?: () => void;
+  /** Logo Composer: the dealer/group logo library (scoped picker, logos only). */
+  onPickLogoLibrary?: () => void;
   onLayerChange?: (id: string, action: 'front'|'back'|'forward'|'backward') => void;
   onPickInfolibImage?: () => void;
 }) {
@@ -2924,9 +2947,16 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
         <EpSection>
           <Eps>Logo</Eps>
           <Fd label="Logo Image">
-            <button onClick={onPickLogoImage} style={{ padding: '5px 10px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, background: '#f5f6f7', cursor: 'pointer', whiteSpace: 'nowrap', color: '#55595c' }}>
-              Choose
-            </button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={onPickLogoImage} style={{ padding: '5px 10px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, background: '#f5f6f7', cursor: 'pointer', whiteSpace: 'nowrap', color: '#55595c' }}>
+                Choose
+              </button>
+              {onPickLogoLibrary && (
+                <button onClick={onPickLogoLibrary} style={{ padding: '5px 10px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, background: '#f5f6f7', cursor: 'pointer', whiteSpace: 'nowrap', color: '#55595c' }}>
+                  Logo library
+                </button>
+              )}
+            </div>
             {(d.imgUrl as string) && (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={d.imgUrl as string} alt="" style={{ maxWidth: '100%', maxHeight: 40, objectFit: 'contain', border: '1px solid #e0e0e0', borderRadius: 2, marginTop: 6, display: 'block' }} />

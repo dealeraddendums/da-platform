@@ -4,7 +4,7 @@
 // print path imports from lib/image-builder — PDFs keep consuming the flat PNGs
 // in the Image Library exactly as before.
 
-export type ImageType = "infobox" | "addendum_bg_standard" | "addendum_bg_narrow" | "infosheet_bg";
+export type ImageType = "infobox" | "addendum_bg_standard" | "addendum_bg_narrow" | "infosheet_bg" | "logo";
 
 export interface ImageTypeSpec {
   type: ImageType;
@@ -13,7 +13,9 @@ export interface ImageTypeSpec {
   height: number;
   maxBytes: number;
   /** The Image Library bucket (= tab) the rendered PNG is saved into. */
-  bucket: "new-infobox-images" | "new-addendum-backgrounds" | "new-infosheet-backgrounds";
+  bucket: "new-infobox-images" | "new-addendum-backgrounds" | "new-infosheet-backgrounds" | "new-dealer-logos";
+  /** Composed per dealer/group only — never a platform design (migration 174). */
+  ownedOnly?: boolean;
 }
 
 export const DPI = 150;
@@ -36,6 +38,13 @@ export const IMAGE_TYPES: Record<ImageType, ImageTypeSpec> = {
   infosheet_bg: {
     type: "infosheet_bg", label: "Infosheet Background",
     width: 2657, height: 3438, maxBytes: 10 * 1024 * 1024, bucket: "new-infosheet-backgrounds",
+  },
+  // Logo Composer (migration 174): a transparent 3:1 logo, high-res for print
+  // (the Logo widget scales it to fit). Saved to the dealer-logos bucket so it
+  // is its own category — never listed with backgrounds.
+  logo: {
+    type: "logo", label: "Logo (transparent)",
+    width: 1500, height: 500, maxBytes: 5 * 1024 * 1024, bucket: "new-dealer-logos", ownedOnly: true,
   },
 };
 
@@ -106,6 +115,23 @@ export interface TextElement extends ElementBase {
   lineHeight: number;       // multiplier of size
 }
 
+/** Filled and/or outlined ellipse inscribed in the element box (a circle when w = h). */
+export interface EllipseElement extends ElementBase {
+  type: "ellipse";
+  fill: string | null;      // null = no fill (outline only)
+  opacity: number;          // 0..1
+  stroke: string | null;
+  strokeWidth: number;
+}
+
+/** A straight rule through the middle of its box: horizontal when the box is
+ *  wider than tall, vertical otherwise. `strokeWidth` is the line thickness. */
+export interface LineElement extends ElementBase {
+  type: "line";
+  stroke: string;
+  strokeWidth: number;
+}
+
 export interface ImageElement extends ElementBase {
   type: "image";
   /** data: URL only — keeps the design self-contained and the export canvas untainted. */
@@ -114,7 +140,7 @@ export interface ImageElement extends ElementBase {
   opacity: number;
 }
 
-export type DesignElement = FrameElement | BoxElement | TextElement | ImageElement;
+export type DesignElement = FrameElement | BoxElement | TextElement | ImageElement | EllipseElement | LineElement;
 export type ElementType = DesignElement["type"];
 
 export interface DesignDoc {
@@ -201,6 +227,15 @@ export function validateDesign(doc: unknown): string | null {
         if (e.src.length > MAX_EMBEDDED_IMAGE_BYTES * 1.4) return `${at} image too large`;
         if (!["contain", "stretch"].includes(String(e.fit))) return `${at}.fit invalid`;
         if (num(e.opacity, 0, 1) === null) return `${at}.opacity invalid`;
+        break;
+      case "ellipse":
+        if (e.fill !== null && !HEX.test(String(e.fill))) return `${at}.fill must be #rrggbb or null`;
+        if (e.stroke !== null && !HEX.test(String(e.stroke))) return `${at}.stroke must be #rrggbb or null`;
+        if (num(e.opacity, 0, 1) === null || num(e.strokeWidth, 0, 1000) === null) return `${at} bad opacity/stroke`;
+        break;
+      case "line":
+        if (!HEX.test(String(e.stroke))) return `${at}.stroke must be #rrggbb`;
+        if (num(e.strokeWidth, 0, 1000) === null) return `${at} bad strokeWidth`;
         break;
       default:
         return `${at}.type unknown`;

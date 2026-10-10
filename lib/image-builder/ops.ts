@@ -12,7 +12,7 @@ export function newId(): string {
   return "el-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-const LABELS: Record<ElementType, string> = { frame: "Frame", box: "Box", text: "Text", image: "Image" };
+const LABELS: Record<ElementType, string> = { frame: "Frame", box: "Box", text: "Text", image: "Image", ellipse: "Circle", line: "Line" };
 
 function nextName(doc: DesignDoc, type: ElementType): string {
   const n = doc.elements.filter((e) => e.type === type).length + 1;
@@ -41,6 +41,16 @@ export function createElement(
       const w = Math.round(W * 0.8), h = Math.round(size * 1.2 * 2);
       return { ...base, type, x: Math.round((W - w) / 2), y: Math.round((H - h) / 2), w, h,
         text: "Text", font: "inter", size, bold: false, color: "#000000", align: "center", lineHeight: 1.2 };
+    }
+    case "ellipse": {
+      const d = Math.round(Math.min(W, H) * 0.5);
+      return { ...base, type, x: Math.round((W - d) / 2), y: Math.round((H - d) / 2), w: d, h: d,
+        fill: null, opacity: 1, stroke: "#000000", strokeWidth: unit * 2 };
+    }
+    case "line": {
+      const w = Math.round(W * 0.6), sw = Math.max(1, unit);
+      const h = Math.max(4, sw * 4);
+      return { ...base, type, x: Math.round((W - w) / 2), y: Math.round((H - h) / 2), w, h, stroke: "#000000", strokeWidth: sw };
     }
     case "image": {
       const nw = image?.naturalWidth || 100, nh = image?.naturalHeight || 100;

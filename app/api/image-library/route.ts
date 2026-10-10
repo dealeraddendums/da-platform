@@ -49,7 +49,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   //    scope-prefixed group/dealer objects are never surfaced here. Auto-populate
   //    platform rows for any S3 object missing one (preserves legacy behavior).
   const s3 = s3Client();
-  const listed = await s3.send(new ListObjectsV2Command({ Bucket: bucket, MaxKeys: 1000 }));
+  // Logos have no platform section (see ALLOWED_BUCKETS) — skip the root listing.
+  const listed = ALLOWED_BUCKETS[bucket].platform === false
+    ? { Contents: [] as { Key?: string; Size?: number }[] }
+    : await s3.send(new ListObjectsV2Command({ Bucket: bucket, MaxKeys: 1000 }));
   const platformObjs = (listed.Contents ?? [])
     .filter((o) => o.Key && !o.Key.includes("/") && /\.(png|jpg|jpeg|gif|webp)$/i.test(o.Key))
     .map((o) => ({ key: o.Key!, size: o.Size ?? 0, url: `https://${bucket}.s3.${REGION}.amazonaws.com/${o.Key!}` }));
@@ -124,7 +127,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     images: out,
     groupName,
     caller: {
-      canUploadPlatform: isSuper && !claims.is_ghost,
+      canUploadPlatform: isSuper && !claims.is_ghost && ALLOWED_BUCKETS[bucket].platform !== false,
       canUploadGroup: canManageGroup,
       canUploadDealer: canManageDealer,
     },

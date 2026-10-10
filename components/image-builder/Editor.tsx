@@ -66,6 +66,19 @@ export default function ImageBuilderEditor({ id, groupId, dealerScope = false }:
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [exportResult, setExportResult] = useState<LibImage | null>(null);
+  // Logo Composer: a dealer's saved logo can become the dealership logo
+  // (dealers.logo_url) — what the Logo widget prints on addendums/infosheets.
+  const [logoSet, setLogoSet] = useState<"idle" | "busy" | "done" | string>("idle");
+  async function setAsDealerLogo(imageId: string) {
+    setLogoSet("busy");
+    try {
+      const res = await fetch("/api/image-library/set-dealer-logo", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imageId }),
+      });
+      const j = await res.json().catch(() => ({})) as { error?: string };
+      setLogoSet(res.ok ? "done" : (j.error ?? "Couldn't set the logo"));
+    } catch { setLogoSet("Couldn't set the logo"); }
+  }
   const [showHistory, setShowHistory] = useState(false);
   const [versions, setVersions] = useState<Version[]>([]);
   const [restoreTarget, setRestoreTarget] = useState<number | null>(null);
@@ -458,6 +471,8 @@ export default function ImageBuilderEditor({ id, groupId, dealerScope = false }:
             <span style={{ fontSize: 12, color: "#666" }}>Add:</span>
             <button style={btn()} onClick={() => add("frame")}>Frame</button>
             <button style={btn()} onClick={() => add("box")}>Box</button>
+            <button style={btn()} onClick={() => add("ellipse")}>Circle</button>
+            <button style={btn()} onClick={() => add("line")}>Line</button>
             <button style={btn()} onClick={() => add("text")}>Text</button>
             <button style={btn()} onClick={() => add("image")}>Image</button>
             <span style={{ width: 1, height: 22, background: "#e0e0e0", margin: "0 4px" }} />
@@ -509,7 +524,7 @@ export default function ImageBuilderEditor({ id, groupId, dealerScope = false }:
                   background: isSel ? "#e3f2fd" : "transparent", borderBottom: "1px solid #f0f0f0",
                   color: el.hidden ? "#999" : "#333",
                 }}>
-                  <span style={{ fontSize: 10, color: "#888", width: 34, textTransform: "uppercase" }}>{el.type}</span>
+                  <span style={{ fontSize: 10, color: "#888", width: 34, textTransform: "uppercase" }}>{el.type === "ellipse" ? "circle" : el.type}</span>
                   <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{el.name}</span>
                   {!readOnly && (
                     <>
@@ -623,7 +638,12 @@ export default function ImageBuilderEditor({ id, groupId, dealerScope = false }:
         <Modal title={groupId ? "Saved to your Group Image Library" : dealerScope ? "Saved to My Images" : "Saved to Image Library"} width={480}
           footer={<>
             {!groupId && !dealerScope && <a href="/admin/image-library" style={{ ...btn(), textDecoration: "none" }}>Open Image Library</a>}
-            <button style={btn("primary")} onClick={() => setExportResult(null)}>Done</button>
+            {dealerScope && meta.image_type === "logo" && (
+              <button style={btn()} disabled={logoSet === "busy" || logoSet === "done"} onClick={() => void setAsDealerLogo(exportResult.id)}>
+                {logoSet === "busy" ? "Setting…" : logoSet === "done" ? "Set as dealership logo ✓" : "Set as my dealership logo"}
+              </button>
+            )}
+            <button style={btn("primary")} onClick={() => { setExportResult(null); setLogoSet("idle"); }}>Done</button>
           </>}>
           <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -633,6 +653,14 @@ export default function ImageBuilderEditor({ id, groupId, dealerScope = false }:
               <div>Tab: {tabLabel(meta.image_type)}</div>
               <div>{spec.width} × {spec.height} px · 150 DPI · PNG</div>
               <div style={{ marginTop: 6, color: "#666" }}>Added as a new library image. Existing library images were not changed.</div>
+              {meta.image_type === "logo" && (
+                <div style={{ marginTop: 6, color: logoSet !== "idle" && logoSet !== "busy" && logoSet !== "done" ? "#c62828" : "#666" }}>
+                  {logoSet === "done" ? "Your Logo widgets now print this logo on addendums and infosheets."
+                    : logoSet !== "idle" && logoSet !== "busy" ? logoSet
+                    : dealerScope ? "Use it as your dealership logo, or pick it from the Logo widget's Logo library in the Builder."
+                    : "Your stores can pick it from the Logo widget's Logo library in the Builder."}
+                </div>
+              )}
             </div>
           </div>
         </Modal>
@@ -665,7 +693,7 @@ export default function ImageBuilderEditor({ id, groupId, dealerScope = false }:
 }
 
 function tabLabel(t: ImageType): string {
-  return t === "infobox" ? "Infobox Images" : t === "infosheet_bg" ? "Infosheet Backgrounds" : "Addendum Backgrounds";
+  return t === "infobox" ? "Infobox Images" : t === "infosheet_bg" ? "Infosheet Backgrounds" : t === "logo" ? "Logos" : "Addendum Backgrounds";
 }
 
 function PanelTitle({ children }: { children: React.ReactNode }) {
@@ -787,6 +815,38 @@ function ElementProps({ el, patch, align, onReplaceImage, onDuplicate, onDelete 
               <NumberField label="Stroke width" value={el.strokeWidth} min={0} onChange={(n) => P({ strokeWidth: n }, "sw")} />
             </>
           )}
+        </>
+      )}
+
+      {el.type === "ellipse" && (
+        <>
+          <Field label="Fill">
+            <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="checkbox" checked={el.fill !== null} onChange={(e) => P({ fill: e.target.checked ? "#e0e0e0" : null })} /> Filled
+            </label>
+          </Field>
+          {el.fill !== null && <ColorField label="Fill colour" value={el.fill} onChange={(c) => P({ fill: c }, "fill")} />}
+          <Field label="Outline">
+            <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="checkbox" checked={el.stroke !== null} onChange={(e) => P({ stroke: e.target.checked ? "#000000" : null })} /> Outline
+            </label>
+          </Field>
+          {el.stroke !== null && (
+            <>
+              <ColorField label="Outline colour" value={el.stroke} onChange={(c) => P({ stroke: c }, "stroke")} />
+              <NumberField label="Outline width" value={el.strokeWidth} min={0} onChange={(n) => P({ strokeWidth: n }, "sw")} />
+            </>
+          )}
+          <NumberField label="Opacity %" value={Math.round(el.opacity * 100)} min={0} max={100} onChange={(n) => P({ opacity: n / 100 }, "op")} />
+          <div style={{ fontSize: 11, color: "#666", marginTop: -6, marginBottom: 10 }}>Equal width and height make a circle.</div>
+        </>
+      )}
+
+      {el.type === "line" && (
+        <>
+          <ColorField label="Line colour" value={el.stroke} onChange={(c) => P({ stroke: c }, "stroke")} />
+          <NumberField label="Thickness" value={el.strokeWidth} min={0} onChange={(n) => P({ strokeWidth: n }, "sw")} />
+          <div style={{ fontSize: 11, color: "#666", marginTop: -6, marginBottom: 10 }}>Horizontal when wider than tall, vertical otherwise.</div>
         </>
       )}
 

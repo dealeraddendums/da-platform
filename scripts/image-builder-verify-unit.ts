@@ -119,6 +119,16 @@ console.log("\nimage builder — design validation\n");
   };
   check("valid doc with all four element types passes", validateDesign(ok) === null, String(validateDesign(ok)));
   check("transparent background (null) allowed", validateDesign({ ...ok, background: null }) === null);
+  // Logo Composer shapes (2026-10-09)
+  const shapes = { version: 1, background: null, elements: [
+    { id: "c1", name: "Circle", type: "ellipse", x: 0, y: 0, w: 100, h: 100, fill: null, opacity: 1, stroke: "#000000", strokeWidth: 4 },
+    { id: "c2", name: "Disc", type: "ellipse", x: 0, y: 0, w: 80, h: 40, fill: "#1976d2", opacity: 0.5, stroke: null, strokeWidth: 0 },
+    { id: "l1", name: "Line", type: "line", x: 0, y: 50, w: 300, h: 8, stroke: "#2a2b3c", strokeWidth: 3 },
+  ] };
+  check("ellipse + line elements validate", validateDesign(shapes) === null, String(validateDesign(shapes)));
+  check("ellipse with bad fill rejected", validateDesign({ ...shapes, elements: [{ ...shapes.elements[0], fill: "blue" }] }) !== null);
+  check("line without a colour rejected", validateDesign({ ...shapes, elements: [{ ...shapes.elements[2], stroke: null }] }) !== null);
+  check("logo type is 1500x500 in the dealer-logos bucket, owned-only", IMAGE_TYPES.logo.width === 1500 && IMAGE_TYPES.logo.height === 500 && IMAGE_TYPES.logo.bucket === "new-dealer-logos" && IMAGE_TYPES.logo.ownedOnly === true);
   check("unknown element type rejected", validateDesign({ ...ok, elements: [{ ...ok.elements[0], type: "circle" }] }) !== null);
   check("duplicate ids rejected", validateDesign({ ...ok, elements: [ok.elements[0], ok.elements[0]] }) !== null);
   check("remote image URL rejected (data URLs only — keeps canvas untainted)",
@@ -159,7 +169,9 @@ console.log("\nimage builder — starter templates\n");
   check("all 7 named templates present (+ narrow variant)", [
     "Classic Black Frame + Notch", "Frame + Pricing Block", "Two-Panel", "Colored Frame",
     "Dealer Infosheet", "Disclaimer Box", "Not-a-Factory-Sticker"].every((n) => STARTER_TEMPLATES.some((t) => t.name === n)));
-  check("every image type has at least one template", IMAGE_TYPE_LIST.every((s) => STARTER_TEMPLATES.some((t) => t.image_type === s.type)));
+  // Logos (migration 174) are dealer/group-only and have no platform starters.
+  check("every platform image type has at least one template", IMAGE_TYPE_LIST.filter((s) => !s.ownedOnly).every((s) => STARTER_TEMPLATES.some((t) => t.image_type === s.type)));
+  check("no starter template is a dealer/group-only type", STARTER_TEMPLATES.every((t) => !IMAGE_TYPES[t.image_type].ownedOnly));
   check("template ids unique", new Set(STARTER_TEMPLATES.map((t) => t.id)).size === STARTER_TEMPLATES.length);
   for (const t of STARTER_TEMPLATES) {
     const spec = IMAGE_TYPES[t.image_type];

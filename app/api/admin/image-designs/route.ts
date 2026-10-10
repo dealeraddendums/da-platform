@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { builderDb, designInScope, ownerColumns, replacesImageAllowed, requireBuilderScope, scopeDesignQuery } from "@/lib/image-builder/access";
 import { audit, DESIGN_LIST_COLUMNS, ensureDealerSeeded, ensureGroupSeeded, writeVersion } from "@/lib/image-builder/server";
-import { isImageType, validateDesign, MAX_DESIGN_JSON_BYTES, type DesignDoc } from "@/lib/image-builder/spec";
+import { IMAGE_TYPES, isImageType, validateDesign, MAX_DESIGN_JSON_BYTES, type DesignDoc } from "@/lib/image-builder/spec";
 
 // Image Builder designs (migration 163). Staff, one group with ?group=<id>
 // (migration 167), or the session's dealer with ?dealer=1 — see
@@ -69,6 +69,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   if (!isImageType(imageType)) return NextResponse.json({ error: "Invalid image_type" }, { status: 400 });
+  // Logos (migration 174) belong to a dealer or a group — never the platform
+  // (the dealer-logos bucket has no shared platform section).
+  if (IMAGE_TYPES[imageType].ownedOnly && scope.kind === "platform") {
+    return NextResponse.json({ error: "Logos are made in a dealer's or a group's Image Builder." }, { status: 400 });
+  }
+  // A brand-new logo starts on a transparent canvas.
+  if (imageType === "logo" && body.from_id === undefined && body.design_json === undefined) doc = { ...EMPTY_DOC, background: null };
   if (!name) return NextResponse.json({ error: "Name is required" }, { status: 400 });
   const bad = validateDesign(doc);
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
@@ -88,6 +95,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     })
     .select(DESIGN_LIST_COLUMNS)
     .single();
+  if (insErr && /image_type_check/.test(insErr.message ?? "")) {
+    return NextResponse.json({ error: "Logos aren't switched on yet (a database update — migration 174 — is pending). Try again shortly." }, { status: 503 });
+  }
   if (insErr || !row) return NextResponse.json({ error: insErr?.message ?? "Insert failed" }, { status: 500 });
 
   await writeVersion(row.id, doc as DesignDoc, claims.sub);

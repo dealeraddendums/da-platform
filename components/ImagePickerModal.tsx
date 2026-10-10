@@ -29,11 +29,17 @@ interface ImagePickerModalProps {
   /** "+ Create a background" → the Image Builder, opened in a NEW tab so the
    *  in-progress template is never disturbed. Omitted/null = no link. */
   createHref?: string | null;
+  /** Link text for createHref (default "+ Create a background"). */
+  createLabel?: string;
+  /** Thumbnail aspect ratio (default portrait paper "8.5 / 11"; logos "3 / 1"). */
+  thumbAspect?: string;
+  /** Empty-state text (default "No images found"). */
+  emptyText?: string;
 }
 
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 
-export default function ImagePickerModal({ bucket, title, onSelect, onClose, groupId, createHref }: ImagePickerModalProps) {
+export default function ImagePickerModal({ bucket, title, onSelect, onClose, groupId, createHref, createLabel = "+ Create a background", thumbAspect = "8.5 / 11", emptyText = "No images found" }: ImagePickerModalProps) {
   const [images, setImages] = useState<ImageEntry[]>([]);
   const [groupName, setGroupName] = useState<string | null>(null);
   const [caller, setCaller] = useState<Caller>({ canUploadPlatform: false, canUploadGroup: false, canUploadDealer: false });
@@ -157,7 +163,7 @@ export default function ImagePickerModal({ bucket, title, onSelect, onClose, gro
             <a href={createHref} target="_blank" rel="noopener noreferrer"
               title="Opens the Image Builder in a new tab — this template stays open"
               style={{ whiteSpace: "nowrap", padding: "5px 12px", background: "#fff", color: "#1976d2", border: "1px solid #1976d2", borderRadius: 4, fontSize: 12, fontWeight: 600, textDecoration: "none" }}>
-              + Create a background
+              {createLabel}
             </a>
           )}
         </div>
@@ -171,7 +177,7 @@ export default function ImagePickerModal({ bucket, title, onSelect, onClose, gro
           {loading ? (
             <div style={{ textAlign: "center", padding: 48, color: "#78828c", fontSize: 13 }}>Loading…</div>
           ) : sections.length === 0 ? (
-            <div style={{ textAlign: "center", padding: 48, color: "#78828c", fontSize: 13 }}>No images found</div>
+            <div style={{ textAlign: "center", padding: 48, color: "#78828c", fontSize: 13 }}>{emptyText}</div>
           ) : (
             sections.map((section) => (
               <div key={section.label} style={{ marginBottom: 20 }}>
@@ -196,7 +202,7 @@ export default function ImagePickerModal({ bucket, title, onSelect, onClose, gro
                           >×</button>
                         )}
                         {/* Portrait aspect ratio matches addendum paper (8.5×11); contain shows the full background */}
-                        <div style={{ aspectRatio: "8.5 / 11", overflow: "hidden", background: "#fff" }}>
+                        <div style={{ aspectRatio: thumbAspect, overflow: "hidden", background: "#fff" }}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={img.url} alt={label} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
                         </div>

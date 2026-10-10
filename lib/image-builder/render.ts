@@ -111,6 +111,29 @@ function drawElement(ctx: CanvasRenderingContext2D, e: DesignElement, images: Im
       ctx.fill();
       if (e.stroke) insideStroke(ctx, e.x, e.y, e.w, e.h, e.radius, e.strokeWidth, e.stroke);
       break;
+    case "ellipse": {
+      // Stroke sits INSIDE the box, matching frame/box.
+      const sw = e.stroke ? Math.min(e.strokeWidth, e.w / 2, e.h / 2) : 0;
+      const rx = Math.max(0, e.w / 2 - sw / 2), ry = Math.max(0, e.h / 2 - sw / 2);
+      ctx.globalAlpha = e.opacity;
+      ctx.beginPath();
+      ctx.ellipse(e.x + e.w / 2, e.y + e.h / 2, Math.max(0, e.w / 2 - sw), Math.max(0, e.h / 2 - sw), 0, 0, Math.PI * 2);
+      if (e.fill) { ctx.fillStyle = e.fill; ctx.fill(); }
+      if (e.stroke && sw > 0) {
+        ctx.beginPath();
+        ctx.ellipse(e.x + e.w / 2, e.y + e.h / 2, rx, ry, 0, 0, Math.PI * 2);
+        ctx.lineWidth = sw; ctx.strokeStyle = e.stroke; ctx.stroke();
+      }
+      break;
+    }
+    case "line": {
+      if (e.strokeWidth <= 0) break;
+      ctx.beginPath();
+      if (e.w >= e.h) { ctx.moveTo(e.x, e.y + e.h / 2); ctx.lineTo(e.x + e.w, e.y + e.h / 2); }
+      else { ctx.moveTo(e.x + e.w / 2, e.y); ctx.lineTo(e.x + e.w / 2, e.y + e.h); }
+      ctx.lineWidth = e.strokeWidth; ctx.strokeStyle = e.stroke; ctx.lineCap = "butt"; ctx.stroke();
+      break;
+    }
     case "text":
       drawText(ctx, e);
       break;

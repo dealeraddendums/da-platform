@@ -101,7 +101,7 @@ export async function requireBuilderScope(req: Request): Promise<
   return { claims: r.claims, scope: { kind: "group", groupId: group }, error: null };
 }
 
-async function requireDealerBuilderScope(): Promise<
+export async function requireDealerBuilderScope(): Promise<
   { claims: JwtClaims; scope: BuilderScope; error: null } | { claims: null; scope: null; error: NextResponse }
 > {
   const r = await requireAuth();

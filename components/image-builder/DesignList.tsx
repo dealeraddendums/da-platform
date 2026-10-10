@@ -140,7 +140,7 @@ export default function DesignList({ groupId, dealerScope = false }: { groupId?:
         <button style={btn("primary")} onClick={() => setCreating({ name: "", type: "infobox" })}>+ New design</button>
         <select style={{ ...input, width: 260 }} value={filter} onChange={(e) => setFilter(e.target.value as ImageType | "")}>
           <option value="">All image types</option>
-          {IMAGE_TYPE_LIST.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
+          {IMAGE_TYPE_LIST.filter((t) => owned || !t.ownedOnly).map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
         </select>
         {groupId
           ? <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginLeft: "auto" }}>Saved images go to your Group Image Library — every store in the group can use them.</span>
@@ -185,7 +185,7 @@ export default function DesignList({ groupId, dealerScope = false }: { groupId?:
           ) : (
             <Field label="Image type">
               <select style={input} value={creating.type} onChange={(e) => setCreating({ ...creating, type: e.target.value as ImageType })}>
-                {IMAGE_TYPE_LIST.map((t) => <option key={t.type} value={t.type}>{t.label} — {t.width}×{t.height}</option>)}
+                {IMAGE_TYPE_LIST.filter((t) => owned || !t.ownedOnly).map((t) => <option key={t.type} value={t.type}>{t.label} — {t.width}×{t.height}</option>)}
               </select>
             </Field>
           )}

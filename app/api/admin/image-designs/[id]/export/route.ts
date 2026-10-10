@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { builderDb, designInScope, requireBuilderScope } from "@/lib/image-builder/access";
 import { audit, checkExport, saveToLibrary } from "@/lib/image-builder/server";
-import { isImageType } from "@/lib/image-builder/spec";
+import { IMAGE_TYPES, isImageType } from "@/lib/image-builder/spec";
 
 /**
  * POST /api/admin/image-designs/[id]/export — "Save to Image Library".
@@ -19,6 +19,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .from("image_designs").select("id, name, image_type, group_id, dealer_uuid, is_template").eq("id", params.id).maybeSingle();
   if (!design || !designInScope(design, scope)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!isImageType(design.image_type)) return NextResponse.json({ error: "Bad image type" }, { status: 500 });
+  if (IMAGE_TYPES[design.image_type as keyof typeof IMAGE_TYPES].ownedOnly && scope.kind === "platform") {
+    return NextResponse.json({ error: "Logos are saved to a dealer's or a group's library." }, { status: 400 });
+  }
 
   let form: FormData;
   try { form = await req.formData(); } catch { return NextResponse.json({ error: "Invalid form data" }, { status: 400 }); }
