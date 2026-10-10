@@ -19,6 +19,15 @@ import type { VehicleInput } from "@/lib/ai-content";
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>;
 
+/**
+ * THE no-unsupported-claims rule for every AI vehicle description — the Edit
+ * Vehicle generator below AND the automatic infosheet description
+ * (generateVehicleContent in lib/ai-content.ts). One string so the two can't
+ * drift. An infosheet is a document the dealer stands behind.
+ */
+export const NO_UNSUPPORTED_CLAIMS =
+  `Do not make claims the data doesn't support — no reliability or durability promises, no "legendary", "best-in-class", "built to exacting standards", no guesses about features, packages or technology that aren't listed. If the data is thin, write a shorter description rather than padding it.`;
+
 /** Same model the AI-content route uses (lib/ai-content.ts). */
 export const VEHICLE_DESC_MODEL = "claude-haiku-4-5-20251001";
 const MAX_MODIFIER_CHARS = 2000;
@@ -107,7 +116,7 @@ Vehicle: ${name || "Vehicle"}
 ${facts}
 
 Write 2-4 sentences for customers: specific, factual, professional. Use only the vehicle data above. ${angle}
-Do not make claims the data doesn't support — no reliability or durability promises, no "legendary", "best-in-class", "built to exacting standards", no guesses about features, packages or technology that aren't listed. If the data is thin, write a shorter description rather than padding it.
+${NO_UNSUPPORTED_CLAIMS}
 Do not include a VIN or stock number unless a house rule asks for it. No markdown, no headings, no surrounding quotes.${modifierPromptBlock(lines)}
 
 Return only the description text.`;

@@ -3,7 +3,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { VinQueryData } from './vinquery';
-import { modifierPromptBlock } from './vehicle-description-ai';
+import { modifierPromptBlock, NO_UNSUPPORTED_CLAIMS } from './vehicle-description-ai';
 
 export interface AiContent {
   description: string;
@@ -79,7 +79,7 @@ ${specLines}
 ${optionLines}
 
 Respond with a single JSON object containing exactly these two keys:
-1. "description": A 2-3 sentence compelling vehicle description for customers. Be specific, factual, and professional. Highlight key selling points. No markdown, no quotes around the field value.
+1. "description": A 2-3 sentence vehicle description for customers. Be specific, factual, and professional, using only the vehicle data above. ${NO_UNSUPPORTED_CLAIMS} No markdown, no quotes around the field value.
 2. "features": An array of 10-14 pairs, each pair is [label, value]. Cover: engine/power, transmission, drivetrain, MPG (city/hwy if available), body style, exterior color, mileage (if used/CPO), seating, and 2-3 notable options if provided. Labels should be short (1-3 words). Values should be concise.
 
 ${modifierLines.length ? `\nThese house rules apply to the "description" field ONLY (never to "features"):${modifierPromptBlock(modifierLines)}\n` : ''}
