@@ -23,11 +23,27 @@ type Admin = ReturnType<typeof createAdminSupabaseClient>;
 /**
  * THE no-unsupported-claims rule for every AI vehicle description — the Edit
  * Vehicle generator below AND the automatic infosheet description
- * (generateVehicleContent in lib/ai-content.ts). One string so the two can't
- * drift. An infosheet is a document the dealer stands behind.
+ * (generateVehicleContent in lib/ai-content.ts, which also backs the Builder
+ * preview and the Add Vehicle AI fill). One string so no path can drift.
+ *
+ * An infosheet is a document the dealer stands behind, so this is a
+ * compliance rule, not a tone preference (2026-10-10, Allan): the model may
+ * assert only what the vehicle data or the dealer's own house rules state.
+ * Warranty, condition-quality, history and ranking claims are fabrications
+ * the model has no data for. A house rule is the dealer's own assertion and
+ * may authorize a statement (e.g. "Mention Free Carfax for used vehicles").
  */
 export const NO_UNSUPPORTED_CLAIMS =
-  `Do not make claims the data doesn't support — no reliability or durability promises, no "legendary", "best-in-class", "built to exacting standards", no popularity, ranking or reputation claims ("most popular", "proven", "trusted"), no guesses about features, packages or technology that aren't listed. If the data is thin, write a shorter description rather than padding it. Do not use these words unless the exact word appears in the vehicle data: legendary, ultimate, iconic, proven, trusted, dependable, reliable, renowned, best-in-class, unmatched, premium, powerful, advanced, luxurious.`;
+  `FACTS ONLY. State only facts that appear in the vehicle data above (year, make, model, trim, body style, colors, mileage, MSRP, engine, transmission, drivetrain, fuel, MPG, listed options/features, and the stated condition New / Used / Certified Pre-Owned) or that a dealership house rule explicitly tells you to state. Do not state or imply anything else, however it is phrased. In particular, NEVER write any of the following unless the vehicle data or a house rule explicitly provides it:
+- Warranty or coverage of any kind — "warranty remaining", "years of coverage", "covered until", "factory warranty", "CPO warranty", "peace of mind". "Certified Pre-Owned" may be stated as the condition, but say nothing about what certification includes.
+- Condition quality — "like-new", "pristine", "mint", "excellent condition", "great shape", "well-maintained", "well cared for", "garage-kept", "one-owner", "accident-free", "clean history", "clean title". Low mileage may be stated as the number; do not turn it into a condition claim.
+- Maintenance, service, ownership or usage history — service records, prior owners, how it was driven or stored.
+- Rankings, popularity, awards or superlatives — "best-selling", "#1", "award-winning", "top-rated", "most reliable", "most popular", "proven", "trusted", "legendary", "best-in-class", "industry-leading", "unmatched".
+- Reliability, durability, safety or performance claims — no promises about how long it lasts or how safe it is, and no horsepower, torque, 0-60, towing, MPG or range figures that are not in the data above.
+- Price, savings, value or deal claims — "great value", "priced to sell", "below market", "save", discounts or incentives. The MSRP may be stated only if it is in the data above.
+- Features, packages or technology that are not listed.
+Do not use these words unless the exact word appears in the vehicle data or a house rule: legendary, ultimate, iconic, proven, trusted, dependable, reliable, renowned, best-in-class, unmatched, premium, powerful, advanced, luxurious, pristine, immaculate, flawless.
+If the data is thin, write a shorter, plain description rather than padding it. Before answering, reread your draft and remove any sentence that is not supported by the vehicle data or a house rule.`;
 
 /** Same model the AI-content route uses (lib/ai-content.ts). */
 export const VEHICLE_DESC_MODEL = "claude-haiku-4-5-20251001";
@@ -94,12 +110,12 @@ Rules about the house rules: they set tone, length, emphasis and what to include
 
 // Different openings so repeated "Generate" clicks give genuinely different drafts.
 const ANGLES = [
-  "Open with what makes this vehicle enjoyable to drive.",
+  "Open with its drivetrain and powertrain from the data.",
   "Open with its practicality for everyday life.",
   "Open with its standout specification from the data.",
   "Open with who this vehicle is a great fit for.",
-  "Open with its comfort and interior experience, staying within the data.",
-  "Open with its value and condition, staying within the data.",
+  "Open with its comfort and interior features, staying within the data.",
+  "Open with its body style, color and drivetrain.",
 ];
 
 export async function generateInfosheetDescription(
