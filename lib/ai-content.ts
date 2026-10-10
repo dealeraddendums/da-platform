@@ -3,7 +3,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { VinQueryData } from './vinquery';
-import { modifierPromptBlock, NO_UNSUPPORTED_CLAIMS } from './vehicle-description-ai';
+import { modifierPromptBlock, NO_UNSUPPORTED_CLAIMS, findUnsupportedClaims, stripUnsupportedSentences, rejectedClaimsNote } from './vehicle-description-ai';
 
 export interface AiContent {
   description: string;
@@ -87,16 +87,31 @@ ${NO_UNSUPPORTED_CLAIMS}
 ${modifierLines.length ? `\nThese house rules apply to the "description" field ONLY (never to "features"):${modifierPromptBlock(modifierLines)}\n` : ''}
 Return only raw JSON with no markdown fences or extra text.`;
 
-  const message = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 1200,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  const raw = (message.content[0] as { type: string; text: string }).text.trim();
-  // Strip markdown fences if present
-  const json = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-  const parsed = JSON.parse(json) as { description: string; features: [string, string][] };
+  // Facts-only backstop (NO_UNSUPPORTED_CLAIMS): the description is checked
+  // against the vehicle data + house rules; a failing draft is regenerated
+  // with the phrases named, then its offending sentences are removed.
+  const source = `${vehicleStr}\n${colorPart} ${mileagePart} ${conditionPart}\n${specLines}\n${optionLines}\n${modifierLines.join('\n')}`;
+  let rejected: string[] = [];
+  let parsed: { description: string; features: [string, string][] } = { description: '', features: [] };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const message = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1200,
+      messages: [{ role: 'user', content: prompt + rejectedClaimsNote(rejected) }],
+    });
+    // Join every text block (newer models can lead with a non-text block).
+    const raw = message.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text).join('').trim();
+    // Strip markdown fences if present
+    const json = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+    parsed = JSON.parse(json) as { description: string; features: [string, string][] };
+    const bad = findUnsupportedClaims(parsed.description ?? '', source);
+    if (!bad.length) break;
+    console.warn(`[ai-content] description rejected for unsupported claims: ${bad.join(', ')}`);
+    rejected = Array.from(new Set(rejected.concat(bad)));
+    if (attempt === 2) parsed = { ...parsed, description: stripUnsupportedSentences(parsed.description ?? '', source) };
+  }
 
   return {
     description: parsed.description ?? '',

@@ -45,6 +45,87 @@ export const NO_UNSUPPORTED_CLAIMS =
 Do not use these words unless the exact word appears in the vehicle data or a house rule: legendary, ultimate, iconic, proven, trusted, dependable, reliable, renowned, best-in-class, unmatched, premium, powerful, advanced, luxurious, pristine, immaculate, flawless.
 If the data is thin, write a shorter, plain description rather than padding it. Before answering, reread your draft and remove any sentence that is not supported by the vehicle data or a house rule.`;
 
+// ── Deterministic backstop for NO_UNSUPPORTED_CLAIMS ────────────────────────
+// The model does not reliably obey a word list (live test 2026-10-10: ~1 in 3
+// drafts still said "proven" / "trusted" / "reliable" / "excellent value"), so
+// every description from either generator is checked here. A phrase is
+// allowed only when it appears in the vehicle data or a house rule (e.g. a
+// house rule that mentions a warranty, or a VIN decode that lists horsepower).
+// A failing draft is regenerated with the phrases named; if it still fails,
+// the offending sentences are removed (enforceFactsOnly).
+const CLAIM_PATTERNS: RegExp[] = [
+  // warranty / coverage
+  /\bwarrant(y|ies|ied)\b/i, /\bcoverage\b/i, /\bcovered (until|by|for|through)\b/i, /\bpeace of mind\b/i,
+  // condition quality
+  /\blike[- ]new\b/i, /\bpristine\b/i, /\bimmaculate\b/i, /\bflawless\b/i, /\bmint( condition)?\b/i,
+  /\b(excellent|great|outstanding|superb|good) (condition|shape)\b/i,
+  /\bwell[- ](maintained|kept|cared[- ]for|cared)\b/i, /\bgarage[- ]kept\b/i,
+  /\b(one|single)[- ]owner\b/i, /\baccident[- ]free\b/i, /\bno accidents\b/i,
+  /\bclean (history|title|record|carfax|vehicle history)\b/i,
+  // maintenance / ownership history
+  /\b(service|maintenance) (records?|history)\b/i, /\b(previous|prior|original) owners?\b/i, /\bdealer[- ]serviced\b/i,
+  // rankings / superlatives / reputation
+  /\bbest[- ]sell(ing|er)\b/i, /#\s?1\b/, /\bnumber one\b/i, /\baward[- ]winning\b/i, /\btop[- ]rated\b/i,
+  /\bmost (reliable|popular|trusted|dependable)\b/i, /\bpopular\b/i, /\bproven\b/i, /\btrusted\b/i, /\blegendary\b/i,
+  /\biconic\b/i, /\brenowned\b/i, /\bbest[- ]in[- ]class\b/i, /\bindustry[- ]leading\b/i, /\bunmatched\b/i,
+  /\breputation\b/i,
+  // reliability / durability
+  /\breliab(le|ility)\b/i, /\bdependab(le|ility)\b/i, /\bdurab(le|ility)\b/i, /\blong[- ]lasting\b/i,
+  // invented performance figures
+  /\b\d[\d,]*\s*(hp|horsepower|lb[- ]?ft)\b/i, /\b0[- ]60\b/i,
+  // price / savings / value
+  /\b(great|excellent|outstanding|exceptional|incredible|unbeatable|good) value\b/i, /\bvalue\b/i,
+  /\bpriced to sell\b/i, /\bbelow market\b/i, /\bsavings?\b/i, /\bsave\b/i, /\bdiscount(s|ed)?\b/i,
+  /\bincentives?\b/i, /\brebates?\b/i, /\bdeal\b/i,
+];
+
+/** Phrases in `text` that NO_UNSUPPORTED_CLAIMS forbids and that the source
+ *  (vehicle data + house rules) does not itself contain. */
+export function findUnsupportedClaims(text: string, source: string): string[] {
+  const src = source.toLowerCase();
+  const found = new Set<string>();
+  for (const re of CLAIM_PATTERNS) {
+    const m = text.match(re);
+    if (m && !src.includes(m[0].toLowerCase())) found.add(m[0]);
+  }
+  return Array.from(found);
+}
+
+/** Drop every sentence that carries an unsupported claim. */
+export function stripUnsupportedSentences(text: string, source: string): string {
+  const sentences = text.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) ?? [text];
+  return sentences.filter((s) => findUnsupportedClaims(s, source).length === 0).join("").trim();
+}
+
+/**
+ * Run a description generator under the facts-only rule. `generate` receives
+ * the phrases a previous draft was rejected for ([] on the first try) so it can
+ * tell the model; at most `attempts` drafts, then the last one is stripped.
+ */
+export async function enforceFactsOnly(
+  generate: (rejected: string[]) => Promise<string>,
+  source: string,
+  attempts = 3,
+): Promise<string> {
+  let rejected: string[] = [];
+  let last = "";
+  for (let i = 0; i < attempts; i++) {
+    last = await generate(rejected);
+    const bad = findUnsupportedClaims(last, source);
+    if (!bad.length) return last;
+    rejected = Array.from(new Set(rejected.concat(bad)));
+    console.warn(`[vehicle-description] draft rejected for unsupported claims: ${bad.join(", ")}`);
+  }
+  return stripUnsupportedSentences(last, source);
+}
+
+/** The retry note appended to a prompt after a rejected draft ("" on the first try). */
+export function rejectedClaimsNote(rejected: string[]): string {
+  return rejected.length
+    ? `\n\nA previous draft was rejected because it used these unsupported phrases: ${rejected.map((r) => `"${r}"`).join(", ")}. Do not use them or any similar claim. Stick strictly to the vehicle data and house rules.`
+    : "";
+}
+
 /** Same model the AI-content route uses (lib/ai-content.ts). */
 export const VEHICLE_DESC_MODEL = "claude-haiku-4-5-20251001";
 const MAX_MODIFIER_CHARS = 2000;
@@ -139,10 +220,11 @@ export async function generateInfosheetDescription(
   ].filter(Boolean).join("\n");
   const angle = ANGLES[Math.floor(Math.random() * ANGLES.length)];
 
+  const dataBlock = `Vehicle: ${name || "Vehicle"}
+${facts}`;
   const prompt = `Write the vehicle description for a car dealership's printed information sheet.
 
-Vehicle: ${name || "Vehicle"}
-${facts}
+${dataBlock}
 
 Write 2-4 sentences for customers: specific, factual, professional. Use only the vehicle data above. ${angle}
 ${NO_UNSUPPORTED_CLAIMS}
@@ -150,14 +232,16 @@ Do not include a VIN or stock number unless a house rule asks for it. No markdow
 
 Return only the description text.`;
 
-  const message = await client.messages.create({
-    model: VEHICLE_DESC_MODEL,
-    max_tokens: 400,
-    temperature: 1,
-    messages: [{ role: "user", content: prompt }],
-  });
-  // Join every text block (newer models can lead with a non-text block).
-  return message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text).join("").trim().replace(/^"|"$/g, "");
+  return enforceFactsOnly(async (rejected) => {
+    const message = await client.messages.create({
+      model: VEHICLE_DESC_MODEL,
+      max_tokens: 400,
+      temperature: 1,
+      messages: [{ role: "user", content: prompt + rejectedClaimsNote(rejected) }],
+    });
+    // Join every text block (newer models can lead with a non-text block).
+    return message.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text).join("").trim().replace(/^"|"$/g, "");
+  }, `${dataBlock}\n${lines.join("\n")}`);
 }
