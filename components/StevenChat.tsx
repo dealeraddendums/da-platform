@@ -59,6 +59,8 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"chat" | "tickets">("chat");
   const [messages, setMessages] = useState<Msg[]>([]);
+  // Server-decided (X-Steven-Mode) — display only; it grants nothing.
+  const [staffMode, setStaffMode] = useState(false);
   const [liveAgent, setLiveAgent] = useState<{ name: string | null; photo: string | null } | null>(null);
   // Ticket detail (My support tickets → open one): status + the agents' progress
   // notes + the dealer's own additions (not the chat transcript) + add info.
@@ -158,6 +160,8 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
       });
       const hdr = res.headers.get("X-Conversation-Id");
       if (hdr) convId.current = hdr;
+      const modeHdr = res.headers.get("X-Steven-Mode");
+      if (modeHdr) setStaffMode(modeHdr === "internal");
 
       // A person has this chat — the server relayed the message to them.
       if (res.headers.get("X-Help-Live") === "1") {
@@ -508,6 +512,11 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
                 {live && (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginBottom: 8, padding: "6px 10px", borderRadius: 6, border: "1px solid #cfe8d2", background: "#f1faf2", color: "#2e7d32", fontSize: 12.5, fontWeight: 600 }}>
                     <span style={{ width: 7, height: 7, borderRadius: 4, background: "#4caf50", display: "inline-block" }} /> You&rsquo;re connected to our support team
+                  </div>
+                )}
+                {staffMode && !live && (
+                  <div style={{ marginBottom: 8, padding: "5px 10px", borderRadius: 6, border: "1px solid #ffe082", background: "#fff8e1", color: "#7a5c00", fontSize: 12, fontWeight: 600, textAlign: "center" }}>
+                    Staff mode &middot; answering from the internal knowledge base
                   </div>
                 )}
                 <div style={{ display: "flex", gap: 6 }}>

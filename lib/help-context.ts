@@ -139,18 +139,27 @@ export interface ScoredRetrieval {
    *  guides and is NOT grounded in anything about the question. */
   matched: boolean;
   top: { title: string; score: number } | null;
+  /** Slugs of the retrieved articles whose audience is 'internal' (audit). */
+  internalSlugs: string[];
 }
 
 /** Same selection as getRelevantArticles, plus how good the best match was —
  *  the knowledge-gap log needs to know when Steven had nothing to go on. */
-export async function getRelevantArticlesScored(query: string, limit = 4): Promise<ScoredRetrieval> {
+//
+// `audiences` is the HARD retrieval filter, resolved by the caller from the
+// session (lib/steven-mode stevenAudiences). Default = dealer-facing only;
+// 'internal' is only ever passed for a verified super_admin in internal mode.
+export async function getRelevantArticlesScored(query: string, limit = 4, audiences: string[] = ["dealer", "all"]): Promise<ScoredRetrieval> {
   const admin = createAdminSupabaseClient();
   // help_articles isn't in the generated Database type yet (migration 091).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (admin as any).from("help_articles")
-    .select("title, category, body, sort_order").eq("published", true).in("audience", ["dealer", "all"])
+    .select("slug, title, category, body, sort_order, audience").eq("published", true).in("audience", audiences)
     .order("sort_order", { ascending: true }).limit(500);
-  const all = ((data ?? []) as (RetrievedArticle & { sort_order: number | null })[])
+  const all = ((data ?? []) as (RetrievedArticle & { sort_order: number | null; slug: string; audience: string })[])
+    // Re-check the filter in memory: an internal row must never reach a caller
+    // that didn't ask for it, whatever the query builder did.
+    .filter((a) => audiences.includes(a.audience))
     .map((a) => ({ ...a, text: htmlToText(a.body) }));
 
   const words = Array.from(new Set(((query ?? "").toLowerCase().match(/[a-z0-9]{3,}/g) ?? [])
@@ -170,5 +179,6 @@ export async function getRelevantArticlesScored(query: string, limit = 4): Promi
     articles: picked.map((a) => ({ title: a.title, category: a.category, body: a.text })),
     matched: scored.length > 0,
     top: scored.length ? { title: scored[0].a.title, score: scored[0].score } : null,
+    internalSlugs: picked.filter((a) => a.audience === "internal").map((a) => a.slug),
   };
 }

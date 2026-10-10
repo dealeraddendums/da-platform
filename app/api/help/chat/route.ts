@@ -5,9 +5,11 @@ import { resolveEffectiveDealer } from "@/lib/dealer-authz";
 import { buildDealerContext, getRelevantArticlesScored } from "@/lib/help-context";
 import { logKnowledgeGap, UNANSWERED_RE } from "@/lib/help-gaps";
 import { STEVEN_TOOLS, runStevenTool } from "@/lib/steven-tools";
-import { buildSystemPrompt } from "@/lib/help-knowledge";
+import { buildSystemPrompt, buildInternalSystemPrompt } from "@/lib/help-knowledge";
+import { resolveStevenMode, stevenAudiences } from "@/lib/steven-mode";
+import { redactSecrets } from "@/lib/secret-redact";
 import { createConversation, ownsConversation, appendMessage, escalateConversation, resolveAsker } from "@/lib/help-conversations";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { publishToInbox } from "@/lib/help-handoff";
 
 // Sentinel the model appends (own final line) when it can't resolve and the user
@@ -105,13 +107,21 @@ export async function POST(req: NextRequest): Promise<Response> {
     }
   }
 
+  // Internal (staff) vs dealer mode — decided ONLY from the server-resolved
+  // session (lib/steven-mode). Ghost / impersonation / any non-super_admin →
+  // dealer mode, which can never retrieve an internal article.
+  const mode = resolveStevenMode(claims);
+
   // Grounding + own-data-only context (both resolved server-side from claims).
   const [dealerContext, retrieval] = await Promise.all([
     buildDealerContext(claims),
-    getRelevantArticlesScored(lastUser.content),
+    getRelevantArticlesScored(lastUser.content, mode === "internal" ? 5 : 4, stevenAudiences(mode)),
   ]);
   const articles = retrieval.articles;
-  const system = buildSystemPrompt({ dealerContext, articles }) +
+  const system = mode === "internal"
+    ? buildInternalSystemPrompt({ articles }) +
+      (page ? `\n\nThe staffer is currently on this page of the app: ${page}` : "")
+    : buildSystemPrompt({ dealerContext, articles }) +
     (page ? `\n\nThe user is currently on this page of the app: ${page}` : "") +
     "\n\nESCALATION: If the user explicitly needs a human, or you genuinely cannot resolve their" +
     " issue from the material above, append the token [[ESCALATE]] on its own final line. The app" +
@@ -133,9 +143,21 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (conversationId) await appendMessage(conversationId, "user", lastUser.content);
   const convId = conversationId;
 
+  // Audit every internal-mode turn + which internal articles it pulled.
+  if (mode === "internal") {
+    fireWrite((createAdminSupabaseClient() as any).from("admin_audit").insert({ // eslint-disable-line @typescript-eslint/no-explicit-any
+      admin_user_id: claims.sub,
+      action: "steven_internal_query",
+      target_dealer_id: null,
+      metadata: { conversation_id: convId, internal_articles: retrieval.internalSlugs, articles: articles.map((a) => a.title) },
+    }), "admin_audit steven_internal_query");
+  }
+
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const encoder = new TextEncoder();
-  const TAIL = 16; // hold back enough trailing chars to catch/strip the sentinel before flushing
+  // Hold back enough trailing chars to catch/strip the sentinel AND to finish
+  // recognising a credential-shaped string (lib/secret-redact) before flushing.
+  const TAIL = 64;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -156,8 +178,10 @@ export async function POST(req: NextRequest): Promise<Response> {
           for await (const ev of ms) {
             if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
               full += ev.delta.text;
-              const safe = full.length - TAIL;          // withhold the tail (may contain the sentinel)
-              if (safe > flushed) { controller.enqueue(encoder.encode(full.slice(flushed, safe))); flushed = safe; }
+              // Flush the REDACTED text; `flushed` indexes the redacted string.
+              const red = redactSecrets(full);
+              const safe = red.length - TAIL;          // withhold the tail (sentinel / partial secret)
+              if (safe > flushed) { controller.enqueue(encoder.encode(red.slice(flushed, safe))); flushed = safe; }
             }
           }
           const final = await ms.finalMessage();
@@ -173,14 +197,16 @@ export async function POST(req: NextRequest): Promise<Response> {
           if (full && !/\s$/.test(full)) full += "\n\n"; // keep pre-tool text apart from the answer
         }
         // Flush the remaining tail with the sentinel removed.
+        full = redactSecrets(full);
         const tailOut = full.slice(flushed).replace(ESCALATE_RE, "");
         if (tailOut) controller.enqueue(encoder.encode(tailOut));
 
         // Persist the assistant answer (sentinel stripped). Trailing control
         // markers the client consumes and never shows: [[MID:…]] (👍/👎) and,
         // when the hand-off went live, [[LIVE:<cursor>]] (switch to live mode).
-        const escalate = full.includes("[[ESCALATE]]") && WANTS_HUMAN.test(lastUser.content);
-        const offerPerson = full.includes("[[ESCALATE]]") && !escalate;
+        // Internal mode has no hand-off (staff ARE the support team).
+        const escalate = mode === "dealer" && full.includes("[[ESCALATE]]") && WANTS_HUMAN.test(lastUser.content);
+        const offerPerson = mode === "dealer" && full.includes("[[ESCALATE]]") && !escalate;
         const answer = full.replace(ESCALATE_RE, "").trim();
         const mid = convId ? await appendMessage(convId, "assistant", answer) : null;
         if (convId && escalate) {
@@ -199,7 +225,8 @@ export async function POST(req: NextRequest): Promise<Response> {
         // Knowledge-gap log (after the reply is out; fire-and-forget).
         const sentinel = full.includes("[[ESCALATE]]");
         // Answered from the dealer's own data → not a Help Center gap.
-        const gapReason = usedTool ? null
+        // Internal-mode answers are staff Q&A, not dealer knowledge gaps.
+        const gapReason = mode === "internal" || usedTool ? null
           : !retrieval.matched ? "no_article"
           : sentinel ? "escalated"
           : UNANSWERED_RE.test(answer) ? "unanswered" : null;
@@ -220,6 +247,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   return new Response(stream, {
     headers: {
       "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no",
+      "X-Steven-Mode": mode,
       ...(convId ? { "X-Conversation-Id": convId } : {}),
     },
   });
