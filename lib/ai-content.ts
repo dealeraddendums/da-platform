@@ -3,7 +3,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { VinQueryData } from './vinquery';
-import { modifierPromptBlock, NO_UNSUPPORTED_CLAIMS, findUnsupportedClaims, stripUnsupportedSentences, rejectedClaimsNote } from './vehicle-description-ai';
+import { modifierPromptBlock, NO_UNSUPPORTED_CLAIMS, findUnsupportedClaims, stripUnsupportedSentences, rejectedClaimsNote, plainFactsDescription } from './vehicle-description-ai';
 
 export interface AiContent {
   description: string;
@@ -110,7 +110,8 @@ Return only raw JSON with no markdown fences or extra text.`;
     if (!bad.length) break;
     console.warn(`[ai-content] description rejected for unsupported claims: ${bad.join(', ')}`);
     rejected = Array.from(new Set(rejected.concat(bad)));
-    if (attempt === 2) parsed = { ...parsed, description: stripUnsupportedSentences(parsed.description ?? '', source) };
+    if (attempt === 2) parsed = { ...parsed, description: stripUnsupportedSentences(parsed.description ?? '', source)
+      || plainFactsDescription({ year, make, model, trim, condition: vehicle.condition, bodyStyle, mileage: vehicle.mileage }) };
   }
 
   return {

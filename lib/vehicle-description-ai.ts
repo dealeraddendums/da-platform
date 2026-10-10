@@ -68,7 +68,7 @@ const CLAIM_PATTERNS: RegExp[] = [
   /\bbest[- ]sell(ing|er)\b/i, /#\s?1\b/, /\bnumber one\b/i, /\baward[- ]winning\b/i, /\btop[- ]rated\b/i,
   /\bmost (reliable|popular|trusted|dependable)\b/i, /\bpopular\b/i, /\bproven\b/i, /\btrusted\b/i, /\blegendary\b/i,
   /\biconic\b/i, /\brenowned\b/i, /\bbest[- ]in[- ]class\b/i, /\bindustry[- ]leading\b/i, /\bunmatched\b/i,
-  /\breputation\b/i,
+  /\breputation\b/i, /\bultimate\b/i, /\bpremium\b/i, /\bpowerful\b/i, /\badvanced\b/i, /\bluxurious\b/i,
   // reliability / durability
   /\breliab(le|ility)\b/i, /\bdependab(le|ility)\b/i, /\bdurab(le|ility)\b/i, /\blong[- ]lasting\b/i,
   // invented performance figures
@@ -91,6 +91,22 @@ export function findUnsupportedClaims(text: string, source: string): string[] {
   return Array.from(found);
 }
 
+/**
+ * A plain description built only from facts, for when every sentence of a
+ * draft carried an unsupported claim. e.g. "This 2022 Subaru Outback Premium
+ * is a used wagon with 24,000 miles."
+ */
+export function plainFactsDescription(v: { year?: string | number | null; make?: string | null; model?: string | null; trim?: string | null; condition?: string | null; bodyStyle?: string | null; mileage?: string | number | null }): string {
+  const name = [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ") || "vehicle";
+  const cond = v.condition ? v.condition.toLowerCase().replace("certified pre-owned", "Certified Pre-Owned") : "";
+  const body = v.bodyStyle ? String(v.bodyStyle).trim() : "";
+  // Keep acronyms (SUV) as written; lowercase ordinary words (Wagon -> wagon).
+  const kind = [cond, body ? (body === body.toUpperCase() ? body : body.toLowerCase()) : "vehicle"].filter(Boolean).join(" ");
+  const miles = Number(String(v.mileage ?? "").replace(/[^0-9]/g, ""));
+  const article = /^(SUV|MPV|[aeio])/i.test(kind) ? "an" : "a"; // "a used", "an SUV"
+  return `This ${name} is ${article} ${kind}${miles > 0 ? ` with ${miles.toLocaleString("en-US")} miles` : ""}.`;
+}
+
 /** Drop every sentence that carries an unsupported claim. */
 export function stripUnsupportedSentences(text: string, source: string): string {
   const sentences = text.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) ?? [text];
@@ -105,6 +121,7 @@ export function stripUnsupportedSentences(text: string, source: string): string 
 export async function enforceFactsOnly(
   generate: (rejected: string[]) => Promise<string>,
   source: string,
+  fallback: string,
   attempts = 3,
 ): Promise<string> {
   let rejected: string[] = [];
@@ -116,7 +133,7 @@ export async function enforceFactsOnly(
     rejected = Array.from(new Set(rejected.concat(bad)));
     console.warn(`[vehicle-description] draft rejected for unsupported claims: ${bad.join(", ")}`);
   }
-  return stripUnsupportedSentences(last, source);
+  return stripUnsupportedSentences(last, source) || fallback;
 }
 
 /** The retry note appended to a prompt after a rejected draft ("" on the first try). */
@@ -243,5 +260,5 @@ Return only the description text.`;
     return message.content
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
       .map((b) => b.text).join("").trim().replace(/^"|"$/g, "");
-  }, `${dataBlock}\n${lines.join("\n")}`);
+  }, `${dataBlock}\n${lines.join("\n")}`, plainFactsDescription(vehicle));
 }
