@@ -1754,14 +1754,19 @@ function ExtensionCard({ data, onGranted }: { data: BillingMeData; onGranted: ()
   );
 }
 
-function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
+// viewOnly: super_admin "Viewing as" (ghost overlay). The ghost token is not a
+// dealer session, so the billing write routes can't resolve a dealer (they'd
+// answer "dealer_id required"). Billing changes belong in a real session — the
+// dealer profile's Login (impersonate) button — so here the plan shows but the
+// change/close controls are disabled with a pointer to Login.
+function BillingTab({ openChangePlan = false, viewOnly = false }: { openChangePlan?: boolean; viewOnly?: boolean }) {
   const [data, setData] = useState<BillingMeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Expanded on load when deep-linked via ?upgrade=1 (sidebar "Upgrade Now").
   // BillingTab only mounts client-side once the tab switches to "billing", so
   // seeding useState from the prop is hydration-safe.
-  const [changeOpen, setChangeOpen] = useState(openChangePlan);
+  const [changeOpen, setChangeOpen] = useState(openChangePlan && !viewOnly);
   const [savingTier, setSavingTier] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // Close-flow state: which step of the close path the dealer is on.
@@ -1929,12 +1934,19 @@ function BillingTab({ openChangePlan = false }: { openChangePlan?: boolean }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div style={{ fontWeight: 600, fontSize: 15, color: "#2a2b3c" }}>Current Subscription</div>
           <button
-            onClick={() => setChangeOpen((v) => !v)}
-            style={{ padding: "6px 14px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+            onClick={() => { if (!viewOnly) setChangeOpen((v) => !v); }}
+            disabled={viewOnly}
+            title={viewOnly ? "Billing changes require Login as this dealer" : undefined}
+            style={{ padding: "6px 14px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: viewOnly ? "not-allowed" : "pointer", opacity: viewOnly ? 0.5 : 1, fontFamily: "inherit" }}
           >
             {changeOpen ? "Cancel" : "Change Plan"}
           </button>
         </div>
+        {viewOnly && (
+          <div style={{ padding: "10px 14px", marginBottom: 12, background: "#fff8e1", border: "1px solid #ffe082", color: "#7a5c00", borderRadius: 6, fontSize: 13 }}>
+            To change billing, use <strong>Login as this dealer</strong> (the Login button at the top of the dealer&apos;s profile). Billing changes require a full login, not View-as.
+          </div>
+        )}
         {sub ? (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, fontSize: 13 }}>
             <div>
@@ -2641,7 +2653,7 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, recomme
           />
         )}
         {tab === "orders" && <OrdersTab />}
-        {tab === "billing" && <BillingTab openChangePlan={openChangePlan} />}
+        {tab === "billing" && <BillingTab openChangePlan={openChangePlan} viewOnly={isStaff} />}
         {tab === "website" && dealer && <WebsiteIntegrationsTab dealerId={dealer.dealer_id} role={userRole} />}
         {tab === "hubspot" && dealer && isStaff && (
           <HubSpotSyncTab dealer={dealer} />
