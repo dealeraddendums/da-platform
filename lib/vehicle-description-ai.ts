@@ -26,7 +26,7 @@ type Admin = ReturnType<typeof createAdminSupabaseClient>;
  * drift. An infosheet is a document the dealer stands behind.
  */
 export const NO_UNSUPPORTED_CLAIMS =
-  `Do not make claims the data doesn't support — no reliability or durability promises, no "legendary", "best-in-class", "built to exacting standards", no popularity, ranking or reputation claims ("most popular", "proven", "trusted"), no guesses about features, packages or technology that aren't listed. If the data is thin, write a shorter description rather than padding it.`;
+  `Do not make claims the data doesn't support — no reliability or durability promises, no "legendary", "best-in-class", "built to exacting standards", no popularity, ranking or reputation claims ("most popular", "proven", "trusted"), no guesses about features, packages or technology that aren't listed. If the data is thin, write a shorter description rather than padding it. Do not use these words unless the exact word appears in the vehicle data: legendary, ultimate, iconic, proven, trusted, dependable, reliable, renowned, best-in-class, unmatched, premium, powerful, advanced, luxurious.`;
 
 /** Same model the AI-content route uses (lib/ai-content.ts). */
 export const VEHICLE_DESC_MODEL = "claude-haiku-4-5-20251001";
