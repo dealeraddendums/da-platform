@@ -20,6 +20,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 import type { JwtClaims } from "@/lib/auth";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import {
@@ -46,6 +47,11 @@ async function resolveDealer(req: NextRequest, claims: JwtClaims): Promise<Resol
     dealerTextId = claims.dealer_id ?? null; // pinned to own dealer; any param ignored
   } else if (claims.role === "super_admin" || claims.role === "group_admin") {
     dealerTextId = param ?? claims.dealer_id ?? null;
+  } else if (claims.role === "group_user") {
+    // Regional manager: in-group AND tag-scoped (canonical helper).
+    const authz = await authorizeDealerAction(claims, param ?? claims.dealer_id);
+    if (!authz.ok) return { ok: false, response: authz.response };
+    dealerTextId = authz.dealerId;
   } else {
     return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }

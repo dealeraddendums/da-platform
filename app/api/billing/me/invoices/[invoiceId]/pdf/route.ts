@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { streamInvoice } from "@/lib/invoice-stream";
 
@@ -21,8 +22,16 @@ export async function GET(req: NextRequest, { params }: Params): Promise<NextRes
     dealerTextId = claims.dealer_id;
   } else if ((claims.role === "super_admin" || claims.role === "group_admin") && claims.dealer_id) {
     dealerTextId = claims.dealer_id;
-  } else {
+  } else if (claims.role === "group_user") {
+    // Regional manager: in-group AND tag-scoped (canonical helper).
+    const authz = await authorizeDealerAction(claims, req.nextUrl.searchParams.get("dealer_id") || claims.dealer_id);
+    if (!authz.ok) return authz.response;
+    dealerTextId = authz.dealerId;
+  } else if (claims.role === "super_admin" || claims.role === "group_admin") {
     dealerTextId = req.nextUrl.searchParams.get("dealer_id");
+  } else {
+    // dealer_restricted used to reach the unchecked ?dealer_id= branch.
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   if (!dealerTextId) return NextResponse.json({ error: "No dealer assigned" }, { status: 403 });
 

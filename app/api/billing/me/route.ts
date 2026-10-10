@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 import type { JwtClaims } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import {
@@ -134,6 +135,20 @@ async function resolveDealerId(
       return { dealerError: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
     }
     return { dealerTextId: claims.dealer_id };
+  }
+  // group_user (regional manager): their switched-in dealer or ?dealer_id=,
+  // authorized in-group AND tag-scoped by the canonical helper.
+  if (claims.role === "group_user") {
+    const target = req.nextUrl.searchParams.get("dealer_id") || claims.dealer_id;
+    const authz = await authorizeDealerAction(claims, target);
+    if (!authz.ok) return { dealerError: authz.response };
+    return { dealerTextId: authz.dealerId };
+  }
+  // Only super_admin / group_admin may name a dealer by param. Anyone else
+  // (dealer_restricted) used to fall through here unchecked and could read
+  // ANY dealer's billing with ?dealer_id=.
+  if (claims.role !== "super_admin" && claims.role !== "group_admin") {
+    return { dealerError: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
   const param = req.nextUrl.searchParams.get("dealer_id");
   if (!param) {

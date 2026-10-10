@@ -26,6 +26,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { billingConfigured, deleteTemplate, listInvoices } from "@/lib/billing";
 import { fireDealerReliable } from "@/lib/sync-hubspot";
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // dealer_admin closes their own account; super_admin can close any (typically
   // while ghosting); group_admin can close a member dealer they're switched into
   // (active dealer, group-verified below). dealer_user is read-only here.
-  if (claims.role !== "dealer_admin" && claims.role !== "super_admin" && claims.role !== "group_admin") {
+  if (claims.role !== "dealer_admin" && claims.role !== "super_admin" && claims.role !== "group_admin" && claims.role !== "group_user") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -64,6 +65,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // the group Member Dealers plan control (2026-08-25) — either way the
     // in-group check after the fetch is the authorization.
     dealerTextId = req.nextUrl.searchParams.get("dealer_id") ?? claims.dealer_id ?? null;
+  } else if (claims.role === "group_user") {
+    // Regional manager: in-group AND tag-scoped (canonical helper).
+    const authz = await authorizeDealerAction(claims, req.nextUrl.searchParams.get("dealer_id") ?? claims.dealer_id);
+    if (!authz.ok) return authz.response;
+    dealerTextId = authz.dealerId;
   } else {
     // super_admin: ghost-mode dealer_id (claims.dealer_id) OR ?dealer_id= override
     const param = req.nextUrl.searchParams.get("dealer_id");

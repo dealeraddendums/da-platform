@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { createAdminSupabaseClient } from "@/lib/db";
 import {
   getTemplate,
@@ -70,6 +71,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     claims.role !== "dealer_admin"
     && claims.role !== "super_admin"
     && claims.role !== "group_admin"
+    && claims.role !== "group_user"
   ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -121,6 +123,13 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     dealerTextId = target;
+  } else if (claims.role === "group_user") {
+    // Regional manager: dealer_admin parity on their tagged dealers, incl.
+    // billing. Same target rule as group_admin; the canonical helper checks
+    // in-group AND tag scope.
+    const authz = await authorizeDealerAction(claims, req.nextUrl.searchParams.get("dealer_id") || claims.dealer_id);
+    if (!authz.ok) return authz.response;
+    dealerTextId = authz.dealerId;
   } else {
     const param = req.nextUrl.searchParams.get("dealer_id");
     if (!param) return NextResponse.json({ error: "dealer_id required" }, { status: 400 });
