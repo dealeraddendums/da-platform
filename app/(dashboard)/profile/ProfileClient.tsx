@@ -2287,7 +2287,7 @@ function BillingTab({ openChangePlan = false, viewOnly = false }: { openChangePl
         </div>
       )}
 
-      <ApEmailCard />
+      <ApEmailCard viewOnly={viewOnly} />
 
       {/* ── Invoice History ──────────────────────────────────────────────── */}
       <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: 20, background: "#fff" }}>
@@ -2336,7 +2336,9 @@ function BillingTab({ openChangePlan = false, viewOnly = false }: { openChangePl
 // invoices and billing notices alongside the main billing contact. Self-billed
 // dealers only (the group-billed view shows a note instead). Server:
 // /api/billing/me/ap-email (stored as a da-billing additional recipient).
-function ApEmailCard() {
+// viewOnly (View-as / ghost): the current AP email stays visible but Add /
+// Update / Remove are disabled with the same Login nudge as Change Plan.
+function ApEmailCard({ viewOnly = false }: { viewOnly?: boolean }) {
   const [state, setState] = useState<{ apEmail: string | null; mainContact: string | null; canEdit: boolean } | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -2359,6 +2361,7 @@ function ApEmailCard() {
   }, []);
 
   async function send(method: "PUT" | "DELETE") {
+    if (viewOnly) return;
     setBusy(true); setMsg(null);
     try {
       const res = await fetch("/api/billing/me/ap-email", {
@@ -2387,24 +2390,33 @@ function ApEmailCard() {
       ) : !state ? (
         <div style={{ fontSize: 13, color: "#78828c" }}>Loading…</div>
       ) : state.canEdit ? (
+        <>
+        {viewOnly && (
+          <div style={{ padding: "10px 14px", marginBottom: 12, background: "#fff8e1", border: "1px solid #ffe082", color: "#7a5c00", borderRadius: 6, fontSize: 13 }}>
+            To change billing, use <strong>Login as this dealer</strong> (the Login button at the top of the dealer&apos;s profile). Billing changes require a full login, not View-as.
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <input
-            type="email" value={draft} placeholder="ap@yourdealership.com" aria-label="Accounts Payable email"
+            type="email" value={draft} disabled={viewOnly} placeholder="ap@yourdealership.com" aria-label="Accounts Payable email"
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && changed && draft.trim()) void send("PUT"); }}
             style={{ flex: "1 1 260px", maxWidth: 360, border: "1px solid #e0e0e0", borderRadius: 4, padding: "7px 9px", fontSize: 13, fontFamily: "inherit" }}
           />
-          <button type="button" disabled={busy || !changed || !draft.trim()} onClick={() => void send("PUT")}
-            style={{ padding: "7px 14px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: busy || !changed || !draft.trim() ? 0.5 : 1 }}>
+          <button type="button" disabled={viewOnly || busy || !changed || !draft.trim()} onClick={() => void send("PUT")}
+            title={viewOnly ? "Billing changes require Login as this dealer" : undefined}
+            style={{ padding: "7px 14px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: viewOnly ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: viewOnly || busy || !changed || !draft.trim() ? 0.5 : 1 }}>
             {busy ? "Saving…" : state.apEmail ? "Update" : "Add"}
           </button>
           {state.apEmail && (
-            <button type="button" disabled={busy} onClick={() => void send("DELETE")}
-              style={{ padding: "7px 14px", background: "#fff", color: "#c62828", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+            <button type="button" disabled={viewOnly || busy} onClick={() => void send("DELETE")}
+              title={viewOnly ? "Billing changes require Login as this dealer" : undefined}
+              style={{ padding: "7px 14px", background: "#fff", color: "#c62828", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: viewOnly ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: viewOnly ? 0.5 : 1 }}>
               Remove
             </button>
           )}
         </div>
+        </>
       ) : (
         <div style={{ fontSize: 13, color: "#55595c" }}>{state.apEmail ?? "None set."}</div>
       )}
