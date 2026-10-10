@@ -1,21 +1,26 @@
 import { NextResponse } from 'next/server';
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server';
+import { createAdminSupabaseClient } from '@/lib/supabase/server';
+import { requireAuth } from '@/lib/auth';
+import { resolveAiContentDealer } from '@/lib/ai-content-scope';
 import { decodeVin } from '@/lib/vinquery';
 import { generateVehicleContent } from '@/lib/ai-content';
 import { vehicleCondition, vehicleConditionFields } from '@/lib/vehicles';
 import type { VehicleRow } from '@/lib/vehicles';
 
 export async function GET(request: Request) {
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { claims, error } = await requireAuth();
+  if (error) return error;
+  // The dealer is the SESSION's (lib/ai-content-scope.ts); a dealer_id query
+  // param is ignored. It used to be trusted — reading another dealer's cached
+  // content, and on a cache miss writing a new cache row for that dealer.
+  const scope = await resolveAiContentDealer(claims);
+  if (!scope.ok) return scope.response;
+  const dealerId = scope.dealerId;
 
   const { searchParams } = new URL(request.url);
   const vin = searchParams.get('vin')?.trim().toUpperCase();
-  const dealerId = searchParams.get('dealer_id')?.trim();
-
-  if (!vin || !dealerId) {
-    return NextResponse.json({ error: 'vin and dealer_id are required' }, { status: 400 });
+  if (!vin) {
+    return NextResponse.json({ error: 'vin is required' }, { status: 400 });
   }
 
   const admin = createAdminSupabaseClient();

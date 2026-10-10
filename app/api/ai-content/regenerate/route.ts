@@ -1,21 +1,26 @@
 import { NextResponse } from 'next/server';
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server';
+import { createAdminSupabaseClient } from '@/lib/supabase/server';
+import { requireAuth } from '@/lib/auth';
+import { resolveAiContentDealer } from '@/lib/ai-content-scope';
 import { decodeVin } from '@/lib/vinquery';
 import { generateVehicleContent } from '@/lib/ai-content';
 import { vehicleCondition, vehicleConditionFields } from '@/lib/vehicles';
 import type { VehicleRow } from '@/lib/vehicles';
 
 export async function POST(request: Request) {
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { claims, error } = await requireAuth();
+  if (error) return error;
+  // The dealer is the SESSION's (lib/ai-content-scope.ts). A dealer_id in the
+  // body is ignored — it used to be trusted, letting any user overwrite any
+  // dealer's cached AI content.
+  const scope = await resolveAiContentDealer(claims);
+  if (!scope.ok) return scope.response;
+  const dealerId = scope.dealerId;
 
-  const body = await request.json() as { vin?: string; dealer_id?: string };
+  const body = await request.json().catch(() => ({})) as { vin?: string };
   const vin = body.vin?.trim().toUpperCase();
-  const dealerId = body.dealer_id?.trim();
-
-  if (!vin || !dealerId) {
-    return NextResponse.json({ error: 'vin and dealer_id are required' }, { status: 400 });
+  if (!vin) {
+    return NextResponse.json({ error: 'vin is required' }, { status: 400 });
   }
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -32,6 +37,10 @@ export async function POST(request: Request) {
       .eq('vin', vin)
       .eq('dealer_id', dealerId)
       .maybeSingle();
+
+    // Regenerate is for a vehicle this dealer actually has (the Builder's
+    // vehicle preview) — no writing cache rows for arbitrary VINs.
+    if (!row) return NextResponse.json({ error: 'Vehicle not found' }, { status: 404 });
 
     const vehicleRow: Partial<VehicleRow> = row
       ? {
