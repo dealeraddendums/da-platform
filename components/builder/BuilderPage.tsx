@@ -7,7 +7,7 @@ import {
   PAPERS, LAYOUT, LAYOUT_INFOSHEET, WIDGET_LABELS, UNIQUE_WIDGETS,
   PALETTE_HIDDEN_IN_ADDENDUM, PALETTE_HIDDEN_IN_INFOSHEET,
   DEFS, DEFAULT_CUSTOM_WIDGETS, snapV, makeWidget, getPaperDims,
-  SAMPLE_SUGGESTED_ITEMS, VEHICLE_HEADER_FIELDS,
+  SAMPLE_SUGGESTED_ITEMS, VEHICLE_HEADER_FIELDS, VEHICLE_HEADER_FIELDS_OPT_IN,
 } from './constants';
 import { renderW } from './widgetRenderer';
 import RichTextEditor from '@/components/RichTextEditor';
@@ -215,6 +215,7 @@ function applyVehicleDataToWidgets(
         trim: vehicle.trim ?? '',
         model: vehicle.model ?? '',
         mileage: vehicle.mileage ? String(vehicle.mileage) : '',
+        drivetrain: vehicle.drivetrain ?? '', // header-only (Header: Drivetrain)
       }}};
     } else if (w.type === 'barcode') {
       result[id] = { ...w, d: { ...w.d, vin: vehicle.vin ?? '' } };
@@ -2995,6 +2996,16 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
                     <div key={f} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0' }}>
                       <span style={{ fontSize: 11, color: '#55595c', textTransform: 'capitalize' }}>Header: {f}</span>
                       <TogSwitch checked={hf[f] !== false} onChange={v => u('headerFields', { ...hf, [f]: v })} />
+                    </div>
+                  );
+                })}
+                {VEHICLE_HEADER_FIELDS_OPT_IN.map(f => {
+                  // Opt-in: unset = OFF, so existing templates don't change.
+                  const hf = (d.headerFields as Record<string, boolean> | undefined) || {};
+                  return (
+                    <div key={f} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0' }}>
+                      <span style={{ fontSize: 11, color: '#55595c', textTransform: 'capitalize' }}>Header: {f}</span>
+                      <TogSwitch checked={hf[f] === true} onChange={v => u('headerFields', { ...hf, [f]: v })} />
                     </div>
                   );
                 })}

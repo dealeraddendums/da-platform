@@ -1,4 +1,4 @@
-import { IB_DEFAULT, VEHICLE_PHOTO_COMING_SOON, VEHICLE_HEADER_FIELDS } from './constants';
+import { IB_DEFAULT, VEHICLE_PHOTO_COMING_SOON, VEHICLE_HEADER_FIELDS, VEHICLE_HEADER_FIELDS_OPT_IN } from './constants';
 import { sanitizeProductHtml, sanitizeProductDescription, normalizeProductHtmlSource } from '@/lib/product-name';
 import { watermarkUrl } from '@/lib/watermarks';
 import { code128Svg } from '@/lib/code128';
@@ -111,7 +111,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
   }
 
   if (type === 'vehicle') {
-    const vd = (d.vehicleData as Record<string, string>) || { stock: 'STOCK_TEST1', vin: '2HGFC3B96HH362096', year: '2017', color: 'White', make: 'Honda', trim: 'Touring', model: 'Civic', mileage: '10' };
+    const vd = (d.vehicleData as Record<string, string>) || { stock: 'STOCK_TEST1', vin: '2HGFC3B96HH362096', year: '2017', color: 'White', make: 'Honda', trim: 'Touring', model: 'Civic', mileage: '10', drivetrain: 'FWD' };
     const lb: Record<string, string> = { stock: 'Stock:', vin: 'VIN:', year: 'Year:', color: 'Color:', make: 'Make:', trim: 'Trim:', model: 'Model:', mileage: 'Mileage:' };
     // Stock/VIN/Year/Make/Model are always rendered, even if a particular
     // record happens to be missing one — the dealer expects the row to be
@@ -128,7 +128,10 @@ export function renderW(type: string, d: D, fontScale: number): string {
       return true;
     };
 
-    const flds = ((d.fields as string[]) || Object.keys(vd)).filter(f => isMeaningful(f, vd[f]));
+    // Header-only keys (drivetrain) are never detail rows, even on a template
+    // with no saved field list.
+    const headerOnly = new Set<string>(VEHICLE_HEADER_FIELDS_OPT_IN);
+    const flds = ((d.fields as string[]) || Object.keys(vd).filter(k => !headerOnly.has(k))).filter(f => isMeaningful(f, vd[f]));
     const hdrFs = Math.round(13 * fs * ((d.headerFontSize as number) || 1));
     const detFs = Math.round(9 * fs * ((d.fontSize as number) || 1));
     // Header line: collapse to non-empty tokens so a missing trim doesn't
@@ -138,8 +141,11 @@ export function renderW(type: string, d: D, fontScale: number): string {
     // that order; a field that isn't set counts as ON, so every template saved
     // before the setting existed still renders Year Make Model Trim.
     const hf = (d.headerFields as Record<string, boolean> | undefined) || {};
-    const headerText = VEHICLE_HEADER_FIELDS
-      .filter(f => hf[f] !== false)
+    // Opt-in fields (Drivetrain) follow Trim and show only when set true.
+    const headerText = [
+      ...VEHICLE_HEADER_FIELDS.filter(f => hf[f] !== false),
+      ...VEHICLE_HEADER_FIELDS_OPT_IN.filter(f => hf[f] === true),
+    ]
       .map(f => vd[f])
       .map(v => (v == null ? '' : String(v).trim()))
       .filter(Boolean)

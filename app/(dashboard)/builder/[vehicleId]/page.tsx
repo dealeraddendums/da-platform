@@ -26,7 +26,7 @@ export default async function BuilderVehicleRoute({
 
   const { data: dv } = await admin
     .from("dealer_vehicles")
-    .select("id, dealer_id, vin, stock_number, year, make, model, trim, exterior_color, mileage, msrp, condition, vdp_link, cmpg, hmpg")
+    .select("id, dealer_id, vin, stock_number, year, make, model, trim, exterior_color, mileage, msrp, condition, vdp_link, cmpg, hmpg, drivetrain")
     .eq("id", params.vehicleId)
     .maybeSingle();
 
@@ -77,6 +77,7 @@ export default async function BuilderVehicleRoute({
     vdp_link: dv.vdp_link ?? null,
     cmpg: dv.cmpg ?? null,
     hmpg: dv.hmpg ?? null,
+    drivetrain: dv.drivetrain ?? null,
   };
 
   return <BuilderPage vehicle={vehicle} aiEnabled={aiEnabled} customSizes={customSizeRows ?? []} dealerId={dv.dealer_id} />;

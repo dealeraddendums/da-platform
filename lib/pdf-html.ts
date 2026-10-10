@@ -238,6 +238,7 @@ export async function buildPdfHtml({
           trim: vehicle.TRIM ?? '',
           model: vehicle.MODEL ?? '',
           mileage: vehicle.MILEAGE ?? '',
+          drivetrain: vehicle.DRIVETRAIN ?? '', // header-only (Header: Drivetrain)
         };
       }
       if (w.type === 'barcode') d.vin = vehicle.VIN_NUMBER;

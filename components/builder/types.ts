@@ -70,6 +70,7 @@ export interface VehiclePreload {
   vdp_link?: string | null;
   cmpg?: string | null;
   hmpg?: string | null;
+  drivetrain?: string | null;
 }
 
 export interface SavedTemplate {
