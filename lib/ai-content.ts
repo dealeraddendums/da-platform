@@ -79,9 +79,11 @@ ${specLines}
 ${optionLines}
 
 Respond with a single JSON object containing exactly these two keys:
-1. "description": A 2-3 sentence vehicle description for customers. Be specific, factual, and professional, using only the vehicle data above. ${NO_UNSUPPORTED_CLAIMS} No markdown, no quotes around the field value.
+1. "description": A 2-3 sentence vehicle description for customers. Be specific, factual, and professional, using only the vehicle data above. No markdown, no quotes around the field value.
 2. "features": An array of 10-14 pairs, each pair is [label, value]. Cover: engine/power, transmission, drivetrain, MPG (city/hwy if available), body style, exterior color, mileage (if used/CPO), seating, and 2-3 notable options if provided. Labels should be short (1-3 words). Values should be concise.
 
+RULES FOR THE "description" FIELD (must follow — check your draft against them before answering):
+${NO_UNSUPPORTED_CLAIMS}
 ${modifierLines.length ? `\nThese house rules apply to the "description" field ONLY (never to "features"):${modifierPromptBlock(modifierLines)}\n` : ''}
 Return only raw JSON with no markdown fences or extra text.`;
 
