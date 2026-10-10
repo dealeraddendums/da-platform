@@ -4,7 +4,8 @@ import { requireAuth } from '@/lib/auth';
 import { resolveAiContentDealer } from '@/lib/ai-content-scope';
 import { decodeVin } from '@/lib/vinquery';
 import { generateVehicleContent } from '@/lib/ai-content';
-import { vehicleCondition, vehicleConditionFields } from '@/lib/vehicles';
+import { aiConditionLabel, effectiveDescriptionModifiers } from '@/lib/vehicle-description-ai';
+import { vehicleConditionFields } from '@/lib/vehicles';
 import type { VehicleRow } from '@/lib/vehicles';
 
 export async function POST(request: Request) {
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
     // Fetch vehicle from Supabase dealer_vehicles
     const { data: row } = await admin
       .from('dealer_vehicles')
-      .select('year, make, model, trim, exterior_color, mileage, msrp, condition')
+      .select('year, make, model, trim, exterior_color, mileage, msrp, condition, certified')
       .eq('vin', vin)
       .eq('dealer_id', dealerId)
       .maybeSingle();
@@ -63,13 +64,16 @@ export async function POST(request: Request) {
       trim: vehicleRow.TRIM ?? undefined,
       colorExt: vehicleRow.EXT_COLOR ?? undefined,
       mileage: vehicleRow.MILEAGE ?? undefined,
-      condition: row ? vehicleCondition(vehicleRow as VehicleRow) : undefined,
+      condition: row ? aiConditionLabel(row) : undefined,
       options: [],
       msrp: vehicleRow.MSRP ? Number(vehicleRow.MSRP) : null,
     };
 
     const vinData = await decodeVin(vin);
-    const content = await generateVehicleContent(vehicleInput, vinData);
+    const content = await generateVehicleContent(vehicleInput, vinData,
+      // House rules (migration 173): this writes the same ai_content_cache row
+      // the infosheet prints, so it must follow them like print-time generation.
+      (await effectiveDescriptionModifiers(admin, dealerId)).lines);
 
     // Upsert cache
     await admin.from('ai_content_cache').upsert({

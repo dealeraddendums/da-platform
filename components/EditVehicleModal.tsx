@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { DealerVehicleRow } from "@/lib/db";
 import { FUEL_RULE_OPTIONS } from "@/lib/fuel-rule";
 import { resolveVehicleCondition } from "@/lib/vehicles";
@@ -53,6 +53,26 @@ function AiBadge() {
   );
 }
 
+const DESC_STATE_LABEL: Record<string, string> = {
+  saved: "Saved", cached: "Auto (default)", generated: "AI draft", edited: "Edited", empty: "Standard",
+};
+const DESC_STATE_HELP: Record<string, string> = {
+  saved: "Saved for this vehicle — prints on its infosheet.",
+  cached: "The auto-generated AI description on file for this vehicle. Click Generate another to apply your current house rules, edit it, then Save Changes.",
+  generated: "New AI draft using your current house rules — not saved until you click Save Changes.",
+  edited: "Edited by hand — not saved until you click Save Changes.",
+  empty: "Nothing saved — the infosheet uses the standard description. Click Generate for an AI draft.",
+};
+
+function DescStateChip({ state }: { state: string }) {
+  return (
+    <span style={{
+      flexShrink: 0, fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 3,
+      background: "#f5f5f5", color: "var(--text-secondary)", border: "1px solid #e0e0e0",
+    }}>{DESC_STATE_LABEL[state]}</span>
+  );
+}
+
 export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose }: Props) {
   const [form, setForm] = useState({
     stock_number: vehicle.stock_number,
@@ -87,7 +107,47 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
   const [genBusy, setGenBusy] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const [generatedOnce, setGeneratedOnce] = useState(false);
-  const showInfosheetDesc = aiEnabled || !!(vehicle.infosheet_ai_description ?? "").trim();
+  // What the box is showing (2026-10-10). When nothing is saved the box
+  // pre-loads the vehicle's cached auto-generated AI description — the text
+  // the infosheet prints today — so it is never blank while one exists.
+  //   saved     — the dealer's saved text (infosheet_ai_description)
+  //   cached    — the auto-generated default; Save keeps it NULL (default behavior)
+  //   generated — a fresh Generate draft, not yet saved
+  //   edited    — hand-edited, not yet saved
+  //   empty     — nothing saved, nothing cached
+  const savedText = (vehicle.infosheet_ai_description ?? "").trim();
+  type DescState = "saved" | "cached" | "generated" | "edited" | "empty";
+  const [descState, setDescState] = useState<DescState>(savedText ? "saved" : "empty");
+  const [cachedText, setCachedText] = useState<string | null>(null);
+  const [aiOn, setAiOn] = useState(!!aiEnabled);
+  const showInfosheetDesc = aiOn || !!aiEnabled || !!savedText || !!cachedText;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/ai-content/vehicle-description?vehicleId=${encodeURIComponent(vehicle.id)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { cachedDescription?: string | null; aiEnabled?: boolean } | null) => {
+        if (cancelled || !j) return;
+        if (j.aiEnabled) setAiOn(true);
+        const cached = (j.cachedDescription ?? "").trim();
+        if (!cached) return;
+        setCachedText(cached);
+        // Only fill an untouched, empty box — never overwrite saved text or a
+        // draft the user already started.
+        setForm((p) => (p.infosheet_ai_description.trim() ? p : { ...p, infosheet_ai_description: cached }));
+        setDescState((st) => (st === "empty" ? "cached" : st));
+      })
+      .catch(() => null);
+    return () => { cancelled = true; };
+  }, [vehicle.id]);
+
+  // Clear = back to default behavior: nothing saved for this vehicle, so the
+  // infosheet uses its standard (auto) description — shown again if cached.
+  function clearInfosheetDesc() {
+    setForm((p) => ({ ...p, infosheet_ai_description: cachedText ?? "" }));
+    setDescState(cachedText ? "cached" : "empty");
+    setGenError(null);
+  }
 
   async function generateInfosheetDesc() {
     setGenBusy(true);
@@ -100,6 +160,7 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
       const j = await res.json().catch(() => ({})) as { description?: string; error?: string };
       if (!res.ok || !j.description) { setGenError(j.error ?? "Couldn't generate a description — try again."); return; }
       setForm((p) => ({ ...p, infosheet_ai_description: j.description as string }));
+      setDescState("generated");
       setGeneratedOnce(true);
     } catch {
       setGenError("Couldn't generate a description — try again.");
@@ -132,6 +193,10 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
+        // The cached auto description is shown for reference only — saving it
+        // unchanged keeps the column NULL so the vehicle stays on default
+        // behavior (and keeps following future regenerations).
+        infosheet_ai_description: descState === "cached" ? "" : form.infosheet_ai_description,
         // Expand the single dropdown into the two columns it owns, so the row
         // can never end up half-set (Certified without the flag, or a stale
         // flag left behind after switching to New/Used).
@@ -205,7 +270,7 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
                 onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
                 style={{ ...TEXTAREA_STYLE, minHeight: 80 }}
                 rows={4}
-                placeholder="Vehicle description — auto-filled by AI if enabled"
+                placeholder="Vehicle description from your feed, or typed by hand"
               />
             </div>
 
@@ -217,8 +282,8 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
                     <AiBadge />
                   </label>
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    {form.infosheet_ai_description.trim() && (
-                      <button type="button" onClick={() => setForm((p) => ({ ...p, infosheet_ai_description: "" }))}
+                    {descState !== "cached" && descState !== "empty" && (
+                      <button type="button" onClick={clearInfosheetDesc} title="Go back to the standard description for this vehicle"
                         style={{ background: "none", border: "none", padding: 0, fontSize: 12, color: "var(--text-muted)", cursor: "pointer" }}>
                         Clear
                       </button>
@@ -231,15 +296,16 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
                 </div>
                 <textarea
                   value={form.infosheet_ai_description}
-                  onChange={(e) => setForm((p) => ({ ...p, infosheet_ai_description: e.target.value }))}
+                  onChange={(e) => { const t = e.target.value; setForm((p) => ({ ...p, infosheet_ai_description: t })); setDescState(t.trim() ? "edited" : "empty"); }}
                   style={{ ...TEXTAREA_STYLE, minHeight: 80 }}
                   rows={4}
                   maxLength={4000}
                   aria-label="Infosheet description"
                   placeholder="Click Generate for an AI description of this vehicle, then edit it as you like."
                 />
-                <div style={{ fontSize: 11, color: genError ? "#c62828" : "var(--text-muted)", marginTop: 4 }}>
-                  {genError ?? "Prints on this vehicle's infosheet. Saved only when you click Save Changes. Leave empty to use the standard description."}
+                <div style={{ fontSize: 11, color: genError ? "#c62828" : "var(--text-muted)", marginTop: 4, display: "flex", gap: 6, alignItems: "baseline" }}>
+                  {!genError && <DescStateChip state={descState} />}
+                  <span>{genError ?? DESC_STATE_HELP[descState]}</span>
                 </div>
               </div>
             )}

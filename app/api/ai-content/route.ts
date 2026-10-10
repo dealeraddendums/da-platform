@@ -4,7 +4,8 @@ import { requireAuth } from '@/lib/auth';
 import { resolveAiContentDealer } from '@/lib/ai-content-scope';
 import { decodeVin } from '@/lib/vinquery';
 import { generateVehicleContent } from '@/lib/ai-content';
-import { vehicleCondition, vehicleConditionFields } from '@/lib/vehicles';
+import { aiConditionLabel, effectiveDescriptionModifiers } from '@/lib/vehicle-description-ai';
+import { vehicleConditionFields } from '@/lib/vehicles';
 import type { VehicleRow } from '@/lib/vehicles';
 
 export async function GET(request: Request) {
@@ -87,7 +88,7 @@ async function generateContent(
     // Fetch vehicle from Supabase dealer_vehicles
     const { data: row } = await admin
       .from('dealer_vehicles')
-      .select('year, make, model, trim, exterior_color, mileage, msrp, condition, description')
+      .select('year, make, model, trim, exterior_color, mileage, msrp, condition, certified, description')
       .eq('vin', vin)
       .eq('dealer_id', dealerId)
       .maybeSingle();
@@ -113,7 +114,7 @@ async function generateContent(
       trim: vehicleRow.TRIM ?? undefined,
       colorExt: vehicleRow.EXT_COLOR ?? undefined,
       mileage: vehicleRow.MILEAGE ?? undefined,
-      condition: row ? vehicleCondition(vehicleRow as VehicleRow) : undefined,
+      condition: row ? aiConditionLabel(row) : undefined,
       options: [],
       msrp: vehicleRow.MSRP ? Number(vehicleRow.MSRP) : null,
     };
@@ -121,7 +122,10 @@ async function generateContent(
     // Enrich with VINQuery if key is configured
     const vinData = await decodeVin(vin);
 
-    return await generateVehicleContent(vehicleInput, vinData);
+    return await generateVehicleContent(vehicleInput, vinData,
+      // House rules (migration 173): this writes the same ai_content_cache row
+      // the infosheet prints, so it must follow them like print-time generation.
+      (await effectiveDescriptionModifiers(admin, dealerId)).lines);
   } catch {
     return null;
   }

@@ -16,6 +16,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { createAdminSupabaseClient } from "@/lib/db";
 import type { VehicleInput } from "@/lib/ai-content";
+import { resolveVehicleCondition } from "@/lib/vehicles";
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>;
 
@@ -66,6 +67,18 @@ export async function effectiveDescriptionModifiers(admin: Admin, dealerTextId: 
   const dealerLines = modifierLines(settings?.ai_vehicle_desc_modifiers);
   const ignoreGroup = settings?.ai_vehicle_desc_ignore_group === true;
   return { groupName, groupLines, dealerLines, ignoreGroup, lines: [...(ignoreGroup ? [] : groupLines), ...dealerLines] };
+}
+
+/**
+ * The condition every AI vehicle-description prompt is given, from the
+ * dealer_vehicles row (condition + certified flag). Conditional house rules
+ * ("Mention Free Carfax for all used vehicles") depend on it, so every
+ * generator — Edit Vehicle's Generate AND the print-time auto description —
+ * must pass it. CPO is spelled out so "used" rules read naturally against it.
+ */
+export function aiConditionLabel(v: { condition?: string | null; certified?: string | boolean | null }): "New" | "Used" | "Certified Pre-Owned" {
+  const c = resolveVehicleCondition(v);
+  return c === "CPO" ? "Certified Pre-Owned" : c;
 }
 
 /** The house-rules block appended to a vehicle-description prompt ("" when none). */

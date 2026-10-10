@@ -23,7 +23,7 @@ import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRo
 import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-save";
 import { resolveTemplate, resolveSecondAddendum, SECOND_ADDENDUM_SETTINGS_COLUMNS, type ResolvedTemplate } from "@/lib/template-resolver";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
-import { effectiveDescriptionModifiers } from "@/lib/vehicle-description-ai";
+import { aiConditionLabel, effectiveDescriptionModifiers } from "@/lib/vehicle-description-ai";
 import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
 import QRCode from "qrcode";
 import type { Widget, PaperSize } from "@/components/builder/types";
@@ -754,6 +754,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             year: vehicleData.YEAR, make: vehicleData.MAKE, model: vehicleData.MODEL,
             trim: vehicleData.TRIM, colorExt: vehicleData.EXT_COLOR,
             mileage: vehicleData.MILEAGE,
+            // Conditional house rules ("…for all used vehicles") need it.
+            condition: aiConditionLabel(dv),
             msrp: vehicleData.MSRP ? parseFloat(vehicleData.MSRP) : null,
           }, null, (await effectiveDescriptionModifiers(admin, dv.dealer_id as string)).lines);
           aiContent = generated;

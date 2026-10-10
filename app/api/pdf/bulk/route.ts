@@ -19,7 +19,7 @@ import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from 
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, autoMatchedLibraryRows, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
 import { enforceCanPrint } from "@/lib/print-eligibility";
-import { effectiveDescriptionModifiers } from "@/lib/vehicle-description-ai";
+import { aiConditionLabel, effectiveDescriptionModifiers } from "@/lib/vehicle-description-ai";
 import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
 import QRCode from "qrcode";
 import { PDFDocument } from "pdf-lib";
@@ -841,6 +841,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 year: vehicleData.YEAR, make: vehicleData.MAKE, model: vehicleData.MODEL,
                 trim: vehicleData.TRIM, colorExt: vehicleData.EXT_COLOR,
                 mileage: vehicleData.MILEAGE,
+                // Conditional house rules ("…for all used vehicles") need it.
+                condition: aiConditionLabel(dv),
                 msrp: vehicleData.MSRP ? parseFloat(vehicleData.MSRP) : null,
               }, null, (await effectiveDescriptionModifiers(admin, dv.dealer_id as string)).lines);
               aiContent = generated;
