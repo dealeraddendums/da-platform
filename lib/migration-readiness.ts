@@ -280,7 +280,7 @@ export function computeReadiness(
   // 1668), so this has no live effect — but if rows ever appear with the field
   // unset they will read as trials and drop out of the queue rather than
   // silently joining it.
-  else if (isTrialTrackAccount(d.account_type)) { eligible = false; eligibleReason = 'trial account — trials are not migrated'; }
+  else if (isTrialTrackAccount(d.account_type)) { eligible = false; eligibleReason = migrationPlanBlock(d) ?? 'Free/Trial — not migrated (plan: Trial)'; }
   // Only paying dealers migrate (Allan, 2026-10-11): Free / Downgraded / no
   // plan join Trial here. Same rule as every other entry point.
   else if (migrationPlanBlock(d)) { eligible = false; eligibleReason = migrationPlanBlock(d)!; }

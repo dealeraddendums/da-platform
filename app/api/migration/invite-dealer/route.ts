@@ -42,6 +42,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(result);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 404 });
+    // A refusal (deactivated / Free-Trial) is a 409, not a missing dealer.
+    return NextResponse.json({ error: msg }, { status: /not found/i.test(msg) ? 404 : 409 });
   }
 }
