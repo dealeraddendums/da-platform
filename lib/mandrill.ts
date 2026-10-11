@@ -104,9 +104,10 @@ export async function sendMandrillEmail(message: MandrillMessage): Promise<void>
 // queues "unconfirmed". Now the WHOLE denylist (133 active entries at the time;
 // Mandrill returns up to 1000 per call) is fetched once and cached for
 // DENYLIST_TTL_MS per worker, with one in-flight fetch shared by concurrent
-// callers and one jittered retry on 429/5xx. If the list ever reaches
-// Mandrill's 1000-row cap it may be truncated, so lookups fall back to the
-// per-address call (also cached, also retried).
+// callers and one jittered retry on 429/5xx. If that fetch fails, every check
+// answers "unknown" (no per-address retries — they'd rebuild the storm). Only
+// if the list reaches Mandrill's 1000-row cap (possibly truncated) do lookups
+// fall back to the per-address call (also cached, also retried).
 
 export type DeliverabilityState = "ok" | "bounced" | "unknown";
 
@@ -121,8 +122,9 @@ type RejectEntry = { email?: string; reason?: string; detail?: string; expired?:
 
 const DENYLIST_TTL_MS = 5 * 60_000;
 const DENYLIST_CAP = 1000;
-let denylistCache: { at: number; byEmail: Map<string, RejectEntry> | null; error?: string } | null = null;
-let denylistInflight: Promise<{ byEmail: Map<string, RejectEntry> | null; error?: string }> | null = null;
+type Denylist = { byEmail: Map<string, RejectEntry> | null; truncated?: boolean; error?: string };
+let denylistCache: ({ at: number } & Denylist) | null = null;
+let denylistInflight: Promise<Denylist> | null = null;
 const perEmailCache = new Map<string, { at: number; result: DeliverabilityResult }>();
 
 /** One rejects/list POST with a single jittered retry on 429 / 5xx / network error. */
@@ -157,15 +159,16 @@ async function rejectsList(body: Record<string, unknown>): Promise<{ ok: true; l
   return { ok: false, detail: last || "Mandrill unreachable" };
 }
 
-/** The whole active denylist, cached. byEmail=null → use per-address lookups. */
-async function getDenylist(apiKey: string): Promise<{ byEmail: Map<string, RejectEntry> | null; error?: string }> {
+/** The whole active denylist, cached. byEmail=null + truncated → per-address
+ *  lookups; byEmail=null + error → Mandrill unavailable (every check "unknown"). */
+async function getDenylist(apiKey: string): Promise<Denylist> {
   if (denylistCache && Date.now() - denylistCache.at < (denylistCache.byEmail ? DENYLIST_TTL_MS : 30_000)) return denylistCache;
   if (denylistInflight) return denylistInflight;
   denylistInflight = (async () => {
     const r = await rejectsList({ key: apiKey, include_expired: false });
-    let out: { byEmail: Map<string, RejectEntry> | null; error?: string };
+    let out: Denylist;
     if (!r.ok) out = { byEmail: null, error: r.detail };
-    else if (r.list.length >= DENYLIST_CAP) out = { byEmail: null, error: `denylist at Mandrill's ${DENYLIST_CAP}-row cap — checking per address` };
+    else if (r.list.length >= DENYLIST_CAP) out = { byEmail: null, truncated: true };
     else out = { byEmail: new Map(r.list.filter((e) => !e.expired && e.email).map((e) => [String(e.email).toLowerCase(), e])) };
     // A failed fetch is cached briefly (30s) so a rate-limited Mandrill isn't hammered.
     denylistCache = { at: Date.now(), ...out };
@@ -192,12 +195,16 @@ export async function checkDeliverability(email: string): Promise<Deliverability
     return hit ? { state: "bounced", reason: hit.reason ?? "denylisted", detail: hit.detail ?? undefined } : { state: "ok" };
   }
 
-  // Fallback: per-address lookup (list unavailable or possibly truncated), cached.
+  // Mandrill unavailable (rate-limited / down): answer "unknown" for everyone
+  // from the one failed fetch — per-address retries would rebuild the 429 storm.
+  if (!list.truncated) return { state: "unknown", detail: list.error ?? "Mandrill unavailable" };
+
+  // List possibly truncated at the 1000-row cap: per-address lookup, cached.
   const cached = perEmailCache.get(addr);
   if (cached && Date.now() - cached.at < (cached.result.state === "unknown" ? 30_000 : DENYLIST_TTL_MS)) return cached.result;
   const r = await rejectsList({ key: apiKey, email: addr, include_expired: false });
   let result: DeliverabilityResult;
-  if (!r.ok) result = { state: "unknown", detail: list.error && !/cap/.test(list.error) ? list.error : r.detail };
+  if (!r.ok) result = { state: "unknown", detail: r.detail };
   else {
     const hit = r.list.find((e) => !e.expired && (e.email ?? "").toLowerCase() === addr);
     result = hit ? { state: "bounced", reason: hit.reason ?? "denylisted", detail: hit.detail ?? undefined } : { state: "ok" };
