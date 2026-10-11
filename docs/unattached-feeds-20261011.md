@@ -419,3 +419,40 @@ A rename would cut each store's 4.0 link. ETL Job 6 (print status) and console S
 - Unattached: 349 feed ids, 98,903 vehicles.
 - Bucket B: 9 likely mis-keyed, 22 duplicates, 285 with no matching store.
 - Bucket A: 33. Frozen: 34 (Honda of Greeley added). Stopped: 16. Errors: 0.
+
+## Follow-up 2026-10-11: ETL2 feed-id aliases (the 5 held stores + Alan Jay)
+
+**Mechanism.** ETL2 (etl-supabase on 34.227.197.196) has a new file, `setting/dealer-id-aliases.json`, that maps a feed id to an exact `dealers.dealer_id`.
+- `New_Vehicle#setDealer_ID` checks it BEFORE `canonical_dealer_ids`.
+- The target is used verbatim, so an id mapped to itself is pinned where it is.
+- The file is re-read whenever its mtime changes, so edits apply with no restart. A broken file is logged and the last good map is kept.
+- Separate fix in the same change: `etl_process_.rb` (the copy Rails loads) now resets the canonical map at each job start. Before this, the map was built once per process.
+- Backups on the box: `app/models/*.rb.bak-alias-20261011` and `setting/_backups/dealer-id-aliases.json.*`.
+
+**Routed.** No store renames; each store's 4.0 key is unchanged.
+
+| Store | Feed | Active vehicles after | Old feed-id rows swept |
+|---|---|---|---|
+| Envision Toyota West Covina | `envisiontoyotawestcovina` | 0 → 549 | yes |
+| Serramonte Kia | `serramontekia` | 437 | yes |
+| Serramonte Subaru | `serramontesubarusoa` | 1,347 (313 live + 1,034 stale "VIN API") | yes |
+| Mazda of Palm Beach | `mazdaofpalmbeach` | 2,444 (316 live + 2,128 stale) | yes |
+| Chuck Brown Ford | `chuckbrownfordfd` | 90 (77 live + 13 stale) | yes |
+
+- **Serramonte Kia** was 1,190 stale rows before. 25 of them were updated in place on a stock-number match. The other 1,165 stale "VIN API" rows were deactivated. Backup: `serramonte-kia-stale-deactivate-backup-20261011.json`.
+
+**Alan Jay Chevrolet Buick GMC Cadillac.**
+- `inventory_dealer_id` is restored to the 4.0 id `AlanJayKiaAllstarDA`. `dealer_id` is unchanged.
+- The Kia DealersLink file of the same name is pinned to itself by an alias entry.
+- After a job 21 run, the store still has its 200 vehicles (6 are used Kias from its own file, the same as before). The 105-vehicle Kia file stayed under its own id.
+- The forced-migration flag is keyed on `dealer_id`, so it still needs the 4.0-side rename. Same as before this change.
+
+**4.0 link.** For all 6 stores, `inventory_dealer_id ?? dealer_id` resolves to the matching Aurora `dealer_dim` row (`_ID == legacy_id`). This is the lookup ETL Job 6 and console Sync use.
+
+**Re-scan.**
+- Unattached: 344 feed ids, 97,176 vehicles.
+- Bucket B: 4 likely mis-keyed (the 4 duplicates), 23 duplicates, 284 with no matching store.
+- Bucket A: 33. Frozen: 34. Stopped: 16. Errors: 0.
+- The scan's triage doesn't know about aliases. It now lists `AlanJayKiaAllstarDA` as a duplicate ("inventory id matches Alan Jay Chevrolet — fed"), but it's really a pinned Kia file with no store.
+
+Backups (suite root): `alias-remap-backup-20261011.json` (all 6 stores' dealer rows plus vehicles under both ids, taken before any change) and `etl2-dealer-id-aliases-20261011.json` (the config as deployed).
