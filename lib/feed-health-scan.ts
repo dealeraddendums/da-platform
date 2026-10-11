@@ -14,11 +14,14 @@
 //   frozen — "refreshing but no new inventory": rows refresh, but no new
 //            vehicle in FROZEN_NEWEST_DAYS (feed-health `frozen`) — a provider
 //            resending the same file. Feed-less stores are never either.
+// Plus a third, feed-side list (lib/feed-unattached.ts): feed ids that are
+// arriving but reach no ACTIVE store (deactivated store / no store at all).
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { dealerFeedHealth, loadRosters, FROZEN_NEWEST_DAYS, type DealerFeedHealth } from "@/lib/feed-health";
+import { scanUnattachedFeeds, UNATTACHED_LABEL, type UnattachedFeed } from "@/lib/feed-unattached";
 
 export interface ScanRow extends DealerFeedHealth {
   dealerId: string;
@@ -92,6 +95,11 @@ function diffAlerts(current: ScanRow[], prev: AlertMap, byId: Map<string, ScanRo
   };
 }
 
+type UnattachedMap = Record<string, { since: string; label: string }>;
+
+const unattachedLabel = (u: UnattachedFeed) =>
+  `${u.bucket === "deactivated_store" ? `deactivated store: ${u.storeName}` : "no store"}${u.source ? ` · ${u.source}` : ""}`;
+
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 function rowHtml(r: ScanRow): string {
@@ -108,22 +116,47 @@ function table(rows: ScanRow[]): string {
     + rows.map(rowHtml).join("") + "</table>";
 }
 
+function unattachedTable(rows: UnattachedFeed[]): string {
+  if (!rows.length) return "<p style=\"color:#78828c\">None.</p>";
+  return `<table cellpadding="6" style="border-collapse:collapse;font-size:13px;font-family:Roboto,Arial,sans-serif">`
+    + `<tr style="background:#f5f6f7;text-align:left"><th>Feed id</th><th>Source</th><th>Last delivery (UTC)</th><th>Newest vehicle</th><th style="text-align:right">Vehicles</th><th>${rows[0].bucket === "deactivated_store" ? "Deactivated store" : "Possible match (hint only)"}</th></tr>`
+    + rows.map((u) => `<tr><td>${esc(u.feedId)}</td><td>${esc(u.source ?? "—")}</td><td>${esc(u.lastDelivery ?? "—")}</td><td>${esc(u.newestVehicleAdded ?? "—")}</td>`
+      + `<td style="text-align:right">${u.vehicles}</td><td>${esc(u.bucket === "deactivated_store" ? u.storeName : (u.hints.join("; ") || "—"))}</td></tr>`).join("")
+    + "</table>";
+}
+
+/** Both buckets, each with its own heading and action. */
+function unattachedSection(rows: UnattachedFeed[]): string {
+  return (["no_store", "deactivated_store"] as const).map((b) => {
+    const r = rows.filter((u) => u.bucket === b);
+    return `<p style="margin:10px 0 4px"><strong>${b === "no_store" ? "B" : "A"}) ${esc(UNATTACHED_LABEL[b])}</strong> (${r.length})</p>${unattachedTable(r)}`;
+  }).join("");
+}
+
 export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promise<{
   skipped?: string; stale: number; newly: number; recovered: number;
-  frozen: number; frozenNewly: number; frozenRecovered: number; emailed: boolean; errors: number;
+  frozen: number; frozenNewly: number; frozenRecovered: number;
+  unattached: number; unattachedNewly: number; unattachedGone: number; unattachedError?: string;
+  emailed: boolean; errors: number;
 }> {
   const admin = createAdminSupabaseClient() as any;
   const { data: lock } = await admin.from("admin_settings").select("value, updated_at").eq("key", LOCK_KEY).maybeSingle();
   if (lock?.value === "1" && lock.updated_at && Date.now() - Date.parse(lock.updated_at) < LOCK_MS) {
-    return { skipped: "already running", stale: 0, newly: 0, recovered: 0, frozen: 0, frozenNewly: 0, frozenRecovered: 0, emailed: false, errors: 0 };
+    return { skipped: "already running", stale: 0, newly: 0, recovered: 0, frozen: 0, frozenNewly: 0, frozenRecovered: 0, unattached: 0, unattachedNewly: 0, unattachedGone: 0, emailed: false, errors: 0 };
   }
   await admin.from("admin_settings").upsert({ key: LOCK_KEY, value: "1", updated_at: new Date().toISOString() }, { onConflict: "key" });
   try {
-    const { rows, errors } = await scanFleet();
+    // The unattached scan runs alongside; if it fails, the stopped/frozen
+    // digest still goes out and the unattached state is left as it was.
+    const [{ rows, errors }, ua] = await Promise.all([
+      scanFleet(),
+      scanUnattachedFeeds(admin).then((list) => ({ list, error: null as string | null }),
+        (e) => ({ list: [] as UnattachedFeed[], error: e instanceof Error ? e.message : String(e) })),
+    ]);
     const stale = staleWorstFirst(rows);
     const frozen = frozenWorstFirst(rows);
     const { data: st } = await admin.from("admin_settings").select("value").eq("key", STATE_KEY).maybeSingle();
-    let prevState: { stale?: AlertMap; frozen?: AlertMap } = {};
+    let prevState: { stale?: AlertMap; frozen?: AlertMap; unattached?: UnattachedMap } = {};
     try { prevState = st?.value ? JSON.parse(st.value) : {}; } catch { prevState = {}; }
 
     const now = new Date().toISOString();
@@ -131,6 +164,17 @@ export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promis
     const s = diffAlerts(stale, prevState.stale ?? {}, byId);
     const f = diffAlerts(frozen, prevState.frozen ?? {}, byId);
     const { newly, still, recovered } = s;
+
+    // Unattached feeds: keyed by feed id; state keeps a label so a feed that
+    // stops being unattached (remapped, store reactivated, feed cancelled) can
+    // still be named in the email.
+    const prevUa = prevState.unattached ?? {};
+    const uaNext: UnattachedMap = {};
+    if (ua.error) Object.assign(uaNext, prevUa);
+    else for (const u of ua.list) uaNext[u.feedId] = { since: prevUa[u.feedId]?.since ?? now, label: unattachedLabel(u) };
+    const uaNewly = ua.error ? [] : ua.list.filter((u) => !prevUa[u.feedId]);
+    const uaStill = ua.error ? [] : ua.list.filter((u) => prevUa[u.feedId]);
+    const uaGone = ua.error ? [] : Object.keys(prevUa).filter((id) => !uaNext[id]).map((id) => ({ feedId: id, label: prevUa[id].label }));
 
     let emailed = false;
     // An empty previous state is the first run: everything is "new", which is
@@ -140,12 +184,15 @@ export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promis
     const firstRun = !st?.value;
     const frozenBaseline = firstRun || !prevState.frozen;
     const frozenNews = !frozenBaseline && (f.newly.length > 0 || f.recovered.length > 0);
-    if (opts.send !== false && !firstRun && (newly.length || recovered.length || frozenNews)) {
+    const uaBaseline = firstRun || !prevState.unattached;
+    const uaNews = !uaBaseline && !ua.error && (uaNewly.length > 0 || uaGone.length > 0);
+    if (opts.send !== false && !firstRun && (newly.length || recovered.length || frozenNews || uaNews)) {
       const printing = stale.filter((r) => r.printedLast14d > 0).length;
       const frozenPrinting = frozen.filter((r) => r.printedLast14d > 0).length;
       await sendMandrillEmail({
         subject: `Feed health: ${newly.length} newly stopped, ${recovered.length} recovered (${stale.length} stopped)`
-          + (frozenBaseline ? "" : ` · ${f.newly.length} newly frozen, ${f.recovered.length} unfrozen (${frozen.length} frozen)`),
+          + (frozenBaseline ? "" : ` · ${f.newly.length} newly frozen, ${f.recovered.length} unfrozen (${frozen.length} frozen)`)
+          + (uaBaseline || ua.error ? "" : ` · ${uaNewly.length} newly unattached feed(s) (${ua.list.length} unattached)`),
         from_email: "noreply@dealeraddendums.com",
         from_name: "DealerAddendums",
         to: [
@@ -169,15 +216,26 @@ export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promis
             : `<h3>Newly frozen (${f.newly.length})</h3>${table(f.newly)}`
               + `<h3>No longer frozen (${f.recovered.length})</h3>${table(f.recovered)}`
               + `<h3>Still frozen (${f.still.length})</h3>${table(f.still)}`)
+          + `<h2 style="font-size:16px">Unattached feeds — delivering data but not reaching a store</h2>`
+          + `<p>Feed ids whose vehicles arrived in the last 3 days but don't belong to an active store, so nobody sees them. Surfaced only — nothing is remapped or cancelled automatically.</p>`
+          + (ua.error
+            ? `<p style="color:#c62828">The unattached-feed check failed this run (${esc(ua.error)}); the previous list is kept.</p>`
+            : uaBaseline
+              ? `<p style="color:#78828c">First run tracking unattached feeds — the ${ua.list.length} below are the baseline; from tomorrow only changes are reported.</p>${unattachedSection(ua.list)}`
+              : `<h3>Newly unattached (${uaNewly.length})</h3>${uaNewly.length ? unattachedSection(uaNewly) : "<p style=\"color:#78828c\">None.</p>"}`
+                + `<h3>No longer unattached (${uaGone.length})</h3>${uaGone.length ? `<ul>${uaGone.map((g) => `<li>${esc(g.feedId)} — was ${esc(g.label)}</li>`).join("")}</ul>` : "<p style=\"color:#78828c\">None.</p>"}`
+                + `<h3>Still unattached (${uaStill.length})</h3>${uaStill.length ? unattachedSection(uaStill) : "<p style=\"color:#78828c\">None.</p>"}`)
           + (errors.length ? `<p style="color:#78828c">${errors.length} store(s) couldn't be checked this run.</p>` : "")
           + `</div>`,
       });
       emailed = true;
     }
-    await admin.from("admin_settings").upsert({ key: STATE_KEY, value: JSON.stringify({ stale: s.next, frozen: f.next, lastRunAt: now }), updated_at: now }, { onConflict: "key" });
+    await admin.from("admin_settings").upsert({ key: STATE_KEY, value: JSON.stringify({ stale: s.next, frozen: f.next, unattached: uaNext, lastRunAt: now }), updated_at: now }, { onConflict: "key" });
     return {
       stale: stale.length, newly: newly.length, recovered: recovered.length,
       frozen: frozen.length, frozenNewly: frozenBaseline ? 0 : f.newly.length, frozenRecovered: frozenBaseline ? 0 : f.recovered.length,
+      unattached: ua.list.length, unattachedNewly: uaBaseline ? 0 : uaNewly.length, unattachedGone: uaBaseline ? 0 : uaGone.length,
+      ...(ua.error ? { unattachedError: ua.error } : {}),
       emailed, errors: errors.length,
     };
   } finally {

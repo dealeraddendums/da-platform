@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { frozenWorstFirst, runFeedHealthDigest, scanFleet, staleWorstFirst } from "@/lib/feed-health-scan";
+import { scanUnattachedFeeds } from "@/lib/feed-unattached";
+import { createAdminSupabaseClient } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -21,8 +23,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   if (req.nextUrl.searchParams.get("report") === "1") {
-    const { rows, errors } = await scanFleet();
-    return NextResponse.json({ generatedAt: new Date().toISOString(), stale: staleWorstFirst(rows).map((r) => r.dealerId), frozen: frozenWorstFirst(rows).map((r) => r.dealerId), rows, errors });
+    const [{ rows, errors }, unattached] = await Promise.all([scanFleet(), scanUnattachedFeeds(createAdminSupabaseClient())]);
+    return NextResponse.json({ generatedAt: new Date().toISOString(), stale: staleWorstFirst(rows).map((r) => r.dealerId), frozen: frozenWorstFirst(rows).map((r) => r.dealerId), unattached, rows, errors });
   }
   runFeedHealthDigest().then(
     (r) => console.log("[feed-health] digest:", JSON.stringify(r)),
