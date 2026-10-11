@@ -136,6 +136,7 @@ check(
   check("template unreadable → block", d({ template: undefined }).mode === "block");
   check("FreshBooks status unknown + no template → block", d({ legacy: L("Automatic Web", "unknown"), template: null }).mode === "block");
   check("4.0 Trial → block (handle manually)", d({ legacy: L("Trial", "none"), template: null }).mode === "block");
+  check("4.0 Trial but da-billing template live → paid (stale 4.0 label)", d({ legacy: L("Trial", "none"), template: { active: true } }).mode === "paid");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

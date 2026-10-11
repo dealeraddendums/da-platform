@@ -62,7 +62,12 @@ export function decideForceBilling(i: ForceBillingInput): ForceBillingDecision {
   const fbGone = FB_GONE.has(fb);
   const fbLabel = fb === "none" ? "no FreshBooks recurring profile" : `FreshBooks recurring profile ${fb}`;
 
-  if (tier === "Trial") return { mode: "block", reason: "the dealer is on a Trial in 4.0 — force-migrate is for paying or Free dealers; handle this one manually" };
+  if (tier === "Trial") {
+    // A live da-billing template means they already pay on 5.0's billing — the
+    // 4.0 label is just stale. Otherwise a trial is neither paying nor Free.
+    if (i.payerCustomerId && i.template?.active === true) return { mode: "paid", reason: "4.0 still says Trial, but the da-billing template is already live" };
+    return { mode: "block", reason: "the dealer is on a Trial in 4.0 — force-migrate is for paying or Free dealers; handle this one manually" };
+  }
 
   if (tier === "Free") {
     // Group-billed: the group's template carries OTHER stores too, so its being
