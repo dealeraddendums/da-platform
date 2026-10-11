@@ -14,6 +14,7 @@
  */
 
 import { computeForceVerdict, type ForceCandidate } from "../lib/force-migration";
+import { decideForceBilling, type ForceBillingInput, type LegacyBillingStatus } from "../lib/force-billing-preflight";
 
 let pass = 0, fail = 0;
 const failures: string[] = [];
@@ -90,6 +91,51 @@ check(
 {
   const d = v({ synced: false, deliverability: "bounced" });
   check("setup problems reported before email problems", d.verdict === "not-ready", d.verdict);
+}
+
+
+// ── Billing pre-flight (2026-10-11): Free carry-over / block / paid ────────
+{
+  const L = (account_type: string, fb: string, extra: Partial<LegacyBillingStatus> = {}): LegacyBillingStatus =>
+    ({ ok: true, found: true, legacy_id: 1, account_type, active: "Yes", recurring: { status: fb, profile_id: fb === "none" ? null : "1" }, ...extra });
+  const base: ForceBillingInput = { legacy: L("Automatic Web", "ok"), billedTo: "dealer", payerCustomerId: "cust", template: { active: false } };
+  const d = (o: Partial<ForceBillingInput>) => decideForceBilling({ ...base, ...o });
+
+  // Lax Automotive exactly: Free in 4.0, no RECURE_ID, customer but no template.
+  const lax = d({ legacy: L("Free", "none"), template: null });
+  check("Lax: 4.0 Free + no template → free (no billing error)", lax.mode === "free", lax.mode);
+  check("Lax: nothing left to stop in FreshBooks", lax.mode === "free" && lax.freshbooksNothingToStop);
+  check("4.0 Free with no customer at all → free, not blocked", d({ legacy: L("Free", "none"), payerCustomerId: null, template: null }).mode === "free");
+  const freeFbLive = d({ legacy: L("Free", "ok"), template: null });
+  check("4.0 Free but FreshBooks still active → free, operator stop still needed", freeFbLive.mode === "free" && !freeFbLive.freshbooksNothingToStop);
+  check("4.0 Free but OWN da-billing template live → block (conflict)", d({ legacy: L("Free", "none"), template: { active: true } }).mode === "block");
+  check("4.0 Free, group-billed, group template live → free (group pays for others)", d({ legacy: L("Free", "none"), billedTo: "group", template: { active: true } }).mode === "free");
+
+  // Cancelled: paid label in 4.0 but FreshBooks gone and nothing staged.
+  check("paid label + FB deleted + no template → free (cancelled)", d({ legacy: L("Automatic Web $135", "deleted"), template: null }).mode === "free");
+  check("paid label + no RECURE_ID + no template → free (cancelled)", d({ legacy: L("Manual", "none"), template: null }).mode === "free");
+
+  // Paying but not staged → block, never migrate.
+  const unstaged = d({ legacy: L("Automatic Web", "ok"), template: null });
+  check("paying in FreshBooks + no template → block 'billing not staged'", unstaged.mode === "block" && /billing not staged/.test(unstaged.reason), unstaged.reason);
+  check("paused FreshBooks + no template → block (ask, don't guess)", d({ legacy: L("Automatic Web", "disabled"), template: null }).mode === "block");
+  check("paying + no customer → block", d({ legacy: L("Automatic Web", "ok"), payerCustomerId: null, template: null }).mode === "block");
+  check("paid label + no customer + no FreshBooks → free (cancelled, nothing bills them)", d({ legacy: L("Automatic Web", "none"), payerCustomerId: null, template: undefined }).mode === "free");
+  check("group-billed paying + group has no template → block", d({ billedTo: "group", template: null }).mode === "block");
+
+  // Normal paid path unchanged.
+  check("paying + staged (paused) template → paid", d({}).mode === "paid");
+  check("paying + live template → paid", d({ template: { active: true } }).mode === "paid");
+  check("FB paused by our cutover + template live → paid (not mistaken for cancelled)", d({ legacy: L("Automatic Web", "disabled"), template: { active: true } }).mode === "paid");
+
+  // Can't tell → block, nothing changed.
+  check("ETL unreachable → block", d({ legacy: null }).mode === "block");
+  check("ETL error → block", d({ legacy: { ok: false, error: "HTTP 500" } }).mode === "block");
+  check("not in 4.0 → block", d({ legacy: { ok: true, found: false } }).mode === "block");
+  check("duplicate DEALER_ID in 4.0 → block", d({ legacy: { ok: true, found: true, ambiguous: true } }).mode === "block");
+  check("template unreadable → block", d({ template: undefined }).mode === "block");
+  check("FreshBooks status unknown + no template → block", d({ legacy: L("Automatic Web", "unknown"), template: null }).mode === "block");
+  check("4.0 Trial → block (handle manually)", d({ legacy: L("Trial", "none"), template: null }).mode === "block");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -63,9 +63,13 @@ export async function migrateDealerRecord(
      *  logins (two PM2 workers, two users) can't both run the migration side
      *  effects. Losing the race returns { ok:false, alreadyMigrated:true }. */
     onlyIfNotMigrated?: boolean;
+    /** Force flow only: "Free" when the dealer is Free/cancelled in 4.0 — the
+     *  plan is carried over instead of assigning a paid tier, and the marketing
+     *  conversion webhook (a paid-conversion event) is not fired. */
+    planOverride?: "Free";
   },
 ): Promise<{ ok: boolean; error?: string; plan: string; alreadyMigrated?: boolean }> {
-  const plan = paidTierFor(dealer.inventory_provider_is_dms, dealer.inventory_provider);
+  const plan = opts.planOverride ?? paidTierFor(dealer.inventory_provider_is_dms, dealer.inventory_provider);
   const patch: Record<string, unknown> = {
     migration_status: "migrated",
     account_type: plan,
@@ -117,7 +121,7 @@ export async function migrateDealerRecord(
   }
 
   fireDealerReliable(dealer.id, opts.hubspotContext);
-  fireConversionWebhook({ dealerId: dealer.dealer_id, convertedAt: opts.nowIso, plan });
+  if (!opts.planOverride) fireConversionWebhook({ dealerId: dealer.dealer_id, convertedAt: opts.nowIso, plan });
   // 4.0 lockout: every migration path (self-serve confirm, group migrate,
   // group self-service) auto-sets the legacy migrated_to_v5 flag via the
   // 4.0-owned endpoint (never a direct Aurora write). Failure/missing endpoint

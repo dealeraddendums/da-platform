@@ -77,7 +77,7 @@ export default function ForceMigrationQueue() {
       const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
-      setMsg({ kind: "ok", text: `${label}: ${j.dealer ?? "done"}${j.billing ? ` — billing ${j.billing}` : ""}${j.emailed && j.emailed.sent === false ? " — ⚠️ notification email NOT sent" : ""}` });
+      setMsg({ kind: "ok", text: `${label}: ${j.dealer ?? "done"}${j.plan ? ` — plan ${j.plan}` : ""}${j.billing ? ` — billing ${j.billing}` : ""}${j.emailed && j.emailed.sent === false ? " — ⚠️ notification email NOT sent" : ""}` });
       await load();
     } catch (e) {
       setMsg({ kind: "err", text: e instanceof Error ? e.message : `${label} failed` });
@@ -226,11 +226,12 @@ export default function ForceMigrationQueue() {
             <ul style={{ fontSize: 13, color: "#55595c", lineHeight: 1.8, margin: "0 0 14px", paddingLeft: 20 }}>
               <li>mark them migrated on 5.0 and set <code>migrated_to_v5</code> on 4.0</li>
               <li>send their 4.0 sign-in to the new platform from now on</li>
-              <li><strong>activate billing</strong> for the responsible payer</li>
+              <li><strong>activate billing</strong> for the responsible payer — unless they are Free or cancelled in 4.0, in which case they move over as <strong>Free</strong> (can sign in, can&apos;t print) and nothing is billed</li>
               <li>email {confirmRow.recipients.length ? confirmRow.recipients.join(", ") : "the dealer"} how to sign in</li>
             </ul>
             <p style={{ fontSize: 12, color: "#78828c", margin: "0 0 20px" }}>
-              If the 4.0 side refuses, the whole thing is rolled back — they are never left half-migrated.
+              Billing is checked first: a paying dealer with no staged da-billing template is refused before anything changes.
+              If the 4.0 side refuses or billing activation fails, the whole thing is rolled back — they are never left half-migrated.
               You can un-force afterwards from this queue.
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>

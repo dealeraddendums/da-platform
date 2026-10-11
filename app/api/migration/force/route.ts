@@ -10,6 +10,8 @@ import { billingConfigured, getTemplate, activateTemplate, setBillingState } fro
 import { futureNextInvoice } from "@/lib/migrate-dealer";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildForcedMigrationEmail } from "@/lib/invite-email";
+import { fireDealerReliable } from "@/lib/sync-hubspot";
+import { decideForceBilling, fetchLegacyBillingStatus, type ForceBillingDecision } from "@/lib/force-billing-preflight";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +21,8 @@ const alert = (subject: string, html: string) =>
     .catch((e) => console.error("[force] alert email failed:", e instanceof Error ? e.message : e));
 
 /**
- * POST /api/migration/force — super_admin only. Body: { dealerId }
+ * POST /api/migration/force — super_admin only. Body: { dealerId, dryRun? }
+ * dryRun:true returns the billing decision + verdict and changes nothing.
  *
  * Force-migrate ONE dealer onto 5.0, as a deliberate manual act by a team
  * member. Spec: suite root force-migration-spec.md.
@@ -35,33 +38,71 @@ const alert = (subject: string, html: string) =>
  * restore the 5.0 row to exactly its prior values and push 4.0 back to false,
  * so the dealer is never left half-migrated.
  *
- * Billing auto-activates (Allan, 2026-09-27) — the queue already gated on
- * billing being verified, and a human is reviewing each one. A billing failure
- * is reported loudly but does NOT roll back the migration: both platforms are
- * already consistent at that point, and /api/migration/activate-billing exists
- * to finish the job. Rolling a dealer back off 5.0 over a billing hiccup would
- * be the more disruptive outcome.
+ * ── Billing pre-flight (2026-10-11, supersedes the 2026-09-27 "billing never
+ * rolls back") ──────────────────────────────────────────────────────────────
+ * Before anything is written, lib/force-billing-preflight.ts reads the dealer's
+ * 4.0 ACCOUNT_TYPE + FreshBooks recurring state (ETL box, read-only) and the
+ * payer's da-billing template, and decides:
+ *   free  — Free (or cancelled) in 4.0 → migrate as Free, no billing activation,
+ *           no paid plan. (Lax Automotive landed on a paid plan with a raw
+ *           "setTemplateStatus 404" before this.)
+ *   paid  — template exists → migrate + activate as before.
+ *   block — e.g. paying but no staged template → 409, nothing changed.
+ * If activation still fails for a paid dealer, the migration is rolled back
+ * exactly like a 4.0 refusal, so a dealer is never left migrated-but-unbilled.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireSuperAdmin();
   if (error) return error;
 
-  let body: { dealerId?: string };
+  let body: { dealerId?: string; dryRun?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
   if (!body.dealerId) return NextResponse.json({ error: "dealerId required" }, { status: 400 });
 
   const admin = createAdminSupabaseClient();
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, group_id, subscription_billed_to, billing_customer_id, account_type, migration_status, converted_at, downgraded_at, billing_cutover_at, inventory_provider, inventory_provider_is_dms, box_folder_id, freshbooks_stopped_at, inventory_dealer_id, primary_contact, primary_contact_email")
+    .select("id, dealer_id, name, group_id, subscription_billed_to, billing_customer_id, account_type, migration_status, converted_at, downgraded_at, billing_cutover_at, inventory_provider, inventory_provider_is_dms, box_folder_id, freshbooks_stopped_at, inventory_dealer_id, primary_contact, primary_contact_email, legacy_lockout_at, legacy_lockout_pending")
     .eq("id", body.dealerId)
     .maybeSingle<DealerRow>();
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
 
+  // ── 0. Billing pre-flight — decide Free / paid / block before any write ───
+  const payerCustomerId = await resolvePayerCustomerId(admin, dealer);
+  const [legacy, template] = await Promise.all([
+    fetchLegacyBillingStatus(dealer.dealer_id),
+    payerCustomerId && billingConfigured()
+      ? getTemplate(payerCustomerId).then((t) => (t ? { active: t.active ?? null } : null), () => undefined)
+      : Promise.resolve(null),
+  ]);
+  const decision: ForceBillingDecision = decideForceBilling({
+    legacy,
+    billedTo: dealer.subscription_billed_to === "group" ? "group" : "dealer",
+    payerCustomerId,
+    template,
+  });
+  const isFree = decision.mode === "free";
+  // dryRun: report what a force WOULD do (billing decision + click-time verdict)
+  // and write nothing — no probe, no 5.0/4.0 flip, no billing, no email.
+  if (body.dryRun) {
+    const v = await recheckVerdict(dealer.id, dealer.dealer_id, isFree);
+    return NextResponse.json({
+      dryRun: true, dealer: dealer.name,
+      billing: { mode: decision.mode, reason: decision.reason, legacyAccountType: legacy?.account_type ?? null, freshbooks: legacy?.recurring?.status ?? null, payerCustomerId, template: template === undefined ? "unreadable" : template },
+      plan: isFree ? "Free" : decision.mode === "paid" ? "paid tier" : null,
+      verdict: v.verdict, reasons: v.reasons,
+    });
+  }
+  if (decision.mode === "block") {
+    return NextResponse.json({ error: `Not forced — ${decision.reason}`, stage: "billing-preflight", legacyAccountType: legacy?.account_type ?? null }, { status: 409 });
+  }
+
   // ── 1. Re-check the verdict AT CLICK TIME ─────────────────────────────────
   // The queue was rendered from a snapshot; email deliverability and readiness
   // can both have changed since. The button and the server use the same gate.
-  const verdictCheck = await recheckVerdict(dealer.id, dealer.dealer_id);
+  // A dealer carried over as Free has nothing to bill, so the billing gate
+  // doesn't apply to it.
+  const verdictCheck = await recheckVerdict(dealer.id, dealer.dealer_id, isFree);
   if (verdictCheck.verdict !== "safe") {
     return NextResponse.json({
       error: `Not safe to force: ${verdictCheck.reasons.join("; ")}`,
@@ -89,6 +130,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     converted_at: dealer.converted_at,
     downgraded_at: dealer.downgraded_at,
     billing_cutover_at: dealer.billing_cutover_at,
+    legacy_lockout_at: dealer.legacy_lockout_at,
+    legacy_lockout_pending: dealer.legacy_lockout_pending,
+    freshbooks_stopped_at: dealer.freshbooks_stopped_at,
   };
   const nowIso = new Date().toISOString();
 
@@ -98,6 +142,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     hubspotContext: "force-migration",
     skipLegacyLockout: true,
     extraPatch: { forced_at: nowIso, forced_by: claims.sub },
+    ...(isFree ? { planOverride: "Free" as const } : {}),
   });
   if (!res.ok) {
     return NextResponse.json({ error: `5.0 migration write failed: ${res.error}`, stage: "5.0" }, { status: 500 });
@@ -128,11 +173,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .update({ legacy_lockout_at: nowIso, legacy_lockout_pending: false })
     .eq("id", dealer.id);
 
-  // ── 6. Billing: AUTO-ACTIVATE (never rolls the migration back) ────────────
-  const billing = await activateBilling(admin, dealer);
+  // ── 6. Billing ─────────────────────────────────────────────────────────────
+  // Free: nothing to activate. Paid: activate; a failure rolls the whole force
+  // back (the pre-flight already proved the template exists, so this is a real
+  // outage, not a missing template).
+  const billing = isFree
+    ? { state: "free", detail: decision.reason, customerId: payerCustomerId }
+    : await activateBilling(admin, dealer, payerCustomerId);
+  if (billing.state === "error" || billing.state === "no-customer") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any).from("dealers").update({ ...prior, forced_at: null, forced_by: null }).eq("id", dealer.id);
+    const undo = await setLegacyMigratedFlag(dealer.dealer_id, false);
+    fireDealerReliable(dealer.id, "force-migration-rollback");
+    console.error(`[force] billing activation FAILED for ${dealer.dealer_id} — migration rolled back on 5.0 and 4.0. ${billing.detail}`);
+    void alert(
+      `↩️ Force-migrate rolled back — ${dealer.name}`,
+      `<p><strong>${dealer.name}</strong> (${dealer.dealer_id}): billing activation failed (${billing.detail}), so the migration was rolled back on 5.0 and 4.0 (4.0 restored: ${undo.ok ? "yes" : `NO — ${undo.detail}`}). Nothing was billed. Retry once da-billing is reachable.</p>`,
+    );
+    return NextResponse.json({
+      error: `Billing activation failed (${billing.detail}) — the migration was rolled back on 5.0 and 4.0, nothing is half-done. Retry once da-billing is reachable.`,
+      stage: "billing",
+      reverted: true,
+      fourZeroRestored: undo.ok,
+    }, { status: 502 });
+  }
+
+  // Free with no FreshBooks profile left to stop: record that, so the console
+  // doesn't show a FreshBooks stop pending forever (same as group self-migrate).
+  const fbNothingToStop = decision.mode === "free" && decision.freshbooksNothingToStop;
+  if (fbNothingToStop && !dealer.freshbooks_stopped_at) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any).from("dealers").update({ freshbooks_stopped_at: nowIso }).eq("id", dealer.id).is("freshbooks_stopped_at", null);
+  }
 
   // ── 7. FreshBooks recurring-stop (operator task, same as self-migration) ──
-  if (!dealer.freshbooks_stopped_at) {
+  if (!dealer.freshbooks_stopped_at && !fbNothingToStop) {
     void alert(
       `⚠️ Queue FreshBooks recurring-stop — ${dealer.name}`,
       `<p><strong>${dealer.name}</strong> (${dealer.dealer_id}) was <strong>force-migrated</strong> to 5.0. <strong>Operator action:</strong> stop their FreshBooks recurring profile (manually — do not dry-run-then-live).</p>`,
@@ -149,7 +224,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     event: "force_migrated",
     performed_by: claims.sub,
     billing_customer_id: billing.customerId,
-    notes: JSON.stringify({ prior, plan: res.plan, billing: billing.state, billingDetail: billing.detail, emailed, legacyDealerId: dealer.dealer_id }),
+    notes: JSON.stringify({ prior, plan: res.plan, billing: billing.state, billingDetail: billing.detail, preflight: { mode: decision.mode, reason: decision.reason, legacyAccountType: legacy?.account_type ?? null, freshbooks: legacy?.recurring?.status ?? null }, emailed, legacyDealerId: dealer.dealer_id }),
   });
   if (logErr) console.warn("[force] migration_log insert failed:", logErr.message);
 
@@ -178,10 +253,11 @@ interface DealerRow {
   inventory_provider: string | null; inventory_provider_is_dms: boolean | null;
   box_folder_id: string | null; freshbooks_stopped_at: string | null;
   inventory_dealer_id: string | null; primary_contact: string | null; primary_contact_email: string | null;
+  legacy_lockout_at: string | null; legacy_lockout_pending: boolean | null;
 }
 
 /** Same gate the queue renders, recomputed for one dealer at click time. */
-async function recheckVerdict(dealerUuid: string, legacyDealerId: string): Promise<{ verdict: string; reasons: string[]; recipients: string[] }> {
+async function recheckVerdict(dealerUuid: string, legacyDealerId: string, billingNotApplicable = false): Promise<{ verdict: string; reasons: string[]; recipients: string[] }> {
   const { rows } = await loadReadinessRows({ dealerIds: [dealerUuid] });
   const r = rows.find((x) => x.id === dealerUuid);
   if (!r) return { verdict: "excluded", reasons: ["dealer is not in the readiness set (test/demo account?)"], recipients: [] };
@@ -200,7 +276,7 @@ async function recheckVerdict(dealerUuid: string, legacyDealerId: string): Promi
   const d = computeForceVerdict({
     synced: r.synced,
     billingStaged: r.billingStaged,
-    billingApplicable: r.billingApplicable,
+    billingApplicable: billingNotApplicable ? false : r.billingApplicable,
     templateConfirmed: r.templateConfirmed,
     eligible: r.eligible,
     eligibleReason: r.eligibleReason,
@@ -213,14 +289,19 @@ async function recheckVerdict(dealerUuid: string, legacyDealerId: string): Promi
   return { verdict: d.verdict, reasons: d.reasons, recipients };
 }
 
-/** da-billing go-Live for the responsible payer. Never throws. */
+/** The responsible payer's da-billing customer: the group's when group-billed. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function activateBilling(admin: any, dealer: DealerRow): Promise<{ state: string; detail: string; customerId: string | null }> {
-  let customerId = dealer.billing_customer_id;
+async function resolvePayerCustomerId(admin: any, dealer: DealerRow): Promise<string | null> {
   if (dealer.subscription_billed_to === "group" && dealer.group_id) {
     const { data: g } = await admin.from("groups").select("billing_customer_id").eq("id", dealer.group_id).maybeSingle();
-    customerId = g?.billing_customer_id ?? null;
+    return g?.billing_customer_id ?? null;
   }
+  return dealer.billing_customer_id;
+}
+
+/** da-billing go-Live for the responsible payer. Never throws. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function activateBilling(_admin: any, dealer: DealerRow, customerId: string | null): Promise<{ state: string; detail: string; customerId: string | null }> {
   if (!billingConfigured()) return { state: "skipped", detail: "billing API not configured", customerId };
   if (!customerId) return { state: "no-customer", detail: dealer.subscription_billed_to === "group" ? "group has no billing customer" : "dealer has no billing customer", customerId: null };
 
