@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { frozenWorstFirst, runFeedHealthDigest, scanFleet, staleWorstFirst } from "@/lib/feed-health-scan";
-import { scanUnattachedFeeds } from "@/lib/feed-unattached";
+import { scanUnattachedFeeds, checkFeedAliases } from "@/lib/feed-unattached";
 import { createAdminSupabaseClient } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -23,8 +23,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   if (req.nextUrl.searchParams.get("report") === "1") {
-    const [{ rows, errors }, unattached] = await Promise.all([scanFleet(), scanUnattachedFeeds(createAdminSupabaseClient())]);
-    return NextResponse.json({ generatedAt: new Date().toISOString(), stale: staleWorstFirst(rows).map((r) => r.dealerId), frozen: frozenWorstFirst(rows).map((r) => r.dealerId), unattached, rows, errors });
+    const admin = createAdminSupabaseClient();
+    const [{ rows, errors }, { aliases, problems }] = await Promise.all([scanFleet(), checkFeedAliases(admin)]);
+    const unattached = await scanUnattachedFeeds(admin, aliases);
+    return NextResponse.json({
+      generatedAt: new Date().toISOString(), stale: staleWorstFirst(rows).map((r) => r.dealerId), frozen: frozenWorstFirst(rows).map((r) => r.dealerId), unattached,
+      aliases: { inUse: Object.fromEntries(aliases.map), mirroredAt: aliases.mirroredAt, unavailable: aliases.unavailable, problems },
+      rows, errors,
+    });
   }
   runFeedHealthDigest().then(
     (r) => console.log("[feed-health] digest:", JSON.stringify(r)),

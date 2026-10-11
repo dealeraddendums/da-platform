@@ -19,6 +19,17 @@
 //                      duplicate copy (cleanup)
 //        none        — no likely store: a non-customer feed, a store to
 //                      onboard, or a dead feed
+//        pinned      — an ETL2 alias (see below) maps this id to ITSELF: it is
+//                      deliberately kept off every store, so it is not a
+//                      remap candidate even if a store's id looks like it
+//
+// ETL2 feed-id aliases (2026-10-11): ETL2's setting/dealer-id-aliases.json
+// routes a feed id to an exact store dealer_id ahead of the normal
+// dealer_id/inventory_dealer_id lookup. ETL2 mirrors the map it has loaded into
+// admin_settings `etl2_dealer_id_aliases` on every reload, and the scan reads
+// that mirror: a routed id is credited to its target store, a pinned id is
+// labelled as such, and an alias whose target isn't an active store is
+// reported (checkFeedAliases) — that alias would be filing a feed nowhere.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { FRESH_DAYS, LIVE_FEED_OR } from "@/lib/feed-health";
@@ -26,7 +37,7 @@ import { FRESH_DAYS, LIVE_FEED_OR } from "@/lib/feed-health";
 type Admin = any;
 
 export type UnattachedBucket = "deactivated_store" | "no_store";
-export type UnattachedMatch = "store_unfed" | "store_fed" | "none";
+export type UnattachedMatch = "store_unfed" | "store_fed" | "none" | "pinned";
 
 export interface UnattachedFeed {
   feedId: string;
@@ -38,13 +49,75 @@ export interface UnattachedFeed {
   storeName: string | null;         // bucket A: the deactivated store
   hints: string[];                  // bucket B: possible matches, for triage only
   match: UnattachedMatch;           // bucket B triage (A is always "none")
+  /** Set when an ETL2 alias covers this feed id: its target, and whether it pins the id to itself. */
+  alias?: { target: string; pinned: boolean };
 }
 
 export const MATCH_LABEL: Record<UnattachedMatch, string> = {
   store_unfed: "Likely mis-keyed — the matching store gets no feed of its own (missing inventory)",
   store_fed: "Duplicate — the matching store is already fed under its own id",
   none: "No matching store — non-customer feed, a store to onboard, or a dead feed",
+  pinned: "Pinned by an ETL2 alias — deliberately kept off every store (not a remap candidate)",
 };
+
+export const ALIAS_MIRROR_KEY = "etl2_dealer_id_aliases";
+
+export interface FeedAliases {
+  /** lowercased feed id → exact target dealer_id (ETL2 uses the target verbatim) */
+  map: Map<string, string>;
+  /** "_…" comment entries from the alias file, keyed by name */
+  notes: Record<string, string>;
+  mirroredAt: string | null;
+  fileMtime: string | null;
+  /** null when the mirror was read; otherwise why aliases are unknown this run */
+  unavailable: string | null;
+}
+
+/** The alias map ETL2 last loaded (mirrored into admin_settings). Never throws:
+ *  a missing/broken mirror yields an empty map with `unavailable` set, so the
+ *  scan degrades to its pre-alias behavior instead of failing. */
+export async function loadFeedAliases(admin: Admin): Promise<FeedAliases> {
+  const out: FeedAliases = { map: new Map(), notes: {}, mirroredAt: null, fileMtime: null, unavailable: null };
+  try {
+    const { data, error } = await admin.from("admin_settings").select("value, updated_at").eq("key", ALIAS_MIRROR_KEY).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data?.value) { out.unavailable = "ETL2 hasn't mirrored its alias list yet"; return out; }
+    const v = JSON.parse(data.value);
+    out.mirroredAt = v.mirrored_at ?? data.updated_at ?? null;
+    out.fileMtime = v.file_mtime ?? null;
+    for (const [k, t] of Object.entries((v.raw ?? {}) as Record<string, unknown>)) {
+      const key = k.trim();
+      if (!key || typeof t !== "string" || !t.trim()) continue;
+      if (key.startsWith("_")) out.notes[key] = t;
+      else out.map.set(key.toLowerCase(), t.trim());
+    }
+  } catch (e) {
+    out.unavailable = `alias mirror unreadable: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  return out;
+}
+
+export interface AliasProblem { feedId: string; target: string; problem: string }
+
+/** Aliases that would file a feed nowhere useful: the target isn't a dealer, or
+ *  is a deactivated one. A pin (target == feed id) is fine by definition. */
+export async function checkFeedAliases(admin: Admin, aliases?: FeedAliases): Promise<{ aliases: FeedAliases; problems: AliasProblem[] }> {
+  const al = aliases ?? await loadFeedAliases(admin);
+  const problems: AliasProblem[] = [];
+  const targets = Array.from(new Set(Array.from(al.map.entries()).filter(([k, t]) => k !== t.toLowerCase()).map(([, t]) => t)));
+  if (targets.length) {
+    const { data, error } = await admin.from("dealers").select("dealer_id, name, active").in("dealer_id", targets);
+    if (error) throw new Error(error.message);
+    const byId = new Map(((data ?? []) as any[]).map((d) => [d.dealer_id, d]));
+    for (const [k, t] of Array.from(al.map.entries())) {
+      if (k === t.toLowerCase()) continue;
+      const d = byId.get(t);
+      if (!d) problems.push({ feedId: k, target: t, problem: "target is not a store's dealer_id (feed files under an id no store has)" });
+      else if (!d.active) problems.push({ feedId: k, target: t, problem: `target store "${d.name ?? t}" is deactivated` });
+    }
+  }
+  return { aliases: al, problems };
+}
 
 export const UNATTACHED_LABEL: Record<UnattachedBucket, string> = {
   deactivated_store: "Feed delivers, but the store is DEACTIVATED — stop the feed or reactivate the store",
@@ -66,7 +139,8 @@ const HEX = "0123456789abcdef";
 const PAGE = 1000;
 const STREAMS = 8;
 
-export async function scanUnattachedFeeds(admin: Admin): Promise<UnattachedFeed[]> {
+export async function scanUnattachedFeeds(admin: Admin, aliases?: FeedAliases): Promise<UnattachedFeed[]> {
+  const al = aliases ?? await loadFeedAliases(admin);
   // Every dealer (active or not), for bucket A and the hints.
   const dealers: { dealer_id: string; name: string | null; active: boolean; inventory_dealer_id: string | null }[] = [];
   for (let from = 0; ; from += 1000) {
@@ -125,6 +199,18 @@ export async function scanUnattachedFeeds(admin: Admin): Promise<UnattachedFeed[
     const d = byId.get(feedId);
     const hints: string[] = [];
     let match: UnattachedMatch = "none";
+    const aliasTarget = al.map.get(feedId.toLowerCase());
+    const alias = aliasTarget ? { target: aliasTarget, pinned: aliasTarget.toLowerCase() === feedId.toLowerCase() } : undefined;
+    if (alias && !alias.pinned) {
+      // ETL2 now files this feed under the alias target; these rows predate the
+      // alias (or the target was renamed) and the feed's next run sweeps them.
+      const t = byId.get(alias.target);
+      hints.push(`ETL2 alias routes this feed to ${t ? `${t.name ?? t.dealer_id} [${t.dealer_id}]${t.active ? "" : " (deactivated)"}` : `${alias.target} (no such store)`} — leftover rows, cleared on the feed's next run`);
+    }
+    if (alias?.pinned) {
+      match = "pinned";
+      hints.push("pinned to itself by an ETL2 alias — kept off every store on purpose");
+    }
     if (!d) {
       const f = norm(feedId), fn = normFeedId(feedId);
       const matched: typeof dealers = [];
@@ -142,7 +228,8 @@ export async function scanUnattachedFeeds(admin: Admin): Promise<UnattachedFeed[
         if (why) { hints.push(`${why} ${label}`); matched.push(x); }
       }
       const activeMatches = matched.filter((x) => x.active);
-      if (activeMatches.some((x) => !fedActive.get(x.dealer_id))) match = "store_unfed";
+      if (alias) { /* routed by alias: triage doesn't apply */ }
+      else if (activeMatches.some((x) => !fedActive.get(x.dealer_id))) match = "store_unfed";
       else if (activeMatches.length) match = "store_fed";
     }
     out.push({
@@ -155,10 +242,11 @@ export async function scanUnattachedFeeds(admin: Admin): Promise<UnattachedFeed[
       storeName: d ? (d.name ?? d.dealer_id) : null,
       hints,
       match,
+      ...(alias ? { alias } : {}),
     });
   }
   // B first (nobody sees them): likely mis-keyed, then duplicates, then the
   // rest; then A. Most vehicles first within each.
-  const rank = (u: UnattachedFeed) => u.bucket === "deactivated_store" ? 3 : u.match === "store_unfed" ? 0 : u.match === "store_fed" ? 1 : 2;
+  const rank = (u: UnattachedFeed) => u.bucket === "deactivated_store" ? 4 : u.match === "store_unfed" ? 0 : u.match === "store_fed" ? 1 : u.match === "none" ? 2 : 3;
   return out.sort((x, y) => rank(x) - rank(y) || y.vehicles - x.vehicles);
 }

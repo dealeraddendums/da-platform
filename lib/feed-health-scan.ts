@@ -21,7 +21,7 @@
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { dealerFeedHealth, loadRosters, FROZEN_NEWEST_DAYS, type DealerFeedHealth } from "@/lib/feed-health";
-import { scanUnattachedFeeds, UNATTACHED_LABEL, MATCH_LABEL, type UnattachedFeed } from "@/lib/feed-unattached";
+import { scanUnattachedFeeds, checkFeedAliases, UNATTACHED_LABEL, MATCH_LABEL, type UnattachedFeed, type AliasProblem, type FeedAliases } from "@/lib/feed-unattached";
 
 export interface ScanRow extends DealerFeedHealth {
   dealerId: string;
@@ -125,12 +125,22 @@ function unattachedTable(rows: UnattachedFeed[]): string {
     + "</table>";
 }
 
+/** ETL2 feed-id alias status for the digest: problems in red, otherwise one muted line. */
+function aliasNote(al: FeedAliases | null, problems: AliasProblem[]): string {
+  if (!al) return "";
+  if (al.unavailable) return `<p style="color:#78828c">ETL2 feed-id aliases: not known this run (${esc(al.unavailable)}) — aliased feeds are triaged as if they had no alias.</p>`;
+  const head = `ETL2 feed-id aliases: ${al.map.size} in use (setting/dealer-id-aliases.json on the ETL2 box; mirrored ${esc((al.mirroredAt ?? "").slice(0, 16).replace("T", " "))} UTC).`;
+  if (!problems.length) return `<p style="color:#78828c">${head}</p>`;
+  return `<p style="color:#c62828">${head} ${problems.length} alias(es) point at no active store, so those feeds are filed where nobody sees them:</p><ul>`
+    + problems.map((p) => `<li>${esc(p.feedId)} → ${esc(p.target)}: ${esc(p.problem)}</li>`).join("") + "</ul>";
+}
+
 /** Bucket B (split by triage) then bucket A, each with its own heading and action. */
 function unattachedSection(rows: UnattachedFeed[]): string {
   const b = rows.filter((u) => u.bucket === "no_store");
   const a = rows.filter((u) => u.bucket === "deactivated_store");
   return `<p style="margin:10px 0 4px"><strong>B) ${esc(UNATTACHED_LABEL.no_store)}</strong> (${b.length})</p>`
-    + (["store_unfed", "store_fed", "none"] as const).map((m) => {
+    + (["store_unfed", "store_fed", "none", "pinned"] as const).map((m) => {
       const r = b.filter((u) => u.match === m);
       return r.length ? `<p style="margin:6px 0 4px 12px"><em>${esc(MATCH_LABEL[m])}</em> (${r.length})</p>${unattachedTable(r)}` : "";
     }).join("")
@@ -140,7 +150,7 @@ function unattachedSection(rows: UnattachedFeed[]): string {
 export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promise<{
   skipped?: string; stale: number; newly: number; recovered: number;
   frozen: number; frozenNewly: number; frozenRecovered: number;
-  unattached: number; unattachedNewly: number; unattachedGone: number; unattachedError?: string;
+  unattached: number; unattachedNewly: number; unattachedGone: number; unattachedError?: string; aliasProblems?: number;
   emailed: boolean; errors: number;
 }> {
   const admin = createAdminSupabaseClient() as any;
@@ -154,8 +164,8 @@ export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promis
     // digest still goes out and the unattached state is left as it was.
     const [{ rows, errors }, ua] = await Promise.all([
       scanFleet(),
-      scanUnattachedFeeds(admin).then((list) => ({ list, error: null as string | null }),
-        (e) => ({ list: [] as UnattachedFeed[], error: e instanceof Error ? e.message : String(e) })),
+      checkFeedAliases(admin).then(async ({ aliases, problems }) => ({ list: await scanUnattachedFeeds(admin, aliases), aliases, problems, error: null as string | null }),
+        (e) => ({ list: [] as UnattachedFeed[], aliases: null as FeedAliases | null, problems: [] as AliasProblem[], error: e instanceof Error ? e.message : String(e) })),
     ]);
     const stale = staleWorstFirst(rows);
     const frozen = frozenWorstFirst(rows);
@@ -222,6 +232,7 @@ export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promis
               + `<h3>Still frozen (${f.still.length})</h3>${table(f.still)}`)
           + `<h2 style="font-size:16px">Unattached feeds — delivering data but not reaching a store</h2>`
           + `<p>Feed ids whose vehicles arrived in the last 3 days but don't belong to an active store, so nobody sees them. Surfaced only — nothing is remapped or cancelled automatically.</p>`
+          + aliasNote(ua.aliases, ua.problems)
           + (ua.error
             ? `<p style="color:#c62828">The unattached-feed check failed this run (${esc(ua.error)}); the previous list is kept.</p>`
             : uaBaseline
@@ -240,6 +251,7 @@ export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promis
       frozen: frozen.length, frozenNewly: frozenBaseline ? 0 : f.newly.length, frozenRecovered: frozenBaseline ? 0 : f.recovered.length,
       unattached: ua.list.length, unattachedNewly: uaBaseline ? 0 : uaNewly.length, unattachedGone: uaBaseline ? 0 : uaGone.length,
       ...(ua.error ? { unattachedError: ua.error } : {}),
+      ...(ua.problems.length ? { aliasProblems: ua.problems.length } : {}),
       emailed, errors: errors.length,
     };
   } finally {
