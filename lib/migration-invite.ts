@@ -1,4 +1,5 @@
 import { createAdminSupabaseClient } from "./db";
+import { migrationPlanBlock } from "@/lib/migration-plan-gate";
 import { sendMandrillEmail } from "./mandrill";
 import { fireWrite } from "@/lib/db";
 
@@ -27,13 +28,16 @@ export async function inviteUsersForDealer(
   // 1. Look up dealer
   const { data: dealer, error: dealerErr } = await admin
     .from("dealers")
-    .select("id, name, inventory_dealer_id")
+    .select("id, name, inventory_dealer_id, account_type, subscription_billed_to, group_id")
     .eq("inventory_dealer_id", inventoryDealerId)
-    .maybeSingle<{ id: string; name: string; inventory_dealer_id: string }>();
+    .maybeSingle<{ id: string; name: string; inventory_dealer_id: string; account_type: string | null; subscription_billed_to: string | null; group_id: string | null }>();
 
   if (dealerErr || !dealer) {
     throw new Error(`Dealer not found: ${inventoryDealerId}`);
   }
+  // Only paying dealers are migrated, so only they are invited (2026-10-11).
+  const planBlock = migrationPlanBlock(dealer);
+  if (planBlock) throw new Error(`Dealer "${dealer.name}": ${planBlock} — migration invites are blocked`);
 
   // 2. Load all profiles for this dealer
   const { data: profiles, error: profilesErr } = await admin

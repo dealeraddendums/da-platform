@@ -8,6 +8,7 @@ import { fireConversionWebhook } from "@/lib/marketing-webhook";
 import { fireAndForget } from "@/lib/billing-sync";
 import { boxConfigured, createDealerFolder } from "@/lib/box";
 import { fireLegacyLockout } from "@/lib/legacy-lockout";
+import { migrationPlanBlock } from "@/lib/migration-plan-gate";
 
 /** account_type Paid tier for a migrating dealer, from its inventory setup. */
 export function paidTierFor(dms: boolean | null, provider: string | null): string {
@@ -63,13 +64,23 @@ export async function migrateDealerRecord(
      *  logins (two PM2 workers, two users) can't both run the migration side
      *  effects. Losing the race returns { ok:false, alreadyMigrated:true }. */
     onlyIfNotMigrated?: boolean;
-    /** Force flow only: "Free" when the dealer is Free/cancelled in 4.0 — the
-     *  plan is carried over instead of assigning a paid tier, and the marketing
-     *  conversion webhook (a paid-conversion event) is not fired. */
-    planOverride?: "Free";
   },
-): Promise<{ ok: boolean; error?: string; plan: string; alreadyMigrated?: boolean }> {
-  const plan = opts.planOverride ?? paidTierFor(dealer.inventory_provider_is_dms, dealer.inventory_provider);
+): Promise<{ ok: boolean; error?: string; plan: string; alreadyMigrated?: boolean; notMigratable?: boolean }> {
+  const plan = paidTierFor(dealer.inventory_provider_is_dms, dealer.inventory_provider);
+
+  // HARD GATE (2026-10-11): only paying dealers are migrated — never Free /
+  // Trial / Trial Expired / Downgraded / no plan. Every migration path ends
+  // here, so this is the backstop behind each entry point's own refusal; the
+  // plan is re-read from the row, never trusted from the caller.
+  {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: cur, error: curErr } = await (admin as any).from("dealers")
+      .select("account_type, subscription_billed_to, group_id").eq("id", dealer.id).maybeSingle();
+    if (curErr || !cur) return { ok: false, error: `could not read the dealer's plan (${curErr?.message ?? "not found"})`, plan, notMigratable: true };
+    const block = migrationPlanBlock(cur);
+    if (block) return { ok: false, error: block, plan, notMigratable: true };
+  }
+
   const patch: Record<string, unknown> = {
     migration_status: "migrated",
     account_type: plan,
@@ -121,7 +132,7 @@ export async function migrateDealerRecord(
   }
 
   fireDealerReliable(dealer.id, opts.hubspotContext);
-  if (!opts.planOverride) fireConversionWebhook({ dealerId: dealer.dealer_id, convertedAt: opts.nowIso, plan });
+  fireConversionWebhook({ dealerId: dealer.dealer_id, convertedAt: opts.nowIso, plan });
   // 4.0 lockout: every migration path (self-serve confirm, group migrate,
   // group self-service) auto-sets the legacy migrated_to_v5 flag via the
   // 4.0-owned endpoint (never a direct Aurora write). Failure/missing endpoint

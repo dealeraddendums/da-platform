@@ -1,12 +1,12 @@
 // Force-migrate billing pre-flight (2026-10-11).
 //
-// Decides, BEFORE anything is written, how a force-migration should treat the
-// dealer's billing:
-//   free  — carry 4.0 Free (or a cancelled 4.0 subscription) over as Free on
-//           5.0: no paid plan, no da-billing activation, no "billing error".
+// Decides, BEFORE anything is written, whether a force-migration may proceed:
 //   paid  — the normal path: paid plan + activate the payer's da-billing
 //           template (which must exist).
-//   block — refuse the force with a clear reason; nothing is changed.
+//   block — refuse the force with a clear reason; nothing is changed. This
+//           includes every Free / Trial / cancelled dealer: only paying
+//           dealers are migrated (Allan, 2026-10-11 — supersedes the same-day
+//           "carry Free over as Free" version).
 //
 // Why: the force used to assume every dealer is paying. Lax Automotive
 // (2026-10-11) had gone Free in 4.0 and its FreshBooks profile was deleted, so
@@ -44,7 +44,6 @@ export interface ForceBillingInput {
 }
 
 export type ForceBillingDecision =
-  | { mode: "free"; reason: string; freshbooksNothingToStop: boolean }
   | { mode: "paid"; reason: string }
   | { mode: "block"; reason: string };
 
@@ -70,18 +69,12 @@ export function decideForceBilling(i: ForceBillingInput): ForceBillingDecision {
   }
 
   if (tier === "Free") {
-    // Group-billed: the group's template carries OTHER stores too, so its being
-    // live says nothing about this dealer. Self-billed: a live template of its
-    // own means da-billing is already charging a dealer 4.0 calls Free.
+    // Self-billed with a LIVE template of its own: da-billing is charging a
+    // dealer 4.0 calls Free — say so, it's a billing problem to resolve.
     if (i.billedTo === "dealer" && i.template?.active === true) {
-      return { mode: "block", reason: "4.0 says Free but the dealer's own da-billing template is LIVE — resolve which is right before forcing" };
+      return { mode: "block", reason: "Free/Trial — not migrated: 4.0 says Free, yet the dealer's own da-billing template is LIVE — resolve which is right" };
     }
-    if (!fbGone && fb !== "disabled") {
-      // Free in 4.0 but a FreshBooks profile still exists and isn't paused — the
-      // operator stop alert still applies, but the plan is Free.
-      return { mode: "free", reason: `4.0 account type is Free (${fbLabel} — still needs the operator stop)`, freshbooksNothingToStop: false };
-    }
-    return { mode: "free", reason: `4.0 account type is Free (${fbLabel})`, freshbooksNothingToStop: true };
+    return { mode: "block", reason: `Free/Trial — not migrated (4.0 plan: Free; ${fbLabel})` };
   }
 
   // A paying tier in 4.0 (or unrecognised) — billing has to be in place.
@@ -96,7 +89,7 @@ export function decideForceBilling(i: ForceBillingInput): ForceBillingDecision {
   }
   // Self-billed, paid label, no template: cancelled (nothing bills them) or simply not staged.
   if (fbGone) {
-    return { mode: "free", reason: `cancelled in 4.0 — account type still reads ${L.account_type ?? "?"}, but there is ${fbLabel} and no da-billing template, so nothing bills them`, freshbooksNothingToStop: true };
+    return { mode: "block", reason: `not a paying dealer — not migrated: 4.0 still says ${L.account_type ?? "?"}, but there is ${fbLabel} and no da-billing template, so nothing bills them (cancelled?)` };
   }
   if (fb === "ok") return { mode: "block", reason: `billing not staged — they still pay through FreshBooks but have no da-billing ${i.payerCustomerId ? "template" : "customer"}; stage billing before forcing` };
   if (fb === "disabled") return { mode: "block", reason: "their FreshBooks profile is paused and there is no da-billing template — confirm whether they still pay before forcing" };

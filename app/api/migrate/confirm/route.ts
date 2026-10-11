@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { migrationPlanBlock } from "@/lib/migration-plan-gate";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
 import { resolveMigrationInvite, manualAttemptAllowed } from "@/lib/invite-lookup";
@@ -82,6 +83,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // is already migrated, do ONLY step 1 (login + profile) + consume the invite —
   // no re-migrate, no billing, no FreshBooks alert.
   const alreadyMigrated = dealer.migration_status === "migrated";
+
+  // Only paying dealers are migrated (2026-10-11) — refuse BEFORE creating a
+  // login, so an invite sent to a Free/Trial dealer can't half-migrate it.
+  if (!alreadyMigrated) {
+    const planBlock = migrationPlanBlock(dealer);
+    if (planBlock) {
+      console.warn(`[migrate/confirm] refused ${dealer.dealer_id} (${dealer.name}): ${planBlock}`);
+      return NextResponse.json({ error: `${dealer.name} isn't on a paid plan, so it can't be moved to Platform 5.0. Please contact support@dealeraddendums.com.`, reason: planBlock }, { status: 409 });
+    }
+  }
 
   const nowIso = new Date().toISOString();
   const fullName = `${inv.first_name ?? ""} ${inv.last_name ?? ""}`.trim() || inv.email;

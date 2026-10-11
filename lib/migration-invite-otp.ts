@@ -17,6 +17,7 @@
 // codes (confirm skips the migrate writes when the dealer is already migrated).
 
 import { createAdminSupabaseClient } from "@/lib/db";
+import { migrationPlanBlock } from "@/lib/migration-plan-gate";
 import { generateSetupCode, hashSetupCode } from "@/lib/invite-code";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { buildMigrationInviteEmail, buildMigrationFollowUpEmail, migrationInviteSubject } from "@/lib/invite-email";
@@ -251,9 +252,10 @@ export async function sendMigrationInvite(
     subscription_billed_to: string | null; billing_customer_id: string | null;
     account_type: string | null; is_native: boolean | null;
     billing_cutover_at: string | null; billing_verified?: boolean | null;
+    group_id: string | null;
   };
   const BASE_COLS = "id, dealer_id, name, inventory_dealer_id, primary_contact, primary_contact_email, active, migration_status, " +
-    "subscription_billed_to, billing_customer_id, account_type, is_native, billing_cutover_at";
+    "subscription_billed_to, billing_customer_id, account_type, is_native, billing_cutover_at, group_id";
   // billing_verified (migration 145) fetched tolerantly: a code deploy ahead of
   // the SQL must not break invites — the gate + cutover just don't arm yet.
   let dealer: (DealerRow & BillingCols) | null = null;
@@ -275,6 +277,11 @@ export async function sendMigrationInvite(
   // (direct invite, wave-send, resend, follow-up drip).
   if (dealer.active === false) {
     throw new Error(`Dealer "${dealer.name}" (${inventoryDealerId}) is deactivated — migration invites are blocked`);
+  }
+  // Only paying dealers are migrated, so only they are invited (2026-10-11).
+  {
+    const planBlock = migrationPlanBlock(dealer);
+    if (planBlock) throw new Error(`Dealer "${dealer.name}" (${inventoryDealerId}): ${planBlock} — migration invites are blocked`);
   }
 
   // ── Billing-cutover scope + gate (2026-08-17) ───────────────────────────────
@@ -443,10 +450,16 @@ export async function sendMigrationFollowUp(
 
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, dealer_id, name, inventory_dealer_id, primary_contact, primary_contact_email, invited_at")
+    .select("id, dealer_id, name, inventory_dealer_id, primary_contact, primary_contact_email, invited_at, active, account_type, subscription_billed_to, group_id")
     .eq("id", dealerUuid)
-    .maybeSingle<DealerRow & { invited_at: string | null }>();
+    .maybeSingle<DealerRow & { invited_at: string | null; active: boolean | null; account_type: string | null; subscription_billed_to: string | null; group_id: string | null }>();
   if (!dealer) throw new Error(`Dealer not found: ${dealerUuid}`);
+  // Free/Trial (and deactivated) dealers get no drip — they are never migrated.
+  if (dealer.active === false) return { ok: false, email: null, emailSent: false, warning: `"${dealer.name}" is deactivated — follow-up skipped` };
+  {
+    const planBlock = migrationPlanBlock(dealer);
+    if (planBlock) return { ok: false, email: null, emailSent: false, warning: `"${dealer.name}": ${planBlock} — follow-up skipped` };
+  }
   if (!dealer.inventory_dealer_id) throw new Error(`No inventory_dealer_id for dealer "${dealer.name}"`);
 
   const all = await resolveMigrationRecipients(admin, dealer);

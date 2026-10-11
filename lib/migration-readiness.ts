@@ -1,3 +1,4 @@
+import { migrationPlanBlock } from "./migration-plan-gate";
 // Phase 13b — migration readiness computation (READ-ONLY view; step 1).
 // Spec: docs/phase-13-self-serve-migration.md → "13b detailed".
 //
@@ -280,6 +281,9 @@ export function computeReadiness(
   // unset they will read as trials and drop out of the queue rather than
   // silently joining it.
   else if (isTrialTrackAccount(d.account_type)) { eligible = false; eligibleReason = 'trial account — trials are not migrated'; }
+  // Only paying dealers migrate (Allan, 2026-10-11): Free / Downgraded / no
+  // plan join Trial here. Same rule as every other entry point.
+  else if (migrationPlanBlock(d)) { eligible = false; eligibleReason = migrationPlanBlock(d)!; }
   // Deactivated dealers (e.g. Dealer General rooftops out of the paid+active
   // scope, 2026-07-14) never migrate — blocks wave-send and claim-next too.
   else if (d.active === false) { eligible = false; eligibleReason = 'deactivated dealer'; }

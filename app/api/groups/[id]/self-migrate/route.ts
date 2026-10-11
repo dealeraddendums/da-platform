@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { migrationPlanBlock } from "@/lib/migration-plan-gate";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { migrateDealerRecord, type MigratableDealer } from "@/lib/migrate-dealer";
@@ -105,7 +106,7 @@ type MemberRow = MigratableDealer & {
   active: boolean | null; is_test: boolean | null; migration_status: string | null;
   subscription_billed_to: string | null; etl_locked: boolean | null; last_synced_at: string | null;
 };
-const MEMBER_COLS = "id, dealer_id, name, active, is_test, migration_status, subscription_billed_to, etl_locked, last_synced_at, inventory_dealer_id, inventory_provider, inventory_provider_is_dms, box_folder_id";
+const MEMBER_COLS = "id, dealer_id, name, active, is_test, migration_status, subscription_billed_to, etl_locked, last_synced_at, inventory_dealer_id, inventory_provider, inventory_provider_is_dms, box_folder_id, account_type, group_id";
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
   const auth = await authorizeAndLoadGroup(params.id);
@@ -176,6 +177,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const d = byId.get(id)!; // membership (and thus existence) enforced above
     if (d.migration_status === "migrated") { results.push({ id, name: d.name, status: "skipped", reason: "already migrated" }); continue; }
     if (d.active === false) { results.push({ id, name: d.name, status: "failed", reason: "deactivated dealer" }); continue; }
+    // Only paying dealers migrate — a Free/Trial member is skipped, never migrated.
+    { const planBlock = migrationPlanBlock(d as unknown as { account_type: string | null; subscription_billed_to: string | null; group_id: string | null });
+      if (planBlock) { results.push({ id, name: d.name, status: "skipped", reason: planBlock }); continue; } }
     if (d.etl_locked === true || group.etl_locked === true) {
       // Sync is skipped for locked dealers, so the stored billed-to flag is
       // the only signal — check it now (it's operator-managed for these).

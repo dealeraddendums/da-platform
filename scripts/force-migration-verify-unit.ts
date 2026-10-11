@@ -15,6 +15,7 @@
 
 import { computeForceVerdict, type ForceCandidate } from "../lib/force-migration";
 import { decideForceBilling, type ForceBillingInput, type LegacyBillingStatus } from "../lib/force-billing-preflight";
+import { migrationPlanBlock, legacyPlanBlock } from "../lib/migration-plan-gate";
 
 let pass = 0, fail = 0;
 const failures: string[] = [];
@@ -94,7 +95,7 @@ check(
 }
 
 
-// ── Billing pre-flight (2026-10-11): Free carry-over / block / paid ────────
+// ── Billing pre-flight + plan gate (2026-10-11): only paying dealers migrate ─
 {
   const L = (account_type: string, fb: string, extra: Partial<LegacyBillingStatus> = {}): LegacyBillingStatus =>
     ({ ok: true, found: true, legacy_id: 1, account_type, active: "Yes", recurring: { status: fb, profile_id: fb === "none" ? null : "1" }, ...extra });
@@ -103,30 +104,27 @@ check(
 
   // Lax Automotive exactly: Free in 4.0, no RECURE_ID, customer but no template.
   const lax = d({ legacy: L("Free", "none"), template: null });
-  check("Lax: 4.0 Free + no template → free (no billing error)", lax.mode === "free", lax.mode);
-  check("Lax: nothing left to stop in FreshBooks", lax.mode === "free" && lax.freshbooksNothingToStop);
-  check("4.0 Free with no customer at all → free, not blocked", d({ legacy: L("Free", "none"), payerCustomerId: null, template: null }).mode === "free");
-  const freeFbLive = d({ legacy: L("Free", "ok"), template: null });
-  check("4.0 Free but FreshBooks still active → free, operator stop still needed", freeFbLive.mode === "free" && !freeFbLive.freshbooksNothingToStop);
-  check("4.0 Free but OWN da-billing template live → block (conflict)", d({ legacy: L("Free", "none"), template: { active: true } }).mode === "block");
-  check("4.0 Free, group-billed, group template live → free (group pays for others)", d({ legacy: L("Free", "none"), billedTo: "group", template: { active: true } }).mode === "free");
+  check("Lax: 4.0 Free → block, Free/Trial not migrated", lax.mode === "block" && /Free\/Trial — not migrated/.test(lax.reason), lax.reason);
+  check("4.0 Free with no customer at all → block", d({ legacy: L("Free", "none"), payerCustomerId: null, template: null }).mode === "block");
+  check("4.0 Free, group-billed, group template live → still block", d({ legacy: L("Free", "none"), billedTo: "group", template: { active: true } }).mode === "block");
+  check("4.0 Free but OWN da-billing template live → block (names the conflict)", /LIVE/.test(d({ legacy: L("Free", "none"), template: { active: true } }).reason));
 
-  // Cancelled: paid label in 4.0 but FreshBooks gone and nothing staged.
-  check("paid label + FB deleted + no template → free (cancelled)", d({ legacy: L("Automatic Web $135", "deleted"), template: null }).mode === "free");
-  check("paid label + no RECURE_ID + no template → free (cancelled)", d({ legacy: L("Manual", "none"), template: null }).mode === "free");
+  // Cancelled: paid label in 4.0 but FreshBooks gone and nothing staged → not paying → block.
+  check("paid label + FB deleted + no template → block (cancelled)", d({ legacy: L("Automatic Web $135", "deleted"), template: null }).mode === "block");
+  check("paid label + no customer + no FreshBooks → block (cancelled)", d({ legacy: L("Automatic Web", "none"), payerCustomerId: null, template: undefined }).mode === "block");
 
   // Paying but not staged → block, never migrate.
   const unstaged = d({ legacy: L("Automatic Web", "ok"), template: null });
   check("paying in FreshBooks + no template → block 'billing not staged'", unstaged.mode === "block" && /billing not staged/.test(unstaged.reason), unstaged.reason);
   check("paused FreshBooks + no template → block (ask, don't guess)", d({ legacy: L("Automatic Web", "disabled"), template: null }).mode === "block");
   check("paying + no customer → block", d({ legacy: L("Automatic Web", "ok"), payerCustomerId: null, template: null }).mode === "block");
-  check("paid label + no customer + no FreshBooks → free (cancelled, nothing bills them)", d({ legacy: L("Automatic Web", "none"), payerCustomerId: null, template: undefined }).mode === "free");
   check("group-billed paying + group has no template → block", d({ billedTo: "group", template: null }).mode === "block");
 
   // Normal paid path unchanged.
   check("paying + staged (paused) template → paid", d({}).mode === "paid");
   check("paying + live template → paid", d({ template: { active: true } }).mode === "paid");
   check("FB paused by our cutover + template live → paid (not mistaken for cancelled)", d({ legacy: L("Automatic Web", "disabled"), template: { active: true } }).mode === "paid");
+  check("group-billed paying + group template staged → paid", d({ billedTo: "group", template: { active: false } }).mode === "paid");
 
   // Can't tell → block, nothing changed.
   check("ETL unreachable → block", d({ legacy: null }).mode === "block");
@@ -135,8 +133,21 @@ check(
   check("duplicate DEALER_ID in 4.0 → block", d({ legacy: { ok: true, found: true, ambiguous: true } }).mode === "block");
   check("template unreadable → block", d({ template: undefined }).mode === "block");
   check("FreshBooks status unknown + no template → block", d({ legacy: L("Automatic Web", "unknown"), template: null }).mode === "block");
-  check("4.0 Trial → block (handle manually)", d({ legacy: L("Trial", "none"), template: null }).mode === "block");
-  check("4.0 Trial but da-billing template live → paid (stale 4.0 label)", d({ legacy: L("Trial", "none"), template: { active: true } }).mode === "paid");
+  check("4.0 Trial → block", d({ legacy: L("Trial", "none"), template: null }).mode === "block");
+}
+
+// ── migrationPlanBlock: the one rule every entry point uses ────────────────
+{
+  const g = (account_type: string | null, billed: string | null = "dealer", group_id: string | null = null) => migrationPlanBlock({ account_type, subscription_billed_to: billed, group_id });
+  for (const at of ["Free", "Trial", "Trial Expired", "Downgraded", "free", "Trial $0", "Free $135"]) check(`plan "${at}" → not migrated`, /Free\/Trial — not migrated/.test(g(at) ?? ""), String(g(at)));
+  for (const at of ["Manual", "Automatic Web", "Automatic DMS", "Automatic Web $135", "sub-auto-web"]) check(`plan "${at}" (self-billed) → migratable`, g(at) === null, String(g(at)));
+  check("blank plan, self-billed → not migrated (no paid plan)", /no paid plan/.test(g(null) ?? ""));
+  check("'Standard' (DB default), self-billed → not migrated", /no paid plan/.test(g("Standard") ?? ""));
+  check("blank plan, group-billed under a group → migratable (group pays)", g(null, "group", "g1") === null);
+  check("group-billed but plan says Free → still not migrated", g("Free", "group", "g1") !== null);
+  check("group-billed with no group id → not migrated", g(null, "group", null) !== null);
+  check("legacy 4.0 Free → blocked", legacyPlanBlock("Free") !== null);
+  check("legacy 4.0 Automatic Web → not blocked by the plan gate", legacyPlanBlock("Automatic Web") === null);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

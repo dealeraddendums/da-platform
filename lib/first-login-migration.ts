@@ -39,6 +39,7 @@
 // back to today's behavior. Everything after it is best-effort and tracked.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { migrationPlanBlock } from "@/lib/migration-plan-gate";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { DEALER_ROLES, isDealerMigratedOnV5 } from "@/lib/v5-usable";
 import { migrateDealerRecord, futureNextInvoice } from "@/lib/migrate-dealer";
@@ -117,7 +118,7 @@ async function run(args: { userId: string; email: string | null; via: string; ad
   if (!prof.dealer_id) return { usable: false, reason: "no dealer on profile" };
 
   const { data: dealer } = await a.from("dealers")
-    .select("id, dealer_id, name, active, migration_status, is_native, last_synced_at, group_id, subscription_billed_to, billing_customer_id, inventory_provider, inventory_provider_is_dms, box_folder_id, freshbooks_stopped_at, inventory_dealer_id")
+    .select("id, dealer_id, name, active, migration_status, is_native, last_synced_at, group_id, subscription_billed_to, billing_customer_id, inventory_provider, inventory_provider_is_dms, box_folder_id, freshbooks_stopped_at, inventory_dealer_id, account_type")
     .eq("dealer_id", prof.dealer_id)
     .maybeSingle() as { data: DealerRow | null };
   if (!dealer) return { usable: false, reason: "dealer row not found" };
@@ -128,6 +129,9 @@ async function run(args: { userId: string; email: string | null; via: string; ad
   if (!TRIGGER_ROLES.has(prof.role)) return { usable: false, reason: `role ${prof.role} does not trigger migration` };
   if (prof.active === false) return { usable: false, reason: "user inactive" };
   if (dealer.active === false) return { usable: false, reason: "dealer inactive" };
+  // Only paying dealers migrate (2026-10-11).
+  { const planBlock = migrationPlanBlock(dealer as unknown as { account_type: string | null; subscription_billed_to: string | null; group_id: string | null });
+    if (planBlock) return { usable: false, reason: planBlock }; }
 
   const ready = await isProvisioned(a, dealer);
   if (!ready.ok) {

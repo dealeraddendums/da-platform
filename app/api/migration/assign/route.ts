@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { migrationPlanBlock } from "@/lib/migration-plan-gate";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 
@@ -38,6 +39,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // in a batch get released.
   let targetIds = dealerIds;
   let skippedNative = 0;
+  let skippedNotPaid = 0;
   if (assignTo !== null) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: natives, error: natErr } = await (admin as any)
@@ -51,10 +53,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       targetIds = dealerIds.filter((id) => !nativeIds.has(id));
       skippedNative = nativeIds.size;
     }
+    // Free/Trial dealers are never migrated (2026-10-11) — not claimable either.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: planRows } = await (admin as any).from("dealers").select("id, account_type, subscription_billed_to, group_id").in("id", targetIds);
+    const notPaid = new Set(((planRows ?? []) as Array<{ id: string; account_type: string | null; subscription_billed_to: string | null; group_id: string | null }>)
+      .filter((r) => migrationPlanBlock(r)).map((r) => r.id));
+    if (notPaid.size > 0) { targetIds = targetIds.filter((id) => !notPaid.has(id)); skippedNotPaid = notPaid.size; }
     if (targetIds.length === 0) {
       return NextResponse.json({
-        ok: true, assigned: 0, assignTo, skippedNative,
-        note: "Nothing assigned — every dealer selected was created on 5.0 and has nothing to migrate.",
+        ok: true, assigned: 0, assignTo, skippedNative, skippedNotPaid,
+        note: "Nothing assigned — every dealer selected was created on 5.0 or is Free/Trial, so there is nothing to migrate.",
       });
     }
   }
@@ -75,5 +83,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // NOTE (2026-07-17): claim/assign no longer auto-stages. The nightly ETL is
   // reduced to discover-and-count (nothing overwrites claimed dealers anymore),
   // and 'pending' is set by the Sync action, which is what Ready now requires.
-  return NextResponse.json({ ok: true, assigned: (data ?? []).length, assignTo, ...(skippedNative ? { skippedNative } : {}) });
+  return NextResponse.json({ ok: true, assigned: (data ?? []).length, assignTo, ...(skippedNative ? { skippedNative } : {}), ...(skippedNotPaid ? { skippedNotPaid } : {}) });
 }
