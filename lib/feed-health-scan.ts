@@ -21,7 +21,7 @@
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { dealerFeedHealth, loadRosters, FROZEN_NEWEST_DAYS, type DealerFeedHealth } from "@/lib/feed-health";
-import { scanUnattachedFeeds, UNATTACHED_LABEL, type UnattachedFeed } from "@/lib/feed-unattached";
+import { scanUnattachedFeeds, UNATTACHED_LABEL, MATCH_LABEL, type UnattachedFeed } from "@/lib/feed-unattached";
 
 export interface ScanRow extends DealerFeedHealth {
   dealerId: string;
@@ -125,12 +125,16 @@ function unattachedTable(rows: UnattachedFeed[]): string {
     + "</table>";
 }
 
-/** Both buckets, each with its own heading and action. */
+/** Bucket B (split by triage) then bucket A, each with its own heading and action. */
 function unattachedSection(rows: UnattachedFeed[]): string {
-  return (["no_store", "deactivated_store"] as const).map((b) => {
-    const r = rows.filter((u) => u.bucket === b);
-    return `<p style="margin:10px 0 4px"><strong>${b === "no_store" ? "B" : "A"}) ${esc(UNATTACHED_LABEL[b])}</strong> (${r.length})</p>${unattachedTable(r)}`;
-  }).join("");
+  const b = rows.filter((u) => u.bucket === "no_store");
+  const a = rows.filter((u) => u.bucket === "deactivated_store");
+  return `<p style="margin:10px 0 4px"><strong>B) ${esc(UNATTACHED_LABEL.no_store)}</strong> (${b.length})</p>`
+    + (["store_unfed", "store_fed", "none"] as const).map((m) => {
+      const r = b.filter((u) => u.match === m);
+      return r.length ? `<p style="margin:6px 0 4px 12px"><em>${esc(MATCH_LABEL[m])}</em> (${r.length})</p>${unattachedTable(r)}` : "";
+    }).join("")
+    + `<p style="margin:10px 0 4px"><strong>A) ${esc(UNATTACHED_LABEL.deactivated_store)}</strong> (${a.length})</p>${unattachedTable(a)}`;
 }
 
 export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promise<{

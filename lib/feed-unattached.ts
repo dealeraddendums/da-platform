@@ -10,6 +10,15 @@
 //   B) no_store          — no dealer row; hints point at a likely store
 //                          (inventory_dealer_id match, case-only difference,
 //                          or a name that looks like the id) — hints only.
+//      Triage within B (2026-10-10 live data: 318 B ids / ~100k vehicles —
+//      ETL2 jobs import whole provider directories, so most are feeds for
+//      non-customers or a second copy of a store's file):
+//        store_unfed — the likely store gets NO fresh feed vehicles of its own:
+//                      probably mis-keyed, that store is missing inventory (urgent)
+//        store_fed   — the likely store is already fed under its own id: a
+//                      duplicate copy (cleanup)
+//        none        — no likely store: a non-customer feed, a store to
+//                      onboard, or a dead feed
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { FRESH_DAYS, LIVE_FEED_OR } from "@/lib/feed-health";
@@ -17,6 +26,7 @@ import { FRESH_DAYS, LIVE_FEED_OR } from "@/lib/feed-health";
 type Admin = any;
 
 export type UnattachedBucket = "deactivated_store" | "no_store";
+export type UnattachedMatch = "store_unfed" | "store_fed" | "none";
 
 export interface UnattachedFeed {
   feedId: string;
@@ -27,7 +37,14 @@ export interface UnattachedFeed {
   newestVehicleAdded: string | null;// newest date_added (YYYY-MM-DD)
   storeName: string | null;         // bucket A: the deactivated store
   hints: string[];                  // bucket B: possible matches, for triage only
+  match: UnattachedMatch;           // bucket B triage (A is always "none")
 }
+
+export const MATCH_LABEL: Record<UnattachedMatch, string> = {
+  store_unfed: "Likely mis-keyed — the matching store gets no feed of its own (missing inventory)",
+  store_fed: "Duplicate — the matching store is already fed under its own id",
+  none: "No matching store — non-customer feed, a store to onboard, or a dead feed",
+};
 
 export const UNATTACHED_LABEL: Record<UnattachedBucket, string> = {
   deactivated_store: "Feed delivers, but the store is DEACTIVATED — stop the feed or reactivate the store",
@@ -66,6 +83,7 @@ export async function scanUnattachedFeeds(admin: Admin): Promise<UnattachedFeed[
   // (uuid ids), so ~430k rows read in parallel without deep OFFSETs.
   const since = new Date(Date.now() - FRESH_DAYS * 86_400_000).toISOString();
   const agg = new Map<string, { n: number; upd: string; added: string; src: Map<string, number> }>();
+  const fedActive = new Map<string, number>(); // fresh feed rows per ACTIVE store (for B triage)
   const slices = HEX.split("");
   let next = 0;
   async function stream() {
@@ -85,7 +103,7 @@ export async function scanUnattachedFeeds(admin: Admin): Promise<UnattachedFeed[
         const rows = (data ?? []) as any[];
         for (const r of rows) {
           const id = String(r.dealer_id ?? "");
-          if (activeIds.has(id)) continue;
+          if (activeIds.has(id)) { fedActive.set(id, (fedActive.get(id) ?? 0) + 1); continue; }
           const a = agg.get(id) ?? { n: 0, upd: "", added: "", src: new Map<string, number>() };
           a.n++;
           if ((r.updated_at ?? "") > a.upd) a.upd = r.updated_at ?? "";
@@ -106,18 +124,26 @@ export async function scanUnattachedFeeds(admin: Admin): Promise<UnattachedFeed[
   for (const [feedId, a] of Array.from(agg.entries())) {
     const d = byId.get(feedId);
     const hints: string[] = [];
+    let match: UnattachedMatch = "none";
     if (!d) {
       const f = norm(feedId), fn = normFeedId(feedId);
+      const matched: typeof dealers = [];
       for (const x of dealers) {
         if (hints.length >= 3) break;
-        const label = `${x.name ?? x.dealer_id} [${x.dealer_id}]${x.active ? "" : " (deactivated)"}`;
-        if (x.inventory_dealer_id && norm(x.inventory_dealer_id) === f) hints.push(`inventory id matches ${label}`);
-        else if (norm(x.dealer_id) === f) hints.push(`dealer id differs only in case/spacing from ${label}`);
+        const fed = fedActive.get(x.dealer_id) ?? 0;
+        const label = `${x.name ?? x.dealer_id} [${x.dealer_id}]${x.active ? (fed ? ` — fed (${fed})` : " — gets NO feed") : " (deactivated)"}`;
+        let why: string | null = null;
+        if (x.inventory_dealer_id && norm(x.inventory_dealer_id) === f) why = "inventory id matches";
+        else if (norm(x.dealer_id) === f) why = "dealer id differs only in case/spacing from";
         else if (fn.length >= 6 && x.name) {
           const n = norm(x.name);
-          if (n.length >= 6 && (n.includes(fn) || fn.includes(n))) hints.push(`name looks like ${label}`);
+          if (n.length >= 6 && (n.includes(fn) || fn.includes(n))) why = "name looks like";
         }
+        if (why) { hints.push(`${why} ${label}`); matched.push(x); }
       }
+      const activeMatches = matched.filter((x) => x.active);
+      if (activeMatches.some((x) => !fedActive.get(x.dealer_id))) match = "store_unfed";
+      else if (activeMatches.length) match = "store_fed";
     }
     out.push({
       feedId,
@@ -128,8 +154,11 @@ export async function scanUnattachedFeeds(admin: Admin): Promise<UnattachedFeed[
       newestVehicleAdded: a.added ? a.added.slice(0, 10) : null,
       storeName: d ? (d.name ?? d.dealer_id) : null,
       hints,
+      match,
     });
   }
-  // B (nobody sees them) first, then most vehicles.
-  return out.sort((x, y) => (x.bucket === y.bucket ? 0 : x.bucket === "no_store" ? -1 : 1) || y.vehicles - x.vehicles);
+  // B first (nobody sees them): likely mis-keyed, then duplicates, then the
+  // rest; then A. Most vehicles first within each.
+  const rank = (u: UnattachedFeed) => u.bucket === "deactivated_store" ? 3 : u.match === "store_unfed" ? 0 : u.match === "store_fed" ? 1 : 2;
+  return out.sort((x, y) => rank(x) - rank(y) || y.vehicles - x.vehicles);
 }
