@@ -386,3 +386,36 @@ Most of B/none is ETL2 jobs importing whole provider directories (e.g. six `gjag
 | `Max427651` | ETL2 job 5 | 2026-10-10 13:31 | 2026-08-11 | 3 | — |
 | `Max856298` | ETL2 job 5 | 2026-10-10 13:31 | 2026-08-11 | 1 | — |
 | `gjones-G` | ETL2 job 38 | 2026-10-10 13:35 | 2026-05-06 | 1 | — |
+
+## Follow-up 2026-10-11: mis-keyed remaps
+
+Same mechanism as the 2026-10-09 DealersLink fix: `POST /api/dealers/[id]/inventory-dealer-id`, with the dealer_id cascade and per-row feed-aware handling of old-id rows. Backup: `miskeyed-remap-backup-20261011.json` (suite root).
+
+**Remapped:**
+
+| Store | Old id | New id | Before | After |
+|---|---|---|---|---|
+| AutoNation BMW of Roseville | `1776794335` | `bmwofroseville` | 73 stale "VIN API" rows, last updated 2026-06-01 | 290 live feed vehicles |
+| Honda of Greeley (5.0-native trial) | `ss_1785430070376` | `hondaofgreeley` | 4 sample vehicles | 156 (152 feed + 4 samples) |
+
+- **BMW of Roseville:** the 73 stale rows were deactivated, not moved. Aurora's `DEALER_ID` is already `bmwofroseville`, so this is the same stale-id class as Glen Sain.
+- **Honda of Greeley:** now shows as FROZEN. The newest vehicle on its feed was added 2026-07-30.
+
+**Held: 4.0 still files these 5 stores under their CURRENT 5.0 id.**
+
+| Feed | Store | 4.0 id |
+|---|---|---|
+| `envisiontoyotawestcovina` | Envision Toyota West Covina | `1733003048` |
+| `serramontekia` | Serramonte Kia | `MP22384K` |
+| `mazdaofpalmbeach` | Mazda of Palm Beach | `1715025212` |
+| `serramontesubarusoa` | Serramonte Subaru | `MP22384S` |
+| `chuckbrownfordfd` | Chuck Brown Ford | `1769457596` |
+
+A rename would cut each store's 4.0 link. ETL Job 6 (print status) and console Sync both find the store through `inventory_dealer_id`.
+
+**Ambiguous, untouched:** `hondaworldwestminster`, `germainhonda`, `HyundaiDecatur`, `ronsauto`.
+
+**Re-scan after the remaps:**
+- Unattached: 349 feed ids, 98,903 vehicles.
+- Bucket B: 9 likely mis-keyed, 22 duplicates, 285 with no matching store.
+- Bucket A: 33. Frozen: 34 (Honda of Greeley added). Stopped: 16. Errors: 0.
