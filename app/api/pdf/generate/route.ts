@@ -23,7 +23,7 @@ import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, savedRo
 import { hasLegacyAddendumData, type SaveOption } from "@/lib/vehicle-options-save";
 import { resolveTemplate, resolveSecondAddendum, SECOND_ADDENDUM_SETTINGS_COLUMNS, type ResolvedTemplate } from "@/lib/template-resolver";
 import { resolveCustomTextTokens } from "@/lib/token-resolver";
-import { aiConditionLabel, effectiveDescriptionModifiers } from "@/lib/vehicle-description-ai";
+import { aiConditionLabel, effectiveDescriptionModifiers, scrubVehicleDescription } from "@/lib/vehicle-description-ai";
 import { generateVehicleContent, enforceDbMileage } from "@/lib/ai-content";
 import QRCode from "qrcode";
 import type { Widget, PaperSize } from "@/components/builder/types";
@@ -774,6 +774,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // enforceDbMileage). Applied before BOTH consumers: the features widget
     // and the {{ai.features}} custom-text token.
     if (aiContent) aiContent = { ...aiContent, features: enforceDbMileage(aiContent.features, dv.mileage as number | null) };
+    // Facts-only read-time net: cached descriptions (some written before the
+    // guard) never print a warranty/condition/history claim.
+    if (aiContent?.description) aiContent = { ...aiContent, description: scrubVehicleDescription(aiContent.description, dv as Record<string, unknown>, (await effectiveDescriptionModifiers(admin, dv.dealer_id as string)).lines) };
     // The dealer's saved per-vehicle description (migration 173) wins for the
     // description widget (pdf-html) AND the {{ai.description}} token.
     const savedDescription = String((dv as Record<string, unknown>).infosheet_ai_description ?? "").trim() || null;

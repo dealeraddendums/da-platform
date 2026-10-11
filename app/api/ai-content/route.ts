@@ -4,7 +4,7 @@ import { requireAuth } from '@/lib/auth';
 import { resolveAiContentDealer } from '@/lib/ai-content-scope';
 import { decodeVin } from '@/lib/vinquery';
 import { generateVehicleContent } from '@/lib/ai-content';
-import { aiConditionLabel, effectiveDescriptionModifiers } from '@/lib/vehicle-description-ai';
+import { aiConditionLabel, effectiveDescriptionModifiers, scrubVehicleDescription } from '@/lib/vehicle-description-ai';
 import { vehicleConditionFields } from '@/lib/vehicles';
 import type { VehicleRow } from '@/lib/vehicles';
 
@@ -35,8 +35,13 @@ export async function GET(request: Request) {
     .single();
 
   if (cached?.description) {
+    // Facts-only read-time net (lib/vehicle-description-ai.ts): a cached row
+    // may predate the guard.
+    const { data: dvRow } = await admin.from('dealer_vehicles').select('*').eq('vin', vin).eq('dealer_id', dealerId).limit(1).maybeSingle();
+    const description = scrubVehicleDescription(cached.description, (dvRow ?? {}) as Record<string, unknown>,
+      (await effectiveDescriptionModifiers(admin, dealerId)).lines);
     return NextResponse.json({
-      description: cached.description,
+      description,
       features: cached.features ?? [],
       source: 'cache',
       generated_at: cached.generated_at,

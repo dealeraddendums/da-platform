@@ -53,7 +53,9 @@ If the data is thin, write a shorter, plain description rather than padding it. 
 // house rule that mentions a warranty, or a VIN decode that lists horsepower).
 // A failing draft is regenerated with the phrases named; if it still fails,
 // the offending sentences are removed (enforceFactsOnly).
-const CLAIM_PATTERNS: RegExp[] = [
+// High-risk: claims a buyer could rely on (warranty, condition, history). The
+// read-time net (scrubVehicleDescription) strips only these.
+const HIGH_RISK_CLAIM_PATTERNS: RegExp[] = [
   // warranty / coverage
   /\bwarrant(y|ies|ied)\b/i, /\bcoverage\b/i, /\bcovered (until|by|for|through)\b/i, /\bpeace of mind\b/i,
   // condition quality
@@ -64,6 +66,9 @@ const CLAIM_PATTERNS: RegExp[] = [
   /\bclean (history|title|record|carfax|vehicle history)\b/i,
   // maintenance / ownership history
   /\b(service|maintenance) (records?|history)\b/i, /\b(previous|prior|original) owners?\b/i, /\bdealer[- ]serviced\b/i,
+];
+const CLAIM_PATTERNS: RegExp[] = [
+  ...HIGH_RISK_CLAIM_PATTERNS,
   // rankings / superlatives / reputation
   /\bbest[- ]sell(ing|er)\b/i, /#\s?1\b/, /\bnumber one\b/i, /\baward[- ]winning\b/i, /\btop[- ]rated\b/i,
   /\bmost (reliable|popular|trusted|dependable)\b/i, /\bpopular\b/i, /\bproven\b/i, /\btrusted\b/i, /\blegendary\b/i,
@@ -81,10 +86,10 @@ const CLAIM_PATTERNS: RegExp[] = [
 
 /** Phrases in `text` that NO_UNSUPPORTED_CLAIMS forbids and that the source
  *  (vehicle data + house rules) does not itself contain. */
-export function findUnsupportedClaims(text: string, source: string): string[] {
+export function findUnsupportedClaims(text: string, source: string, patterns: RegExp[] = CLAIM_PATTERNS): string[] {
   const src = source.toLowerCase();
   const found = new Set<string>();
-  for (const re of CLAIM_PATTERNS) {
+  for (const re of patterns) {
     const m = text.match(re);
     if (m && !src.includes(m[0].toLowerCase())) found.add(m[0]);
   }
@@ -107,10 +112,50 @@ export function plainFactsDescription(v: { year?: string | number | null; make?:
   return `This ${name} is ${article} ${kind}${miles > 0 ? ` with ${miles.toLocaleString("en-US")} miles` : ""}.`;
 }
 
+/**
+ * After sentences are stripped: nothing left → the facts-only sentence; the
+ * sentence naming the vehicle was removed → the facts-only sentence leads, so a
+ * scrubbed description never starts mid-thought ("A Free Carfax report…").
+ */
+export function withFactsLead(stripped: string, fallback: string, model: string | null | undefined): string {
+  if (!stripped) return fallback;
+  if (model && !stripped.toLowerCase().includes(String(model).toLowerCase())) return `${fallback} ${stripped}`;
+  return stripped;
+}
+
 /** Drop every sentence that carries an unsupported claim. */
-export function stripUnsupportedSentences(text: string, source: string): string {
+export function stripUnsupportedSentences(text: string, source: string, patterns: RegExp[] = CLAIM_PATTERNS): string {
   const sentences = text.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) ?? [text];
-  return sentences.filter((s) => findUnsupportedClaims(s, source).length === 0).join("").trim();
+  return sentences.filter((s) => findUnsupportedClaims(s, source, patterns).length === 0).join("").trim();
+}
+
+/** The facts a description may rely on: the dealer_vehicles row + the house rules. */
+export function descriptionSource(row: Record<string, unknown>, lines: string[]): string {
+  const keys = ["year", "make", "model", "trim", "body_style", "exterior_color", "interior_color", "mileage", "msrp",
+    "condition", "engine", "transmission", "drivetrain", "fuel", "cmpg", "hmpg", "options", "description"];
+  return [...keys.map((k) => (row[k] == null ? "" : String(row[k]))), aiConditionLabel(row as never), ...lines].join("\n");
+}
+
+/**
+ * READ-TIME safety net (2026-10-10), modelled on lib/secret-redact.ts: don't
+ * trust what's stored. Runs on every AI description before it is shown or
+ * printed — including ai_content_cache rows written before the facts-only
+ * guard existed (121 of 377 fleet rows then carried warranty/condition claims).
+ * Strips only the HIGH-RISK categories (warranty/coverage, condition quality,
+ * maintenance/ownership history) unless the vehicle data or a house rule
+ * contains the phrase; a clean description is returned unchanged. If every
+ * sentence goes, a plain facts-only sentence replaces it.
+ */
+export function scrubVehicleDescription(text: string, row: Record<string, unknown>, lines: string[]): string {
+  const source = descriptionSource(row, lines);
+  const bad = findUnsupportedClaims(text, source, HIGH_RISK_CLAIM_PATTERNS);
+  if (!bad.length) return text;
+  console.warn(`[vehicle-description] scrubbed stored description: ${bad.join(", ")}`);
+  const s = (k: string) => (row[k] == null ? null : String(row[k]));
+  return withFactsLead(stripUnsupportedSentences(text, source, HIGH_RISK_CLAIM_PATTERNS), plainFactsDescription({
+    year: s("year"), make: s("make"), model: s("model"), trim: s("trim"),
+    condition: aiConditionLabel(row as never), bodyStyle: s("body_style"), mileage: s("mileage"),
+  }), s("model"));
 }
 
 /**
@@ -122,6 +167,7 @@ export async function enforceFactsOnly(
   generate: (rejected: string[]) => Promise<string>,
   source: string,
   fallback: string,
+  model?: string | null,
   attempts = 3,
 ): Promise<string> {
   let rejected: string[] = [];
@@ -133,7 +179,7 @@ export async function enforceFactsOnly(
     rejected = Array.from(new Set(rejected.concat(bad)));
     console.warn(`[vehicle-description] draft rejected for unsupported claims: ${bad.join(", ")}`);
   }
-  return stripUnsupportedSentences(last, source) || fallback;
+  return withFactsLead(stripUnsupportedSentences(last, source), fallback, model);
 }
 
 /** The retry note appended to a prompt after a rejected draft ("" on the first try). */
@@ -260,5 +306,5 @@ Return only the description text.`;
     return message.content
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
       .map((b) => b.text).join("").trim().replace(/^"|"$/g, "");
-  }, `${dataBlock}\n${lines.join("\n")}`, plainFactsDescription(vehicle));
+  }, `${dataBlock}\n${lines.join("\n")}`, plainFactsDescription(vehicle), vehicle.model);
 }

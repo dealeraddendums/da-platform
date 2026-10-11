@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, type JwtClaims } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { rateLimit } from "@/lib/rate-limit";
-import { aiConditionLabel, effectiveDescriptionModifiers, generateInfosheetDescription } from "@/lib/vehicle-description-ai";
+import { aiConditionLabel, effectiveDescriptionModifiers, generateInfosheetDescription, scrubVehicleDescription } from "@/lib/vehicle-description-ai";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!/^[0-9a-f-]{36}$/i.test(vehicleId)) return NextResponse.json({ error: "vehicleId required" }, { status: 400 });
 
   const admin = createAdminSupabaseClient();
-  const { data: v } = await admin.from("dealer_vehicles").select("vin").eq("id", vehicleId).eq("dealer_id", dealerId).maybeSingle();
+  const { data: v } = await admin.from("dealer_vehicles").select("*").eq("id", vehicleId).eq("dealer_id", dealerId).maybeSingle();
   if (!v) return NextResponse.json({ error: "Vehicle not found" }, { status: 404 });
   const vin = String((v as { vin?: string | null }).vin ?? "").trim().toUpperCase();
   const [{ data: cached }, { data: settings }] = await Promise.all([
@@ -40,8 +40,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     admin.from("dealer_settings").select("ai_content_default").eq("dealer_id", dealerId).maybeSingle(),
   ]);
   const c = cached as { description?: string | null; generated_at?: string | null } | null;
+  // Facts-only read-time net — what's pre-loaded is what prints (the pdf
+  // routes run the same scrub).
+  const raw = c?.description?.trim() || null;
+  const cachedDescription = raw
+    ? scrubVehicleDescription(raw, v as Record<string, unknown>, (await effectiveDescriptionModifiers(admin, dealerId)).lines)
+    : null;
   return NextResponse.json({
-    cachedDescription: c?.description?.trim() || null,
+    cachedDescription,
     cachedAt: c?.generated_at ?? null,
     aiEnabled: (settings as { ai_content_default?: boolean } | null)?.ai_content_default === true,
   }, { headers: { "Cache-Control": "no-store" } });
