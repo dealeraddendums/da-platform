@@ -103,9 +103,24 @@ Return only raw JSON with no markdown fences or extra text.`;
     const raw = message.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
       .map((b) => b.text).join('').trim();
-    // Strip markdown fences if present
+    // Strip markdown fences, and read only the JSON object — the model
+    // sometimes adds a note after it ("Unexpected non-whitespace character
+    // after JSON"). A response that still won't parse counts as an attempt.
     const json = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-    parsed = JSON.parse(json) as { description: string; features: [string, string][] };
+    const start = json.indexOf('{'), end = json.lastIndexOf('}');
+    try {
+      parsed = JSON.parse(start >= 0 && end > start ? json.slice(start, end + 1) : json) as { description: string; features: [string, string][] };
+    } catch (e) {
+      if (attempt === 2) {
+        if (!parsed.description) throw e;
+        // Fall back to the earlier (rejected) draft, scrubbed.
+        parsed = { ...parsed, description: withFactsLead(stripUnsupportedSentences(parsed.description, source),
+          plainFactsDescription({ year, make, model, trim, condition: vehicle.condition, bodyStyle, mileage: vehicle.mileage }), String(model)) };
+        break;
+      }
+      console.warn(`[ai-content] unparseable response, retrying: ${e instanceof Error ? e.message : e}`);
+      continue;
+    }
     const bad = findUnsupportedClaims(parsed.description ?? '', source);
     if (!bad.length) break;
     console.warn(`[ai-content] description rejected for unsupported claims: ${bad.join(', ')}`);
