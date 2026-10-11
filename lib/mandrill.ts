@@ -91,12 +91,22 @@ export async function sendMandrillEmail(message: MandrillMessage): Promise<void>
 // ── Deliverability ──────────────────────────────────────────────────────────
 // Used by the Force Migration queue: forcing a dealer whose email bounces locks
 // them out of BOTH platforms (4.0 redirects them away, and they can't receive
-// the sign-in code for 5.0). So "can we actually reach this address" is a hard
-// gate on the force, not a warning.
+// the sign-in code for 5.0). A CONFIRMED denylist hit blocks the force; an
+// UNKNOWN result (Mandrill unreachable / rate-limited) is advisory only
+// (Allan, 2026-10-11) — the operator sees "couldn't verify" and may still force.
 //
 // Mandrill's denylist (`/rejects/list.json`) is the authoritative "we cannot
 // deliver here" signal — hard bounces, spam complaints and manual blocks all
 // land there. An address absent from it is deliverable as far as we know.
+//
+// Rate limiting (2026-10-11): the queue used to make one rejects/list call per
+// recipient per render, which tripped Mandrill's HTTP 429 and turned whole
+// queues "unconfirmed". Now the WHOLE denylist (133 active entries at the time;
+// Mandrill returns up to 1000 per call) is fetched once and cached for
+// DENYLIST_TTL_MS per worker, with one in-flight fetch shared by concurrent
+// callers and one jittered retry on 429/5xx. If the list ever reaches
+// Mandrill's 1000-row cap it may be truncated, so lookups fall back to the
+// per-address call (also cached, also retried).
 
 export type DeliverabilityState = "ok" | "bounced" | "unknown";
 
@@ -107,42 +117,91 @@ export interface DeliverabilityResult {
   detail?: string;
 }
 
+type RejectEntry = { email?: string; reason?: string; detail?: string; expired?: boolean };
+
+const DENYLIST_TTL_MS = 5 * 60_000;
+const DENYLIST_CAP = 1000;
+let denylistCache: { at: number; byEmail: Map<string, RejectEntry> | null; error?: string } | null = null;
+let denylistInflight: Promise<{ byEmail: Map<string, RejectEntry> | null; error?: string }> | null = null;
+const perEmailCache = new Map<string, { at: number; result: DeliverabilityResult }>();
+
+/** One rejects/list POST with a single jittered retry on 429 / 5xx / network error. */
+async function rejectsList(body: Record<string, unknown>): Promise<{ ok: true; list: RejectEntry[] } | { ok: false; detail: string }> {
+  let last = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 1000 + Math.floor(Math.random() * 2000)));
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 10_000);
+      let res: Response;
+      try {
+        res = await fetch(`${MANDRILL_API}/rejects/list.json`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } finally { clearTimeout(t); }
+      if (res.status === 429 || res.status >= 500) { last = `Mandrill rejects/list HTTP ${res.status}`; continue; }
+      if (!res.ok) return { ok: false, detail: `Mandrill rejects/list HTTP ${res.status}` };
+      const parsed = await res.json().catch(() => null) as RejectEntry[] | { status?: string; message?: string } | null;
+      if (!Array.isArray(parsed)) {
+        const msg = parsed && typeof parsed === "object" && "message" in parsed ? String(parsed.message) : "unexpected response";
+        return { ok: false, detail: `Mandrill: ${msg}` };
+      }
+      return { ok: true, list: parsed };
+    } catch (e) {
+      last = `Mandrill unreachable: ${e instanceof Error && e.name === "AbortError" ? "timed out" : e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+  return { ok: false, detail: last || "Mandrill unreachable" };
+}
+
+/** The whole active denylist, cached. byEmail=null → use per-address lookups. */
+async function getDenylist(apiKey: string): Promise<{ byEmail: Map<string, RejectEntry> | null; error?: string }> {
+  if (denylistCache && Date.now() - denylistCache.at < (denylistCache.byEmail ? DENYLIST_TTL_MS : 30_000)) return denylistCache;
+  if (denylistInflight) return denylistInflight;
+  denylistInflight = (async () => {
+    const r = await rejectsList({ key: apiKey, include_expired: false });
+    let out: { byEmail: Map<string, RejectEntry> | null; error?: string };
+    if (!r.ok) out = { byEmail: null, error: r.detail };
+    else if (r.list.length >= DENYLIST_CAP) out = { byEmail: null, error: `denylist at Mandrill's ${DENYLIST_CAP}-row cap — checking per address` };
+    else out = { byEmail: new Map(r.list.filter((e) => !e.expired && e.email).map((e) => [String(e.email).toLowerCase(), e])) };
+    // A failed fetch is cached briefly (30s) so a rate-limited Mandrill isn't hammered.
+    denylistCache = { at: Date.now(), ...out };
+    return out;
+  })().finally(() => { denylistInflight = null; });
+  return denylistInflight;
+}
+
 /**
  * Is this address on Mandrill's denylist? Expired entries are ignored (Mandrill
  * ages soft failures out). Returns "unknown" — never "ok" — when Mandrill is
- * unreachable or unconfigured, so a transient API failure can never be mistaken
- * for a clean bill of health and let a force through.
+ * unreachable or unconfigured, so a transient API failure is never mistaken for
+ * a clean bill of health (the caller shows it as "couldn't verify").
  */
 export async function checkDeliverability(email: string): Promise<DeliverabilityResult> {
   const apiKey = process.env.MANDRILL_API_KEY;
   if (!apiKey) return { state: "unknown", detail: "MANDRILL_API_KEY not set" };
-  const addr = (email ?? "").trim();
+  const addr = (email ?? "").trim().toLowerCase();
   if (!addr) return { state: "unknown", detail: "no email address" };
 
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10_000);
-    let res: Response;
-    try {
-      res = await fetch(`${MANDRILL_API}/rejects/list.json`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: apiKey, email: addr, include_expired: false }),
-        signal: controller.signal,
-      });
-    } finally { clearTimeout(t); }
-
-    if (!res.ok) return { state: "unknown", detail: `Mandrill rejects/list HTTP ${res.status}` };
-    const body = await res.json().catch(() => null) as Array<{ email?: string; reason?: string; detail?: string; expired?: boolean }> | { status?: string; message?: string } | null;
-    if (!Array.isArray(body)) {
-      const msg = body && typeof body === "object" && "message" in body ? String(body.message) : "unexpected response";
-      return { state: "unknown", detail: `Mandrill: ${msg}` };
-    }
-    const hit = body.find((r) => !r.expired && (r.email ?? "").toLowerCase() === addr.toLowerCase());
-    if (hit) return { state: "bounced", reason: hit.reason ?? "denylisted", detail: hit.detail ?? undefined };
-    return { state: "ok" };
-  } catch (e) {
-    const msg = e instanceof Error && e.name === "AbortError" ? "timed out" : e instanceof Error ? e.message : String(e);
-    return { state: "unknown", detail: `Mandrill unreachable: ${msg}` };
+  const list = await getDenylist(apiKey);
+  if (list.byEmail) {
+    const hit = list.byEmail.get(addr);
+    return hit ? { state: "bounced", reason: hit.reason ?? "denylisted", detail: hit.detail ?? undefined } : { state: "ok" };
   }
+
+  // Fallback: per-address lookup (list unavailable or possibly truncated), cached.
+  const cached = perEmailCache.get(addr);
+  if (cached && Date.now() - cached.at < (cached.result.state === "unknown" ? 30_000 : DENYLIST_TTL_MS)) return cached.result;
+  const r = await rejectsList({ key: apiKey, email: addr, include_expired: false });
+  let result: DeliverabilityResult;
+  if (!r.ok) result = { state: "unknown", detail: list.error && !/cap/.test(list.error) ? list.error : r.detail };
+  else {
+    const hit = r.list.find((e) => !e.expired && (e.email ?? "").toLowerCase() === addr);
+    result = hit ? { state: "bounced", reason: hit.reason ?? "denylisted", detail: hit.detail ?? undefined } : { state: "ok" };
+  }
+  perEmailCache.set(addr, { at: Date.now(), result });
+  return result;
 }

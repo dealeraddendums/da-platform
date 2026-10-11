@@ -6,7 +6,7 @@
  * Force button renders, AND the force endpoint re-runs it at click time. The
  * cases worth asserting are the ones where a wrong answer hurts a real dealer:
  *   * a dealer who never got the final notice must never be forceable
- *   * a bounced/unconfirmed email must block (a forced dealer with a dead
+ *   * a CONFIRMED bounced email must block (a forced dealer with a dead
  *     address is locked out of BOTH platforms)
  *   * a missing legacy DEALER_ID must block (the 4.0 call would 404)
  *   * excluded/held must outrank setup problems, so operators aren't sent off
@@ -52,7 +52,9 @@ check("no final notice says why", /final notice/i.test(v({ finalNoticeAt: null }
 
 // ── Never force someone we can't reach ─────────────────────────────────────
 check("bounced email → unreachable", v({ deliverability: "bounced" }).verdict === "unreachable");
-check("unconfirmed email → unreachable (fail closed)", v({ deliverability: "unknown" }).verdict === "unreachable");
+{ const u = v({ deliverability: "unknown" });
+  check("unverifiable email (Mandrill down / 429) → still forceable, with a note", u.verdict === "safe" && (u.notes ?? []).length === 1, JSON.stringify(u)); }
+check("unknown deliverability does not outrank real setup problems", v({ deliverability: "unknown", synced: false }).verdict === "not-ready");
 check("no recipient at all → unreachable", v({ hasRecipient: false }).verdict === "unreachable");
 
 // ── Never force someone 4.0 can't be told about ────────────────────────────

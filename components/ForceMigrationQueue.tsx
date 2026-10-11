@@ -35,6 +35,7 @@ interface Row {
   forcedAt: string | null;
   verdict: Verdict;
   reasons: string[];
+  notes?: string[];
 }
 
 const VERDICT_STYLE: Record<Verdict, { bg: string; fg: string; label: string }> = {
@@ -166,6 +167,7 @@ export default function ForceMigrationQueue() {
                           {r.reasons.map((x) => <li key={x}>{x}</li>)}
                         </ul>
                       )}
+                      {(r.notes ?? []).map((x) => <div key={x} style={{ fontSize: 11, color: "#8a6d00", marginTop: 4 }}>⚠ {x}</div>)}
                       {r.hold && r.holdReason && <div style={{ fontSize: 11, color: "#546e7a", marginTop: 4 }}>“{r.holdReason}”</div>}
                     </td>
                     <td style={td}>
@@ -175,10 +177,10 @@ export default function ForceMigrationQueue() {
                     </td>
                     <td style={td}>
                       <div style={{ fontSize: 12, color: r.deliverability === "ok" ? "#2e7d32" : r.deliverability === "bounced" ? "#c62828" : "#8a6d00" }}>
-                        {r.deliverability === "ok" ? "deliverable" : r.deliverability === "bounced" ? "BOUNCED" : "unconfirmed"}
+                        {r.deliverability === "ok" ? "deliverable" : r.deliverability === "bounced" ? "BOUNCED" : "couldn't verify"}
                       </div>
                       {r.recipients.map((e) => <div key={e} style={{ fontSize: 11, color: "#78828c" }}>{e}</div>)}
-                      {r.deliverabilityDetail && <div style={{ fontSize: 11, color: "#c62828" }}>{r.deliverabilityDetail}</div>}
+                      {r.deliverabilityDetail && <div style={{ fontSize: 11, color: r.deliverability === "bounced" ? "#c62828" : "#8a6d00" }}>{r.deliverabilityDetail}</div>}
                     </td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
                       <div style={{ fontSize: 12 }}>{fmt(r.finalNoticeAt)}</div>

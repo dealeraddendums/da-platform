@@ -54,6 +54,8 @@ export interface ForceDecision {
   verdict: ForceVerdict;
   /** Ordered, human-readable — the UI shows these as the "why not" list. */
   reasons: string[];
+  /** Advisory only — shown on a forceable row (e.g. "couldn't verify the email"). */
+  notes?: string[];
 }
 
 /**
@@ -93,8 +95,11 @@ export function computeForceVerdict(c: ForceCandidate): ForceDecision {
   //    operator fixes by changing the dealer's email, not their setup.
   if (!c.hasRecipient) return { verdict: "unreachable", reasons: ["no contact email on file"] };
   if (c.deliverability === "bounced") return { verdict: "unreachable", reasons: ["email is on the bounce/denylist"] };
+  // UNKNOWN (Mandrill unreachable / rate-limited) is advisory, not a gate
+  // (Allan, 2026-10-11): it used to block, and a Mandrill 429 storm turned whole
+  // queues "unreachable". Only a CONFIRMED denylist hit above blocks the force.
   if (c.deliverability === "unknown") {
-    return { verdict: "unreachable", reasons: ["could not confirm the email is deliverable"] };
+    return { verdict: "safe", reasons: [], notes: ["couldn't verify the email is deliverable (Mandrill didn't answer) — no bounce on record"] };
   }
 
   return { verdict: "safe", reasons: [] };
@@ -121,6 +126,7 @@ export interface ForceQueueRow {
   forcedAt: string | null;
   verdict: ForceVerdict;
   reasons: string[];
+  notes: string[];
 }
 
 interface ForceFlags {
@@ -251,6 +257,7 @@ export async function loadForceQueue(): Promise<{ rows: ForceQueueRow[]; checked
         forcedAt: f.forced_at,
         verdict: decision.verdict,
         reasons: decision.reasons,
+        notes: decision.notes ?? [],
       };
       return row;
     }));
