@@ -8,11 +8,17 @@
 // stores were stale at the last run. An email goes out only when a store
 // BECOMES stale or RECOVERS; the still-stale list rides along in that email.
 // A second run on the same day with no change sends nothing.
+//
+// Two kinds of broken feed, tracked separately (2026-10-10):
+//   stale  — "feed stopped": nothing refreshed in 3 days (feed-health `health`)
+//   frozen — "refreshing but no new inventory": rows refresh, but no new
+//            vehicle in FROZEN_NEWEST_DAYS (feed-health `frozen`) — a provider
+//            resending the same file. Feed-less stores are never either.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
-import { dealerFeedHealth, loadRosters, type DealerFeedHealth } from "@/lib/feed-health";
+import { dealerFeedHealth, loadRosters, FROZEN_NEWEST_DAYS, type DealerFeedHealth } from "@/lib/feed-health";
 
 export interface ScanRow extends DealerFeedHealth {
   dealerId: string;
@@ -63,6 +69,29 @@ export function staleWorstFirst(rows: ScanRow[]): ScanRow[] {
     || b.activeVehicles - a.activeVehicles);
 }
 
+/** Frozen feeds, same ordering: printing first, then longest without a new vehicle. */
+export function frozenWorstFirst(rows: ScanRow[]): ScanRow[] {
+  return rows.filter((r) => r.frozen).sort((a, b) =>
+    (Number(b.printedLast14d > 0) - Number(a.printedLast14d > 0))
+    || ((b.daysSinceNewestFeedAdded ?? 0) - (a.daysSinceNewestFeedAdded ?? 0))
+    || b.activeVehicles - a.activeVehicles);
+}
+
+type AlertMap = Record<string, { since: string }>;
+
+/** Diff one category against the previous run's map. */
+function diffAlerts(current: ScanRow[], prev: AlertMap, byId: Map<string, ScanRow>) {
+  const now = new Date().toISOString();
+  const next: AlertMap = {};
+  for (const r of current) next[r.dealerId] = { since: prev[r.dealerId]?.since ?? now };
+  return {
+    next,
+    newly: current.filter((r) => !prev[r.dealerId]),
+    still: current.filter((r) => prev[r.dealerId]),
+    recovered: Object.keys(prev).filter((id) => !next[id]).map((id) => byId.get(id)).filter((r): r is ScanRow => !!r),
+  };
+}
+
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 function rowHtml(r: ScanRow): string {
@@ -80,37 +109,43 @@ function table(rows: ScanRow[]): string {
 }
 
 export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promise<{
-  skipped?: string; stale: number; newly: number; recovered: number; emailed: boolean; errors: number;
+  skipped?: string; stale: number; newly: number; recovered: number;
+  frozen: number; frozenNewly: number; frozenRecovered: number; emailed: boolean; errors: number;
 }> {
   const admin = createAdminSupabaseClient() as any;
   const { data: lock } = await admin.from("admin_settings").select("value, updated_at").eq("key", LOCK_KEY).maybeSingle();
   if (lock?.value === "1" && lock.updated_at && Date.now() - Date.parse(lock.updated_at) < LOCK_MS) {
-    return { skipped: "already running", stale: 0, newly: 0, recovered: 0, emailed: false, errors: 0 };
+    return { skipped: "already running", stale: 0, newly: 0, recovered: 0, frozen: 0, frozenNewly: 0, frozenRecovered: 0, emailed: false, errors: 0 };
   }
   await admin.from("admin_settings").upsert({ key: LOCK_KEY, value: "1", updated_at: new Date().toISOString() }, { onConflict: "key" });
   try {
     const { rows, errors } = await scanFleet();
     const stale = staleWorstFirst(rows);
+    const frozen = frozenWorstFirst(rows);
     const { data: st } = await admin.from("admin_settings").select("value").eq("key", STATE_KEY).maybeSingle();
-    let prev: Record<string, { since: string }> = {};
-    try { prev = st?.value ? JSON.parse(st.value).stale ?? {} : {}; } catch { prev = {}; }
+    let prevState: { stale?: AlertMap; frozen?: AlertMap } = {};
+    try { prevState = st?.value ? JSON.parse(st.value) : {}; } catch { prevState = {}; }
 
     const now = new Date().toISOString();
-    const nextState: Record<string, { since: string }> = {};
-    for (const r of stale) nextState[r.dealerId] = { since: prev[r.dealerId]?.since ?? now };
-    const newly = stale.filter((r) => !prev[r.dealerId]);
-    const still = stale.filter((r) => prev[r.dealerId]);
     const byId = new Map(rows.map((r) => [r.dealerId, r]));
-    const recovered = Object.keys(prev).filter((id) => !nextState[id]).map((id) => byId.get(id)).filter((r): r is ScanRow => !!r);
+    const s = diffAlerts(stale, prevState.stale ?? {}, byId);
+    const f = diffAlerts(frozen, prevState.frozen ?? {}, byId);
+    const { newly, still, recovered } = s;
 
     let emailed = false;
     // An empty previous state is the first run: everything is "new", which is
-    // the baseline report, not news — record it without emailing.
+    // the baseline report, not news — record it without emailing. The same
+    // goes for the frozen list the first time it's tracked (state saved before
+    // frozen existed has no `frozen` key).
     const firstRun = !st?.value;
-    if (opts.send !== false && !firstRun && (newly.length || recovered.length)) {
+    const frozenBaseline = firstRun || !prevState.frozen;
+    const frozenNews = !frozenBaseline && (f.newly.length > 0 || f.recovered.length > 0);
+    if (opts.send !== false && !firstRun && (newly.length || recovered.length || frozenNews)) {
       const printing = stale.filter((r) => r.printedLast14d > 0).length;
+      const frozenPrinting = frozen.filter((r) => r.printedLast14d > 0).length;
       await sendMandrillEmail({
-        subject: `Feed health: ${newly.length} newly stale, ${recovered.length} recovered (${stale.length} stale in total)`,
+        subject: `Feed health: ${newly.length} newly stopped, ${recovered.length} recovered (${stale.length} stopped)`
+          + (frozenBaseline ? "" : ` · ${f.newly.length} newly frozen, ${f.recovered.length} unfrozen (${frozen.length} frozen)`),
         from_email: "noreply@dealeraddendums.com",
         from_name: "DealerAddendums",
         to: [
@@ -118,19 +153,33 @@ export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promis
           { email: "allan@dealeraddendums.com", name: "Allan Tone", type: "to" },
         ],
         html: `<div style="font-family:Roboto,Arial,sans-serif;font-size:14px;color:#2a2b3c">`
-          + `<p>Daily inventory-feed check. <strong>Stale</strong> = a store with feed vehicles where none was refreshed in the last 3 days `
-          + `and the feed hasn't added a vehicle in over 7 days. ${printing} of the ${stale.length} stale stores printed in the last 14 days (highest risk). `
-          + `Stores with no automatic feed (vehicles added by hand) are never flagged here.</p>`
-          + `<h3>Newly stale (${newly.length})</h3>${table(newly)}`
+          + `<p>Daily inventory-feed check. Two kinds of broken feed:</p><ul>`
+          + `<li><strong>Feed stopped</strong> — none of the store's feed vehicles was refreshed in the last 3 days and the feed hasn't added a vehicle in over 7 days. `
+          + `${printing} of the ${stale.length} printed in the last 14 days (highest risk).</li>`
+          + `<li><strong>Frozen — refreshing but no new inventory</strong> — the feed keeps touching the store's vehicles, but hasn't added a NEW one in over ${FROZEN_NEWEST_DAYS} days `
+          + `(usually the provider resending the same file). ${frozenPrinting} of the ${frozen.length} printed in the last 14 days.</li></ul>`
+          + `<p>Stores with no automatic feed (vehicles added by hand) are never flagged here.</p>`
+          + `<h2 style="font-size:16px">Feed stopped</h2>`
+          + `<h3>Newly stopped (${newly.length})</h3>${table(newly)}`
           + `<h3>Recovered (${recovered.length})</h3>${table(recovered)}`
-          + `<h3>Still stale (${still.length})</h3>${table(still)}`
+          + `<h3>Still stopped (${still.length})</h3>${table(still)}`
+          + `<h2 style="font-size:16px">Frozen — refreshing but no new inventory</h2>`
+          + (frozenBaseline
+            ? `<p style="color:#78828c">First run tracking frozen feeds — the ${frozen.length} below are the baseline; from tomorrow only changes are reported.</p>${table(frozen)}`
+            : `<h3>Newly frozen (${f.newly.length})</h3>${table(f.newly)}`
+              + `<h3>No longer frozen (${f.recovered.length})</h3>${table(f.recovered)}`
+              + `<h3>Still frozen (${f.still.length})</h3>${table(f.still)}`)
           + (errors.length ? `<p style="color:#78828c">${errors.length} store(s) couldn't be checked this run.</p>` : "")
           + `</div>`,
       });
       emailed = true;
     }
-    await admin.from("admin_settings").upsert({ key: STATE_KEY, value: JSON.stringify({ stale: nextState, lastRunAt: now }), updated_at: now }, { onConflict: "key" });
-    return { stale: stale.length, newly: newly.length, recovered: recovered.length, emailed, errors: errors.length };
+    await admin.from("admin_settings").upsert({ key: STATE_KEY, value: JSON.stringify({ stale: s.next, frozen: f.next, lastRunAt: now }), updated_at: now }, { onConflict: "key" });
+    return {
+      stale: stale.length, newly: newly.length, recovered: recovered.length,
+      frozen: frozen.length, frozenNewly: frozenBaseline ? 0 : f.newly.length, frozenRecovered: frozenBaseline ? 0 : f.recovered.length,
+      emailed, errors: errors.length,
+    };
   } finally {
     await admin.from("admin_settings").delete().eq("key", LOCK_KEY);
   }

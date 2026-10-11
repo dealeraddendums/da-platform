@@ -20,12 +20,22 @@
 // STALE (the alert definition): a store with feed vehicles where NONE was
 // refreshed in the last 3 days AND the newest feed-added vehicle is more than
 // 7 days old (or there is none).
+//
+// FROZEN (2026-10-10, fleet scan + digest only): the feed IS refreshing rows
+// (so `health` stays "updating") but has added no NEW vehicle in more than
+// FROZEN_NEWEST_DAYS — a provider resending the same file forever (the Job 21
+// DealersLink stores, e.g. Harbin Ford, newest May 6, rows touched hourly).
+// Kept OUT of `health` on purpose: Steven's get_feed_provider reports health
+// to dealers, and this change is internal-only. Real data (2026-10-10): every
+// live store had a new vehicle within ~30 days or none for 70+ days, so 21
+// sits in the gap; tune here.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { providerLabel } from "@/lib/inventory-providers";
 
 export const FRESH_DAYS = 3;
 export const STALE_NEWEST_DAYS = 7;
+export const FROZEN_NEWEST_DAYS = 21;
 export const LIVE_FEED_OR = "created_by.like.FORTELLIS_*,created_by.like.CDK_*,created_by.like.automatic*";
 
 export type FeedHealth = "updating" | "stale" | "feed_no_vehicles" | "no_live_feed";
@@ -68,6 +78,8 @@ export interface DealerFeedHealth {
   newestFeedAdded: string | null;     // YYYY-MM-DD
   daysSinceNewestFeedAdded: number | null;
   health: FeedHealth;
+  /** Refreshing but no new vehicle in > FROZEN_NEWEST_DAYS (scan/digest only — not in `health`). */
+  frozen: boolean;
   lastPrintDate: string | null;       // any document, 5.0 or synced 4.0 print
   printedLast14d: number;
   handAddedActive: number;            // active vehicles not from a live feed
@@ -156,6 +168,7 @@ export async function dealerFeedHealth(
     newestFeedAdded: newest ? String(newest).slice(0, 10) : null,
     daysSinceNewestFeedAdded: daysSince,
     health,
+    frozen: health === "updating" && daysSince != null && daysSince > FROZEN_NEWEST_DAYS,
     lastPrintDate: lastPrint.data?.[0]?.print_date ? String(lastPrint.data[0].print_date).slice(0, 10) : null,
     printedLast14d: printed14.count ?? 0,
     handAddedActive,
