@@ -24,6 +24,44 @@ type Props =
 type Preview = { svg: string; replaced: string[]; franchises: string[] };
 type LibLogo = { id: string | null; url: string; display_name: string; scope: string };
 
+/** "Redmond Chevrolet!" → "redmond-chevrolet"; empty → "logo". */
+function slugName(name: string): string {
+  const s = name.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return s || "logo";
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Render the cleaned SVG to a PNG (long edge 1500 px, transparent). */
+function svgToPngBlob(svg: string, longEdge = 1500): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth || 1, h = img.naturalHeight || 1;
+      const k = longEdge / Math.max(w, h);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(w * k);
+      canvas.height = Math.round(h * k);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { reject(new Error("no canvas")); return; }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("PNG export failed"))), "image/png");
+    };
+    img.onerror = () => reject(new Error("Couldn't render the logo"));
+    img.src = svgDataUrl(svg);
+  });
+}
+
 function svgDataUrl(svg: string): string {
   return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
 }
@@ -162,6 +200,16 @@ export default function LogoStudio(props: Props) {
                   <button style={btn()} disabled={busy !== null} onClick={() => void save(false)}>Save to my logos only</button>
                 </>
               )}
+              {/* Download the cleaned (already sanitized) After SVG to touch up in
+                  Illustrator. Client-side only: saves nothing, sets nothing. */}
+              <button style={btn()} disabled={busy !== null}
+                onClick={() => downloadBlob(new Blob([preview.svg], { type: "image/svg+xml" }), `${slugName(name)}.svg`)}>
+                Download SVG
+              </button>
+              <button style={btn()} disabled={busy !== null}
+                onClick={() => { void svgToPngBlob(preview.svg).then((b) => downloadBlob(b, `${slugName(name)}.png`)).catch((e: Error) => setErr(e.message)); }}>
+                Download PNG
+              </button>
             </div>
           )}
           <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
