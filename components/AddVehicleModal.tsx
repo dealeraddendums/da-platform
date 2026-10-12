@@ -216,6 +216,40 @@ const EMPTY_FORM: FormState = {
   mileage: "0", msrp: "", cmpg: "", hmpg: "", condition: "Used",
 };
 
+// ── Multi-value decode fields ─────────────────────────────────────────────────
+// vPIC returns several possibilities for some fields as one string — trim
+// "SEL, SEL Plus", body style "Sport Utility Vehicle [SUV]/Multipurpose Vehicle
+// [MPV]", drivetrain "4WD/4-Wheel Drive/4x4". Split them into options so the
+// user picks ONE and the vehicle stores a clean single value. Separators inside
+// [] / () don't split, nor do "w/", "w/o" or digit/digit ("1/2 Ton").
+type MultiField = "trim" | "body_style" | "drivetrain";
+type DecodeOptions = Record<MultiField, string[]>;
+const NO_DECODE_OPTIONS: DecodeOptions = { trim: [], body_style: [], drivetrain: [] };
+
+function splitDecodedOptions(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const parts: string[] = [];
+  let cur = "";
+  let depth = 0;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === "[" || ch === "(") depth++;
+    else if ((ch === "]" || ch === ")") && depth > 0) depth--;
+    const isSep = depth === 0 && (ch === "," || (ch === "/"
+      && !/(^|[^a-z])w$/i.test(cur)                          // "w/", "w/o"
+      && !(/\d$/.test(cur) && /\d/.test(raw[i + 1] ?? ""))));  // "1/2"
+    if (isSep) { parts.push(cur); cur = ""; } else cur += ch;
+  }
+  parts.push(cur);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of parts) {
+    const v = p.trim();
+    if (v && !seen.has(v.toLowerCase())) { seen.add(v.toLowerCase()); out.push(v); }
+  }
+  return out;
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialTab = "vin", label }: Props) {
@@ -230,6 +264,9 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
   const [decodeResult, setDecodeResult] = useState<DecodeResult | null>(null);
   const [decodeError, setDecodeError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  // 2+ options = that field renders as a dropdown (trim: required, no default).
+  const [decodeOptions, setDecodeOptions] = useState<DecodeOptions>(NO_DECODE_OPTIONS);
+  const [trimMissing, setTrimMissing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [aiGenerating, setAiGenerating] = useState(false);
@@ -257,6 +294,8 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
     setDecodeResult(null);
     setDecodeError(null);
     setForm(EMPTY_FORM);
+    setDecodeOptions(NO_DECODE_OPTIONS);
+    setTrimMissing(false);
     setSaveError(null);
     setAiGenerating(false);
     setAiGenerated(false);
@@ -281,6 +320,8 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
     setDecoding(true);
     setDecodeError(null);
     setDecodeResult(null);
+    setDecodeOptions(NO_DECODE_OPTIONS);
+    setTrimMissing(false);
     setAiGenerated(false);
 
     const res = await fetch(`/api/vehicles/decode?vin=${encodeURIComponent(vin)}`);
@@ -297,6 +338,18 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
     }
 
     const currentYear = new Date().getFullYear();
+    const opts: DecodeOptions = {
+      trim: splitDecodedOptions(json.trim),
+      body_style: splitDecodedOptions(json.body_style),
+      drivetrain: splitDecodedOptions(json.drivetrain),
+    };
+    // Single values keep today's behavior (prefill the field as decoded).
+    const multi = (k: MultiField) => opts[k].length >= 2;
+    setDecodeOptions({
+      trim: multi("trim") ? opts.trim : [],
+      body_style: multi("body_style") ? opts.body_style : [],
+      drivetrain: multi("drivetrain") ? opts.drivetrain : [],
+    });
     setDecodeResult(json);
     setDecodeAttempted(true);
     setForm((f) => ({
@@ -305,11 +358,12 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
       year: json.year ? String(json.year) : f.year,
       make: json.make ?? f.make,
       model: json.model ?? f.model,
-      trim: json.trim ?? f.trim,
-      body_style: json.body_style ?? f.body_style,
+      // Multi-value trim: no default — the user must pick one before saving.
+      trim: multi("trim") ? "" : (json.trim ?? f.trim),
+      body_style: multi("body_style") ? opts.body_style[0] : (json.body_style ?? f.body_style),
       engine: json.engine ?? f.engine,
       transmission: json.transmission ?? f.transmission,
-      drivetrain: json.drivetrain ?? f.drivetrain,
+      drivetrain: multi("drivetrain") ? opts.drivetrain[0] : (json.drivetrain ?? f.drivetrain),
       fuel: normalizeFuel(json.fuel_type) ?? f.fuel,
       cmpg: json.cmpg ?? f.cmpg,
       hmpg: json.hmpg ?? f.hmpg,
@@ -340,6 +394,11 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
   async function handleSave(openAddendum: boolean) {
     if (!form.stock_number.trim()) {
       setSaveError("Stock Number is required");
+      return;
+    }
+    if (decodeOptions.trim.length >= 2 && !form.trim) {
+      setTrimMissing(true);
+      setSaveError("Choose a trim before saving — this VIN decodes to more than one.");
       return;
     }
     setSaving(true);
@@ -609,6 +668,9 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
               onDecode={handleDecode}
               form={form}
               setForm={setForm}
+              decodeOptions={decodeOptions}
+              trimMissing={trimMissing}
+              onTrimChosen={() => { setTrimMissing(false); setSaveError(null); }}
               saving={saving}
               saveError={saveError}
               onSave={handleSave}
@@ -646,7 +708,7 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
 function VinTab({
   dealerId: _dealerId, aiEnabled, aiGenerating, aiGenerated,
   vinInput, setVinInput, decoding, decodeAttempted, decodeResult, decodeError, onDecode,
-  form, setForm, saving, saveError, onSave, onClose,
+  form, setForm, decodeOptions, trimMissing, onTrimChosen, saving, saveError, onSave, onClose,
 }: {
   dealerId: string;
   aiEnabled?: boolean;
@@ -656,6 +718,7 @@ function VinTab({
   decoding: boolean; decodeAttempted: boolean; decodeResult: DecodeResult | null; decodeError: string | null;
   onDecode: () => void;
   form: FormState; setForm: React.Dispatch<React.SetStateAction<FormState>>;
+  decodeOptions: DecodeOptions; trimMissing: boolean; onTrimChosen: () => void;
   saving: boolean; saveError: string | null;
   onSave: (openAddendum: boolean) => void;
   onClose: () => void;
@@ -667,6 +730,22 @@ function VinTab({
       onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))}
       style={INPUT_STYLE}
     />
+  );
+
+  // A decoded multi-value field: dropdown of its options. Trim has no default
+  // (placeholder, required); the others default to the first option.
+  const multiField = (k: MultiField, placeholder?: string) => (
+    <select
+      value={form[k]}
+      onChange={(e) => {
+        setForm((f) => ({ ...f, [k]: e.target.value }));
+        if (k === "trim" && e.target.value) onTrimChosen();
+      }}
+      style={k === "trim" && trimMissing ? { ...INPUT_STYLE, borderColor: "#c62828" } : INPUT_STYLE}
+    >
+      {placeholder && <option value="" disabled>{placeholder}</option>}
+      {decodeOptions[k].map((o) => <option key={o} value={o}>{o}</option>)}
+    </select>
   );
 
   return (
@@ -786,13 +865,18 @@ function VinTab({
             </div>
 
             <div>
-              <label style={LABEL_STYLE}>Trim</label>
-              {field("trim")}
+              <label style={LABEL_STYLE}>Trim{decodeOptions.trim.length >= 2 ? " *" : ""}</label>
+              {decodeOptions.trim.length >= 2 ? multiField("trim", "Select trim…") : field("trim")}
+              {trimMissing && (
+                <div style={{ fontSize: 12, color: "#c62828", marginTop: 4 }}>
+                  Choose a trim — this VIN decodes to more than one.
+                </div>
+              )}
             </div>
 
             <div>
               <label style={LABEL_STYLE}>Body Style</label>
-              {field("body_style")}
+              {decodeOptions.body_style.length >= 2 ? multiField("body_style") : field("body_style")}
             </div>
 
             <div>
@@ -817,7 +901,7 @@ function VinTab({
 
             <div>
               <label style={LABEL_STYLE}>Drivetrain</label>
-              {field("drivetrain")}
+              {decodeOptions.drivetrain.length >= 2 ? multiField("drivetrain") : field("drivetrain")}
             </div>
 
             <div>
