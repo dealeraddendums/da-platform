@@ -101,6 +101,9 @@ export function LoginForm({ unified = false }: { unified?: boolean }) {
   const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  // Unified login: the 5.0 password was right but the dealer isn't on 5.0 yet —
+  // the error then offers the emailed-code way in alongside the message.
+  const [notOnV5, setNotOnV5] = useState(false);
   const [success, setSuccess] = useState(false);
   const [shakeKey, setShakeKey] = useState(0);
   const [passkeyState, setPasskeyState] = useState<PasskeyState>("idle");
@@ -202,6 +205,7 @@ export function LoginForm({ unified = false }: { unified?: boolean }) {
     e.preventDefault();
     setTouched({ email: true, password: true });
     setServerError(null);
+    setNotOnV5(false);
     setPasskeyError(null);
 
     if (!idValid || !pwValid) {
@@ -221,13 +225,14 @@ export function LoginForm({ unified = false }: { unified?: boolean }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username: email.trim(), password, next }),
         });
-        const data = await res.json().catch(() => ({})) as { ok?: boolean; redirect?: string; error?: string };
+        const data = await res.json().catch(() => ({})) as { ok?: boolean; redirect?: string; error?: string; code?: string };
         if (res.ok && data.ok && data.redirect) {
           setSuccess(true);
           window.location.assign(data.redirect); // may be an external one-time 4.0 URL or an internal path
           return;
         }
         setServerError(data.error ?? "Login failed. Please try again.");
+        setNotOnV5(data.code === "not_on_v5");
       } catch {
         setServerError("Login failed. Please try again.");
       }
@@ -415,7 +420,22 @@ export function LoginForm({ unified = false }: { unified?: boolean }) {
       {serverError && (
         <div role="alert" className="lp-server-error">
           <IconAlert style={{ marginTop: 2, flexShrink: 0, color: "var(--da-red)" }} />
-          <span>{serverError}</span>
+          <span>
+            {serverError}
+            {notOnV5 && emailValid && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  onClick={() => void startCodeLogin()}
+                  disabled={codeSending}
+                  style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "inherit", fontWeight: 600, textDecoration: "underline", cursor: "pointer" }}
+                >
+                  Email me a sign-in code
+                </button>
+              </>
+            )}
+          </span>
         </div>
       )}
 

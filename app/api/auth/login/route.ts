@@ -61,6 +61,14 @@ async function floor(started: number): Promise<void> {
 const ERR_CREDS = "Wrong username or password.";
 const ERR_RATE = "Too many attempts. Please try again later.";
 const ERR_GENERIC = "Login failed. Please try again.";
+// Shown ONLY when the 5.0 password was accepted but the dealer isn't on 5.0 yet
+// and 4.0 then rejected the same credentials. The caller already proved the
+// password, so this reveals nothing to a guesser; a wrong password still gets
+// ERR_CREDS. There's no separate 4.0 login page (it redirects here), so the
+// 4.0 way in is this same form with the 4.0 password.
+const ERR_NOT_ON_V5 =
+  "Your password is right, but your dealership isn't on the new platform (5.0) yet. " +
+  "Sign in here with your Platform 4.0 password, or we can email you a sign-in code.";
 
 type FourZeroResult =
   | { kind: "ok"; login_url: string }
@@ -135,6 +143,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const email = username.toLowerCase();
   const emailMode = isEmail(username);
+  // Set only on the branch where GoTrue accepted the password but the dealer
+  // isn't usable on 5.0 — picks the failure message below, nothing else.
+  let v5PasswordOk = false;
 
   // ── 5.0 first (email usernames only) ──────────────────────────────────────
   if (emailMode) {
@@ -193,6 +204,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // 5.0 session so NO cookie is set, and fall through to the 4.0 handoff where
       // they have a working login. Not a credential failure -> no lockout strike.
       await supabase.auth.signOut({ scope: "local" });
+      v5PasswordOk = true;
       recordAuthEvent({ event: "password_verify", result: "failure", email, detail: "5.0 not usable -> 4.0 fallback", req });
     } else {
       // 5.0 failed — strike, then fall through to 4.0 (the email may be a 4.0 login).
@@ -209,5 +221,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   if (r.kind === "rate") return done(429, { ok: false, error: ERR_RATE });
   if (r.kind === "misconfig") return done(400, { ok: false, error: ERR_GENERIC });
+  if (v5PasswordOk) return done(401, { ok: false, error: ERR_NOT_ON_V5, code: "not_on_v5" });
   return done(401, { ok: false, error: ERR_CREDS });
 }
