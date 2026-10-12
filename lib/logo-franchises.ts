@@ -5,7 +5,10 @@ import { makeKey } from "@/lib/make-key";
 //
 // DA has no franchise column. The best evidence of what a store is franchised
 // for is what it sells NEW (a store's used lot carries every brand) plus any
-// per-make template override it set up (template_make_overrides, migration 153).
+// per-make template override it set up (template_make_overrides, migration 153)
+// and the store's own name ("Findlay Chrysler Dodge Ram", "Bravo CDJR") — a
+// trial store may have no inventory yet. A make right after "of"/"in"/"at" is a
+// city, not a franchise ("Anderson Ford of Lincoln"), and doesn't count.
 // A make counts when it has at least MIN_NEW active new vehicles, so one
 // mis-coded unit doesn't make a franchise. A group's franchises = the union of
 // its member dealers'.
@@ -32,6 +35,23 @@ const ALIASES: Record<string, string> = {
 };
 const BY_KEY = [...CANONICAL.map((m) => [makeKey(m), m] as const), ...Object.entries(ALIASES)]
   .sort((a, b) => b[0].length - a[0].length); // longest key wins
+
+const NAME_WORDS: [RegExp, string[]][] = [
+  ...CANONICAL.map((m) => [m, [m]] as [string, string[]]),
+  ["Chevy", ["Chevrolet"]], ["VW", ["Volkswagen"]], ["Mercedes", ["Mercedes-Benz"]], ["Range Rover", ["Land Rover"]],
+  ["CDJRF", ["Chrysler", "Dodge", "Jeep", "Ram", "Fiat"]], ["CDJR", ["Chrysler", "Dodge", "Jeep", "Ram"]], ["CJDR", ["Chrysler", "Dodge", "Jeep", "Ram"]],
+].map(([w, makes]) => [
+  new RegExp(`(?<!\\b(?:of|in|at)\\s+)\\b${(w as string).replace(/[-\s]/g, "[-\\s]?")}\\b`, "i"),
+  makes as string[],
+]);
+
+/** Franchise makes a dealer's own NAME states. */
+export function makesInDealerName(name: string | null | undefined): string[] {
+  const n = String(name ?? "");
+  const out = new Set<string>();
+  for (const [re, makes] of NAME_WORDS) if (re.test(n)) makes.forEach((m) => out.add(m));
+  return Array.from(out);
+}
 
 export function canonicalMake(raw: string | null | undefined): string | null {
   const k = makeKey(raw);
@@ -63,6 +83,8 @@ export async function franchiseMakesForDealers(dealerTextIds: string[]): Promise
     if (!data || data.length < PAGE) break;
   }
   const out = new Set(Array.from(counts).filter(([, n]) => n >= MIN_NEW).map(([m]) => m));
+  const { data: names } = await db.from("dealers").select("name").in("dealer_id", ids);
+  for (const d of (names ?? []) as { name: string | null }[]) makesInDealerName(d.name).forEach((m) => out.add(m));
   const { data: overrides } = await db.from("template_make_overrides").select("make_key").in("dealer_id", ids);
   for (const o of overrides ?? []) {
     const m = canonicalMake((o as { make_key: string }).make_key);
