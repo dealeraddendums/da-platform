@@ -10,6 +10,7 @@ import GroupOptionsPanel from "@/components/GroupOptionsPanel";
 import GroupImagesPanel from "@/components/GroupImagesPanel";
 import GroupExportsPanel from "@/components/GroupExportsPanel";
 import DesignList from "@/components/image-builder/DesignList";
+import LogoStudio from "@/components/LogoStudio";
 
 type Props = { params: { id: string } };
 
@@ -106,6 +107,7 @@ export default async function GroupPage({ params }: Props) {
           memberDealers={<GroupDealers groupId={params.id} isSuperAdmin={isSuperAdmin} isGroupAdmin={isGroupAdmin} isRestyler={(groupData as { is_restyler?: boolean } | null)?.is_restyler === true} />}
           imageLibrary={<GroupImagesPanel groupId={params.id} inTab />}
           imageBuilder={<DesignList groupId={params.id} />}
+          logoStudio={<LogoStudio mode="group" groupId={params.id} />}
           exports={<GroupExportsPanel groupId={params.id} inTab />}
         />
       )}

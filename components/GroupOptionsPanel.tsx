@@ -23,11 +23,12 @@ type Props = {
   memberDealers?: ReactNode;
   imageLibrary?: ReactNode;
   imageBuilder?: ReactNode;
+  logoStudio?: ReactNode;
   exports?: ReactNode;
 };
 
-type Tab = "users" | "members" | "templates" | "options" | "disclaimers" | "images" | "imageBuilder" | "exports" | "billing";
-const TAB_IDS: Tab[] = ["users", "members", "templates", "options", "disclaimers", "images", "imageBuilder", "exports", "billing"];
+type Tab = "users" | "members" | "templates" | "options" | "disclaimers" | "images" | "imageBuilder" | "logoStudio" | "exports" | "billing";
+const TAB_IDS: Tab[] = ["users", "members", "templates", "options", "disclaimers", "images", "imageBuilder", "logoStudio", "exports", "billing"];
 
 // Open the Builder in GROUP mode. If the viewer is a group_admin currently
 // switched into a member dealer (active_dealer_id set), clear that first —
@@ -45,7 +46,7 @@ async function openGroupBuilder(url: string): Promise<void> {
   window.location.href = url;
 }
 
-export default function GroupOptionsPanel({ groupId, isSuperAdmin = false, memberDealers, imageLibrary, imageBuilder, exports }: Props) {
+export default function GroupOptionsPanel({ groupId, isSuperAdmin = false, memberDealers, imageLibrary, imageBuilder, logoStudio, exports }: Props) {
 
   const [tab, setTabState] = useState<Tab>("users");
   // ?tab=… keeps the selected tab across a refresh and makes tabs linkable.
@@ -68,6 +69,7 @@ export default function GroupOptionsPanel({ groupId, isSuperAdmin = false, membe
     { id: "disclaimers", label: "Disclaimers" },
     ...(imageLibrary ? [{ id: "images" as Tab, label: "Group Image Library" }] : []),
     ...(imageBuilder ? [{ id: "imageBuilder" as Tab, label: "Image Builder" }] : []),
+    ...(logoStudio ? [{ id: "logoStudio" as Tab, label: "Logo Studio" }] : []),
     ...(exports ? [{ id: "exports" as Tab, label: "Exports" }] : []),
     { id: "billing", label: "Billing" },
   ];
@@ -103,6 +105,7 @@ export default function GroupOptionsPanel({ groupId, isSuperAdmin = false, membe
         {tab === "members" && memberDealers}
         {tab === "images" && imageLibrary}
         {tab === "imageBuilder" && imageBuilder}
+        {tab === "logoStudio" && logoStudio}
         {tab === "exports" && exports}
       </div>
     </div>

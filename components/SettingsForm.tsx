@@ -647,6 +647,7 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
                 dealerId={dealerId}
                 currentLogoUrl={logoUrl}
                 onUpdated={(url) => setLogoUrl(url)}
+                vectorize
               />
             </div>
           )}

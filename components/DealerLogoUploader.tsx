@@ -2,16 +2,22 @@
 
 import { useState, useEffect } from "react";
 import ImageUploadPicker from "@/components/ImageUploadPicker";
+import LogoStudio from "@/components/LogoStudio";
 
 type Props = {
   dealerId: string;
   currentLogoUrl: string | null;
   onUpdated: (newUrl: string | null) => void;
+  /** Offer "Clean up / vectorize" (Logo Studio). Print Settings only: it acts
+   *  on the SESSION's dealer, so it isn't offered where an admin views some
+   *  other dealer's profile. */
+  vectorize?: boolean;
 };
 
-export default function DealerLogoUploader({ dealerId, currentLogoUrl, onUpdated }: Props) {
+export default function DealerLogoUploader({ dealerId, currentLogoUrl, onUpdated, vectorize = false }: Props) {
   const [logoUrl, setLogoUrl] = useState(currentLogoUrl);
   const [showPicker, setShowPicker] = useState(false);
+  const [showStudio, setShowStudio] = useState(false);
 
   // Sync prop → state when parent loads logo asynchronously after initial render
   useEffect(() => { setLogoUrl(currentLogoUrl); }, [currentLogoUrl]);
@@ -76,11 +82,34 @@ export default function DealerLogoUploader({ dealerId, currentLogoUrl, onUpdated
               {removing ? "Removing…" : "Remove Logo"}
             </button>
           )}
+          {vectorize && (
+            <button className="btn btn-secondary" style={{ fontSize: 12, height: 30, padding: "0 12px" }} onClick={() => setShowStudio(true)}>
+              Clean up / vectorize a logo
+            </button>
+          )}
           <p className="text-xs" style={{ color: "var(--text-muted)", marginTop: 2 }}>PNG, JPG, or SVG · Max 2 MB</p>
         </div>
       </div>
 
       {error && <p className="text-xs mt-2" style={{ color: "var(--error)" }}>{error}</p>}
+
+      {showStudio && (
+        // Persistent modal (no backdrop/Escape dismiss — explicit Close only).
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: "#fff", borderRadius: 6, width: "min(760px, 100%)", maxHeight: "90vh", overflowY: "auto", padding: "18px 22px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <span style={{ fontSize: 16, fontWeight: 700, color: "#2a2b3c" }}>Clean up / vectorize a logo</span>
+              <button aria-label="Close" onClick={() => setShowStudio(false)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#78828c" }}>×</button>
+            </div>
+            <LogoStudio
+              mode="dealer"
+              dealerId={dealerId}
+              onLogoSet={(url) => { setLogoUrl(url); onUpdated(url); }}
+              onClose={() => setShowStudio(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {showPicker && (
         <ImageUploadPicker
