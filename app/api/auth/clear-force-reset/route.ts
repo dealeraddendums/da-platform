@@ -9,18 +9,22 @@ import { createAdminSupabaseClient } from "@/lib/db";
  */
 export async function POST(): Promise<NextResponse> {
   const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+  // getUser() verifies the token with GoTrue; getSession() would trust whatever
+  // the cookie says about who this is.
+  const { data: { user }, error: userErr } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (userErr || !user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
   const admin = createAdminSupabaseClient();
 
-  // Clear flag in auth.users app_metadata
-  const { error: authErr } = await admin.auth.admin.updateUserById(session.user.id, {
+  // Merge into the user's CURRENT app_metadata (not the copy in the token,
+  // which may be stale) so no other server-set field is overwritten.
+  const { data: fresh } = await admin.auth.admin.getUserById(user.id);
+  const { error: authErr } = await admin.auth.admin.updateUserById(user.id, {
     app_metadata: {
-      ...session.user.app_metadata,
+      ...(fresh?.user?.app_metadata ?? user.app_metadata),
       force_password_reset: false,
     },
   });
@@ -33,7 +37,7 @@ export async function POST(): Promise<NextResponse> {
   await admin
     .from("profiles")
     .update({ force_password_reset: false, last_activity: new Date().toISOString() } as never)
-    .eq("id", session.user.id);
+    .eq("id", user.id);
 
   return NextResponse.json({ ok: true });
 }

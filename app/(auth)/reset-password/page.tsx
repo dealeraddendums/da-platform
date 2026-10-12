@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
 
 /**
  * Dual-purpose password page:
@@ -12,7 +11,6 @@ import { useRouter } from "next/navigation";
  *     returns to /profile?tab=security with an explicit success state.
  */
 export default function ResetPasswordPage() {
-  const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -52,12 +50,23 @@ export default function ResetPasswordPage() {
       const res = await fetch("/api/auth/clear-force-reset", { method: "POST" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: string };
-        throw new Error(body.error ?? "Failed to clear reset flag");
+        throw new Error(body.error ?? "Your password was saved, but we couldn't finish setting up your account. Sign out and sign back in.");
+      }
+
+      // The middleware pins forced-reset users by reading app_metadata from the
+      // session COOKIE's JWT. Clearing the flag server-side doesn't change that
+      // token, so without a refresh the next navigation bounces straight back
+      // here until the token expires (the forced-reset loop, 2026-10-12).
+      // Refresh to get a token minted from the updated user, then do a full
+      // page load so the middleware sees the new cookie.
+      const { error: refreshErr } = await supabase.auth.refreshSession();
+      if (refreshErr) {
+        throw new Error("Your password was saved. Sign out and sign back in with your new password to continue.");
       }
 
       setSuccess(true);
       setTimeout(() => {
-        router.push(forced ? "/dashboard" : "/profile?tab=security");
+        window.location.assign(forced ? "/dashboard" : "/profile?tab=security");
       }, 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
