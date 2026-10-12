@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { sanitizeSvgUpload } from "@/lib/svg-sanitize";
 import { resolveDeleteContext, isDeletableKey, findImageUsage, RAW_IMAGE_BUCKETS, UNOWNED_BUCKETS } from "@/lib/raw-image-delete";
 
 const ALLOWED_BUCKETS = new Set([
@@ -116,7 +117,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const prefix = keyPrefix ? `${keyPrefix}/`.replace(/\/+/g, "/") : "";
   const key = `${prefix}${Date.now()}_${cleanName}`;
 
-  const buffer = Buffer.from(await file.arrayBuffer());
+  let buffer: Buffer = Buffer.from(await file.arrayBuffer());
+  // An SVG is a document that can carry script; these buckets are public-read
+  // and logos print. Sanitize on intake (same allow-list as Logo Studio).
+  if (file.type === "image/svg+xml") {
+    const clean = sanitizeSvgUpload(buffer);
+    if (!clean.ok) return NextResponse.json({ error: clean.error }, { status: 422 });
+    buffer = clean.buffer;
+  }
   await getClient().send(new PutObjectCommand({
     Bucket: bucket,
     Key: key,

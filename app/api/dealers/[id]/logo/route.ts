@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { uploadLogo } from "@/lib/s3-upload";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
 import sharp from "sharp";
+import { sanitizeSvgUpload } from "@/lib/svg-sanitize";
 
 type Params = { params: { id: string } };
 
@@ -98,7 +99,10 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       .toBuffer();
     buffer = Buffer.from(resized);
   } else {
-    buffer = rawBuffer;
+    // SVG: sanitize on intake (same allow-list as Logo Studio) — never stored raw.
+    const clean = sanitizeSvgUpload(rawBuffer);
+    if (!clean.ok) return NextResponse.json({ error: clean.error }, { status: 422 });
+    buffer = clean.buffer;
   }
 
   // Always store as .png for raster (consistent URL, no format confusion)

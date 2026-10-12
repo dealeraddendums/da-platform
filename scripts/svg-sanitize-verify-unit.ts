@@ -2,7 +2,7 @@
 // Mirrors da-logoforge/tests/test_library.py's sanitizer tests, plus parser
 // strictness cases. Run: npm run test:svg-sanitize [path/to/real.svg ...]
 import { readFileSync } from "fs";
-import { sanitizeSvg, SvgSanitizeError, reportIsClean } from "../lib/svg-sanitize";
+import { sanitizeSvg, sanitizeSvgUpload, SvgSanitizeError, reportIsClean } from "../lib/svg-sanitize";
 
 let failed = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -78,6 +78,16 @@ rejects("markup declaration rejected", '<svg xmlns="http://www.w3.org/2000/svg">
   check("idempotent", once === twice.svg && reportIsClean(twice.report), `${once}\n${twice.svg}`);
   const amp = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg"><g id="a&amp;b"/></svg>').svg;
   check("entities round-trip escaped", amp.includes('id="a&amp;b"'), amp);
+}
+
+// 5b. upload wrapper (used by /api/upload-image + /api/dealers/[id]/logo)
+{
+  const good = sanitizeSvgUpload(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>x</script><rect width="1" height="1"/></svg>'));
+  check("upload: hostile neutralized", good.ok && !/script|onload/.test(good.buffer.toString()) && good.buffer.toString().includes("<rect"));
+  const ent = sanitizeSvgUpload(Buffer.from('<!DOCTYPE s [<!ENTITY a "b">]><svg xmlns="http://www.w3.org/2000/svg">&a;</svg>'));
+  check("upload: entities refused", !ent.ok);
+  const bin = sanitizeSvgUpload(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00]));
+  check("upload: non-UTF-8 / binary refused", !bin.ok);
 }
 
 // 6. real LogoForge outputs (optional paths on the command line)

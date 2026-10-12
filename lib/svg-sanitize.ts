@@ -285,3 +285,22 @@ export function sanitizeSvg(input: string | Uint8Array): { svg: string; report: 
 export function reportIsClean(r: SanitizeReport): boolean {
   return !(r.removedElements.length || r.removedAttrs.length || r.neutralized.length);
 }
+
+/**
+ * Upload-route wrapper: sanitize an uploaded SVG file's bytes before they are
+ * stored. Used by every route that accepts image/svg+xml (/api/upload-image,
+ * /api/dealers/[id]/logo, Logo Studio). `ok:false` → refuse the upload with 422
+ * (DTD/entities, malformed, not an SVG, not UTF-8).
+ */
+export function sanitizeSvgUpload(bytes: Uint8Array):
+  | { ok: true; buffer: Buffer; report: SanitizeReport }
+  | { ok: false; error: string } {
+  try {
+    const { svg, report } = sanitizeSvg(bytes);
+    return { ok: true, buffer: Buffer.from(svg, "utf8"), report };
+  } catch (e) {
+    if (e instanceof SvgSanitizeError) return { ok: false, error: `That SVG was refused: ${e.message}` };
+    if (e instanceof TypeError) return { ok: false, error: "That SVG was refused: not valid UTF-8 text" };
+    throw e;
+  }
+}
