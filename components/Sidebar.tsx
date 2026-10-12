@@ -24,6 +24,25 @@ type NavEntry = NavItem | NavSection;
 
 const DEALER_NAV_ROLES = new Set<string>(["dealer_admin", "dealer_user", "dealer_restricted"]);
 
+// DEALER sidebar order (Allan, 2026-10-12): recurring use | account/admin |
+// setup/design + support. "|" = divider. Applies only to dealer roles (incl. a
+// group_admin / group_user switched into a dealer, whom the layout renders as
+// dealer_admin); every other role keeps the `nav` array order below. Items are
+// the same `nav` entries (same hrefs, icons, role gates) — only order, the
+// dividers, the Template Builder label and the Image Builder indent differ.
+const DEALER_NAV_ORDER: string[] = [
+  "/dashboard", "/options", "/profile?tab=labels",
+  "|",
+  "/profile", "/users", "/settings",
+  "|",
+  "/builder", "/image-builder", "/get-the-app", "/help",
+];
+const DEALER_LABELS: Record<string, string> = { "/dashboard": "Inventory", "/builder": "Template Builder" };
+// Image Builder reads as a Template Builder asset: indented under it, one click.
+const DEALER_SUB_ITEM_STYLE: Record<string, React.CSSProperties> = {
+  "/image-builder": { paddingLeft: 40, height: 38, fontSize: 13 },
+};
+
 const nav: NavEntry[] = [
   // ── Main ─────────────────────────────────────────────────────────────────────
   {
@@ -196,13 +215,7 @@ const nav: NavEntry[] = [
       </svg>
     ),
   },
-  // Divider sits between Print Settings and Order Supplies per the
-  // documented dealer-role nav: Inventory (/dashboard) → Products → Builder → Users →
-  // My Profile → Print Settings → [divider] → Order Supplies → Help.
-  {
-    section: "",
-    roles: ["dealer_admin", "dealer_user", "dealer_restricted"],
-  },
+  // (Dealer roles: order + dividers come from DEALER_NAV_ORDER above.)
   {
     label: "Order Supplies",
     href: "/profile?tab=labels",
@@ -515,10 +528,39 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
   // hideBuilder is set when the dealer's group has taken over template
   // management (dealers.group_controls_templates = true) — Builder is then
   // off-limits for dealer roles. group_admin / super_admin always see it.
-  const visibleNav = nav
+  const roleNav = nav
     .filter((entry) => entry.roles.includes(role as UserRole)
       || (showImageBuilder && "href" in entry && entry.href === "/admin/image-builder"))
     .filter((entry) => !(hideBuilder && "href" in entry && (entry.href === "/builder" || entry.href === "/image-builder")));
+  const visibleNav: NavEntry[] = DEALER_NAV_ROLES.has(role) ? dealerOrdered(roleNav) : roleNav;
+
+  // Arrange the dealer's visible items in DEALER_NAV_ORDER. A divider is drawn
+  // only between two non-empty groups (a dealer_user without Users / Print
+  // Settings still gets a clean list); any item missing from the order (a future
+  // addition) is appended rather than dropped.
+  function dealerOrdered(entries: NavEntry[]): NavEntry[] {
+    const items = entries.filter((e): e is NavItem => "href" in e);
+    const byHref = new Map(items.map((e) => [e.href, e]));
+    const groups: NavItem[][] = [[]];
+    for (const key of DEALER_NAV_ORDER) {
+      if (key === "|") { groups.push([]); continue; }
+      const it = byHref.get(key);
+      if (!it) continue;
+      groups[groups.length - 1].push({
+        ...it,
+        label: DEALER_LABELS[key] ?? it.label,
+        itemStyle: { ...it.itemStyle, ...DEALER_SUB_ITEM_STYLE[key] },
+      });
+      byHref.delete(key);
+    }
+    groups[groups.length - 1].push(...Array.from(byHref.values()));
+    const out: NavEntry[] = [];
+    for (const g of groups.filter((g) => g.length)) {
+      if (out.length) out.push({ section: "", roles: [role as UserRole] });
+      out.push(...g);
+    }
+    return out;
+  }
 
   function getIsActive(item: NavItem): boolean {
     if (item.disabled) return false;
@@ -607,10 +649,9 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
               </div>
             );
           }
-          const raw = entry as NavItem;
-          // The dealer view's /dashboard IS the inventory list — call it that.
-          // Operator dashboards (super_admin, group) keep "Dashboard".
-          const item = raw.href === "/dashboard" && DEALER_NAV_ROLES.has(role) ? { ...raw, label: "Inventory" } : raw;
+          // Dealer labels ("Inventory", "Template Builder") are applied in
+          // dealerOrdered(); operator navs keep "Dashboard" / "Builder".
+          const item = entry as NavItem;
           const isActive = getIsActive(item);
           return item.disabled ? (
             <div key={item.href} className="nav-item disabled" style={item.itemStyle}>
