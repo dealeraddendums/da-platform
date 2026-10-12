@@ -18,6 +18,8 @@ import CustomSizesModal from '@/components/CustomSizesModal';
 import AddCustomSizeModal from './AddCustomSizeModal';
 import ImageUploadPicker from '@/components/ImageUploadPicker';
 import ImagePickerModal from '@/components/ImagePickerModal';
+import DealerLogoUploader from '@/components/DealerLogoUploader';
+import LogoStudio from '@/components/LogoStudio';
 
 // ── Palette widget tiles ──────────────────────────────────────────────
 const PALETTE_TILES = [
@@ -283,6 +285,11 @@ interface Props {
    *  "created using dealeraddendums.com" footer — a forced overlay, not a
    *  widget; the author cannot select, move, or delete it. */
   restylerAttribution?: boolean;
+  /** The session may change this dealer's logo (dealer_admin, group roles
+   *  switched into the store, super_admin ghosting it — the same callers the
+   *  Print Settings → Dealer Logo card serves). Gates the Logo widget's
+   *  "Change dealer logo" / "Clean up / vectorize" actions in dealer mode. */
+  canManageDealerLogo?: boolean;
 }
 
 
@@ -322,7 +329,7 @@ function PreviewClippedContent({ html, w, h }: { html: string; w: number; h: num
   );
 }
 
-export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, imageBuilderHref = null, canAddCustomSize = false, canAdminUpload = false, starterMode = false, starterTemplateId , restylerAttribution}: Props) {
+export default function BuilderPage({ vehicle, templateId, aiEnabled = false, customSizes = [], dealerId, dealerLogoUrl, dealerInfo, groupId, imageBuilderHref = null, canAddCustomSize = false, canAdminUpload = false, starterMode = false, starterTemplateId , restylerAttribution, canManageDealerLogo = false}: Props) {
   const { setTitle } = useBuilderBreadcrumb();
 
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
@@ -420,6 +427,9 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   const [showAddSizeModal, setShowAddSizeModal] = useState(false);
   const [showLogoPicker, setShowLogoPicker] = useState(false);
   const [showLogoLibPicker, setShowLogoLibPicker] = useState(false);
+  // Logo widget → dealer-logo actions, opened as overlays so the canvas (and
+  // any unsaved template work) stays mounted underneath.
+  const [logoAction, setLogoAction] = useState<null | 'change' | 'studio' | 'groupStudio'>(null);
   const [showInfoboxLibPicker, setShowInfoboxLibPicker] = useState(false);
   const [showBgLibPicker, setShowBgLibPicker] = useState(false);
   // "+ New" starter picker (dealer/group Builder only). List of platform
@@ -627,6 +637,31 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       else if (action === 'forward') newZ = curZ + 1;
       else if (action === 'backward') newZ = curZ - 1;
       const next = { ...prev, [id]: { ...w, z: newZ } };
+      widgetsRef.current = next;
+      pushHistory(next, nid);
+      return next;
+    });
+  }, [nid, pushHistory]);
+
+  // The dealer logo changed (Change logo / Logo Studio "Set as Dealer Logo" —
+  // both already wrote dealers.logo_url). Show it on the canvas now: the
+  // selected Logo widget, plus any Logo widget still showing the old dealer
+  // logo (or none). A widget pointed at a different library image is left alone.
+  const applyNewDealerLogo = useCallback((url: string | null, targetId: string | null) => {
+    const old = canonicalLogoRef.current;
+    canonicalLogoRef.current = url;
+    isDirtyRef.current = true;
+    setWidgets(prev => {
+      let changed = false;
+      const next: Record<string, Widget> = {};
+      for (const [id, w] of Object.entries(prev)) {
+        const cur = (w.d as { imgUrl?: unknown }).imgUrl;
+        if (w.type === 'logo' && (id === targetId || !cur || cur === old)) {
+          next[id] = { ...w, d: { ...w.d, imgUrl: url ?? '' } };
+          changed = true;
+        } else next[id] = w;
+      }
+      if (!changed) return prev;
       widgetsRef.current = next;
       pushHistory(next, nid);
       return next;
@@ -2386,6 +2421,13 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
                   onUpdatePos={updateWidgetPos}
                   onPickLogoImage={() => setShowLogoPicker(true)}
                   onPickLogoLibrary={() => setShowLogoLibPicker(true)}
+                  onDealerLogoAction={
+                    starterMode ? undefined
+                    : dealerId ? (canManageDealerLogo ? (a) => setLogoAction(a) : undefined)
+                    : groupId ? (a) => { if (a === 'studio') setLogoAction('groupStudio'); }
+                    : undefined
+                  }
+                  dealerLogoMode={dealerId ? 'dealer' : 'group'}
                   onLayerChange={handleLayerChange}
                   onPickInfolibImage={() => setShowInfoboxLibPicker(true)}
                 />
@@ -2774,6 +2816,36 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
         />
       )}
 
+      {/* DEALER LOGO — the Print Settings → Dealer Logo flows (same component,
+          same PATCH / Logo Studio routes), opened over the Builder. */}
+      {(logoAction === 'change' || logoAction === 'studio') && dealerId && (
+        <DealerLogoUploader
+          dealerId={dealerId}
+          currentLogoUrl={canonicalLogoRef.current}
+          open={logoAction === 'change' ? 'picker' : 'studio'}
+          onUpdated={url => {
+            applyNewDealerLogo(url, selId);
+            showToast(url ? 'Dealer logo updated' : 'Dealer logo removed');
+          }}
+          onDone={err => { setLogoAction(null); if (err) showToast(err); }}
+        />
+      )}
+
+      {/* GROUP template: the Logo widget prints each dealer's own logo, so
+          there's no single "dealer logo" to set — clean-up saves to the
+          group's logo library instead (pick it via "Logo library"). */}
+      {logoAction === 'groupStudio' && groupId && !dealerId && (
+        // Persistent modal (no backdrop/Escape dismiss — explicit Close only).
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 6, width: 'min(800px, 100%)', maxHeight: '90vh', overflowY: 'auto', padding: '14px 16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button aria-label="Close" onClick={() => setLogoAction(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#78828c' }}>×</button>
+            </div>
+            <LogoStudio mode="group" groupId={groupId} />
+          </div>
+        </div>
+      )}
+
       {/* LOGO IMAGE PICKER */}
       {showLogoPicker && (
         <ImageUploadPicker
@@ -2876,7 +2948,7 @@ function ModalRow({ icon, label, children }: { icon: React.ReactNode; label: Rea
 }
 
 // ── Widget Edit Panel ──────────────────────────────────────────────────
-function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, onDelete, onUpdatePos, onPickLogoImage, onPickLogoLibrary, onLayerChange, onPickInfolibImage }: {
+function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, onDelete, onUpdatePos, onPickLogoImage, onPickLogoLibrary, onDealerLogoAction, dealerLogoMode, onLayerChange, onPickInfolibImage }: {
   widget: Widget;
   fontScale: number;
   dealerId: string | null;
@@ -2887,6 +2959,9 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
   onPickLogoImage?: () => void;
   /** Logo Composer: the dealer/group logo library (scoped picker, logos only). */
   onPickLogoLibrary?: () => void;
+  /** Dealer-logo actions on the Logo widget (absent = not offered). */
+  onDealerLogoAction?: (a: 'change' | 'studio') => void;
+  dealerLogoMode?: 'dealer' | 'group';
   onLayerChange?: (id: string, action: 'front'|'back'|'forward'|'backward') => void;
   onPickInfolibImage?: () => void;
 }) {
@@ -2963,6 +3038,25 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
               <img src={d.imgUrl as string} alt="" style={{ maxWidth: '100%', maxHeight: 40, objectFit: 'contain', border: '1px solid #e0e0e0', borderRadius: 2, marginTop: 6, display: 'block' }} />
             )}
           </Fd>
+          {onDealerLogoAction && (
+            <Fd label={dealerLogoMode === 'group' ? 'Group logos' : 'Dealer logo'}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {dealerLogoMode !== 'group' && (
+                  <button onClick={() => onDealerLogoAction('change')} style={{ padding: '5px 10px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, background: '#f5f6f7', cursor: 'pointer', color: '#55595c', textAlign: 'left' }}>
+                    Change dealer logo
+                  </button>
+                )}
+                <button onClick={() => onDealerLogoAction('studio')} style={{ padding: '5px 10px', border: '1px solid #e0e0e0', borderRadius: 4, fontSize: 11, background: '#f5f6f7', cursor: 'pointer', color: '#55595c', textAlign: 'left' }}>
+                  Clean up / vectorize a logo
+                </button>
+              </div>
+              <div style={{ fontSize: 10, color: '#78828c', marginTop: 4, lineHeight: 1.35 }}>
+                {dealerLogoMode === 'group'
+                  ? 'Each dealer prints its own logo here. Cleaned logos are saved to the group logo library.'
+                  : 'Sets the dealer logo — the same one as Print Settings → Dealer Logo.'}
+              </div>
+            </Fd>
+          )}
           <Fd label="Placeholder text">
             <input value={(d.label as string) || ''} onChange={e => u('label', e.target.value)} style={fiStyle} />
           </Fd>

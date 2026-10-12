@@ -12,12 +12,21 @@ type Props = {
    *  on the SESSION's dealer, so it isn't offered where an admin views some
    *  other dealer's profile. */
   vectorize?: boolean;
+  /** Modal-only mode (Template Builder): skip the card and open straight into
+   *  the Change Logo picker or the Logo Studio; onDone fires when it closes. */
+  open?: "picker" | "studio";
+  /** error = the save failure message, so the host can show it (the card's
+   *  inline error line isn't rendered in this mode). */
+  onDone?: (error?: string) => void;
 };
 
-export default function DealerLogoUploader({ dealerId, currentLogoUrl, onUpdated, vectorize = false }: Props) {
+export default function DealerLogoUploader({ dealerId, currentLogoUrl, onUpdated, vectorize = false, open, onDone }: Props) {
   const [logoUrl, setLogoUrl] = useState(currentLogoUrl);
-  const [showPicker, setShowPicker] = useState(false);
-  const [showStudio, setShowStudio] = useState(false);
+  const [showPicker, _setShowPicker] = useState(open === "picker");
+  const [showStudio, _setShowStudio] = useState(open === "studio");
+  // In modal-only mode, closing the one modal ends the whole interaction.
+  const setShowPicker = (v: boolean) => { _setShowPicker(v); if (!v && open) onDone?.(); };
+  const setShowStudio = (v: boolean) => { _setShowStudio(v); if (!v && open) onDone?.(); };
 
   // Sync prop → state when parent loads logo asynchronously after initial render
   useEffect(() => { setLogoUrl(currentLogoUrl); }, [currentLogoUrl]);
@@ -54,13 +63,16 @@ export default function DealerLogoUploader({ dealerId, currentLogoUrl, onUpdated
       setLogoUrl(url);
       onUpdated(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
+      const msg = err instanceof Error ? err.message : "Save failed";
+      setError(msg);
+      if (open) { _setShowPicker(false); onDone?.(msg); return; }
     }
     setShowPicker(false);
   }
 
   return (
     <div>
+      {!open && (<>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 20 }}>
         {/* Preview */}
         <div style={{ width: 180, height: 80, border: "1px solid var(--border)", borderRadius: 4, background: "#fafafa", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
@@ -92,6 +104,7 @@ export default function DealerLogoUploader({ dealerId, currentLogoUrl, onUpdated
       </div>
 
       {error && <p className="text-xs mt-2" style={{ color: "var(--error)" }}>{error}</p>}
+      </>)}
 
       {showStudio && (
         // Persistent modal (no backdrop/Escape dismiss — explicit Close only).

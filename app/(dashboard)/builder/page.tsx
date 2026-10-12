@@ -136,5 +136,9 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
   // "+ Create a background" in Choose Background — same gate as the Image Builder pages.
   const imageBuilderHref = await imageBuilderHrefFor({ groupId: groupId && !dealerId ? groupId : null, dealerId });
 
-  return <BuilderPage imageBuilderHref={imageBuilderHref} customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={canAddCustomSize} canAdminUpload={role === 'super_admin'} restylerAttribution={restylerAttribution} />;
+  // Same callers the Print Settings → Dealer Logo card serves; the PATCH and
+  // Logo Studio routes re-check scope server-side regardless.
+  const canManageDealerLogo = !!dealerId && (role === 'dealer_admin' || role === 'group_admin' || role === 'group_user' || role === 'super_admin');
+
+  return <BuilderPage canManageDealerLogo={canManageDealerLogo} imageBuilderHref={imageBuilderHref} customSizes={customSizeRows ?? []} dealerId={dealerId ?? undefined} dealerLogoUrl={resolvedLogo} dealerInfo={dealerInfo} groupId={groupId ?? undefined} templateId={templateParam ?? undefined} canAddCustomSize={canAddCustomSize} canAdminUpload={role === 'super_admin'} restylerAttribution={restylerAttribution} />;
 }
