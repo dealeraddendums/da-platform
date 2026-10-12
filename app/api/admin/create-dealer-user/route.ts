@@ -39,10 +39,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   if (!dealer) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
 
-  // Create Supabase auth user with a known default password
+  // Create the auth user with NO password. They sign in with an emailed code
+  // (or a passkey) and can set a password themselves in My Profile. This used to
+  // set a shared default password ("Welcome2DA!") and email it in plain text;
+  // DealerAddendums never issues shared/temporary passwords (Allan, 2026-10-12).
   const { data: newUser, error: createErr } = await admin.auth.admin.createUser({
     email: email.trim().toLowerCase(),
-    password: "Welcome2DA!",
     email_confirm: true,
     user_metadata: { full_name: full_name.trim() },
   });
@@ -86,10 +88,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   <div style="background: #f5f6f7; border-radius: 4px; padding: 16px 20px; margin: 0 0 24px;">
     <p style="margin: 0 0 6px; font-size: 13px; color: #55595c;"><strong>Login URL:</strong> <a href="https://app.dealeraddendums.com/login" style="color: #1976d2;">app.dealeraddendums.com/login</a></p>
     <p style="margin: 0 0 6px; font-size: 13px; color: #55595c;"><strong>Email:</strong> ${email.trim().toLowerCase()}</p>
-    <p style="margin: 0; font-size: 13px; color: #55595c;"><strong>Temporary password:</strong> Welcome2DA!</p>
   </div>
+  <p style="margin: 0 0 16px; color: #55595c;">
+    To sign in, open the login page, enter your email, and choose to get a sign-in code. We&rsquo;ll email you a code to enter.
+    You can add a password or a passkey afterwards in My Profile &rarr; Security.
+  </p>
   <p style="color: #78828c; font-size: 12px; margin: 0;">
-    Please change your password after your first login. If you did not expect this email, contact support at support@dealeraddendums.com.
+    If you did not expect this email, contact support at support@dealeraddendums.com.
   </p>
 </div>
 `,

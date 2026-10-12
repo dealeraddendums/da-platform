@@ -282,8 +282,6 @@ export async function middleware(request: NextRequest) {
   }
 
   const isAuthRoute = pathname === "/login" || pathname === "/signup" || pathname === "/welcome" || pathname === "/unified-login";
-  const isResetRoute = pathname === "/reset-password";
-  const isApiAuth = pathname.startsWith("/api/auth/");
   const isProtected =
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/dealers") ||
@@ -308,23 +306,10 @@ export async function middleware(request: NextRequest) {
     return redirectRes;
   }
 
-  // Force password reset: redirect to /reset-password before any other access
-  const isImpersonating = request.cookies.get("da_impersonating")?.value === "1";
-  if (
-    session &&
-    session.user.app_metadata?.force_password_reset === true &&
-    !isImpersonating
-  ) {
-    if (!isResetRoute && !isApiAuth) {
-      const redirectRes = NextResponse.redirect(
-        new URL("/reset-password", request.url)
-      );
-      applySecurityHeaders(redirectRes, pathname);
-      return redirectRes;
-    }
-    applySecurityHeaders(response, pathname);
-    return response;
-  }
+  // No forced password resets (Allan, 2026-10-12): DealerAddendums never pins
+  // a user to /reset-password. People sign in with their password, an emailed
+  // code or a passkey; /reset-password is a voluntary change-password page only.
+  // app_metadata.force_password_reset is no longer read here (or set anywhere).
 
   // Redirect authenticated users away from auth pages
   if (isAuthRoute && session) {
@@ -339,8 +324,7 @@ export async function middleware(request: NextRequest) {
   // as the voluntary change-password page (profile "Change Password →" link).
   // A previous session-bounce here sent every logged-in user to /dashboard,
   // which made that link a silent no-op for all roles. The forced-reset flow is
-  // handled above (force_password_reset users are pinned TO this route);
-  // unauthenticated visitors are pushed to /login by the isProtected branch.
+  // Unauthenticated visitors are pushed to /login by the isProtected branch.
 
   applySecurityHeaders(response, pathname);
   return response;

@@ -1,12 +1,13 @@
 /**
  * import-users.ts — Import active Aurora users → Supabase auth + profiles.
- * Sets temporary password "Welcome2DA!" and force_password_reset=true.
+ * Creates users with NO password: they sign in with an emailed code (OTP) or
+ * a passkey, or set a password themselves later. DealerAddendums never forces
+ * a password reset and never issues a shared temporary password (Allan,
+ * 2026-10-12 — this script used to set "Welcome2DA!" + force_password_reset).
  * Skips users that already exist (matched by legacy_user_id in profiles).
  * Safe to re-run — resumes from last position via progress file.
  *
  * Run: npm run import:users
- *
- * After running, users must reset password on first login.
  */
 
 import * as mysql from "mysql2/promise";
@@ -18,7 +19,6 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: path.join(process.cwd(), ".env.local") });
 dotenv.config({ path: path.join(process.cwd(), ".env.production") });
 
-const TEMP_PASSWORD = "Welcome2DA!";
 const DELAY_MS = 120; // between auth creates to avoid rate limits
 const PROGRESS_FILE = path.join(process.cwd(), "import-users-progress.json");
 
@@ -159,11 +159,9 @@ async function main() {
         // Create Supabase auth user
         const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
           email,
-          password: TEMP_PASSWORD,
           email_confirm: true,
           app_metadata: {
             role,
-            force_password_reset: true,
             legacy_user_id: r._ID,
           },
           user_metadata: {
@@ -225,7 +223,6 @@ async function main() {
             phone: r.PHONE ?? null,
             user_image: r.USER_IMAGE ?? null,
             hubspot_contact_id: r.HUBSPOT_CONTACT_ID ?? null,
-            force_password_reset: true,
             email_report: r.EMAIL_REPORT ?? null,
             report_send_to: r.REPORT_SEND_TO ?? null,
             last_login: toTs(r.LAST_LOGIN),

@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 /**
- * Dual-purpose password page:
- *   - FORCED reset (app_metadata.force_password_reset) — middleware pins the
- *     user here until they set a password; continue to /dashboard.
- *   - VOLUNTARY change — reached via the profile "Change Password →" link;
- *     returns to /profile?tab=security with an explicit success state.
+ * Voluntary change-password page — reached via the profile "Change Password →"
+ * link; returns to /profile?tab=security with an explicit success state.
+ *
+ * DealerAddendums never FORCES a password reset (Allan, 2026-10-12): nothing
+ * pins users here any more. Saving a password still clears any leftover
+ * force_password_reset flag, so the account reads as a normal one everywhere.
  */
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
@@ -16,14 +17,6 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [forced, setForced] = useState(false);
-
-  useEffect(() => {
-    const supabase = createClient();
-    void supabase.auth.getSession().then(({ data: { session } }) => {
-      setForced(session?.user.app_metadata?.force_password_reset === true);
-    });
-  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -46,19 +39,15 @@ export default function ResetPasswordPage() {
       const { error: updateErr } = await supabase.auth.updateUser({ password });
       if (updateErr) throw new Error(updateErr.message);
 
-      // Clear the force_password_reset flag via API (no-op when not forced)
+      // Clear any leftover force_password_reset flag (no-op when not set)
       const res = await fetch("/api/auth/clear-force-reset", { method: "POST" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(body.error ?? "Your password was saved, but we couldn't finish setting up your account. Sign out and sign back in.");
       }
 
-      // The middleware pins forced-reset users by reading app_metadata from the
-      // session COOKIE's JWT. Clearing the flag server-side doesn't change that
-      // token, so without a refresh the next navigation bounces straight back
-      // here until the token expires (the forced-reset loop, 2026-10-12).
-      // Refresh to get a token minted from the updated user, then do a full
-      // page load so the middleware sees the new cookie.
+      // Refresh so the session cookie carries a token minted from the updated
+      // user (app_metadata in the old token is stale), then a full page load.
       const { error: refreshErr } = await supabase.auth.refreshSession();
       if (refreshErr) {
         throw new Error("Your password was saved. Sign out and sign back in with your new password to continue.");
@@ -66,7 +55,7 @@ export default function ResetPasswordPage() {
 
       setSuccess(true);
       setTimeout(() => {
-        window.location.assign(forced ? "/dashboard" : "/profile?tab=security");
+        window.location.assign("/profile?tab=security");
       }, 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
@@ -98,12 +87,10 @@ export default function ResetPasswordPage() {
         </div>
 
         <h1 className="text-xl font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
-          {forced ? "Set your password" : "Change your password"}
+          Change your password
         </h1>
         <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
-          {forced
-            ? "Your account requires a new password before continuing."
-            : "Choose a new password for your account."}
+          Choose a new password for your account.
         </p>
 
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
@@ -172,10 +159,10 @@ export default function ResetPasswordPage() {
               border: "none",
             }}
           >
-            {success ? "Password updated ✓" : loading ? "Saving…" : forced ? "Set password & continue" : "Change password"}
+            {success ? "Password updated ✓" : loading ? "Saving…" : "Change password"}
           </button>
 
-          {!forced && !success && (
+          {!success && (
             <a
               href="/profile?tab=security"
               className="block text-center text-sm"

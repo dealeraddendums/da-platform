@@ -61,6 +61,15 @@ const RESET_AUDIT_MATCH_MS = 2 * 60_000;
 // SET is direct, non-heuristic proof the human has never completed a login,
 // whatever last_sign_in_at says. Unlike the two time-window rules above this
 // one cannot produce a false negative: a working login always clears it.
+//
+// 2026-10-12 — forced resets REMOVED platform-wide (Allan): nothing pins users
+// any more, so a still-set flag no longer proves anything going forward, and the
+// fleet's flags were cleared. To keep this exclusion exact for the HISTORICAL
+// stamps it protected, the clear wrote `app_metadata.unverified_sign_in_before`
+// = the account's last_sign_in_at at that moment (only for flagged accounts that
+// had one). A sign-in AT OR BEFORE that instant is the old unproven stamp and is
+// excluded; any later sign-in is a real one (a fresh OTP / password / passkey
+// login re-stamps last_sign_in_at) and counts. A leftover flag is still honored.
 
 /**
  * Resolve an existing auth user's id by email via the GoTrue admin API. Used by
@@ -180,6 +189,7 @@ async function buildSignInMaps(): Promise<{ display: Map<string, string | null>;
   const raw = new Map<string, string | null>();
   const recoverySent = new Map<string, number>();
   const forceReset = new Set<string>();
+  const unverifiedBefore = new Map<string, number>();
   for (let page = 1; ; page++) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
     if (error) {
@@ -195,8 +205,13 @@ async function buildSignInMaps(): Promise<{ display: Map<string, string | null>;
         const ms = Date.parse(rec);
         if (!Number.isNaN(ms)) recoverySent.set(u.email.toLowerCase(), ms);
       }
-      if ((u.app_metadata as { force_password_reset?: boolean } | undefined)?.force_password_reset === true) {
+      const am = u.app_metadata as { force_password_reset?: boolean; unverified_sign_in_before?: string } | undefined;
+      if (am?.force_password_reset === true) {
         forceReset.add(u.email.toLowerCase());
+      }
+      if (am?.unverified_sign_in_before) {
+        const ms = Date.parse(am.unverified_sign_in_before);
+        if (!Number.isNaN(ms)) unverifiedBefore.set(u.email.toLowerCase(), ms);
       }
     }
     if (users.length < 1000) break;
@@ -232,6 +247,11 @@ async function buildSignInMaps(): Promise<{ display: Map<string, string | null>;
   // STRICT-only: a still-set force_password_reset flag means the human is
   // pinned to /reset-password and has never completed a login (see header).
   forceReset.forEach((email: string) => strict.set(email, null));
+  // STRICT-only: the pre-2026-10-12 stamp of a formerly-flagged account (see header).
+  unverifiedBefore.forEach((cutoffMs: number, email: string) => {
+    const signIn = strict.get(email);
+    if (signIn && Date.parse(signIn) <= cutoffMs) strict.set(email, null);
+  });
 
   if (polluted.length > 0) {
     // Display map only: best-effort fallback to legacy profiles.last_login for
