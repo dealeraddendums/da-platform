@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerSettingsRow, BuyersGuideDefaults } from "@/lib/db";
 import { buildPdfHtml } from "@/lib/pdf-html";
+import { resolveQrUrlTemplate } from "@/lib/qr-url";
 import { isRestylerGroup } from "@/lib/restyler";
 import { uploadPdf, buildPdfKey } from "@/lib/s3-upload";
 import { createPendingPrint, recordPrint, type PrintRecordPayload } from "@/lib/record-print";
@@ -759,14 +760,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         );
         if (hasQrWidgets) {
           widgets = await Promise.all(widgets.map(async w => {
-            const vin = dv.vin ?? "";
-            const stock = dv.stock_number ?? "";
 
             if (w.type === "infobox" && (w.d.ibType as string) === "qr") {
               const tmplStr = (w.d.qrUrlTemplate as string) || dealerQrTemplate || null;
-              const qrUrl = dv.vdp_link ?? (tmplStr
-                ? tmplStr.replace("[VIN]", vin).replace("[STOCK]", stock)
-                : null);
+              const qrUrl = dv.vdp_link ?? resolveQrUrlTemplate(tmplStr, dv);
               if (!qrUrl) return w;
               try {
                 const dataUrl = await QRCode.toDataURL(qrUrl, { width: 300, margin: 1, color: { dark: "#000000", light: "#ffffff" } });
@@ -776,7 +773,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
             if (w.type === "qrcode") {
               const tmplStr = (w.d.qrUrlTemplate as string) || dealerQrTemplate || null;
-              const resolvedTmpl = tmplStr ? tmplStr.replace("[VIN]", vin).replace("[STOCK]", stock) : null;
+              const resolvedTmpl = resolveQrUrlTemplate(tmplStr, dv);
               const baseUrl = dv.vdp_link ?? resolvedTmpl ?? (w.d.url as string) ?? "https://dealeraddendums.com";
               try {
                 const dataUrl = await QRCode.toDataURL(baseUrl, { width: 300, margin: 1, color: { dark: "#000000", light: "#ffffff" } });

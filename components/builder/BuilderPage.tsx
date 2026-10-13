@@ -3509,7 +3509,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
                   style={{ ...fiStyle, fontSize: 11 }} placeholder="https://dealer.com/inventory/[VIN]" />
               </Fd>
               <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, marginTop: 4 }}>
-                Use <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[VIN]</code> or <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[STOCK]</code> as variables. Leave blank to use VDP link from inventory data.
+                Variables: <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[VIN]</code> <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[STOCK]</code> <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[YEAR]</code> <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[MAKE]</code> <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[MODEL]</code> <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[TRIM]</code>. Values are URL-encoded; a missing value is left empty. Leave blank to use VDP link from inventory data.
               </div>
               {dealerId && (
                 <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -3598,7 +3598,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
               style={{ ...fiStyle, fontSize: 11 }} placeholder="https://dealer.com/inventory/[VIN]" />
           </Fd>
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, marginTop: 4 }}>
-            Use <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[VIN]</code> or <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[STOCK]</code> as variables. Leave blank to use VDP link from inventory data.
+            Variables: <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[VIN]</code> <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[STOCK]</code> <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[YEAR]</code> <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[MAKE]</code> <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[MODEL]</code> <code style={{ background: '#f5f6f7', padding: '1px 3px', borderRadius: 2 }}>[TRIM]</code>. Values are URL-encoded; a missing value is left empty. Leave blank to use VDP link from inventory data.
           </div>
           {dealerId && (
             <div style={{ marginTop: 8 }}>

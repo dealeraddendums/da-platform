@@ -27,7 +27,8 @@
     "test:vehicle-search": "tsx scripts/vehicle-search-verify-unit.ts",
     "test:force-migration": "tsx scripts/force-migration-verify-unit.ts",
     "test:image-builder": "tsx scripts/image-builder-verify-unit.ts",
-    "test:svg-sanitize": "tsx scripts/svg-sanitize-verify-unit.ts"
+    "test:svg-sanitize": "tsx scripts/svg-sanitize-verify-unit.ts",
+    "test:qr-url": "tsx scripts/qr-url-verify-unit.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
