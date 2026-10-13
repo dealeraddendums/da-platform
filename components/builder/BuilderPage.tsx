@@ -3656,6 +3656,30 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
           <Fd label="Or load from URL" style={{ marginTop: 8 }}>
             <input value={(d.imgUrl as string) || ''} onChange={e => u('imgUrl', e.target.value)} style={{ ...fiStyle, fontSize: 11 }} placeholder="https://…" />
           </Fd>
+          <Fd label="Fit" style={{ marginTop: 8 }}>
+            <select value={(d.imageFit as string) || 'stretch'} onChange={e => u('imageFit', e.target.value)} style={fiStyle as React.CSSProperties}>
+              <option value="stretch">Stretch — fill the box exactly (may distort)</option>
+              <option value="contain">Contain — fit inside, keep shape (may leave gaps)</option>
+              <option value="cover">Cover — fill the box, keep shape (crops edges)</option>
+            </select>
+          </Fd>
+          {!!d.imgUrl && (
+            <button
+              onClick={() => {
+                // Size the box to the image's own shape (keep W, set H) so it
+                // fills cleanly with no crop or distortion — useful for
+                // graphics with text, where Cover/Stretch would damage it.
+                const img = new window.Image();
+                img.onload = () => {
+                  if (img.naturalWidth > 0 && img.naturalHeight > 0) fp('h', w.w * img.naturalHeight / img.naturalWidth);
+                };
+                img.src = d.imgUrl as string;
+              }}
+              style={{ width: '100%', padding: '6px', background: '#fff', color: '#1976d2', border: '1px solid #1976d2', borderRadius: 4, fontSize: 11, cursor: 'pointer', marginTop: 6, fontFamily: 'inherit' }}
+            >
+              Match image aspect
+            </button>
+          )}
           <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Full-width image layer. PNG/JPG/WebP/GIF/SVG up to 5 MB. Use Layer Order below to control stacking.</div>
         </EpSection>
       )}

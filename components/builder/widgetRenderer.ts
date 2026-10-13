@@ -467,8 +467,13 @@ export function renderW(type: string, d: D, fontScale: number): string {
 
   // Background Image — full-width image layer, no content. Defaults to the
   // EPA/DOT Fuel Economy image so a new template prints something useful.
+  // d.imageFit picks how the image sits in its W×H box: 'stretch' (fill the
+  // box exactly, may distort), 'contain' (fit inside, may letterbox) or
+  // 'cover' (fill, crop the overflow). Unset = stretch, which is what every
+  // template saved before the Fit control rendered — keep it byte-identical.
   if (type === 'bgimage') {
-    const imgSt = 'width:100%;height:100%;object-fit:fill;display:block;mix-blend-mode:multiply';
+    const fit = d.imageFit === 'contain' ? 'contain' : d.imageFit === 'cover' ? 'cover' : 'fill';
+    const imgSt = `width:100%;height:100%;object-fit:${fit};display:block;mix-blend-mode:multiply`;
     const phSt = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#f0f0f0;border:1px dashed #bbb';
     const src = (d.imgUrl as string) || '';
     const alt = ((d.label as string) || 'Custom Image').replace(/"/g, '&quot;');
