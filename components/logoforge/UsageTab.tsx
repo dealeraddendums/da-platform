@@ -138,7 +138,8 @@ function BarChart({ series }: { series: { key: string; vectorize: number; librar
   const W = 900, H = 180, PAD_L = 32, PAD_B = 22;
   const max = Math.max(1, ...series.map((d) => d.vectorize + d.brand));
   const bw = (W - PAD_L) / Math.max(1, series.length);
-  const y = (v: number) => (H - PAD_B) * (1 - v / max);
+  const PAD_T = 12;
+  const y = (v: number) => PAD_T + (H - PAD_B - PAD_T) * (1 - v / max);
   const ticks = [0, Math.round(max / 2), max];
   const every = Math.max(1, Math.ceil(series.length / 10));
   return (
