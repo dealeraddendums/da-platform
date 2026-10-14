@@ -102,7 +102,7 @@ export default function TemplatesTab() {
                   </tbody>
                 </table>
                 <p style={{ ...MUTED, margin: "8px 0 0" }}>
-                  Fixed artwork: {(t.fixed ?? []).map((f) => `${f.id} (${f.kind === "library" ? `library ${f.source}` : "uploaded"})`).join(", ") || "none"}
+                  Fixed artwork: {(t.fixed ?? []).map((f) => `${f.id} (${f.kind === "library" ? `library ${f.source}` : f.kind === "text" ? `text “${f.source}”` : "uploaded"})`).join(", ") || "none"}
                 </p>
                 <p style={{ ...MUTED, margin: "6px 0 0" }}><strong>License:</strong> {t.license_note}</p>
               </>
