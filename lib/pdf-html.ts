@@ -6,6 +6,7 @@ import type { Widget, PaperSize } from '@/components/builder/types';
 import { formatOptionPrice, parseOptionPriceValue, priceSetUsesDecimals, formatCurrencyAmount } from '@/lib/option-price';
 import { parsePhotos } from '@/lib/vehicles';
 import type { VehicleRow } from '@/lib/vehicles';
+import { trimWithElectrification } from '@/lib/electrification';
 
 async function fetchImageAsBase64(url: string): Promise<string> {
   if (!url || !url.startsWith('http')) return url;
@@ -90,6 +91,10 @@ export interface BuildPdfHtmlInput {
    *  adhesive strip; anything else falls back to the default visible spot
    *  (resolveRestylerAttrPos). Text/presence are never authorable. */
   restylerAttrPos?: { x?: unknown; y?: unknown } | null;
+  /** Printing dealer's dealer_settings.append_electrification_to_trim
+   *  (migration 175): true ⇒ the Vehicle widget's Trim (body + header) prints
+   *  as "{Trim} {vehicle.ELECTRIFICATION}". False/absent ⇒ today's output. */
+  appendElectrificationToTrim?: boolean;
 }
 
 export async function buildPdfHtml({
@@ -114,6 +119,7 @@ export async function buildPdfHtml({
   alwaysShowCents,
   restylerAttribution,
   restylerAttrPos,
+  appendElectrificationToTrim,
 }: BuildPdfHtmlInput): Promise<string> {
   // Use the SAME paper geometry as the Builder canvas (components/builder/
   // constants.ts PAPERS) so the PDF .paper width/height exactly matches the
@@ -235,7 +241,8 @@ export async function buildPdfHtml({
           year: vehicle.YEAR ?? '',
           color: vehicle.EXT_COLOR ?? '',
           make: vehicle.MAKE ?? '',
-          trim: vehicle.TRIM ?? '',
+          // Shared with the Builder canvas preload (canvas == print).
+          trim: trimWithElectrification(vehicle.TRIM, vehicle.ELECTRIFICATION, appendElectrificationToTrim === true),
           model: vehicle.MODEL ?? '',
           mileage: vehicle.MILEAGE ?? '',
           drivetrain: vehicle.DRIVETRAIN ?? '', // header-only (Header: Drivetrain)

@@ -254,6 +254,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               "default_infosheet_new", "default_infosheet_used", "default_infosheet_cpo",
               "default_buyersguide_new", "default_buyersguide_used", "default_buyersguide_cpo",
               "qr_url_template", "ai_content_default", "always_show_cents",
+              "append_electrification_to_trim", // migration 175
               // Double-addendum (migration 162) — the second template ids + the toggle.
               ...SECOND_ADDENDUM_SETTINGS_COLUMNS,
             ].join(", "))
@@ -358,6 +359,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           STOCK_NUMBER: dv.stock_number,
           YEAR: dv.year ? String(dv.year) : null,
           MAKE: dv.make, MODEL: dv.model, TRIM: dv.trim,
+          ELECTRIFICATION: (dv as { electrification?: string | null }).electrification ?? null,
           BODYSTYLE: dv.body_style, EXT_COLOR: dv.exterior_color,
           INT_COLOR: dv.interior_color, ENGINE: dv.engine, FUEL: dv.fuel ?? null,
           DRIVETRAIN: dv.drivetrain, TRANSMISSION: dv.transmission,
@@ -903,6 +905,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           savedDescription,
           dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
           alwaysShowCents: (dealerSettings as Record<string, unknown> | null)?.always_show_cents === true,
+          appendElectrificationToTrim: (dealerSettings as Record<string, unknown> | null)?.append_electrification_to_trim === true,
         });
         const s3Key = buildPdfKey({
           internalId: dealer?.internal_id ?? null,
@@ -953,6 +956,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             savedDescription,
             dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
             alwaysShowCents: (dealerSettings as Record<string, unknown> | null)?.always_show_cents === true,
+          appendElectrificationToTrim: (dealerSettings as Record<string, unknown> | null)?.append_electrification_to_trim === true,
           });
         }
 

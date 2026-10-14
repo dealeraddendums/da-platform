@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeElectrification } from "@/lib/electrification";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import type { DealerVehicleInsert, DealerVehicleRow, VehicleAuditLogInsert } from "@/lib/db";
@@ -70,6 +71,8 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
     // Migration 173: the infosheet description the dealer generated/edited in
     // Edit Vehicle. An empty string clears it (stored NULL → today's behavior).
     "infosheet_ai_description",
+    // Migration 175: electrification (short token; normalized below).
+    "electrification",
   ];
 
   const update: Record<string, unknown> = {};
@@ -83,6 +86,7 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
       const t = typeof newVal === "string" ? newVal.trim().slice(0, 4000) : "";
       newVal = t || null;
     }
+    if (field === "electrification") newVal = normalizeElectrification(newVal) || null;
     if (String(oldVal ?? "") !== String(newVal ?? "")) {
       update[field] = newVal;
       changes[field] = { old: oldVal ?? null, new: newVal ?? null };

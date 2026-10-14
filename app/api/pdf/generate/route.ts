@@ -113,14 +113,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // templates honor each member dealer's own choices, like logo injection.
     let dealerQrTemplate: string | null = null;
     let alwaysShowCents = false;
+    let appendElectrificationToTrim = false;
     try {
       const { data: dealerQrSettings } = await admin
         .from("dealer_settings")
-        .select("qr_url_template, always_show_cents")
+        .select("qr_url_template, always_show_cents, append_electrification_to_trim")
         .eq("dealer_id", dv.dealer_id)
-        .maybeSingle<{ qr_url_template: string | null; always_show_cents: boolean | null }>();
+        .maybeSingle<{ qr_url_template: string | null; always_show_cents: boolean | null; append_electrification_to_trim: boolean | null }>();
       dealerQrTemplate = dealerQrSettings?.qr_url_template ?? null;
       alwaysShowCents = dealerQrSettings?.always_show_cents === true;
+      appendElectrificationToTrim = dealerQrSettings?.append_electrification_to_trim === true;
     } catch { /* columns may not exist until migrations 034/144 are applied */ }
 
     // Options are fetched AFTER the library load below — the orphan prune
@@ -290,6 +292,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       MAKE: dv.make,
       MODEL: dv.model,
       TRIM: dv.trim,
+      ELECTRIFICATION: (dv as { electrification?: string | null }).electrification ?? null,
       BODYSTYLE: dv.body_style,
       EXT_COLOR: dv.exterior_color,
       INT_COLOR: dv.interior_color,
@@ -827,6 +830,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       savedDescription,
       dbOptionsText: (dv as Record<string, unknown>).options as string | null ?? null,
       alwaysShowCents,
+      appendElectrificationToTrim,
       restylerAttribution,
     };
 

@@ -200,6 +200,7 @@ type FormState = {
   transmission: string;
   drivetrain: string;
   fuel: string;
+  electrification: string;
   description: string;
   options: string;
   mileage: string;
@@ -212,7 +213,7 @@ type FormState = {
 const EMPTY_FORM: FormState = {
   stock_number: "", vin: "", year: "", make: "", model: "", trim: "",
   body_style: "", exterior_color: "", interior_color: "", engine: "",
-  transmission: "", drivetrain: "", fuel: "", description: "", options: "",
+  transmission: "", drivetrain: "", fuel: "", electrification: "", description: "", options: "",
   mileage: "0", msrp: "", cmpg: "", hmpg: "", condition: "Used",
 };
 
@@ -365,6 +366,9 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
       transmission: json.transmission ?? f.transmission,
       drivetrain: multi("drivetrain") ? opts.drivetrain[0] : (json.drivetrain ?? f.drivetrain),
       fuel: normalizeFuel(json.fuel_type) ?? f.fuel,
+      // Migration 175: short token ("HEV", "Strong HEV"…); a fresh decode
+      // replaces it — non-electric decodes clear it.
+      electrification: json.electrification ?? "",
       cmpg: json.cmpg ?? f.cmpg,
       hmpg: json.hmpg ?? f.hmpg,
       // >= — next-model-year vehicles (e.g. a 2027 decoded in 2026) are New;
@@ -415,6 +419,7 @@ export default function AddVehicleModal({ dealerId, aiEnabled, onSaved, initialT
         cmpg: form.cmpg.trim() || null,
         hmpg: form.hmpg.trim() || null,
         fuel: form.fuel.trim() || null,
+        electrification: form.electrification.trim() || null,
         decode_source: decodeResult ? "vin_decoder" : "manual",
         decode_flagged: decodeResult?.decode_flagged ?? false,
       }),
@@ -919,6 +924,18 @@ function VinTab({
                   <option key={o.label} value={o.label}>{o.label}</option>
                 ))}
               </select>
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Electrification</label>
+              <input
+                type="text"
+                value={form.electrification}
+                onChange={(e) => setForm((f) => ({ ...f, electrification: e.target.value }))}
+                style={INPUT_STYLE}
+                placeholder="e.g. HEV, PHEV, BEV — blank if not electric"
+                maxLength={32}
+              />
             </div>
 
             <div>

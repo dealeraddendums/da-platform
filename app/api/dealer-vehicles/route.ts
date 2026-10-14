@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeElectrification } from "@/lib/electrification";
 import { tokenizeSearch, buildVehicleSearchOr } from "@/lib/vehicle-search";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
@@ -222,6 +223,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     msrp: body.msrp ? parseFloat(String(body.msrp)) : null,
     cmpg: (body.cmpg as string | undefined)?.trim() || null,
     hmpg: (body.hmpg as string | undefined)?.trim() || null,
+    // Migration 175: stored as the SHORT token only, whatever the caller sent.
+    electrification: normalizeElectrification(body.electrification) || null,
     condition: (body.condition as string | undefined) || "New",
     status: "active",
     decode_source: (body.decode_source as string | undefined) || "manual",
@@ -262,7 +265,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         "stock_number", "year", "make", "model", "trim", "body_style",
         "exterior_color", "interior_color", "engine", "transmission",
         "drivetrain", "fuel", "msrp", "cmpg", "hmpg", "condition",
-        "decode_source",
+        "decode_source", "electrification",
       ] as const) {
         const v = (insert as Record<string, unknown>)[key];
         if (v !== null && v !== undefined) (update as Record<string, unknown>)[key] = v;

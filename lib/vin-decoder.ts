@@ -2,6 +2,7 @@
 // Import only from API routes and server components.
 
 import { createAdminSupabaseClient } from './db';
+import { normalizeElectrification } from './electrification';
 
 export type DecodeResult = {
   vin: string;
@@ -17,6 +18,12 @@ export type DecodeResult = {
   doors: number | null;
   cmpg: string | null;
   hmpg: string | null;
+  /**
+   * Migration 175: SHORT electrification token from vPIC's ElectrificationLevel
+   * ("HEV", "Strong HEV", "PHEV", "BEV"…); null for non-electric or for decode
+   * stages that don't carry it (override / pattern / dealer_vehicles / WMI).
+   */
+  electrification?: string | null;
   source: 'override' | 'nhtsa' | 'dealer_vehicles' | 'partial';
   decode_flagged: boolean;
   confidence: 'high' | 'medium' | 'low';
@@ -62,6 +69,7 @@ async function liveNhtsaDecode(vin: string): Promise<DecodeResult | null> {
       doors: raw.Doors ? parseInt(raw.Doors, 10) : null,
       cmpg: null,
       hmpg: null,
+      electrification: normalizeElectrification(raw.ElectrificationLevel) || null,
       source: 'nhtsa',
       decode_flagged: false,
       confidence: 'high',

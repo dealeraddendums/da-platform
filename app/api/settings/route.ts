@@ -25,6 +25,7 @@ const DEFAULTS = {
   default_buyersguide_cpo: null,
   qr_url_template: null,
   always_show_cents: false,
+  append_electrification_to_trim: false,
   // Double addendum (migration 162) — off, with no second templates chosen.
   print_double_addendums: false,
   default_addendum_new_second: null,
@@ -152,6 +153,8 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     ...("default_addendum_cpo_second" in body && { default_addendum_cpo_second: body.default_addendum_cpo_second ?? null }),
     ...("qr_url_template" in body && { qr_url_template: body.qr_url_template ?? null }),
     ...(body.always_show_cents !== undefined && { always_show_cents: body.always_show_cents === true }),
+    // Migration 175 — "Append electrification to Trim" (display-only).
+    ...(body.append_electrification_to_trim !== undefined && { append_electrification_to_trim: body.append_electrification_to_trim === true }),
     // Migration 173 — AI vehicle-description house rules (dealer lines) and
     // the "don't apply my group's defaults" switch.
     ...("ai_vehicle_desc_modifiers" in body && {

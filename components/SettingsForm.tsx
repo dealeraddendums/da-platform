@@ -57,6 +57,7 @@ const SETTING_DEFAULTS: Omit<DealerSettingsRow, "dealer_id" | "updated_at"> = {
   buyers_guide_defaults: null,
   qr_url_template: null,
   always_show_cents: false,
+  append_electrification_to_trim: false,
   // Double addendum (migration 162)
   print_double_addendums: false,
   default_addendum_new_second: null,
@@ -169,6 +170,7 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
           buyers_guide_defaults: initialSettings.buyers_guide_defaults ?? null,
           qr_url_template: initialSettings.qr_url_template ?? null,
           always_show_cents: initialSettings.always_show_cents === true,
+          append_electrification_to_trim: initialSettings.append_electrification_to_trim === true,
         }
       : { ...SETTING_DEFAULTS }
   );
@@ -197,6 +199,7 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
     return () => { cancelled = true; };
   }, [dealerId, role]);
   const [priceDisplayCollapsed, setPriceDisplayCollapsed] = useState(true);
+  const [vehicleDisplayCollapsed, setVehicleDisplayCollapsed] = useState(true);
   const [templatesCollapsed, setTemplatesCollapsed] = useState(true);
   const [nudgeCollapsed, setNudgeCollapsed] = useState(true);
   const [historyCollapsed, setHistoryCollapsed] = useState(true);
@@ -271,6 +274,7 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
         buyers_guide_defaults: sJson.data.buyers_guide_defaults ?? null,
         qr_url_template: sJson.data.qr_url_template ?? null,
         always_show_cents: sJson.data.always_show_cents === true,
+        append_electrification_to_trim: sJson.data.append_electrification_to_trim === true,
       });
     }
     setTemplates(tJson.data ?? []);
@@ -770,6 +774,49 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
               {settings.always_show_cents
                 ? "On: prices show $199.00 — every price on the addendum always includes cents."
                 : "Off: whole dollars show as $199, and cents appear only when a price has them."}
+            </p>
+            </>
+            )}
+          </div>
+
+          {/* Vehicle Display (migration 175) */}
+          <div className="card mb-4" style={{ padding: vehicleDisplayCollapsed ? "14px 20px" : "20px" }}>
+            <CollapsibleCardHeader label="Vehicle Display" collapsed={vehicleDisplayCollapsed} onToggle={() => setVehicleDisplayCollapsed((c) => !c)} />
+            {!vehicleDisplayCollapsed && (
+            <>
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>Append electrification to Trim</span>
+              <button
+                className="px-4 py-2 text-sm font-medium rounded"
+                style={{
+                  background: !settings.append_electrification_to_trim ? "var(--blue)" : "var(--bg-subtle)",
+                  color: !settings.append_electrification_to_trim ? "#fff" : "var(--text-secondary)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+                onClick={() => setSettings((s) => ({ ...s, append_electrification_to_trim: false }))}
+              >
+                Off
+              </button>
+              <button
+                className="px-4 py-2 text-sm font-medium"
+                style={{
+                  background: settings.append_electrification_to_trim ? "var(--blue)" : "var(--bg-subtle)",
+                  color: settings.append_electrification_to_trim ? "#fff" : "var(--text-secondary)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+                onClick={() => setSettings((s) => ({ ...s, append_electrification_to_trim: true }))}
+              >
+                On
+              </button>
+            </div>
+            <p className="text-xs mt-3" style={{ color: "var(--text-muted)" }}>
+              {settings.append_electrification_to_trim
+                ? "On: hybrid and electric vehicles print their electrification after the Trim (e.g. \"Limited HEV\"). Gas-only vehicles are unchanged."
+                : "Off: Trim prints exactly as stored."}
             </p>
             </>
             )}

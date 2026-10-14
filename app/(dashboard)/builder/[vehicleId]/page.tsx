@@ -3,6 +3,7 @@ import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
 import { resolveSessionProfile } from "@/lib/profile-session";
 import type { VehiclePreload } from "@/components/builder/types";
 import BuilderPage from "@/components/builder/BuilderPage";
+import { trimWithElectrification } from "@/lib/electrification";
 
 export const metadata = { title: "Document Builder — DA Platform" };
 
@@ -26,7 +27,7 @@ export default async function BuilderVehicleRoute({
 
   const { data: dv } = await admin
     .from("dealer_vehicles")
-    .select("id, dealer_id, vin, stock_number, year, make, model, trim, exterior_color, mileage, msrp, condition, vdp_link, cmpg, hmpg, drivetrain")
+    .select("id, dealer_id, vin, stock_number, year, make, model, trim, exterior_color, mileage, msrp, condition, vdp_link, cmpg, hmpg, drivetrain, electrification")
     .eq("id", params.vehicleId)
     .maybeSingle();
 
@@ -41,7 +42,7 @@ export default async function BuilderVehicleRoute({
   }
 
   const [{ data: settings }, { data: dealerRow }, { data: customSizeRows }] = await Promise.all([
-    admin.from("dealer_settings").select("ai_content_default").eq("dealer_id", dv.dealer_id).single<{ ai_content_default: boolean }>(),
+    admin.from("dealer_settings").select("ai_content_default, append_electrification_to_trim").eq("dealer_id", dv.dealer_id).single<{ ai_content_default: boolean; append_electrification_to_trim: boolean | null }>(),
     admin.from("dealers").select("name, address, city, state, zip, phone, logo_url").eq("dealer_id", dv.dealer_id).maybeSingle<{ name: string | null; address: string | null; city: string | null; state: string | null; zip: string | null; phone: string | null; logo_url: string | null }>(),
     admin.from("dealer_custom_sizes").select("id, dealer_id, name, width_in, height_in, background_url, doc_type, created_at, updated_at").eq("dealer_id", dv.dealer_id).order("name"),
   ]);
@@ -62,6 +63,8 @@ export default async function BuilderVehicleRoute({
     make: dv.make ?? null,
     model: dv.model ?? null,
     trim: dv.trim ?? null,
+    // Same helper as lib/pdf-html.ts (migration 175) so canvas == print.
+    trim_display: trimWithElectrification(dv.trim, dv.electrification, settings?.append_electrification_to_trim === true),
     color_ext: dv.exterior_color ?? null,
     mileage: dv.mileage ?? null,
     msrp: dv.msrp ?? null,

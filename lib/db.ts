@@ -590,6 +590,8 @@ export type DealerSettingsRow = {
    *  money label on the addendum renders two decimals; false → whole-dollar
    *  addendums drop ".00" (the priceSetUsesDecimals rule). Display-only. */
   always_show_cents: boolean;
+  /** Print Settings "Append electrification to Trim" (migration 175). Display-only; default false. */
+  append_electrification_to_trim?: boolean;
   updated_at: string;
 };
 
@@ -621,6 +623,7 @@ type DealerSettingsInsert = {
   default_addendum_cpo_second?: string | null;
   qr_url_template?: string | null;
   always_show_cents?: boolean;
+  append_electrification_to_trim?: boolean;
 };
 
 export type DealerSettingsUpdate = {
@@ -653,6 +656,7 @@ export type DealerSettingsUpdate = {
   default_addendum_cpo_second?: string | null;
   qr_url_template?: string | null;
   always_show_cents?: boolean;
+  append_electrification_to_trim?: boolean;
   updated_at?: string;
 };
 
@@ -1152,6 +1156,8 @@ export type DealerVehicleRow = {
   options: string | null;
   /** Migration 173: the dealer's saved infosheet description (Edit Vehicle → Generate/edit → Save). */
   infosheet_ai_description?: string | null;
+  /** Migration 175: short electrification token ("HEV", "Strong HEV", "PHEV", "BEV"…); NULL = non-electric/unknown. */
+  electrification?: string | null;
   created_by: string | null;
   date_added: string;
   updated_at: string;
@@ -1214,6 +1220,7 @@ export type DealerVehicleInsert = {
   description?: string | null;
   options?: string | null;
   infosheet_ai_description?: string | null;
+  electrification?: string | null;
   created_by?: string | null;
   // Extended fields (migration 020)
   doors?: string | null;

@@ -11,6 +11,8 @@ export type VehicleRow = {
   MODEL: string | null;
   BODYSTYLE: string | null;
   TRIM: string | null;
+  /** dealer_vehicles.electrification (migration 175) — short token, display-only. */
+  ELECTRIFICATION?: string | null;
   EXT_COLOR: string | null;
   INT_COLOR: string | null;
   ENGINE: string | null;

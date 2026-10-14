@@ -55,6 +55,9 @@ export interface VehiclePreload {
   make: string | null;
   model: string | null;
   trim: string | null;
+  /** Trim as printed — includes the electrification suffix when the dealer's
+   *  "Append electrification to Trim" setting is on (migration 175). */
+  trim_display?: string | null;
   color_ext: string | null;
   mileage: number | null;
   msrp: number | null;

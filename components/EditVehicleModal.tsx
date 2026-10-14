@@ -88,6 +88,7 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
     transmission: vehicle.transmission ?? "",
     drivetrain: vehicle.drivetrain ?? "",
     fuel: vehicle.fuel ?? "",
+    electrification: vehicle.electrification ?? "",
     description: vehicle.description ?? "",
     infosheet_ai_description: vehicle.infosheet_ai_description ?? "",
     options: vehicle.options ?? "",
@@ -258,6 +259,10 @@ export default function EditVehicleModal({ vehicle, aiEnabled, onSaved, onClose 
                 )}
                 {FUEL_RULE_OPTIONS.map((o) => <option key={o.label} value={o.label}>{o.label}</option>)}
               </select>
+            </div>
+            <div>
+              <label style={LABEL_STYLE}>Electrification</label>
+              <input type="text" value={form.electrification} onChange={(e) => setForm((p) => ({ ...p, electrification: e.target.value }))} style={INPUT_STYLE} placeholder="e.g. HEV, PHEV, BEV — blank if not electric" maxLength={32} />
             </div>
 
             <div style={{ gridColumn: "1 / -1" }}>

@@ -214,7 +214,7 @@ function applyVehicleDataToWidgets(
         year: vehicle.year ? String(vehicle.year) : '',
         color: vehicle.color_ext ?? '',
         make: vehicle.make ?? '',
-        trim: vehicle.trim ?? '',
+        trim: vehicle.trim_display ?? vehicle.trim ?? '',
         model: vehicle.model ?? '',
         mileage: vehicle.mileage ? String(vehicle.mileage) : '',
         drivetrain: vehicle.drivetrain ?? '', // header-only (Header: Drivetrain)
