@@ -592,6 +592,10 @@ export type DealerSettingsRow = {
   always_show_cents: boolean;
   /** Print Settings "Append electrification to Trim" (migration 175). Display-only; default false. */
   append_electrification_to_trim?: boolean;
+  /** CPO by mileage & brand — Infosheet template selection (migration 176). */
+  cpo_by_mileage_enabled?: boolean;
+  cpo_by_mileage_cap?: number | null;
+  cpo_by_mileage_brands?: string[] | null;
   updated_at: string;
 };
 
@@ -624,6 +628,9 @@ type DealerSettingsInsert = {
   qr_url_template?: string | null;
   always_show_cents?: boolean;
   append_electrification_to_trim?: boolean;
+  cpo_by_mileage_enabled?: boolean;
+  cpo_by_mileage_cap?: number | null;
+  cpo_by_mileage_brands?: string[] | null;
 };
 
 export type DealerSettingsUpdate = {
@@ -657,6 +664,9 @@ export type DealerSettingsUpdate = {
   qr_url_template?: string | null;
   always_show_cents?: boolean;
   append_electrification_to_trim?: boolean;
+  cpo_by_mileage_enabled?: boolean;
+  cpo_by_mileage_cap?: number | null;
+  cpo_by_mileage_brands?: string[] | null;
   updated_at?: string;
 };
 

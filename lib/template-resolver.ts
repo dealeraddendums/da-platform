@@ -23,7 +23,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Widget } from "@/components/builder/types";
-import { pickByMake } from "@/lib/make-key";
+import { makeMatches, pickByMake } from "@/lib/make-key";
 import { resolveVehicleCondition } from "@/lib/vehicles";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,9 +59,50 @@ export interface TemplateResolverCache {
   byKey: Map<string, { widgets: Widget[] | null; meta: TemplateMeta }>;
   /** Per-dealer make overrides, fetched once per batch. */
   overridesByDealer: Map<string, MakeOverrideRow[]>;
+  /** Per-dealer "CPO by mileage" rule (migration 176), fetched once per batch. */
+  cpoRuleByDealer?: Map<string, CpoByMileageRule | null>;
 }
 export function createTemplateResolverCache(): TemplateResolverCache {
-  return { byKey: new Map(), overridesByDealer: new Map() };
+  return { byKey: new Map(), overridesByDealer: new Map(), cpoRuleByDealer: new Map() };
+}
+
+// ── CPO by mileage & brand (migration 176) — INFOSHEET only ─────────────────
+// A dealer can have USED vehicles of the makes they represent, under a mileage
+// cap, print their CPO Infosheet, in addition to vehicles the feed marks
+// certified. Template selection only: the vehicle's condition and certified
+// flag are never written, and the addendum still resolves on the certified flag.
+export interface CpoByMileageRule { cap: number; brands: string[] }
+
+/** The dealer's rule, or null when it is off / incomplete. Read here rather than
+ *  from the caller's settings row so the print routes' column lists stay
+ *  untouched, and a database without migration 176 just reads as "off". */
+async function loadCpoByMileageRule(admin: Admin, dealerTextId: string, cache?: TemplateResolverCache): Promise<CpoByMileageRule | null> {
+  if (cache?.cpoRuleByDealer?.has(dealerTextId)) return cache.cpoRuleByDealer.get(dealerTextId) ?? null;
+  let rule: CpoByMileageRule | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (admin as any)
+    .from("dealer_settings")
+    .select("cpo_by_mileage_enabled, cpo_by_mileage_cap, cpo_by_mileage_brands")
+    .eq("dealer_id", dealerTextId)
+    .maybeSingle() as { data: { cpo_by_mileage_enabled: boolean | null; cpo_by_mileage_cap: number | null; cpo_by_mileage_brands: string[] | null } | null; error: unknown };
+  if (!error && data?.cpo_by_mileage_enabled === true) {
+    const cap = Number(data.cpo_by_mileage_cap);
+    const brands = (data.cpo_by_mileage_brands ?? []).filter((b) => typeof b === "string" && b.trim());
+    if (Number.isFinite(cap) && cap > 0 && brands.length > 0) rule = { cap, brands };
+  }
+  cache?.cpoRuleByDealer?.set(dealerTextId, rule);
+  return rule;
+}
+
+/** Does a USED vehicle qualify? Make must match one of the dealer's brands (same
+ *  make-key normalization as the brand overrides), and mileage must be a real
+ *  reading under the cap. Blank/zero mileage can't prove "under the cap", so it
+ *  never qualifies. */
+export function qualifiesCpoByMileage(rule: CpoByMileageRule | null, make: string | null | undefined, mileage: unknown): boolean {
+  if (!rule) return false;
+  if (!rule.brands.some((b) => makeMatches(b, make))) return false;
+  const miles = typeof mileage === "number" ? mileage : parseFloat(String(mileage ?? "").replace(/,/g, ""));
+  return Number.isFinite(miles) && miles > 0 && miles < rule.cap;
 }
 
 export interface MakeOverrideRow {
@@ -137,20 +178,33 @@ export interface ResolveTemplateArgs {
   settings: Record<string, unknown> | null;
   /** dealer_vehicles.make — drives the per-make override rung (migration 153). */
   make?: string | null;
+  /** dealer_vehicles.mileage — the "CPO by mileage" infosheet rule (migration 176). */
+  mileage?: number | string | null;
   cache?: TemplateResolverCache;
 }
 
 export async function resolveTemplate(admin: Admin, args: ResolveTemplateArgs): Promise<ResolvedTemplate> {
-  const { dealerTextId, docType, condition, settings, make, cache } = args;
+  const { dealerTextId, docType, condition, settings, make, mileage, cache } = args;
 
   // Normalized through the shared resolver rather than compared literally.
   // The old expression was `=== "New" ? new : === "Used" ? used : cpo`, so the
   // 11,724 active rows stored as "NEW" and 445 as "USED" fell through to CPO
   // and silently picked up CPO template overrides.
-  const condKey = resolveVehicleCondition({ condition }) === "New" ? "new"
+  let condKey = resolveVehicleCondition({ condition }) === "New" ? "new"
     : resolveVehicleCondition({ condition }) === "Used" ? "used"
     : "cpo";
   const docKey = docType === "buyer_guide" ? "buyersguide" : docType;
+
+  // CPO by mileage & brand (migration 176) — INFOSHEET only, USED only. New
+  // vehicles and already-certified ones are untouched; the addendum never gets
+  // here. A qualifying vehicle resolves as CPO below; if the dealer has no CPO
+  // infosheet to give it (no CPO brand override, no CPO default), it is
+  // resolved exactly as the Used vehicle it is, never a blank sheet.
+  let cpoByMileage = false;
+  if (docType === "infosheet" && condKey === "used") {
+    cpoByMileage = qualifiesCpoByMileage(await loadCpoByMileageRule(admin, dealerTextId, cache), make, mileage);
+    if (cpoByMileage) condKey = "cpo";
+  }
 
   let widgets: Widget[] | null = null;
   const meta: TemplateMeta = {};
@@ -178,6 +232,10 @@ export async function resolveTemplate(admin: Admin, args: ResolveTemplateArgs): 
       cache?.overridesByDealer.set(ovKey, overrides);
     }
     const forDoc = overrides.filter(o => o.doc_type === docType);
+    if (cpoByMileage && !pickByMake(forDoc.filter(o => o.condition === "cpo"), make)
+        && !(settings?.default_infosheet_cpo as string | null | undefined)) {
+      condKey = "used";
+    }
     const hit = pickByMake(forDoc.filter(o => o.condition === condKey), make)
              ?? pickByMake(forDoc.filter(o => o.condition === "any"), make);
     if (hit) {

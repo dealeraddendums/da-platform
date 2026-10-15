@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import MakeOverrides from "@/components/MakeOverrides";
+import CpoByMileageCard from "@/components/CpoByMileageCard";
 import type { DealerSettingsRow, TemplateRow, UserRole, BuyersGuideDefaults } from "@/lib/db";
 import BuyersGuideAlignment from "@/components/BuyersGuideAlignment";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
@@ -63,6 +64,10 @@ const SETTING_DEFAULTS: Omit<DealerSettingsRow, "dealer_id" | "updated_at"> = {
   default_addendum_new_second: null,
   default_addendum_used_second: null,
   default_addendum_cpo_second: null,
+  // CPO by mileage & brand (migration 176)
+  cpo_by_mileage_enabled: false,
+  cpo_by_mileage_cap: null,
+  cpo_by_mileage_brands: null,
 };
 
 const WARRANTY_LABELS: Record<string, string> = {
@@ -171,6 +176,9 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
           qr_url_template: initialSettings.qr_url_template ?? null,
           always_show_cents: initialSettings.always_show_cents === true,
           append_electrification_to_trim: initialSettings.append_electrification_to_trim === true,
+          cpo_by_mileage_enabled: initialSettings.cpo_by_mileage_enabled === true,
+          cpo_by_mileage_cap: initialSettings.cpo_by_mileage_cap ?? null,
+          cpo_by_mileage_brands: initialSettings.cpo_by_mileage_brands ?? null,
         }
       : { ...SETTING_DEFAULTS }
   );
@@ -275,6 +283,9 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
         qr_url_template: sJson.data.qr_url_template ?? null,
         always_show_cents: sJson.data.always_show_cents === true,
         append_electrification_to_trim: sJson.data.append_electrification_to_trim === true,
+        cpo_by_mileage_enabled: sJson.data.cpo_by_mileage_enabled === true,
+        cpo_by_mileage_cap: sJson.data.cpo_by_mileage_cap ?? null,
+        cpo_by_mileage_brands: sJson.data.cpo_by_mileage_brands ?? null,
       });
     }
     setTemplates(tJson.data ?? []);
@@ -960,6 +971,17 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
                     </span>
                   </label>
                 </div>
+              )}
+              {/* CPO by mileage & brand (migration 176) — Infosheet tab only. */}
+              {docTab === "infosheet" && (
+                <CpoByMileageCard
+                  dealerId={dealerId ?? null}
+                  enabled={settings.cpo_by_mileage_enabled === true}
+                  cap={settings.cpo_by_mileage_cap ?? null}
+                  brands={settings.cpo_by_mileage_brands ?? []}
+                  readOnly={templatesAreLocked}
+                  onChange={(patch) => setSettings((s) => ({ ...s, ...patch }))}
+                />
               )}
               {/* Per-make overrides (migration 153) — Genesis prints Genesis, etc. */}
               <MakeOverrides

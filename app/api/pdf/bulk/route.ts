@@ -275,6 +275,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           docType,
           condition: resolveVehicleCondition(dv),
           make: dv.make,
+          mileage: dv.mileage,
           settings: dealerSettings as Record<string, unknown> | null,
           cache: templateResolverCache,
         });

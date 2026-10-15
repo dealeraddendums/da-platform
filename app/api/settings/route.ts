@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerSettingsUpdate } from "@/lib/db";
 import { resolveDealerForRequest } from "@/lib/dealer-authz";
 import { effectiveDescriptionModifiers } from "@/lib/vehicle-description-ai";
+import { makeKey } from "@/lib/make-key";
 
 const DEFAULTS = {
   ai_content_default: false,
@@ -31,7 +32,24 @@ const DEFAULTS = {
   default_addendum_new_second: null,
   default_addendum_used_second: null,
   default_addendum_cpo_second: null,
+  // CPO by mileage & brand (migration 176) — off.
+  cpo_by_mileage_enabled: false,
+  cpo_by_mileage_cap: null,
+  cpo_by_mileage_brands: null,
 };
+
+/** Whole miles, 1..10,000,000; anything else clears the cap (rule goes inert). */
+function cleanCap(v: unknown): number | null {
+  const n = typeof v === "number" ? v : parseInt(String(v ?? "").replace(/[,\s]/g, ""), 10);
+  return Number.isFinite(n) && n > 0 && n <= 10_000_000 ? Math.round(n) : null;
+}
+
+/** Store make KEYS (lib/make-key.ts makeKey), de-duplicated; empty -> null. */
+function cleanBrands(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  const keys = Array.from(new Set(v.map((b) => makeKey(typeof b === "string" ? b : "")).filter(Boolean))).slice(0, 50);
+  return keys.length ? keys : null;
+}
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireAuth();
@@ -162,6 +180,10 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         ? body.ai_vehicle_desc_modifiers.slice(0, 2000) : null,
     }),
     ...(body.ai_vehicle_desc_ignore_group !== undefined && { ai_vehicle_desc_ignore_group: body.ai_vehicle_desc_ignore_group === true }),
+    // Migration 176 — CPO by mileage & brand (Infosheet template selection).
+    ...(body.cpo_by_mileage_enabled !== undefined && { cpo_by_mileage_enabled: body.cpo_by_mileage_enabled === true }),
+    ...("cpo_by_mileage_cap" in body && { cpo_by_mileage_cap: cleanCap(body.cpo_by_mileage_cap) }),
+    ...("cpo_by_mileage_brands" in body && { cpo_by_mileage_brands: cleanBrands(body.cpo_by_mileage_brands) }),
   };
 
   let { data, error: upsertErr } = await admin
@@ -169,6 +191,17 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     .upsert(upsertPayload, { onConflict: "dealer_id" })
     .select()
     .single();
+  // Migration 176 not applied yet: the form always sends the CPO-by-mileage
+  // fields, so retry without them rather than fail every Settings save.
+  if (upsertErr && /cpo_by_mileage/.test(upsertErr.message ?? "")) {
+    const { cpo_by_mileage_enabled: _e, cpo_by_mileage_cap: _c, cpo_by_mileage_brands: _b, ...rest } = upsertPayload as Record<string, unknown>;
+    void _e; void _c; void _b;
+    ({ data, error: upsertErr } = await admin
+      .from("dealer_settings")
+      .upsert(rest as typeof upsertPayload, { onConflict: "dealer_id" })
+      .select()
+      .single());
+  }
   // Migration 173 not applied yet: the form always sends the AI house-rule
   // fields, so retry without them rather than fail every Settings save.
   if (upsertErr && /ai_vehicle_desc/.test(upsertErr.message ?? "")) {

@@ -491,6 +491,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         docType,
         condition: resolveVehicleCondition(dv),
         make: dv.make,
+        mileage: dv.mileage,
         settings: settings as Record<string, unknown> | null,
       });
       savedTemplateWidgets = resolved.widgets;
