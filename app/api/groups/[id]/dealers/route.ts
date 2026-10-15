@@ -29,17 +29,26 @@ export async function GET(
   }
 
   const admin = createAdminSupabaseClient();
-  const { data, error: dbError } = await admin
-    .from("dealers")
-    .select("*")
-    .eq("group_id", params.id)
-    .order("name");
-
-  if (dbError) {
-    return NextResponse.json({ error: dbError.message }, { status: 500 });
+  // Paged past PostgREST's 1000-row clamp so the member list (and its plan
+  // filter counts) can never silently drop members of a very large group.
+  const PAGE = 1000;
+  const data: DealerRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error: dbError } = await admin
+      .from("dealers")
+      .select("*")
+      .eq("group_id", params.id)
+      .order("name")
+      .order("id")
+      .range(from, from + PAGE - 1);
+    if (dbError) {
+      return NextResponse.json({ error: dbError.message }, { status: 500 });
+    }
+    data.push(...((page as DealerRow[]) ?? []));
+    if (!page || page.length < PAGE) break;
   }
 
-  return NextResponse.json({ data: (data as DealerRow[]) ?? [] });
+  return NextResponse.json({ data });
 }
 
 /**

@@ -13,6 +13,7 @@ import EntityTagsCard from "@/components/EntityTagsCard";
 import { loginAsGroup } from "@/lib/admin-login-as";
 import { decodeHtmlEntities, formatCreatedDate } from "@/lib/format";
 import { rememberDealerReturnPath } from "@/lib/dealer-return";
+import { isBillableAccountType } from "@/lib/group-discount";
 
 type Props = {
   group: GroupRow;
@@ -866,14 +867,26 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin, isRestyler =
   }
   const sortIndicator = (col: SortCol) => (sortBy === col ? (sortDir === "asc" ? " ▲" : " ▼") : "");
 
+  // Plan/billing filter (2026-10-15). Paying = isBillableAccountType (the same
+  // definition the group-discount tier count uses); the plan buckets are paying
+  // members whose plan reads Manual / Automatic Web / Automatic DMS in the Plan
+  // column. "Free & Trial" is everything not paying.
+  const [planFilter, setPlanFilter] = useState<MemberPlanFilter>("all");
+  const planCounts = useMemo(() => {
+    const c: Record<MemberPlanFilter, number> = { all: dealers.length, paying: 0, manual: 0, web: 0, dms: 0, unpaid: 0 };
+    for (const d of dealers) for (const f of MEMBER_PLAN_FILTERS) if (f.key !== "all" && matchesPlanFilter(d, f.key)) c[f.key]++;
+    return c;
+  }, [dealers]);
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const planned = dealers.filter((d) => matchesPlanFilter(d, planFilter));
     const rows = q
-      ? dealers.filter((d) =>
+      ? planned.filter((d) =>
           decodeHtmlEntities(d.name ?? "").toLowerCase().includes(q) ||
           (d.dealer_id ?? "").toLowerCase().includes(q) ||
           (d.inventory_dealer_id ?? "").toLowerCase().includes(q))
-      : dealers.slice();
+      : planned;
     rows.sort((a, b) => {
       let cmp: number;
       if (sortBy === "name") {
@@ -884,7 +897,7 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin, isRestyler =
       return sortDir === "asc" ? cmp : -cmp;
     });
     return rows;
-  }, [dealers, query, sortBy, sortDir]);
+  }, [dealers, query, planFilter, sortBy, sortDir]);
 
   async function handleImpersonate(d: DealerRow) {
     setImpersonating(d.dealer_id);
@@ -973,7 +986,7 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin, isRestyler =
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
         <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)", letterSpacing: "0.06em" }}>
-          Member Dealers ({dealers.length})
+          Member Dealers ({query || planFilter !== "all" ? `${visible.length} of ${dealers.length}` : dealers.length})
         </p>
         {(isSuperAdmin || isGroupAdmin) && (
           <button
@@ -996,10 +1009,33 @@ export function GroupDealers({ groupId, isSuperAdmin, isGroupAdmin, isRestyler =
             onChange={(e) => setQuery(e.target.value)}
             style={{ maxWidth: 360, height: 32, fontSize: 13 }}
           />
-          {query && (
+          {!isRestyler && (
+            <select
+              className="input"
+              aria-label="Filter by plan"
+              value={planFilter}
+              onChange={(e) => setPlanFilter(e.target.value as MemberPlanFilter)}
+              style={{ width: 190, height: 32, fontSize: 13 }}
+            >
+              {MEMBER_PLAN_FILTERS.map((f) => (
+                <option key={f.key} value={f.key}>{f.label} ({planCounts[f.key]})</option>
+              ))}
+            </select>
+          )}
+          {(query || planFilter !== "all") && (
             <span className="text-xs" style={{ color: "var(--text-muted)" }}>
               {visible.length} of {dealers.length}
             </span>
+          )}
+          {(query || planFilter !== "all") && (
+            <button
+              type="button"
+              className="text-xs"
+              onClick={() => { setQuery(""); setPlanFilter("all"); }}
+              style={{ color: "var(--blue)", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+            >
+              Clear
+            </button>
           )}
         </div>
       )}
@@ -1546,6 +1582,27 @@ const PLAN_LABELS: Record<string, string> = {
 function planLabel(accountType: string | null | undefined): string {
   if (!accountType) return "—";
   return PLAN_LABELS[accountType.trim().toLowerCase()] ?? accountType;
+}
+
+// Member Dealers plan/billing filter buckets. Plan is read from the same
+// account_type the Plan column shows (legacy " $NNN" price suffix ignored, as
+// isBillableAccountType does).
+type MemberPlanFilter = "all" | "paying" | "manual" | "web" | "dms" | "unpaid";
+const MEMBER_PLAN_FILTERS: { key: MemberPlanFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "paying", label: "All Paying" },
+  { key: "manual", label: "Manual" },
+  { key: "web", label: "Auto Web" },
+  { key: "dms", label: "Auto DMS" },
+  { key: "unpaid", label: "Free & Trial" },
+];
+const PLAN_FILTER_LABEL: Partial<Record<MemberPlanFilter, string>> = { manual: "Manual", web: "Automatic Web", dms: "Automatic DMS" };
+function matchesPlanFilter(d: DealerRow, f: MemberPlanFilter): boolean {
+  if (f === "all") return true;
+  const paying = isBillableAccountType(d.account_type);
+  if (f === "paying") return paying;
+  if (f === "unpaid") return !paying;
+  return paying && planLabel(String(d.account_type ?? "").split(" $")[0]) === PLAN_FILTER_LABEL[f];
 }
 
 function MemberPlanCell({ dealer, canEdit, onChanged }: {
