@@ -65,6 +65,7 @@ interface DealerForHubspot {
   downgraded_at: string | null;          // set on paying→Free, cleared on re-upgrade
   trial_ends_at: string | null;          // migration 126 — extend-trial override
   trial_prints_cap: number | null;       // migration 126 — extend-trial override
+  website_url?: string | null;           // migration 177 — loaded separately (see syncDealerToHubspot)
 }
 
 interface GroupForHubspot {
@@ -183,6 +184,12 @@ function dealerCompanyProperties(d: DealerForHubspot, groupName: string | null, 
     phone:            d.phone,
     dealership_phone: digitsOnly(d.phone),
     company_email:    d.primary_contact_email,
+
+    // Standard free-text "Website URL" property (string, not an enumeration —
+    // verified via the properties API 2026-10-15). Null when we don't have one;
+    // upsertObject strips nulls, so a dealer with no website never blanks a
+    // website someone set in HubSpot.
+    website: d.website_url ?? null,
 
     // Plan / billing
     subscription_type: subType,
@@ -483,6 +490,16 @@ export async function syncDealerToHubspot(dealerId: string, opts?: { sourceForm?
       .eq("id", dealerId)
       .maybeSingle() as { data: DealerForHubspot | null };
     if (!dealer) return;
+
+    // website_url (migration 177) is read on its own so that, if the column
+    // isn't there yet, only the website is missing — not the whole dealer
+    // (an unknown column in the select above would return no row at all).
+    {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: site, error: siteErr } = await (admin as any)
+        .from("dealers").select("website_url").eq("id", dealerId).maybeSingle();
+      dealer.website_url = siteErr ? null : (site?.website_url ?? null);
+    }
 
     // Defensive guard: never create/patch a HubSpot Company for a nameless
     // dealer (would produce a blank "--" record). No such dealers exist today,

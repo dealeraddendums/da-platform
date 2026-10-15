@@ -55,6 +55,7 @@ export async function createTrialDealer(input: {
   phone?: string | null;
   zip?: string | null;
   attribution?: Attribution;
+  websiteUrl?: string | null;
 }): Promise<{ dealerUuid: string; dealerId: string; internalId: string }> {
   const admin = createAdminSupabaseClient();
   const internalId = Date.now().toString();
@@ -75,14 +76,20 @@ export async function createTrialDealer(input: {
     phone: input.phone || null,
     zip: input.zip || null,
     acquisition: input.attribution ?? null,
+    website_url: input.websiteUrl ?? null,
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let { data, error } = await (admin as any).from("dealers").insert(payload).select("id, dealer_id").single();
-  if (error && /acquisition/i.test(error.message)) {
-    const { acquisition: _drop, ...withoutAcq } = payload;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ({ data, error } = await (admin as any).from("dealers").insert(withoutAcq).select("id, dealer_id").single());
+  // Optional columns whose migration may not be applied yet (087 acquisition,
+  // 177 website_url): drop the one named in the error and retry, so a pending
+  // migration costs that field, never the signup.
+  for (const col of ["acquisition", "website_url"]) {
+    if (error && new RegExp(col, "i").test(error.message)) {
+      delete payload[col];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ({ data, error } = await (admin as any).from("dealers").insert(payload).select("id, dealer_id").single());
+    }
   }
   if (error || !data) {
     throw new Error(`dealer insert failed: ${error?.message ?? "unknown"}`);
@@ -155,6 +162,7 @@ export async function createTrialDealer(input: {
   <tr><td style="padding:4px 12px 4px 0;color:#666">Contact</td><td>${input.contactName} &lt;${input.email}&gt;</td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Phone</td><td>${input.phone ?? "—"}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Zip</td><td>${input.zip ?? "—"}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Website</td><td>${input.websiteUrl ?? "—"}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Dealer ID</td><td>${data.dealer_id as string}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Signed up</td><td>${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT</td></tr>
 </table>`,

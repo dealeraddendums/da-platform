@@ -27,6 +27,7 @@ interface GateRow {
   dealership: string | null;
   phone: string | null;
   zip: string | null;
+  website_url?: string | null;
   account_kind: string;
   source_ip: string | null;
   decision: string;

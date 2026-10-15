@@ -43,6 +43,7 @@ export async function sendReviewRequestEmail(args: {
     ["Contact", input.name],
     ["Email", input.email],
     ["ZIP", input.zip || "(not provided)"],
+    ["Website", input.websiteUrl || "(not provided)"],
     ["Phone", input.phone || "(not provided)"],
     ["Account type", input.accountKind],
   ];

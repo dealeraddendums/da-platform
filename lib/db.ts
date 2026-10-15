@@ -208,6 +208,8 @@ export type GroupUpdate = {
 export type DealerRow = {
   id: string;
   dealer_id: string;
+  /** Migration 177 — dealer website, normalized (lib/website-url.ts). Absent until the migration is applied. */
+  website_url?: string | null;
   /** Never-changing billing ID (_ID). Used by da-billing for lineItemDescription. Never update. */
   internal_id: string | null;
   /** Inventory supplier-assigned ID. Used to match vehicles in dealer_vehicles. */
@@ -305,6 +307,7 @@ export type DealerRow = {
 type DealerInsert = {
   dealer_id: string;
   name: string;
+  website_url?: string | null;
   internal_id?: string | null;
   inventory_dealer_id?: string | null;
   inventory_provider?: string | null;
@@ -381,6 +384,8 @@ type DealerInsert = {
 
 export type DealerUpdate = {
   name?: string;
+  /** Migration 177. Normalized via lib/website-url.ts; null clears it. */
+  website_url?: string | null;
   /** inventory_dealer_id can be updated by super_admin and group_admin
    *  (latter only on dealers in their group). internal_id must never be updated. */
   inventory_dealer_id?: string | null;

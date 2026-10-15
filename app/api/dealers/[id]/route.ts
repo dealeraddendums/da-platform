@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeOptionalWebsiteUrl } from "@/lib/website-url";
 import { z } from "zod";
 import { US_STATE_CODES } from "@/lib/constants/us-states";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
@@ -211,6 +212,11 @@ export async function PATCH(
     patch.state = st || null;
   }
   if (body.zip !== undefined) patch.zip = body.zip;
+  if (body.website_url !== undefined) {
+    const site = normalizeOptionalWebsiteUrl(body.website_url);
+    if (!site.ok) return NextResponse.json({ error: site.error }, { status: 400 });
+    patch.website_url = site.url;
+  }
   if (body.country !== undefined) patch.country = body.country;
   if (body.makes !== undefined) patch.makes = body.makes;
   if (body.logo_url !== undefined) patch.logo_url = body.logo_url;
@@ -303,9 +309,16 @@ export async function PATCH(
   // downstream side-effects are gated on active/group_id/name/account_type, none
   // of which are touched here.
   const hasOtherFields = Object.keys(patch).length > 0;
-  const { data, error: dbError } = hasOtherFields
+  let { data, error: dbError } = hasOtherFields
     ? await admin.from("dealers").update(patch).eq("id", dealerUuid).select().single()
     : await admin.from("dealers").select().eq("id", dealerUuid).single();
+  // Migration 177 not applied yet: save everything else, drop the website.
+  if (dbError && dbError.message.includes("website_url") && patch.website_url !== undefined) {
+    delete patch.website_url;
+    ({ data, error: dbError } = Object.keys(patch).length > 0
+      ? await admin.from("dealers").update(patch).eq("id", dealerUuid).select().single()
+      : await admin.from("dealers").select().eq("id", dealerUuid).single());
+  }
 
   if (dbError || !data) {
     return NextResponse.json(

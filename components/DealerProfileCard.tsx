@@ -98,6 +98,7 @@ type FormData = {
   primary_contact: string;
   primary_contact_email: string;
   phone: string;
+  website_url: string;
   address: string;
   city: string;
   state: string;
@@ -115,6 +116,7 @@ function dealerToForm(d: DealerRow): FormData {
     primary_contact: d.primary_contact ?? "",
     primary_contact_email: d.primary_contact_email ?? "",
     phone: d.phone ?? "",
+    website_url: d.website_url ?? "",
     address: d.address ?? "",
     city: d.city ?? "",
     state: d.state ?? "",
@@ -275,6 +277,11 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
       primary_contact: form.primary_contact.trim() || null,
       primary_contact_email: form.primary_contact_email.trim() || null,
       phone: form.phone.trim() || null,
+      // Sent only when changed, so saving other fields never re-validates or
+      // rewrites it. The server normalizes (https:// added) or 400s.
+      ...(form.website_url.trim() !== (dealer.website_url ?? "")
+        ? { website_url: form.website_url.trim() || null }
+        : {}),
       address: form.address.trim() || null,
       city: form.city.trim() || null,
       state: normalizeStateCode(form.state),
@@ -1317,6 +1324,13 @@ export default function DealerProfileCard({ dealer: initialDealer, group, canEdi
               editing={editing}
               onChange={set("phone")}
               view={dealer.phone}
+            />
+            <Field
+              label="Website"
+              value={form.website_url}
+              editing={editing}
+              onChange={set("website_url")}
+              view={dealer.website_url ?? null}
             />
           </div>
         </div>

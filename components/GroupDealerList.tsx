@@ -52,6 +52,7 @@ type NewDealerFields = {
   name: string; inventory_dealer_id: string;
   address: string; city: string; state: string; zip: string;
   phone: string; primary_contact: string; primary_contact_email: string;
+  website_url: string;
   account_type: "sub-manual" | "sub-auto-web" | "sub-auto-dms" | "Trial";
   subscription_billed_to: BillingTarget;
   labels_billed_to: BillingTarget;
@@ -62,6 +63,7 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
     name: "", inventory_dealer_id: "",
     address: "", city: "", state: "", zip: "",
     phone: "", primary_contact: "", primary_contact_email: "",
+    website_url: "",
     account_type: "sub-manual",
     subscription_billed_to: "dealer",
     labels_billed_to: "dealer",
@@ -96,6 +98,8 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
         state: fields.state.toUpperCase() || null,
         zip: fields.zip.trim() || null,
         phone: fields.phone.trim() || null,
+        // Optional; normalized server-side (https:// added) or 400 with a reason.
+        website_url: fields.website_url.trim() || null,
         primary_contact: fields.primary_contact.trim() || null,
         primary_contact_email: fields.primary_contact_email.trim() || null,
         account_type: fields.account_type,
@@ -145,6 +149,10 @@ function NewDealerForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
           <div>
             <label style={labelStyle}>Phone</label>
             <input style={inputStyle} value={fields.phone} onChange={set("phone")} placeholder="(513) 555-0100" />
+          </div>
+          <div>
+            <label style={labelStyle}>Website</label>
+            <input style={inputStyle} value={fields.website_url} onChange={set("website_url")} placeholder="yourdealership.com" />
           </div>
           <div>
             <label style={labelStyle}>Contact Name</label>

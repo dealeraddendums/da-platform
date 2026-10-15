@@ -32,6 +32,7 @@ import {
 import { evaluateSignupLegitimacy, shouldAutoProvision, type LegitimacyVerdict } from "@/lib/signup-legitimacy";
 import { provisionSelfServe, type SelfServeInput } from "@/lib/self-serve-provision";
 import { sendReviewRequestEmail } from "@/lib/self-serve-review-email";
+import { normalizeOptionalWebsiteUrl } from "@/lib/website-url";
 
 interface Body {
   name?: string;
@@ -42,6 +43,7 @@ interface Body {
   accountKind?: "single" | "group";
   groupName?: string;
   attribution?: Attribution;
+  websiteUrl?: string;
 }
 
 const PENDING_MESSAGE =
@@ -51,8 +53,16 @@ const PENDING_MESSAGE =
 async function logDecision(fields: Record<string, unknown>): Promise<string | null> {
   const admin = createAdminSupabaseClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (admin as any)
+  let { data, error } = await (admin as any)
     .from("self_serve_signups").insert(fields).select("id").single();
+  // Migration 177 not applied yet → keep the row (it's also the rate-limit
+  // ledger), just without the website.
+  if (error && /website_url/i.test(error.message) && "website_url" in fields) {
+    const { website_url: _drop, ...rest } = fields;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ({ data, error } = await (admin as any)
+      .from("self_serve_signups").insert(rest).select("id").single());
+  }
   if (error) {
     // Never fail a signup because logging failed — but say so loudly.
     console.error("[self-serve] decision log insert failed:", error.message);
@@ -86,6 +96,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const zip = body.zip?.trim() || null;
   const accountKind: "single" | "group" = body.accountKind === "group" ? "group" : "single";
   const attribution = body.attribution ?? null;
+  // Required on the marketing form, which already normalized it. Re-checked
+  // here; a lead confirmed from before the field existed has none, and a bad
+  // value is dropped rather than failing a confirmed applicant.
+  const website = normalizeOptionalWebsiteUrl(body.websiteUrl);
+  const websiteUrl = website.ok ? website.url : null;
+  if (!website.ok) console.warn(`[self-serve] ignoring invalid websiteUrl ${JSON.stringify(body.websiteUrl)}`);
   // The applicant's browser IP, forwarded by the marketing site (which sits
   // directly on EC2 and therefore sees the real client address).
   const sourceIp = req.headers.get("x-signup-client-ip")?.trim()
@@ -102,6 +118,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     email, contact_name: name, dealership, phone, zip,
     account_kind: accountKind, group_name: accountKind === "group" ? groupName : null,
     attribution, source_ip: sourceIp,
+    ...(websiteUrl ? { website_url: websiteUrl } : {}),
   };
 
   // ── Layer 1a — field sanity ───────────────────────────────────────────────
@@ -161,12 +178,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const verdict: LegitimacyVerdict = await evaluateSignupLegitimacy({
     email, name, dealership, zip, phone, accountKind,
     groupName: accountKind === "group" ? groupName : null,
+    websiteUrl,
   });
   const aiFields = {
     ai_verdict: verdict.verdict, ai_confidence: verdict.confidence,
     ai_reasons: verdict.reasons, ai_model: verdict.model, ai_ms: verdict.ms,
   };
-  const input: SelfServeInput = { name, email, dealership, phone, zip, accountKind, groupName, attribution };
+  const input: SelfServeInput = { name, email, dealership, phone, zip, accountKind, groupName, attribution, websiteUrl };
 
   // ── Held for human review ─────────────────────────────────────────────────
   if (!shouldAutoProvision(verdict)) {

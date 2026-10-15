@@ -16,6 +16,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { isDisposableDomain } from "@/lib/signup-guard";
 
 // Sonnet: this is a short classification on a latency-sensitive path, and it
 // matches the model tier already used for the platform's other content calls.
@@ -89,6 +90,7 @@ Signals that a signup is REAL:
 - A work email on the dealership's own domain, a dealer-group domain, or a plausible personal address for a small independent lot.
 - A contact name that reads like a real person's name and is DIFFERENT from the dealership name.
 - A US ZIP that is plausible for a car dealership.
+- A website whose domain matches the email domain, or plainly relates to the dealership or group name ("gettelhyundai.com" for Gettel Hyundai, "tuttleclick.com" for a Tuttle-Click store). Small independent lots often use a dealer-website platform domain or subdomain, or a Facebook page — that is normal.
 
 Signals that a signup is FAKE or a test:
 - Placeholder, joke, or cryptography-textbook names: "test", "asdf", "bob", "alice", "foo", "demo", "x", or anything containing "victim"/"attacker"/"hacker".
@@ -96,6 +98,9 @@ Signals that a signup is FAKE or a test:
 - A dealership name that is not a business name at all (a single first name, a single letter, random characters).
 - An email local-part that looks generated ("bob11", "alice0105", long random strings) on a domain with no automotive or business identity.
 - A ZIP that is implausible for the claimed business, or obvious filler.
+- A website that is a placeholder or junk ("example.com", "test.com", "foo.com", "asdf.com"), a big unrelated brand ("google.com", "facebook.com" itself rather than a page), a disposable-email domain, or a domain unrelated to BOTH the dealership name and the email domain.
+
+The website is a TEXT signal only — you cannot visit it, so judge only the address as written. Weigh it like the other weak signals: a mismatched or junk website should lower your confidence or move a borderline signup to "suspicious", but never call a signup fake on the website alone. A website shown as "(not provided)" is neutral (older signups predate the field).
 
 Be decisive but fair. Independent used-car lots often have plain names and free email addresses — that alone is NOT fake; weigh it with the other signals. When the dealership name is a credible business name, prefer "legit" even if the email is a free provider.
 
@@ -109,6 +114,8 @@ export async function evaluateSignupLegitimacy(input: {
   phone?: string | null;
   accountKind?: "single" | "group";
   groupName?: string | null;
+  /** Normalized (lib/website-url.ts). Text only — never fetched here. */
+  websiteUrl?: string | null;
 }): Promise<LegitimacyVerdict> {
   const started = Date.now();
   const base: Omit<LegitimacyVerdict, "verdict" | "confidence" | "reasons"> = {
@@ -130,6 +137,7 @@ export async function evaluateSignupLegitimacy(input: {
     `Phone: ${input.phone?.trim() || "(not provided)"}`,
     `Account type requested: ${input.accountKind ?? "single"}`,
     ...(input.groupName ? [`Group name: ${input.groupName}`] : []),
+    ...websiteFacts(input.websiteUrl, input.email),
   ].join("\n");
 
   try {
@@ -171,4 +179,21 @@ export async function evaluateSignupLegitimacy(input: {
     console.error("[signup-legitimacy] evaluation failed:", msg);
     return { verdict: "error", confidence: 0, reasons: [`evaluation failed: ${msg.slice(0, 160)}`], ...base, ms };
   }
+}
+
+/** The website as the model sees it, plus two plain comparisons it would
+ *  otherwise have to do by eye. Pure string work — no network. */
+function websiteFacts(websiteUrl: string | null | undefined, email: string): string[] {
+  if (!websiteUrl) return ["Website: (not provided)"];
+  let host = "";
+  try { host = new URL(websiteUrl).hostname.toLowerCase(); } catch { /* keep "" */ }
+  const site = host.replace(/^www\./, "");
+  const emailDomain = (email.split("@")[1] ?? "").toLowerCase();
+  const sameDomain = !!site && !!emailDomain && (site === emailDomain || site.endsWith(`.${emailDomain}`) || emailDomain.endsWith(`.${site}`));
+  return [
+    `Website: ${websiteUrl}`,
+    `Website domain: ${site || "(unparseable)"}`,
+    `Website domain matches email domain: ${sameDomain ? "yes" : "no"}`,
+    ...(site && isDisposableDomain(`x@${site}`) ? ["Website domain is a known disposable-email domain: yes"] : []),
+  ];
 }

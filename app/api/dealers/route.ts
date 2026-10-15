@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeOptionalWebsiteUrl } from "@/lib/website-url";
 import { z } from "zod";
 import { US_STATE_CODES } from "@/lib/constants/us-states";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
@@ -663,6 +664,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!name?.trim()) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
+  // Optional on the admin create forms; stored normalized (https:// added).
+  if (rest.website_url !== undefined) {
+    const site = normalizeOptionalWebsiteUrl(rest.website_url);
+    if (!site.ok) return NextResponse.json({ error: site.error }, { status: 400 });
+    rest.website_url = site.url;
+  }
 
   const internalId = Date.now().toString();
   // dealer_id: use the caller-supplied inventory id when given (any role —
@@ -753,6 +760,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (dbError && dbError.message.includes("account_purpose")) {
     const { account_purpose: _p, ...noPurpose } = insertPayload as typeof insertPayload & { account_purpose?: string };
     ({ data, error: dbError } = await admin.from("dealers").insert(noPurpose).select().single());
+  }
+  // Migration 177 not applied yet: create the dealer without the website.
+  if (dbError && dbError.message.includes("website_url")) {
+    const { website_url: _w, ...noWebsite } = insertPayload as typeof insertPayload & { website_url?: string | null };
+    ({ data, error: dbError } = await admin.from("dealers").insert(noWebsite).select().single());
   }
   if (dbError && dbError.message.includes("account_type")) {
     const { account_type: _drop, ...payloadWithoutAccountType } = insertPayload as typeof insertPayload & { account_type?: string };

@@ -23,6 +23,7 @@ export interface ReviewRow {
   dealership: string | null;
   phone?: string | null;
   zip: string | null;
+  website_url?: string | null; // migration 177
   account_kind?: string | null;
   source_ip: string | null;
   decision: string;
@@ -78,6 +79,7 @@ export default function SelfServeReviewCard({
     ["Contact", row.contact_name ?? "—"],
     ["Email", row.email],
     ["ZIP", row.zip || "(not provided)"],
+    ["Website", row.website_url || "(not provided)"],
     ["Phone", row.phone || "(not provided)"],
     ["Account type", row.account_kind ?? "—"],
     ["Source IP", row.source_ip || "(unknown)"],

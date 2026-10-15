@@ -22,6 +22,7 @@ interface GateRow {
   account_kind: "single" | "group";
   group_name: string | null;
   attribution: Record<string, string | null> | null;
+  website_url?: string | null; // migration 177
   decision: string;
 }
 
@@ -37,7 +38,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: row } = await (admin as any)
     .from("self_serve_signups")
-    .select("id, email, contact_name, dealership, phone, zip, account_kind, group_name, attribution, decision")
+    // "*" rather than a column list so the row still loads if migration 177
+    // (website_url) hasn't been applied yet.
+    .select("*")
     .eq("review_token", token)
     .maybeSingle() as { data: GateRow | null };
 
@@ -93,6 +96,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     accountKind: row.account_kind === "group" ? "group" : "single",
     groupName: row.group_name ?? row.dealership ?? row.email,
     attribution: row.attribution ?? null,
+    websiteUrl: row.website_url ?? null,
   };
   try {
     const result = await provisionSelfServe(input);

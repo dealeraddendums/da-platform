@@ -736,6 +736,7 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
     state: "",
     zip: "",
     phone: "",
+    website_url: "",
   });
 
   function set(key: keyof typeof fields) {
@@ -777,6 +778,8 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
       city: fields.city.trim() || null,
       state: fields.state.trim().toUpperCase() || null,
       zip: fields.zip.trim() || null,
+      // Optional; the server normalizes it (adds https://) or 400s with a reason.
+      website_url: fields.website_url.trim() || null,
       username: fields.username.trim() || undefined,
       password: fields.password || undefined,
       sendNotify,
@@ -933,6 +936,10 @@ function NewDealerForm({ role, onCreated, onCancel }: NewDealerFormProps) {
           <div>
             <label className="label">Phone</label>
             <input className="input" value={fields.phone} onChange={set("phone")} placeholder="(555) 123-4567" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="label">Website</label>
+            <input className="input" value={fields.website_url} onChange={set("website_url")} placeholder="yourdealership.com" />
           </div>
         </div>
       </div>

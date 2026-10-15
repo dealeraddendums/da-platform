@@ -23,6 +23,8 @@ export interface SelfServeInput {
   accountKind: "single" | "group";
   groupName: string;
   attribution: Attribution;
+  /** Normalized (lib/website-url.ts); null when not captured. Dealer only — groups have no website column. */
+  websiteUrl?: string | null;
 }
 
 export type ProvisionResult =
@@ -45,7 +47,7 @@ export async function provisionSelfServe(input: SelfServeInput): Promise<Provisi
   }
 
   const { dealerUuid, dealerId } = await createTrialDealer({
-    dealership, contactName: name, email, phone, zip, attribution,
+    dealership, contactName: name, email, phone, zip, attribution, websiteUrl: input.websiteUrl ?? null,
   });
   await createAdminUserWithInvite({
     email, fullName: name, phone, role: "dealer_admin",
