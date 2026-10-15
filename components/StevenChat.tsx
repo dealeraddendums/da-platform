@@ -331,9 +331,14 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
   return (
     <>
       {!open && (
+        // Docked bottom-LEFT over the navy sidebar (Sidebar reserves the space —
+        // .steven-dock-slot), so it never covers page content or row buttons.
+        <div className="steven-dock">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="steven-arrow" src="/get-instant-support-arrow.svg" alt="" aria-hidden="true" width={170} height={102} />
         <button onClick={() => setOpen(true)} aria-label="Chat with Steven"
           style={{
-            position: "fixed", right: 20, bottom: 20, zIndex: 1000, height: 48, padding: "0 18px 0 14px",
+            pointerEvents: "auto", height: 48, padding: "0 18px 0 14px",
             borderRadius: 24, background: NAVY, color: "#fff", border: `2px solid ${ORANGE}`, cursor: "pointer",
             display: "flex", alignItems: "center", gap: 8, fontFamily: "Roboto, sans-serif", fontSize: 14, fontWeight: 600,
           }}>
@@ -343,12 +348,13 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
           Steven
           {live && <span style={{ width: 8, height: 8, borderRadius: 4, background: "#4caf50", display: "inline-block" }} />}
         </button>
+        </div>
       )}
 
       {open && (
         <div role="dialog" aria-label="Steven — DA support chat"
           style={{
-            position: "fixed", right: 20, bottom: 20, zIndex: 1000, width: 390, maxWidth: "calc(100vw - 32px)",
+            position: "fixed", left: 20, bottom: 20, zIndex: 1000, width: 390, maxWidth: "calc(100vw - 32px)",
             height: 580, maxHeight: "calc(100vh - 40px)", background: "#fff", border: BORDER, borderRadius: 10,
             display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: "Roboto, sans-serif",
           }}>

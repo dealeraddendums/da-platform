@@ -682,6 +682,10 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
         })}
       </nav>
 
+      {/* Space reserved for the fixed Steven launcher + "Get Instant Support"
+          arrow (components/StevenChat.tsx .steven-dock) so it never sits on nav items. */}
+      <div className="steven-dock-slot" aria-hidden="true" />
+
       {/* Phase label */}
       <div
         className="px-4 py-3 text-xs flex-shrink-0"

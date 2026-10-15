@@ -227,3 +227,27 @@
   right: auto !important;
   left: 20px !important;
 }
+
+/* Steven launcher dock — bottom-LEFT over the 220px navy sidebar, just above
+   the version label (~41px tall). The Sidebar's .steven-dock-slot reserves the
+   same height inside its flex column so the dock never sits on nav items, and
+   it never reaches the content area to the right. The arrow is decorative
+   (pointer-events none); only the Steven button takes clicks. On short screens
+   the arrow — and its reserved space — drop out; Steven always stays. */
+.steven-dock {
+  position: fixed;
+  left: 0;
+  bottom: 47px;
+  width: 220px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+.steven-arrow { display: block; width: 170px; height: auto; margin-bottom: 2px; pointer-events: none; user-select: none; }
+.steven-dock-slot { flex-shrink: 0; height: 162px; }
+@media (max-height: 760px) {
+  .steven-arrow { display: none; }
+  .steven-dock-slot { height: 60px; }
+}

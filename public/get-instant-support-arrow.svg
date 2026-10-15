@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120" width="200" height="120" role="img" aria-label="Get Instant Support">
+  <defs>
+    <filter id="pencil" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="3" seed="7" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.3" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+  <g filter="url(#pencil)" fill="none" stroke="#C7F23D" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Hand-lettered-ish label, drawn so it needs no installed font -->
+    <text x="100" y="40" text-anchor="middle" transform="rotate(-4 100 40)"
+          font-family="'Bradley Hand','Comic Sans MS','Segoe Print','Chalkboard SE',cursive"
+          font-size="26" font-weight="700" fill="#C7F23D" stroke="none">Get Instant</text>
+    <text x="100" y="68" text-anchor="middle" transform="rotate(-2 100 68)"
+          font-family="'Bradley Hand','Comic Sans MS','Segoe Print','Chalkboard SE',cursive"
+          font-size="26" font-weight="700" fill="#C7F23D" stroke="none">Support</text>
+    <!-- three cheeky arrows pointing down at the Steven button -->
+    <path d="M66,80 q -4,11 1,22"/>
+    <path d="M67,103 l -7,-8"/>
+    <path d="M67,103 l 7,-7"/>
+    <path d="M100,79 q 3,12 -1,23"/>
+    <path d="M99,103 l -7,-7"/>
+    <path d="M99,103 l 7,-8"/>
+    <path d="M134,80 q -3,11 1,22"/>
+    <path d="M135,103 l -7,-8"/>
+    <path d="M135,103 l 7,-7"/>
+  </g>
+</svg>
