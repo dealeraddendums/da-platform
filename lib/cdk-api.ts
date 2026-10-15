@@ -140,6 +140,8 @@ export interface CdkVehicle {
   body_style: string | null;
   date_in_stock: string | null;
   certified: string | null;
+  /** CDK <Status>: S in stock, T transit, O on order, G gone/sold. */
+  status: string | null;
 }
 
 export function parseCdkVehicles(body: string): CdkVehicle[] {
@@ -168,10 +170,10 @@ export function parseCdkVehicles(body: string): CdkVehicle[] {
     const inferredUsed = mileage && parseInt(mileage.replace(/[^\d]/g, ""), 10) > 0 ? "Used" : "New";
     out.push({
       vin: xmlTag(chunk, "VIN") ?? xmlTag(chunk, "Vin"),
-      // CDK PIP IVEH_Bulk doesn't always include a stock number in the
-      // standard fields; some dealers store it in DealerDefined1/2. Try
-      // both; fall back to VIN at insert time if missing.
-      stock_number: xmlTag(chunk, "StockNumber") ?? xmlTag(chunk, "Stock") ?? xmlTag(chunk, "DealerDefined1"),
+      // CDK PIP's stock number is <StockNo> (what ETL2 reads). This used to
+      // try StockNumber/Stock/DealerDefined1 only, so imports fell back to the
+      // VIN and ETL2 later added a twin row under the real stock number.
+      stock_number: xmlTag(chunk, "StockNo") ?? xmlTag(chunk, "StockNumber") ?? xmlTag(chunk, "Stock") ?? xmlTag(chunk, "DealerDefined1"),
       year: year ? parseInt(year, 10) || null : null,
       make: xmlTag(chunk, "Make") ?? xmlTag(chunk, "Manufacturer"),
       // ModelName is the human-readable "Elantra"; Model is the code "ELAN".
@@ -189,6 +191,7 @@ export function parseCdkVehicles(body: string): CdkVehicle[] {
       // EntryDate = when the car landed in inventory in CDK.
       date_in_stock: xmlTag(chunk, "EntryDate") ?? xmlTag(chunk, "DateInStock") ?? xmlTag(chunk, "DateInventoried"),
       certified: xmlTag(chunk, "Certified"),
+      status: xmlTag(chunk, "Status"),
     });
   }
   return out;
