@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { UserRole } from "@/lib/db";
@@ -42,6 +43,17 @@ const DEALER_LABELS: Record<string, string> = { "/dashboard": "Inventory", "/bui
 const DEALER_SUB_ITEM_STYLE: Record<string, React.CSSProperties> = {
   "/image-builder": { paddingLeft: 40, height: 38, fontSize: 13 },
 };
+
+// SUPER_ADMIN sidebar arrangement (Allan, 2026-10-15): the titled categories'
+// items are A→Z (FEEDS, ADMIN; Help Center lives in ADMIN), ADMIN is the last
+// category, and Migration is pinned alone at the very bottom, outside any
+// category so collapsing ADMIN never hides it. Only the un-ghosted super_admin
+// nav uses this — dealer and group sidebars keep their own order.
+const SUPER_ADMIN_SORTED_SECTIONS = new Set(["Feeds", "Admin"]);
+const SUPER_ADMIN_INTO_ADMIN = "/help/manage";
+const SUPER_ADMIN_PINNED_BOTTOM = "/migration";
+const SUPER_ADMIN_LAST_SECTION = "Admin";
+const COLLAPSED_STORAGE_KEY = "da_sidebar_collapsed";
 
 const nav: NavEntry[] = [
   // ── Main ─────────────────────────────────────────────────────────────────────
@@ -542,7 +554,56 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
     .filter((entry) => entry.roles.includes(role as UserRole)
       || (showImageBuilder && "href" in entry && entry.href === "/admin/image-builder"))
     .filter((entry) => !(hideBuilder && "href" in entry && (entry.href === "/builder" || entry.href === "/image-builder")));
-  const visibleNav: NavEntry[] = DEALER_NAV_ROLES.has(role) ? dealerOrdered(roleNav) : roleNav;
+  const visibleNav: NavEntry[] = DEALER_NAV_ROLES.has(role) ? dealerOrdered(roleNav)
+    : role === "super_admin" ? superAdminOrdered(roleNav)
+    : roleNav;
+
+  // Collapsed titled categories, remembered per browser. Everything starts
+  // expanded; unreadable/blocked storage just leaves it that way.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(COLLAPSED_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") setCollapsed(parsed);
+      }
+    } catch { /* fail open: expanded */ }
+  }, []);
+  function toggleSection(title: string) {
+    setCollapsed((prev) => {
+      const next = { ...prev, [title]: !prev[title] };
+      try { window.localStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
+  // See SUPER_ADMIN_* above. Untitled top items keep their order; any item the
+  // rules don't mention stays where it was.
+  function superAdminOrdered(entries: NavEntry[]): NavEntry[] {
+    const top: NavItem[] = [];
+    const sections: { entry: NavSection; items: NavItem[] }[] = [];
+    let intoAdmin: NavItem | null = null;
+    let pinned: NavItem | null = null;
+    for (const e of entries) {
+      if ("section" in e) { sections.push({ entry: e, items: [] }); continue; }
+      if (e.href === SUPER_ADMIN_INTO_ADMIN) { intoAdmin = e; continue; }
+      if (e.href === SUPER_ADMIN_PINNED_BOTTOM) { pinned = e; continue; }
+      (sections.length ? sections[sections.length - 1].items : top).push(e);
+    }
+    const admin = sections.find((x) => x.entry.section === SUPER_ADMIN_LAST_SECTION);
+    if (intoAdmin) (admin ? admin.items : top).push(intoAdmin);
+    for (const x of sections) {
+      if (SUPER_ADMIN_SORTED_SECTIONS.has(x.entry.section)) {
+        x.items.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+      }
+    }
+    const ordered = admin ? [...sections.filter((x) => x !== admin), admin] : sections;
+    const out: NavEntry[] = [...top];
+    for (const x of ordered) out.push(x.entry, ...x.items);
+    if (pinned) out.push({ section: "", roles: ["super_admin"] }, pinned);
+    return out;
+  }
 
   // Arrange the dealer's visible items in DEALER_NAV_ORDER. A divider is drawn
   // only between two non-empty groups (a dealer_user without Users / Print
@@ -639,26 +700,56 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
             <span>Upgrade Now</span>
           </Link>
         )}
-        {visibleNav.map((entry, i) => {
+        {(() => { let openSection: string | null = null; return visibleNav.map((entry, i) => {
           if ("section" in entry) {
+            const sectionStyle: React.CSSProperties = {
+              padding: "16px 16px 4px",
+              fontSize: 10,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: ".06em",
+              color: "rgba(255,255,255,0.35)",
+              borderTop: "1px solid rgba(255,255,255,0.08)",
+              marginTop: 4,
+            };
+            openSection = entry.section || null;
+            // Untitled entries are plain dividers (dealer nav groups, the pinned
+            // Migration item) — never collapsible.
+            if (!entry.section) return <div key={`section-${i}`} style={sectionStyle} />;
+            const isCollapsed = !!collapsed[entry.section];
             return (
-              <div
+              <button
                 key={`section-${i}`}
+                type="button"
+                onClick={() => toggleSection(entry.section)}
+                aria-expanded={!isCollapsed}
                 style={{
-                  padding: "16px 16px 4px",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: ".06em",
-                  color: "rgba(255,255,255,0.35)",
-                  borderTop: "1px solid rgba(255,255,255,0.08)",
-                  marginTop: 4,
+                  ...sectionStyle,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  width: "100%",
+                  background: "none",
+                  borderLeft: "none",
+                  borderRight: "none",
+                  borderBottom: "none",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  fontFamily: "inherit",
                 }}
               >
-                {entry.section}
-              </div>
+                <span>{entry.section}</span>
+                <svg
+                  width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                  aria-hidden="true"
+                  style={{ transform: isCollapsed ? "rotate(-90deg)" : "none", transition: "transform .15s" }}
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
             );
           }
+          if (openSection && collapsed[openSection]) return null;
           // Dealer labels ("Inventory", "Template Builder") are applied in
           // dealerOrdered(); operator navs keep "Dashboard" / "Builder".
           const item = entry as NavItem;
@@ -679,7 +770,7 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
               <span>{item.label}</span>
             </Link>
           );
-        })}
+        }); })()}
       </nav>
 
       {/* Space reserved for the fixed Steven launcher + "Get Instant Support"
