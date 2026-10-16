@@ -18,6 +18,7 @@ import {
 } from "@/lib/billing";
 import { fireDealerReliable } from "@/lib/sync-hubspot";
 import { fireConversionWebhook } from "@/lib/marketing-webhook";
+import { fireDealerBillingEmailBackfill } from "@/lib/dealer-billing-contact";
 import { sendMandrillEmail } from "@/lib/mandrill";
 
 const SUPPORT_EMAIL = process.env.SUPPORT_NOTIFICATION_EMAIL ?? "support@dealeraddendums.com";
@@ -326,6 +327,9 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     await (admin as any).from("dealers")
       .update({ billing_customer_id: effectiveCustomerKey, template_id: effectiveCustomerKey })
       .eq("id", dealer.id);
+    // Fill an empty billing email (e.g. a linked billing_id customer, or no
+    // primary contact on file) from the dealer's first dealer_admin.
+    fireDealerBillingEmailBackfill(dealer.id, "self-serve subscription");
   }
 
   // Ensure billing state is 'active' for any conversion — a pre-existing

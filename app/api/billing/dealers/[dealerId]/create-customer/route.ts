@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
+import { fireDealerBillingEmailBackfill } from "@/lib/dealer-billing-contact";
 import { createCustomer, customerExists, searchCustomers, billingConfigured, BillingDuplicateError } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
@@ -129,6 +130,8 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
         { status: 500 },
       );
     }
+
+    fireDealerBillingEmailBackfill(dealer.id, "create-customer");
 
     // Clear any prior unresolved create-customer error rows for this
     // dealer so the retry dashboard reflects the recovered state.

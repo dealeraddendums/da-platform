@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { fireDealerBillingEmailBackfillByTextId } from "@/lib/dealer-billing-contact";
 import { recordAuthEvent } from "@/lib/auth-events";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { UserRole } from "@/lib/db";
@@ -178,6 +179,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     console.error("[invite/accept] profile upsert failed:", profileErr.message);
     return NextResponse.json({ error: "Failed to create profile" }, { status: 500 });
   }
+  // An accepted dealer_admin can supply the dealer's empty billing email.
+  if (!isGroupInvite && inv.role === "dealer_admin") fireDealerBillingEmailBackfillByTextId(dealerTextId, "invite accept");
 
   // Invite-time store tags (2026-08-12, migration 141): a group_user
   // invitation can carry the tag scope picked in the invite form — apply it

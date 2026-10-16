@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { fireDealerBillingEmailBackfillByTextId } from "@/lib/dealer-billing-contact";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { lastSignInByEmail } from "@/lib/last-sign-in";
@@ -430,6 +431,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // HubSpot Contact sync — fire-and-forget, mirroring invite/accept. Without
   // this, directly-added users (the "+ Add User" path) never reach HubSpot.
   fireProfileSync(authData.user.id);
+  // A dealer's first dealer_admin can supply its empty billing email.
+  if (targetRole === "dealer_admin") fireDealerBillingEmailBackfillByTextId(targetDealerId, "user add");
 
   return NextResponse.json({ user: profile }, { status: 201 });
 }

@@ -3,6 +3,7 @@ import { normalizeOptionalWebsiteUrl } from "@/lib/website-url";
 import { z } from "zod";
 import { US_STATE_CODES } from "@/lib/constants/us-states";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
+import { backfillDealerBillingEmail } from "@/lib/dealer-billing-contact";
 import { createAdminSupabaseClient } from "@/lib/db";
 import type { DealerUpdate } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
@@ -93,6 +94,15 @@ async function fireAndForgetCustomerCreate(args: NewBillingCustomerArgs): Promis
     },
   );
   if (!customerResult.ok) return;
+
+  // A dealer created without a contact email gets one from its first
+  // dealer_admin (created moments later in the same request). Only fills an
+  // EMPTY customer email; never blocks or fails the create.
+  if (!(args.email ?? "").trim()) {
+    await new Promise((r) => setTimeout(r, 3000));
+    try { await backfillDealerBillingEmail(args.dealerUuid, args.adminClient); }
+    catch (e) { console.error("[dealers POST] billing email backfill failed:", e instanceof Error ? e.message : e); }
+  }
 
   // Step B: create recurring template (skipped for trial/free/inactive).
   // da-billing's /pricing endpoint is keyed by short id ("sub-manual" etc.).

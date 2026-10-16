@@ -5,6 +5,7 @@ import { sendMandrillEmail } from "@/lib/mandrill";
 import { authorizeDealerAction, resolveDealerForRequest, resolveEffectiveDealer } from "@/lib/dealer-authz";
 import { fetchLabelPricingEntries } from "@/lib/label-products";
 import { ensureDealerCustomer } from "@/lib/dealer-billing-customer";
+import { fireDealerBillingEmailBackfill } from "@/lib/dealer-billing-contact";
 
 // DA Platform SKU -> da-billing labelType slug. da-billing's price
 // resolver keys off these slugs (size + finish), not our SKUs or the
@@ -262,6 +263,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         primary_contact_email: dealerCfg.primary_contact_email ?? null,
       });
       billingCustomerKey = resolved.customerId;
+      // Fill an empty billing email from the dealer's contact (never overwrites).
+      if (billingCustomerKey) fireDealerBillingEmailBackfill(dealerId, "label order customer resolve");
       if (!billingCustomerKey) {
         console.error(
           `[orders/labels] could not resolve a da-billing customer for dealer ${dealerId}: ${resolved.error ?? "unknown"}`,

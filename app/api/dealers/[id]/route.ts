@@ -15,6 +15,7 @@ import { boxConfigured, deleteFolderIfEmpty } from "@/lib/box";
 import { fireGroupDiscountSync } from "@/lib/sync-group-discount";
 import { fireSuperAdminGroupAssignCascade } from "@/lib/group-billing-cascade";
 import { applyDealerSubscriptionChange, type SubscriptionBillingResult } from "@/lib/billing-subscription";
+import { fireDealerBillingEmailBackfill } from "@/lib/dealer-billing-contact";
 import { applyInventoryDealerIdChange, DealerIdSyncError } from "@/lib/dealer-id-sync";
 
 // state must be one of the US_STATES codes (or empty). Upper-cased first so
@@ -557,6 +558,10 @@ export async function PATCH(
   } else {
     fireDealerSync(dealerUuid);
   }
+
+  // A contact added/changed on the dealer fills its da-billing billing email
+  // when that's still empty (never overwrites; fire-and-forget).
+  fireDealerBillingEmailBackfill(dealerUuid, "dealer update");
 
   // Account Purpose flip — keep the CRM holding only real dealers.
   // Real → Test/Sales Demo archives the Company + Contacts (recoverable) and

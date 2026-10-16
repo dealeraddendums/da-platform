@@ -12,6 +12,7 @@
 // HubSpot sync. Returns a result the UI surfaces inline (synchronous by design).
 
 import { createAdminSupabaseClient } from "@/lib/db";
+import { resolveDealerBillingEmail, fireDealerBillingEmailBackfill } from "@/lib/dealer-billing-contact";
 import {
   getTemplate,
   putTemplate,
@@ -39,6 +40,12 @@ interface DealerSnap {
   subscription_billed_to: "dealer" | "group" | null;
   group_id: string | null;
   account_type: string | null;
+  dealer_id: string;
+  primary_contact: string | null;
+  primary_contact_email: string | null;
+  phone: string | null;
+  address: string | null;
+  state: string | null;
 }
 
 interface GroupSnap {
@@ -125,7 +132,7 @@ export async function applyDealerSubscriptionChange(
   const admin = createAdminSupabaseClient();
   const { data: dealer } = await admin
     .from("dealers")
-    .select("id, name, internal_id, billing_customer_id, billing_id, subscription_billed_to, group_id, account_type")
+    .select("id, name, internal_id, billing_customer_id, billing_id, subscription_billed_to, group_id, account_type, dealer_id, primary_contact, primary_contact_email, phone, address, state")
     .eq("id", dealerUuid)
     .maybeSingle<DealerSnap>();
   if (!dealer) return { ok: false, blocked: false, message: "Dealer not found for billing sync." };
@@ -174,9 +181,17 @@ async function setDealerTier(
     } else {
       // Self-pay Trial→paid upgrade: the dealer is paying now, so bill
       // immediately (not held in setup). billingState:'active' => cron emails.
+      // Carry the dealer's contact — this used to send the NAME only, so every
+      // admin Trial→paid conversion produced a customer with no billing email
+      // and its invoices were never emailed (Land Rover Cape Fear, 2026-10-15).
+      const billingEmail = await resolveDealerBillingEmail(admin, dealer);
       const cust = await createCustomer({
-        name: dealer.name,
+        name: (dealer.primary_contact ?? dealer.name).trim() || dealer.name,
         company: dealer.name,
+        email: billingEmail?.email,
+        phone: dealer.phone ?? undefined,
+        address: dealer.address ?? undefined,
+        state: dealer.state ?? undefined,
         internalId: dealer.internal_id ?? undefined,
         platformId: dealer.id,
         isGroup: false,
@@ -198,6 +213,9 @@ async function setDealerTier(
     await (admin as any).from("dealers")
       .update({ billing_customer_id: key, template_id: key })
       .eq("id", dealer.id);
+    // A linked (reused / billing_id) customer may be the email-less one —
+    // fill it if empty. Never overwrites an address already there.
+    fireDealerBillingEmailBackfill(dealer.id, "subscription change");
   }
 
   const newSubLine: BillingProduct = {
