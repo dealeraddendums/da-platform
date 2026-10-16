@@ -144,11 +144,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Roles that can place a label order. Mirrors the Order Supplies
   // sidebar entry (dealer_admin / dealer_user / dealer_restricted) plus
-  // super_admin / group_admin so impersonation works — when a
-  // super_admin ghosts into a dealer the JWT carries the impersonated
-  // role, which may be any of the three dealer tiers OR group_admin if
-  // they entered through a group context.
-  const ALLOWED_ROLES = new Set(['dealer_admin', 'dealer_user', 'dealer_restricted', 'super_admin', 'group_admin']);
+  // super_admin / group_admin / group_user. group_user (Regional Manager)
+  // has dealer_admin parity on its in-group ∩ tagged dealers; it was missing
+  // here until 2026-10-16, so AutoNation's regional managers got "Forbidden"
+  // on stores with no local admin. The per-dealer scope (own / in-group /
+  // in-group ∩ tags) is enforced by authorizeDealerAction below.
+  const ALLOWED_ROLES = new Set(['dealer_admin', 'dealer_user', 'dealer_restricted', 'super_admin', 'group_admin', 'group_user']);
   if (!ALLOWED_ROLES.has(claims.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
@@ -210,7 +211,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }>();
 
   // Authorize the acting user against the target dealer: dealer roles → own,
-  // group_admin → in-group, super_admin → any. (Previously the body's dealerId
+  // group_admin → in-group, group_user → in-group ∩ tags, super_admin → any. (Previously the body's dealerId
   // was unverified for every role.)
   const labelsAuthz = await authorizeDealerAction(claims, dealerCfg?.dealer_id ?? null);
   if (!labelsAuthz.ok) return labelsAuthz.response;

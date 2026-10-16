@@ -5,6 +5,8 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
 import type { DealerRow } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
+import { getJwtClaims } from "@/lib/auth";
+import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { getRecommendedAddendumPaperSizes } from "@/lib/recommended-labels";
 import { fetchLabelProducts } from "@/lib/label-products";
 import ProfileClient from "./ProfileClient";
@@ -40,12 +42,14 @@ export default async function ProfilePage() {
         .single();
 
       const dealer = rawDealer as DealerRow | null;
+      // A ghosted super_admin can place a label order for the dealer (the API
+      // authorizes super_admin for any dealer); profile editing stays off.
       return (
         <ProfileClient
         labelProducts={labelProducts}
           dealer={dealer}
           canEdit={false}
-          canOrderLabels={false}
+          canOrderLabels={!!dealer}
           recommendedPaperSizes={[]}
           userEmail={userEmail}
           userName={userName}
@@ -87,6 +91,14 @@ export default async function ProfilePage() {
         .eq("id", profile.active_dealer_id)
         .maybeSingle<{ dealer_id: string }>();
       resolvedActive = d?.dealer_id ?? null;
+    }
+    // The persisted active dealer must still be in scope — group_admin:
+    // in-group; group_user: in-group ∩ assigned tags — via the same canonical
+    // check the APIs use. An out-of-scope (stale) active dealer is ignored.
+    if (resolvedActive) {
+      const claims = await getJwtClaims();
+      const authz = claims ? await authorizeDealerAction(claims, resolvedActive) : null;
+      if (!authz?.ok) resolvedActive = null;
     }
     if (!resolvedActive) {
       return (
