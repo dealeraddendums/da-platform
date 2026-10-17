@@ -397,7 +397,7 @@ export function renderW(type: string, d: D, fontScale: number): string {
       const labelSec = `<div style="flex:1;min-width:0;display:flex;align-items:center;box-sizing:border-box;color:#000;padding:5px 8px;font-size:${lfs}px;font-weight:800;letter-spacing:-.01em">${d.label}</div>`;
       const priceSec = `<div style="display:flex;align-items:center;justify-content:flex-end;box-sizing:border-box;color:#000;padding:5px 10px;font-size:${vfs}px;font-weight:800;font-family:monospace;min-width:120px;text-align:right;white-space:nowrap">${d.value}${(d.priceSuffix as string) || ''}</div>`;
       const barRow = `<div style="display:flex;align-items:stretch;width:100%">${labelSec}${priceSec}</div>`;
-      const sub = hasSub ? `<div style="width:100%;box-sizing:border-box;color:#000;font-size:${sfs}px;font-style:italic;padding:3px 8px 12px">${d.subtitle}</div>` : '';
+      const sub = hasSub ? `<div style="width:100%;box-sizing:border-box;color:#000;font-size:${sfs}px;font-style:italic;line-height:1.2;padding:3px 8px">${d.subtitle}</div>` : '';
       // Clear bar → transparent frame too (same 2px geometry, just invisible).
       return `<div style="display:flex;flex-direction:column;width:100%;line-height:1.4;border:2px solid transparent;box-sizing:border-box">${barRow}${sub}</div>`;
     }
@@ -405,9 +405,11 @@ export function renderW(type: string, d: D, fontScale: number): string {
     const labelSec = `<div style="flex:1;min-width:0;display:flex;align-items:center;box-sizing:border-box;background:${bar};color:${inv};padding:5px 8px;font-size:${lfs}px;font-weight:800;letter-spacing:-.01em">${d.label}</div>`;
     const priceSec = `<div style="display:flex;align-items:center;justify-content:flex-end;box-sizing:border-box;background:${inv};color:${bar};padding:5px 10px;font-size:${vfs}px;font-weight:800;font-family:monospace;min-width:120px;text-align:right;white-space:nowrap">${d.value}${(d.priceSuffix as string) || ''}</div>`;
     const barRow = `<div style="display:flex;align-items:stretch;width:100%">${labelSec}${priceSec}</div>`;
-    // Subtitle: full-width strip below the bar, bar-color background + inverse
-    // text, with ≥12px bottom padding so it isn't cramped.
-    const sub = hasSub ? `<div style="width:100%;box-sizing:border-box;background:${bar};color:${inv};font-size:${sfs}px;font-style:italic;padding:3px 8px 12px">${d.subtitle}</div>` : '';
+    // Subtitle: compact full-width strip below the bar, bar-color background +
+    // inverse text, equal top/bottom padding so the text sits centered and snug
+    // under the bar (2026-10-17 — the old 3px/12px padding left a tall band with
+    // the text riding high).
+    const sub = hasSub ? `<div style="width:100%;box-sizing:border-box;background:${bar};color:${inv};font-size:${sfs}px;font-style:italic;line-height:1.2;padding:3px 8px">${d.subtitle}</div>` : '';
     // Natural height (no min-height:100%): with no subtitle the widget is flush
     // to the bar; the subtitle strip is the ONLY thing that adds height below it.
     return `<div style="display:flex;flex-direction:column;width:100%;line-height:1.4;border:2px solid #000;box-sizing:border-box">${barRow}${sub}</div>`;
