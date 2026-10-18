@@ -44,12 +44,30 @@ const DEALER_SUB_ITEM_STYLE: Record<string, React.CSSProperties> = {
   "/image-builder": { paddingLeft: 40, height: 38, fontSize: 13 },
 };
 
-// SUPER_ADMIN sidebar arrangement (Allan, 2026-10-15): the titled categories'
-// items are A→Z (FEEDS, ADMIN; Help Center lives in ADMIN), ADMIN is the last
+// SUPER_ADMIN sidebar arrangement (Allan, 2026-10-15; INVENTORY/VISUALS
+// 2026-10-18): the titled categories' items are A→Z (INVENTORY, ADMIN; Help
+// Center lives in ADMIN), VISUALS keeps Allan's fixed order, ADMIN is the last
 // category, and Migration is pinned alone at the very bottom, outside any
 // category so collapsing ADMIN never hides it. Only the un-ghosted super_admin
-// nav uses this — dealer and group sidebars keep their own order.
-const SUPER_ADMIN_SORTED_SECTIONS = new Set(["Feeds", "Admin"]);
+// nav uses this — dealer and group sidebars keep their own order. Items are
+// moved between categories HERE (not by re-ordering `nav`) because
+// /admin/image-builder is also shown to granted non-admins, whose sidebars
+// follow `nav` order and must not shift.
+const SUPER_ADMIN_SORTED_SECTIONS = new Set(["Inventory", "Admin"]);
+const SUPER_ADMIN_MOVE_TO: Record<string, string> = {
+  "/admin/decoder": "Inventory",
+  "/admin/vin-lookup": "Inventory",
+  "/admin/image-builder": "Visuals",
+  "/admin/image-library": "Visuals",
+  "/admin/logoforge": "Visuals",
+  "/starter-layouts": "Visuals",
+  "/system-admin/buyers-guide": "Visuals",
+};
+// VISUALS is shown in this order (Allan's), not A→Z; it sits right after INVENTORY.
+const SUPER_ADMIN_VISUALS_ORDER = [
+  "/admin/image-builder", "/admin/image-library", "/admin/logoforge",
+  "/starter-layouts", "/system-admin/buyers-guide",
+];
 const SUPER_ADMIN_INTO_ADMIN = "/help/manage";
 const SUPER_ADMIN_PINNED_BOTTOM = "/migration";
 const SUPER_ADMIN_LAST_SECTION = "Admin";
@@ -292,7 +310,7 @@ const nav: NavEntry[] = [
   },
   // ── Feeds section ─────────────────────────────────────────────────────────────
   {
-    section: "Feeds",
+    section: "Inventory",
     roles: ["super_admin"],
   },
   {
@@ -600,11 +618,26 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
     const sections: { entry: NavSection; items: NavItem[] }[] = [];
     let intoAdmin: NavItem | null = null;
     let pinned: NavItem | null = null;
+    const moved: NavItem[] = [];
     for (const e of entries) {
       if ("section" in e) { sections.push({ entry: e, items: [] }); continue; }
       if (e.href === SUPER_ADMIN_INTO_ADMIN) { intoAdmin = e; continue; }
       if (e.href === SUPER_ADMIN_PINNED_BOTTOM) { pinned = e; continue; }
+      if (SUPER_ADMIN_MOVE_TO[e.href]) { moved.push(e); continue; }
       (sections.length ? sections[sections.length - 1].items : top).push(e);
+    }
+    if (moved.some((e) => SUPER_ADMIN_MOVE_TO[e.href] === "Visuals")) {
+      const at = sections.findIndex((x) => x.entry.section === "Inventory");
+      sections.splice(at + 1, 0, { entry: { section: "Visuals", roles: ["super_admin"] }, items: [] });
+    }
+    for (const e of moved) {
+      const dest = sections.find((x) => x.entry.section === SUPER_ADMIN_MOVE_TO[e.href]);
+      (dest ? dest.items : top).push(e);
+    }
+    const visuals = sections.find((x) => x.entry.section === "Visuals");
+    if (visuals) {
+      const rank = (h: string) => SUPER_ADMIN_VISUALS_ORDER.indexOf(h);
+      visuals.items.sort((a, b) => rank(a.href) - rank(b.href));
     }
     const admin = sections.find((x) => x.entry.section === SUPER_ADMIN_LAST_SECTION);
     if (intoAdmin) (admin ? admin.items : top).push(intoAdmin);
