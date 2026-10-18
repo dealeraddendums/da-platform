@@ -6,7 +6,8 @@
  * Imports:
  *   1. All makes  (~12k records, one API call)
  *   2. Models for top common makes
- *   3. WMI records from known manufacturers
+ *   3. WMI records — every 3-char WMI our inventory uses + known brands',
+ *      resolved per code via vPIC DecodeWMI (gives the real Make)
  *   4. Writes nhtsa_sync_log on completion
  */
 
@@ -51,19 +52,24 @@ async function upsertBatch<T extends Record<string, unknown>>(
   conflictCol: string
 ): Promise<number> {
   if (!rows.length) return 0;
+  // Postgres rejects an upsert batch that touches the same key twice ("ON
+  // CONFLICT DO UPDATE command cannot affect row a second time"), and vPIC
+  // repeats keys (WMIs shared across brands). Last occurrence wins.
+  const byKey = new Map<unknown, T>();
+  for (const r of rows) byKey.set(r[conflictCol], r);
+  const unique = Array.from(byKey.values());
   const BATCH = 500;
   let total = 0;
-  for (let i = 0; i < rows.length; i += BATCH) {
-    const batch = rows.slice(i, i + BATCH);
+  for (let i = 0; i < unique.length; i += BATCH) {
+    const batch = unique.slice(i, i + BATCH);
     const { error, data } = await admin
       .from(table)
       .upsert(batch, { onConflict: conflictCol })
       .select("*");
-    if (error) {
-      console.warn(`  upsert error on ${table}:`, error.message);
-    } else {
-      total += data?.length ?? 0;
-    }
+    // A failed write fails the sync. This used to be a console.warn, which
+    // let nhtsa_wmi sit at 0 rows for months behind "success" log entries.
+    if (error) throw new Error(`upsert error on ${table}: ${error.message}`);
+    total += data?.length ?? 0;
   }
   return total;
 }
@@ -154,7 +160,12 @@ async function syncModels(): Promise<number> {
 }
 
 // ── Step 3: Sync WMI records ──────────────────────────────────────────────────
-// WMI = first 3 chars of VIN. Map common manufacturer names to their WMIs.
+// WMI = first 3 chars of VIN; lib/vin-decoder's last-resort stage looks it up
+// to return at least the make. Candidates are (a) every WMI in our active
+// inventory — that is what decodes actually see — plus (b) the WMIs vPIC lists
+// for a set of common brands. Each is resolved with DecodeWMI, which returns
+// the real Make ("CHEVROLET", not "GENERAL MOTORS LLC"); brand-name lookups
+// alone miss GM/Lexus/Acura/Infiniti, which vPIC files under the parent.
 const COMMON_MANUFACTURERS = [
   "Toyota", "Honda", "Ford", "Chevrolet", "Nissan", "BMW", "Mercedes-Benz",
   "Audi", "Volkswagen", "Hyundai", "Kia", "Subaru", "Mazda", "Lexus",
@@ -163,37 +174,81 @@ const COMMON_MANUFACTURERS = [
   "Land Rover", "Mini", "Tesla", "Rivian", "Genesis", "Lincoln",
 ];
 
+const WMI_RE = /^[A-HJ-NPR-Z0-9]{3}$/;
+
+async function inventoryWmis(): Promise<Set<string>> {
+  const out = new Set<string>();
+  let last: string | null = null;
+  // Keyset-paged: PostgREST clamps any single read to 1,000 rows.
+  for (;;) {
+    let q = admin.from("dealer_vehicles").select("id, vin").eq("status", "active").order("id").limit(1000);
+    if (last) q = q.gt("id", last);
+    const { data, error } = await q;
+    if (error) throw new Error(`dealer_vehicles read: ${error.message}`);
+    for (const r of data ?? []) {
+      const w = String(r.vin ?? "").trim().toUpperCase().slice(0, 3);
+      if (WMI_RE.test(w)) out.add(w);
+    }
+    if (!data || data.length < 1000) break;
+    last = data[data.length - 1].id as string;
+  }
+  return out;
+}
+
+async function makeIdByName(): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await admin.from("nhtsa_makes").select("id, name").order("id").range(from, from + 999);
+    if (error) throw new Error(`nhtsa_makes read: ${error.message}`);
+    for (const m of data ?? []) {
+      const k = String(m.name ?? "").trim().toUpperCase();
+      if (k && !out.has(k)) out.set(k, m.id as number);
+    }
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
 async function syncWmi(): Promise<number> {
-  console.log(`Syncing WMI for ${COMMON_MANUFACTURERS.length} manufacturers...`);
-  const allRows: { wmi: string; manufacturer_name: string; country: string | null }[] = [];
+  const candidates = await inventoryWmis();
+  console.log(`  ${candidates.size} WMIs in active inventory`);
 
+  console.log(`Collecting WMIs for ${COMMON_MANUFACTURERS.length} brands...`);
   for (const mfr of COMMON_MANUFACTURERS) {
-    const json = await fetchJson<{
-      Results: {
-        WMI: string;
-        ManufacturerName: string;
-        Country: string;
-        Make?: string;
-      }[];
-    }>(`${NHTSA_BASE}/GetWMIsForManufacturer/${encodeURIComponent(mfr)}?format=json`);
-
-    if (json?.Results?.length) {
-      for (const r of json.Results) {
-        if (r.WMI) {
-          allRows.push({
-            wmi: r.WMI,
-            manufacturer_name: r.ManufacturerName ?? mfr,
-            country: r.Country ?? null,
-          });
-        }
-      }
+    const json = await fetchJson<{ Results: { WMI: string }[] }>(
+      `${NHTSA_BASE}/GetWMIsForManufacturer/${encodeURIComponent(mfr)}?format=json`
+    );
+    for (const r of json?.Results ?? []) {
+      const w = String(r.WMI ?? "").trim().toUpperCase();
+      if (WMI_RE.test(w)) candidates.add(w);
     }
     await new Promise((r) => setTimeout(r, 80));
-    process.stdout.write(`  ${mfr}(${json?.Results?.length ?? 0}) `);
   }
-  console.log();
 
-  const count = await upsertBatch("nhtsa_wmi", allRows, "wmi");
+  const makes = await makeIdByName();
+  console.log(`Resolving ${candidates.size} WMIs via DecodeWMI...`);
+  const rows: { wmi: string; make_id: number | null; manufacturer_name: string; country: string | null }[] = [];
+  let unresolved = 0;
+  for (const wmi of Array.from(candidates).sort()) {
+    const json = await fetchJson<{ Results: { Make?: string; ManufacturerName?: string }[] }>(
+      `${NHTSA_BASE}/DecodeWMI/${wmi}?format=json`
+    );
+    const r = json?.Results?.[0];
+    const make = String(r?.Make ?? "").trim();
+    const mfrName = String(r?.ManufacturerName ?? "").trim();
+    if (!make && !mfrName) { unresolved++; continue; }
+    rows.push({
+      wmi,
+      make_id: make ? makes.get(make.toUpperCase()) ?? null : null,
+      // The decoder shows this when make_id has no match — prefer the Make.
+      manufacturer_name: make || mfrName,
+      country: null,
+    });
+    await new Promise((res) => setTimeout(res, 60));
+  }
+  console.log(`  ${rows.length} resolved, ${unresolved} unknown to vPIC`);
+
+  const count = await upsertBatch("nhtsa_wmi", rows, "wmi");
   console.log(`  Synced ${count} WMI records`);
   return count;
 }
