@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { NhtsaOverrideRow, NhtsaSyncLogRow } from "@/lib/db";
+import type { DecodeResult } from "@/lib/vin-decoder";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ type FlaggedVehicle = {
   date_added: string;
 };
 
-type SubTab = "status" | "overrides" | "flagged" | "usage";
+type SubTab = "status" | "overrides" | "flagged" | "usage" | "test";
 
 type UsageTopDealer = {
   dealer_id: string;
@@ -101,7 +102,7 @@ export default function DecoderPage() {
       {/* Sub-tabs */}
       <div className="card overflow-hidden">
         <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg-subtle)" }}>
-          {(["status", "overrides", "flagged", "usage"] as SubTab[]).map((t) => (
+          {(["status", "overrides", "flagged", "usage", "test"] as SubTab[]).map((t) => (
             <button key={t} onClick={() => setSubTab(t)}
               style={{
                 padding: "10px 20px", border: "none", background: "none", fontSize: 13,
@@ -110,7 +111,7 @@ export default function DecoderPage() {
                 borderBottom: subTab === t ? "2px solid #1976d2" : "2px solid transparent",
                 textTransform: "capitalize",
               }}>
-              {t === "status" ? "Database Status" : t === "overrides" ? "Overrides" : t === "flagged" ? "Flagged Decodes" : "Usage"}
+              {t === "status" ? "Database Status" : t === "overrides" ? "Overrides" : t === "flagged" ? "Flagged Decodes" : t === "usage" ? "Usage" : "Test Decode"}
             </button>
           ))}
         </div>
@@ -120,8 +121,149 @@ export default function DecoderPage() {
           {subTab === "overrides" && <OverridesTab />}
           {subTab === "flagged" && <FlaggedTab />}
           {subTab === "usage" && <UsageTab />}
+          {subTab === "test" && <TestDecodeTab />}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Test Decode Tab ───────────────────────────────────────────────────────────
+// Runs one VIN through the platform's real decode chain (decodeVin — the same
+// function /api/vehicles/decode uses, overrides included) via the super_admin
+// /api/admin/decoder-test route. Read-only, no dealer context, and NOT logged
+// to vin_decode_log, so the Usage tab never moves.
+
+type TestDecodeResponse = {
+  result: DecodeResult;
+  candidates: { trim: string[]; body_style: string[]; drivetrain: string[] };
+  duration_ms: number;
+};
+
+const STAGE_INFO: Record<DecodeResult["resolved_by"], { label: string; bg: string; fg: string; note: string }> = {
+  override:        { label: "Override",        bg: "#ede7f6", fg: "#4527a0", note: "An admin override (longest matching VIN prefix) answered." },
+  pattern:         { label: "Local pattern",   bg: "#e3f2fd", fg: "#1565c0", note: "The local NHTSA pattern table (first 9 characters) answered." },
+  vpic:            { label: "Live vPIC",       bg: "#e8f5e9", fg: "#2e7d32", note: "No override or local pattern — the live NHTSA vPIC API answered." },
+  dealer_vehicles: { label: "dealer_vehicles", bg: "#fff8e1", fg: "#7a5c00", note: "vPIC had nothing — copied from an existing inventory row for this VIN (flagged)." },
+  wmi_partial:     { label: "WMI partial",     bg: "#fff8e1", fg: "#7a5c00", note: "Only the manufacturer (first 3 characters) was recognized — make only." },
+  failed:          { label: "Failed",          bg: "#ffebee", fg: "#b71c1c", note: "Nothing in the chain recognized this VIN." },
+};
+
+function TestDecodeTab() {
+  const [vin, setVin] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<TestDecodeResponse | null>(null);
+  const [showRaw, setShowRaw] = useState(false);
+
+  async function decode(e: React.FormEvent) {
+    e.preventDefault();
+    const v = vin.trim().toUpperCase();
+    if (!v) return;
+    setLoading(true); setError(null); setData(null);
+    try {
+      const res = await fetch(`/api/admin/decoder-test?vin=${encodeURIComponent(v)}`, { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) setError(json.error ?? `HTTP ${res.status}`);
+      else setData(json as TestDecodeResponse);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const r = data?.result;
+  const stage = r ? STAGE_INFO[r.resolved_by] : null;
+  const row = (k: string, v: React.ReactNode) => (
+    <tr key={k}>
+      <td style={{ padding: "6px 12px 6px 0", fontSize: 13, color: "var(--text-muted)", whiteSpace: "nowrap", verticalAlign: "top" }}>{k}</td>
+      <td style={{ padding: "6px 0", fontSize: 13, color: "var(--text-primary)" }}>{v ?? "—"}</td>
+    </tr>
+  );
+  const multi = (field: keyof TestDecodeResponse["candidates"], raw: string | null) => {
+    const opts = data?.candidates[field] ?? [];
+    if (opts.length >= 2) {
+      return (
+        <span>
+          {opts.map((o) => (
+            <span key={o} style={{ display: "inline-block", margin: "0 6px 4px 0", padding: "2px 8px", border: "1px solid #e0e0e0", borderRadius: 3, fontSize: 12 }}>{o}</span>
+          ))}
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            {" "}{opts.length} choices — Add Vehicle shows a dropdown{field === "trim" ? " (user must pick)" : " (first preselected)"}
+          </span>
+        </span>
+      );
+    }
+    return raw || "—";
+  };
+
+  return (
+    <div>
+      <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 12 }}>
+        Runs a VIN through the same decode chain as Add Vehicle (override → local pattern → live vPIC → dealer_vehicles → WMI).
+        Preview only — creates no vehicle and isn&apos;t counted in Usage.
+      </p>
+      <form onSubmit={decode} style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        <input
+          value={vin}
+          onChange={(e) => setVin(e.target.value)}
+          placeholder="17-character VIN"
+          maxLength={17}
+          style={{ width: 280, height: 36, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 4, fontSize: 14, fontFamily: "monospace", textTransform: "uppercase" }}
+        />
+        <button type="submit" disabled={loading || !vin.trim()}
+          style={{ height: 36, padding: "0 16px", background: loading || !vin.trim() ? "#ccc" : "#1976d2", color: "#fff", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: loading ? "wait" : "pointer" }}>
+          {loading ? "Decoding…" : "Decode"}
+        </button>
+        {vin.trim() && vin.trim().length !== 17 && (
+          <span style={{ alignSelf: "center", fontSize: 12, color: "var(--text-muted)" }}>{vin.trim().length}/17 characters</span>
+        )}
+      </form>
+
+      {error && (
+        <div style={{ padding: "8px 12px", background: "#ffebee", border: "1px solid #ffcdd2", borderRadius: 4, fontSize: 13, color: "#c62828", marginBottom: 16 }}>{error}</div>
+      )}
+
+      {r && stage && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: stage.bg, borderRadius: 4, marginBottom: 16 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: stage.fg, textTransform: "uppercase", letterSpacing: ".04em" }}>Resolved by</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: stage.fg }}>{stage.label}</span>
+            <span style={{ fontSize: 12, color: stage.fg }}>{stage.note}</span>
+            <span style={{ marginLeft: "auto", fontSize: 11, color: stage.fg, whiteSpace: "nowrap" }}>
+              confidence {r.confidence}{r.decode_flagged ? " · flagged" : ""} · {data?.duration_ms} ms
+            </span>
+          </div>
+          <table style={{ borderCollapse: "collapse", marginBottom: 12 }}>
+            <tbody>
+              {row("VIN", <code>{r.vin}</code>)}
+              {row("Year", r.year)}
+              {row("Make", r.make)}
+              {row("Model", r.model)}
+              {row("Trim", multi("trim", r.trim))}
+              {row("Body style", multi("body_style", r.body_style))}
+              {row("Drivetrain", multi("drivetrain", r.drivetrain))}
+              {row("Engine", r.engine)}
+              {row("Transmission", r.transmission)}
+              {row("Fuel", r.fuel_type)}
+              {row("Electrification", r.electrification)}
+              {row("Doors", r.doors)}
+              {row("MPG (city / hwy)", r.cmpg || r.hmpg ? `${r.cmpg ?? "—"} / ${r.hmpg ?? "—"}` : null)}
+              {row("Source (stored on vehicle)", <code>{r.source}</code>)}
+            </tbody>
+          </table>
+          <button type="button" onClick={() => setShowRaw((x) => !x)}
+            style={{ background: "none", border: "none", padding: 0, color: "#1976d2", fontSize: 12, cursor: "pointer" }}>
+            {showRaw ? "▾ Hide raw decode payload" : "▸ Show raw decode payload"}
+          </button>
+          {showRaw && (
+            <pre style={{ marginTop: 8, padding: 12, background: "var(--bg-subtle)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 12, overflowX: "auto" }}>
+              {JSON.stringify(data, null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }
