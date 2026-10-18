@@ -440,6 +440,21 @@ const nav: NavEntry[] = [
     ),
   },
   {
+    label: "VIN / Stock Lookup",
+    href: "/admin/vin-lookup",
+    roles: ["super_admin"],
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="2" y="5" width="13" height="14" rx="1" />
+        <line x1="5" y1="9" x2="5" y2="15" />
+        <line x1="8" y1="9" x2="8" y2="15" />
+        <line x1="11" y1="9" x2="11" y2="15" />
+        <circle cx="17.5" cy="14.5" r="3" />
+        <line x1="19.7" y1="16.7" x2="22" y2="19" />
+      </svg>
+    ),
+  },
+  {
     label: "LogoForge",
     href: "/admin/logoforge",
     roles: ["super_admin"],
