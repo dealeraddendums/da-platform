@@ -285,6 +285,30 @@ export function snapV(v: number): number {
   return Math.round(v / SNAP) * SNAP;
 }
 
+// Standard addendum seed overrides — applied ONLY where a new addendum doc is
+// seeded with the standard widget set (applyBlankCanvas, the initial seed and
+// the addendum paper-size reset). LAYOUT/DEFS stay as-is so a widget dropped
+// from the palette keeps its generic defaults. Keep in step with the
+// SuperAdmin "Blank" starter row (is_blank_default), which dealers see first.
+export const STANDARD_SEED_OVERRIDES: Record<string, { layout?: Partial<{ x: number; y: number; w: number; h: number }>; d?: Record<string, unknown> }> = {
+  msrp: { d: { label: 'Manufacturer\u2019s Suggested Retail Price' } },
+  subtotal: { layout: { y: 597 } },
+  askbar: {
+    layout: { x: 28, y: 620, w: 348, h: 48 },
+    d: { subtitle: '(Not the Manufacturer\u2019s Suggested Retail Price)' },
+  },
+};
+
+export function makeStandardSeedWidget(type: string, id: string, scaleW = 1): Widget {
+  const o = STANDARD_SEED_OVERRIDES[type];
+  const base = { ...(LAYOUT[type] || { x: 12, y: 200, w: 384, h: 60 }), ...(o?.layout ?? {}) };
+  const w = scaleW !== 1
+    ? makeWidget(type, id, Math.round(base.x * scaleW), base.y, Math.round(base.w * scaleW), base.h)
+    : makeWidget(type, id, base.x, base.y, base.w, base.h);
+  if (o?.d) w.d = { ...w.d, ...o.d };
+  return w;
+}
+
 export function makeWidget(
   type: string,
   id: string,

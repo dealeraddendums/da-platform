@@ -4,9 +4,9 @@ import { RESTYLER_ATTRIBUTION_TEXT, RESTYLER_ATTR_W, RESTYLER_ATTR_H, RESTYLER_A
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SNAP, MIN_W, MIN_H, BG_DEFAULT, IS_BG_DEFAULT, IB_DEFAULT,
-  PAPERS, LAYOUT, LAYOUT_INFOSHEET, WIDGET_LABELS, UNIQUE_WIDGETS,
+  PAPERS, LAYOUT_INFOSHEET, WIDGET_LABELS, UNIQUE_WIDGETS,
   PALETTE_HIDDEN_IN_ADDENDUM, PALETTE_HIDDEN_IN_INFOSHEET,
-  DEFS, DEFAULT_CUSTOM_WIDGETS, snapV, makeWidget, getPaperDims,
+  DEFS, DEFAULT_CUSTOM_WIDGETS, snapV, makeWidget, makeStandardSeedWidget, getPaperDims,
   SAMPLE_SUGGESTED_ITEMS, VEHICLE_HEADER_FIELDS, VEHICLE_HEADER_FIELDS_OPT_IN,
 } from './constants';
 import { renderW } from './widgetRenderer';
@@ -823,7 +823,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     let ws: Record<string, Widget> = {};
     order.forEach(type => {
       const id = 'w' + nextNid++;
-      ws[id] = makeWidget(type, id);
+      ws[id] = makeStandardSeedWidget(type, id);
     });
     if (vehicle) {
       // Set vehicle fields list first
@@ -1284,12 +1284,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
       let ws: Record<string, Widget> = {};
       order.forEach(type => {
         const id = 'w' + nextNid++;
-        if (scaleW !== 1) {
-          const layout = LAYOUT[type] ?? { x: 12, y: 200, w: 384, h: 60 };
-          ws[id] = makeWidget(type, id, Math.round(layout.x * scaleW), layout.y, Math.round(layout.w * scaleW), layout.h);
-        } else {
-          ws[id] = makeWidget(type, id);
-        }
+        ws[id] = makeStandardSeedWidget(type, id, scaleW);
       });
       ws = clampWidgets(ws, pw, ph);
       if (vehicle) ws = applyVehicleDataToWidgets(ws, vehicle);
@@ -1774,7 +1769,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     let ws: Record<string, Widget> = {};
     order.forEach(type => {
       const id = 'w' + nextNid++;
-      ws[id] = makeWidget(type, id);
+      ws[id] = makeStandardSeedWidget(type, id);
     });
     if (vehicle) {
       Object.values(ws).forEach(w => {
