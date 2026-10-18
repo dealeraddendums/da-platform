@@ -483,12 +483,35 @@ function buildVerdict(x: {
     }
   }
 
-  if (active.length) {
-    const who = Array.from(new Set(active.map(dname))).join(", ");
-    const head = active.length > 1 && new Set(active.map((v) => v.dealer_id)).size > 1
-      ? `Active in 5.0 under ${new Set(active.map((v) => v.dealer_id)).size} dealers (${who}) — duplicate VIN; each dealer sees its own copy.`
+  // A row whose dealer_id matches no 5.0 dealer is invisible to everyone, so
+  // it never counts as "visible" — it only appears in the notes.
+  const visible = active.filter((v) => v.dealer);
+  const orphanActive = active.filter((v) => !v.dealer);
+  const realInactive = inactive.filter((v) => v.dealer);
+
+  if (visible.length) {
+    const who = Array.from(new Set(visible.map(dname))).join(", ");
+    const n = new Set(visible.map((v) => v.dealer_id)).size;
+    const head = n > 1
+      ? `Active in 5.0 under ${n} dealers (${who}) — duplicate VIN; each dealer sees its own copy.`
       : `Active in 5.0 for ${who} — should be visible.`;
     return { tone: "green", headline: head, notes: notes.concat(extraNotes(x, active, inactive)) };
+  }
+
+  if (realInactive.length) {
+    // Prefer the dealer the operator expected, when one was given.
+    const v = realInactive.find((r) => expectedIds.has(r.dealer_id)) ?? realInactive[0];
+    const head = `Found but INACTIVE for ${dname(v)} (updated ${fmtDate(v.updated_at)}, created_by ${v.created_by ?? "unknown"}) — marked sold/deactivated.`;
+    return { tone: "amber", headline: head, notes: notes.concat(extraNotes(x, active, inactive)) };
+  }
+
+  if (orphanActive.length) {
+    const ids = Array.from(new Set(orphanActive.map((v) => v.dealer_id))).join(", ");
+    return {
+      tone: "red",
+      headline: `Active in 5.0 ONLY under dealer_id ${ids}, which matches no 5.0 dealer — no one can see it (feed writing under an id with no dealer record).`,
+      notes: notes.concat(extraNotes(x, active, inactive)),
+    };
   }
 
   if (inactive.length) {
@@ -538,8 +561,11 @@ function extraNotes(
   const au = x.aurora.rows;
   for (const v of active) {
     const name = v.dealer?.name ?? v.dealer_id;
-    if (!v.dealer) out.push(`${name}: the vehicle's dealer_id "${v.dealer_id}" matches NO dealer record — orphaned by a dealer-id rename, so no dealer can see it.`);
-    else {
+    if (!v.dealer) {
+      out.push(`dealer_id "${v.dealer_id}": an ACTIVE copy (created_by ${v.created_by ?? "unknown"}) sits under an id that matches no 5.0 dealer — invisible to everyone (a feed writing under a 4.0/old id, or a dealer-id rename).`);
+      continue;
+    }
+    {
       if (!v.dealer.active) out.push(`${name}: the dealer account itself is INACTIVE.`);
       if (v.dealer.is_test) out.push(`${name}: this is a test account.`);
       if (v.dealer.migration_status !== "migrated" && !v.dealer.is_native && !/^(ss|ga)_/.test(v.dealer.dealer_id)) {
@@ -572,7 +598,7 @@ function extraNotes(
   if (dealerSet.size > 1) out.push(`This VIN exists under ${dealerSet.size} dealers in 5.0 — check the dealer is looking at the right rooftop.`);
   // 4.0 dealers with no 5.0 match.
   for (const r of au) {
-    if (!r.v5_dealer) out.push(`4.0 row under DEALER_ID ${r.dealer_id} (${r.dealer_name ?? "?"}) has no matching 5.0 dealer (inventory_dealer_id).`);
+    if (!r.v5_dealer) out.push(`4.0 row under DEALER_ID ${r.dealer_id}${r.dealer_name ? ` (${r.dealer_name})` : " (no 4.0 dealer record either)"} has no matching 5.0 dealer (inventory_dealer_id).`);
   }
   return Array.from(new Set(out));
 }
