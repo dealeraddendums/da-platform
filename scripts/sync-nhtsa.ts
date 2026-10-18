@@ -176,18 +176,29 @@ const COMMON_MANUFACTURERS = [
 
 const WMI_RE = /^[A-HJ-NPR-Z0-9]{3}$/;
 
+// WMI -> make -> vehicle count, from active inventory. Used to pick ONE make
+// when vPIC reports a shared code (e.g. 5XY = "HYUNDAI, KIA").
+const inventoryMakes = new Map<string, Map<string, number>>();
+
 async function inventoryWmis(): Promise<Set<string>> {
   const out = new Set<string>();
   let last: string | null = null;
   // Keyset-paged: PostgREST clamps any single read to 1,000 rows.
   for (;;) {
-    let q = admin.from("dealer_vehicles").select("id, vin").eq("status", "active").order("id").limit(1000);
+    let q = admin.from("dealer_vehicles").select("id, vin, make").eq("status", "active").order("id").limit(1000);
     if (last) q = q.gt("id", last);
     const { data, error } = await q;
     if (error) throw new Error(`dealer_vehicles read: ${error.message}`);
     for (const r of data ?? []) {
       const w = String(r.vin ?? "").trim().toUpperCase().slice(0, 3);
-      if (WMI_RE.test(w)) out.add(w);
+      if (!WMI_RE.test(w)) continue;
+      out.add(w);
+      const mk = String(r.make ?? "").trim().toUpperCase();
+      if (mk) {
+        const m = inventoryMakes.get(w) ?? new Map<string, number>();
+        m.set(mk, (m.get(mk) ?? 0) + 1);
+        inventoryMakes.set(w, m);
+      }
     }
     if (!data || data.length < 1000) break;
     last = data[data.length - 1].id as string;
@@ -234,7 +245,16 @@ async function syncWmi(): Promise<number> {
       `${NHTSA_BASE}/DecodeWMI/${wmi}?format=json`
     );
     const r = json?.Results?.[0];
-    const make = String(r?.Make ?? "").trim();
+    let make = String(r?.Make ?? "").trim();
+    if (make.includes(",")) {
+      // Shared code: use the listed make our inventory actually carries most.
+      const listed = make.split(",").map((x) => x.trim().toUpperCase()).filter(Boolean);
+      const seen = inventoryMakes.get(wmi);
+      const best = listed
+        .map((m) => ({ m, n: seen?.get(m) ?? 0 }))
+        .sort((a, b) => b.n - a.n)[0];
+      if (best && best.n > 0) make = best.m;
+    }
     const mfrName = String(r?.ManufacturerName ?? "").trim();
     if (!make && !mfrName) { unresolved++; continue; }
     rows.push({
