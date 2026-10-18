@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
 import BuilderPage from "@/components/builder/BuilderPage";
 
-export const metadata = { title: "SuperAdmin Builder — DA Platform" };
+export const metadata = { title: "Template Builder — DA Platform" };
 
 /**
  * /starter-layouts/builder[?id=] — the Builder in platform-starter mode.

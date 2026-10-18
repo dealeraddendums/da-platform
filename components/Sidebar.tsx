@@ -483,7 +483,7 @@ const nav: NavEntry[] = [
     ),
   },
   {
-    label: "SuperAdmin Builder",
+    label: "Template Builder",
     href: "/starter-layouts",
     roles: ["super_admin"],
     icon: (

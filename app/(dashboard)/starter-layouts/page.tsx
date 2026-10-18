@@ -5,7 +5,7 @@ import { resolveSessionProfile } from "@/lib/profile-session";
 import { PageHeader } from "@/components/PageHeader";
 import StarterLayoutsClient from "@/components/StarterLayoutsClient";
 
-export const metadata = { title: "SuperAdmin Builder — DA Platform" };
+export const metadata = { title: "Template Builder — DA Platform" };
 
 export default async function StarterLayoutsPage() {
   const supabase = createClient();
@@ -19,7 +19,7 @@ export default async function StarterLayoutsPage() {
   return (
     <div>
       <PageHeader
-        title="SuperAdmin Builder"
+        title="Template Builder"
         subtitle="Platform starter layouts every dealer can start a new document from."
       />
       <StarterLayoutsClient />
