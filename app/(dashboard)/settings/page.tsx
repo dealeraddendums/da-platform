@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
+import { resolveActiveDealer } from "@/lib/active-dealer";
 import type { DealerSettingsRow, UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import SettingsForm from "@/components/SettingsForm";
@@ -34,13 +35,15 @@ export default async function SettingsPage() {
   // A group_admin OR group_user (regional manager) switched into a dealer edits
   // that dealer's settings. SettingsForm scopes its API calls by dealer_id and
   // /api/settings re-verifies scope (group + tags) — we just supply the id.
-  if (!dealerId && (role === "group_admin" || role === "group_user") && profile?.active_dealer_id) {
-    const { data: d } = await admin
-      .from("dealers")
-      .select("dealer_id")
-      .eq("id", profile.active_dealer_id)
-      .maybeSingle<{ dealer_id: string }>();
-    dealerId = d?.dealer_id ?? null;
+  // Session-scoped active dealer (lib/active-dealer.ts) — the SAME resolver the
+  // API layer uses, re-authorized per request, so this page's chrome can never
+  // disagree with the data and writes it drives.
+  if (!dealerId) {
+    dealerId = (await resolveActiveDealer(admin, {
+      userId: session.user.id,
+      role,
+      groupId: profile?.group_id ?? null,
+    })).textId;
   }
 
   let initialSettings: DealerSettingsRow | null = null;

@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
+import { resolveActiveDealer } from "@/lib/active-dealer";
 import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import { canPrintForDealer } from "@/lib/print-eligibility";
@@ -235,33 +236,27 @@ export default async function DashboardPage({ searchParams }: { searchParams?: {
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
     ?? "dealer_user") as UserRole;
 
-  // A group_admin who has "Switched to Dealer" (active_dealer_id set) acts as
-  // that dealer — render the dealer dashboard, not the group view. Mirrors the
-  // layout's sidebarRole rule and the resolution in /builder and /users.
-  if (role === "group_admin" && profile?.active_dealer_id) {
-    const { data: activeDlr } = await admin
-      .from("dealers")
-      .select("dealer_id")
-      .eq("id", profile.active_dealer_id)
-      .maybeSingle<{ dealer_id: string }>();
-    if (activeDlr?.dealer_id) {
-      return <DealerDashboardView dealerId={activeDlr.dealer_id} />;
-    }
+  // Session-scoped active dealer (lib/active-dealer.ts) — same resolver the API
+  // layer uses, re-authorized per request, so chrome and data always agree.
+  const activeDealerTextId = (await resolveActiveDealer(admin, {
+    userId: session.user.id,
+    role,
+    groupId: profile?.group_id ?? null,
+  })).textId;
+
+  // A group_admin who has "Switched to Dealer" acts as that dealer — render the
+  // dealer dashboard, not the group view. Mirrors the layout's sidebarRole rule
+  // and the resolution in /builder and /users.
+  if (role === "group_admin" && activeDealerTextId) {
+    return <DealerDashboardView dealerId={activeDealerTextId} />;
   }
 
   // group_user (regional manager). Switched into a tagged dealer → dealer view
   // (full parity). Otherwise a minimal landing pointing to My Dealers — NOT the
   // group-wide dashboard, which would surface metrics beyond their tagged subset.
   if (role === "group_user") {
-    if (profile?.active_dealer_id) {
-      const { data: activeDlr } = await admin
-        .from("dealers")
-        .select("dealer_id")
-        .eq("id", profile.active_dealer_id)
-        .maybeSingle<{ dealer_id: string }>();
-      if (activeDlr?.dealer_id) {
-        return <DealerDashboardView dealerId={activeDlr.dealer_id} />;
-      }
+    if (activeDealerTextId) {
+      return <DealerDashboardView dealerId={activeDealerTextId} />;
     }
     return (
       <div>

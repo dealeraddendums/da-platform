@@ -3,6 +3,7 @@ import { cookies, headers } from "next/headers";
 import { createServerSupabaseClient, createAdminSupabaseClient } from "./db";
 import type { UserRole } from "./db";
 import { verifyGhostToken } from "./ghost";
+import { resolveActiveDealer, loadScopeTagIds, readGroupLevelReset } from "./active-dealer";
 
 export type JwtClaims = {
   sub: string;
@@ -156,38 +157,38 @@ export async function getJwtClaims(): Promise<JwtClaims | null> {
   let dealerId = profile?.dealer_id ?? null;
   let activeDealerUuid: string | null = null;
 
-  // When a group_admin has an active dealer selected, resolve the dealer's
-  // text dealer_id so all downstream routes work without special-casing.
-  //
-  // Session-layer group-level reset (#116): when a group is freshly impersonated,
-  // entry sets the `da_group_level` cookie so we IGNORE the impersonated user's
-  // persisted active_dealer_id and land at GROUP level — WITHOUT mutating their
-  // profile. The cookie is cleared the moment they explicitly switch into a
-  // dealer (/api/profiles/active-dealer) or exit impersonation.
-  let groupLevelReset = false;
-  try { groupLevelReset = cookies().get("da_group_level")?.value === "1"; } catch { /* no req ctx */ }
-  // group_user (regional manager) switches into a tagged dealer the same way a
-  // group_admin does — resolve the active dealer's text id for downstream routes.
-  if ((role === "group_admin" || role === "group_user") && profile?.active_dealer_id && !groupLevelReset) {
-    activeDealerUuid = profile.active_dealer_id;
-    const { data: activeDlr } = await admin
-      .from("dealers")
-      .select("dealer_id")
-      .eq("id", activeDealerUuid)
-      .maybeSingle<{ dealer_id: string }>();
-    if (activeDlr) dealerId = activeDlr.dealer_id;
-  }
-
   // group_user scope: the tags assigned to this manager (user_tags). Keyed on
   // the resolved profile id (email-fallback aware). Empty ⇒ no dealers.
+  // Loaded BEFORE the active-dealer resolve below, which re-checks tag scope.
   let scopeTagIds: string[] = [];
   if (role === "group_user") {
-    const uid = profile?.id ?? user.id;
-    // user_tags isn't in the generated Supabase types yet (migration 109).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: tagRows } = await (admin as any).from("user_tags").select("tag_id").eq("user_id", uid);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    scopeTagIds = (tagRows ?? []).map((r: any) => r.tag_id as string);
+    scopeTagIds = await loadScopeTagIds(admin, profile?.id ?? user.id);
+  }
+
+  // Active dealer is SESSION/DEVICE scoped (lib/active-dealer.ts) — an httpOnly
+  // cookie bound to this auth user, re-authorized against the database on every
+  // request. It replaced the shared per-user `profiles.active_dealer_id`, which
+  // let one session's dealer switch move every other session of the same login
+  // (wrong-rooftop bug, 2026-10-19). Server pages resolve through the SAME
+  // function, so chrome and data can never disagree.
+  //
+  // Session-layer group-level reset (#116) still applies: when a group is
+  // freshly impersonated, entry sets `da_group_level` so we land at GROUP level.
+  // The cookie is cleared the moment they explicitly switch into a dealer
+  // (/api/profiles/active-dealer) or exit impersonation. The user-id binding in
+  // the cookie makes an impersonated session ignore the operator's own dealer
+  // context for free.
+  const groupLevelReset = readGroupLevelReset();
+  const active = await resolveActiveDealer(admin, {
+    userId: user.id,
+    role,
+    groupId: profile?.group_id ?? null,
+    scopeTagIds,
+    groupLevelReset,
+  });
+  if (active.uuid && active.textId) {
+    activeDealerUuid = active.uuid;
+    dealerId = active.textId;
   }
 
   // Ghost mode: super_admin operates in dealer context without a real session swap

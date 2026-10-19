@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
+import { resolveActiveDealer } from "@/lib/active-dealer";
 import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import HelpClient from "./HelpClient";
@@ -38,13 +39,15 @@ export default async function HelpPage() {
   const isDealer = role === "dealer_admin" || role === "dealer_user" || role === "dealer_restricted";
   let dealerId = isDealer ? (profile?.dealer_id ?? null) : (ghostDealerId ?? null);
 
-  if (!dealerId && (role === "group_admin" || role === "group_user") && profile?.active_dealer_id) {
-    const { data: d } = await admin
-      .from("dealers")
-      .select("dealer_id")
-      .eq("id", profile.active_dealer_id)
-      .maybeSingle<{ dealer_id: string }>();
-    dealerId = d?.dealer_id ?? null;
+  // Session-scoped active dealer (lib/active-dealer.ts) — the SAME resolver the
+  // API layer uses, re-authorized per request, so this page's chrome can never
+  // disagree with the data and writes it drives.
+  if (!dealerId) {
+    dealerId = (await resolveActiveDealer(admin, {
+      userId: session.user.id,
+      role,
+      groupId: profile?.group_id ?? null,
+    })).textId;
   }
 
   let inventoryProvider: string | null = null;

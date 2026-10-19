@@ -3,6 +3,7 @@ import { cookies, headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
+import { resolveActiveDealer } from "@/lib/active-dealer";
 import type { UserRole } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
 import { isPaidAccountType } from "@/lib/print-eligibility";
@@ -41,7 +42,18 @@ export default async function DashboardLayout({
   const isSuperAdmin = role === "super_admin";
   // A group_user (regional manager) switches into a tagged dealer the same way a
   // group_admin does — resolve their active dealer so the nav flips to dealer parity.
-  const activeDealerUuidRaw = (isGroupAdmin || isGroupUser) ? (profile?.active_dealer_id ?? null) : null;
+  //
+  // SESSION-SCOPED (lib/active-dealer.ts): this is the same resolver the API
+  // layer runs, so the header/nav rendered here and the inventory + write paths
+  // driven by `getJwtClaims` always name the SAME dealer. It used to read the
+  // shared per-user `profiles.active_dealer_id`, which meant another session of
+  // the same login could move the data under a header that had already rendered
+  // (wrong-rooftop bug, 2026-10-19).
+  const activeDealerUuidRaw = (await resolveActiveDealer(admin, {
+    userId: session.user.id,
+    role,
+    groupId: profile?.group_id ?? null,
+  })).uuid;
 
   // Route-aware chrome: the layout can't see the URL, so middleware forwards it
   // as `x-da-pathname`. On a group-scoped route (/groups, /groups/[id], My

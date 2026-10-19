@@ -3,10 +3,9 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
+import { resolveActiveDealer } from "@/lib/active-dealer";
 import type { DealerRow } from "@/lib/db";
 import { verifyGhostToken } from "@/lib/ghost";
-import { getJwtClaims } from "@/lib/auth";
-import { authorizeDealerAction } from "@/lib/dealer-authz";
 import { getRecommendedAddendumPaperSizes } from "@/lib/recommended-labels";
 import { fetchLabelProducts } from "@/lib/label-products";
 import ProfileClient from "./ProfileClient";
@@ -21,7 +20,7 @@ export default async function ProfilePage() {
   const admin = createAdminSupabaseClient();
   // Live label catalog from da-billing (1h cache; hardcoded fallback inside).
   const labelProducts = await fetchLabelProducts();
-  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; full_name: string | null; active_dealer_id: string | null; created_at: string }>(admin, session, "role, dealer_id, full_name, active_dealer_id, created_at");
+  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; group_id: string | null; full_name: string | null; active_dealer_id: string | null; created_at: string }>(admin, session, "role, dealer_id, group_id, full_name, active_dealer_id, created_at");
 
   const role = profile?.role ?? "dealer_user";
   const userEmail = session.user.email ?? "";
@@ -83,23 +82,15 @@ export default async function ProfilePage() {
   // group_admin OR group_user (regional manager) acting as a switched-in dealer
   // sees that dealer's profile — edit, Order Supplies, and its billing.
   if (role === "group_admin" || role === "group_user") {
-    let resolvedActive: string | null = null;
-    if (profile?.active_dealer_id) {
-      const { data: d } = await admin
-        .from("dealers")
-        .select("dealer_id")
-        .eq("id", profile.active_dealer_id)
-        .maybeSingle<{ dealer_id: string }>();
-      resolvedActive = d?.dealer_id ?? null;
-    }
-    // The persisted active dealer must still be in scope — group_admin:
-    // in-group; group_user: in-group ∩ assigned tags — via the same canonical
-    // check the APIs use. An out-of-scope (stale) active dealer is ignored.
-    if (resolvedActive) {
-      const claims = await getJwtClaims();
-      const authz = claims ? await authorizeDealerAction(claims, resolvedActive) : null;
-      if (!authz?.ok) resolvedActive = null;
-    }
+    // Session-scoped active dealer (lib/active-dealer.ts). The resolver applies
+    // the same scope check this page used to run inline — group_admin: in-group;
+    // group_user: in-group ∩ assigned tags — so an out-of-scope or stale
+    // selection resolves to null and this page falls back to the Security tab.
+    const resolvedActive = (await resolveActiveDealer(admin, {
+      userId: session.user.id,
+      role,
+      groupId: profile?.group_id ?? null,
+    })).textId;
     if (!resolvedActive) {
       return (
         <ProfileClient

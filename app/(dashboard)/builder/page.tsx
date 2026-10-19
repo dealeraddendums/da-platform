@@ -3,6 +3,7 @@ import { imageBuilderHrefFor } from "@/lib/image-builder/page-gate";
 import { cookies } from "next/headers";
 import { createClient, createAdminSupabaseClient } from "@/lib/supabase/server";
 import { resolveSessionProfile } from "@/lib/profile-session";
+import { resolveActiveDealer } from "@/lib/active-dealer";
 import { verifyGhostToken } from "@/lib/ghost";
 import BuilderPage from "@/components/builder/BuilderPage";
 import { isRestylerGroup, dealerInRestylerGroup } from "@/lib/restyler";
@@ -59,6 +60,14 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
   // /api/templates (dealer table) — never the group's saved templates.
   const ghostGroupId = ghostCtx?.group_id ?? null;
 
+  // Session-scoped active dealer (lib/active-dealer.ts) — same resolver the API
+  // layer uses, re-authorized per request, so chrome and data always agree.
+  const activeDealerTextId = (await resolveActiveDealer(admin, {
+    userId: session.user.id,
+    role,
+    groupId: profile?.group_id ?? null,
+  })).textId;
+
   // Resolve effective dealer_id
   let dealerId = ghostDealerId ?? profile?.dealer_id ?? null;
   let switchedIntoDealer = false;
@@ -70,13 +79,9 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
     // in BuilderPage, so Save would have written a DEALER template while
     // visibly editing a group one.
     dealerId = null;
-  } else if (!ghostDealerId && (isGroupAdmin || isGroupUser) && profile?.active_dealer_id) {
-    const { data: activeDlr } = await admin
-      .from("dealers")
-      .select("dealer_id")
-      .eq("id", profile.active_dealer_id)
-      .maybeSingle<{ dealer_id: string }>();
-    if (activeDlr) { dealerId = activeDlr.dealer_id; switchedIntoDealer = true; }
+  } else if (!ghostDealerId && activeDealerTextId) {
+    dealerId = activeDealerTextId;
+    switchedIntoDealer = true;
   }
 
   // groupId puts the Builder in GROUP mode: the "Open Template" modal reads the
@@ -124,7 +129,7 @@ export default async function BuilderRoute({ searchParams }: { searchParams?: { 
   // canAdminUpload remains super_admin-only — that gates the platform background
   // library, a separate concern from dealer-scoped sizes.
   const canAddCustomSize = role === 'super_admin' || role === 'dealer_admin'
-    || ((isGroupAdmin || isGroupUser) && !!profile?.active_dealer_id);
+    || !!activeDealerTextId;
 
   // Restyler account (migration 149): the canvas mirrors the PDF's locked
   // attribution footer. Group mode → the group itself; dealer mode → the

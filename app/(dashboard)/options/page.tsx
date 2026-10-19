@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveSessionProfile } from "@/lib/profile-session";
+import { resolveActiveDealer } from "@/lib/active-dealer";
 import { verifyGhostToken } from "@/lib/ghost";
 import OptionsLibrary from "@/components/OptionsLibrary";
 
@@ -14,7 +15,7 @@ export default async function OptionsPage() {
   if (!session) redirect("/login");
 
   const admin = createAdminSupabaseClient();
-  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; active_dealer_id: string | null }>(admin, session, "role, dealer_id, active_dealer_id");
+  const profile = await resolveSessionProfile<{ role: string; dealer_id: string | null; group_id: string | null; active_dealer_id: string | null }>(admin, session, "role, dealer_id, group_id, active_dealer_id");
 
   const role = profile?.role
     ?? (session.user.app_metadata as Record<string, unknown>)?.role as string | undefined
@@ -28,15 +29,14 @@ export default async function OptionsPage() {
 
   // A group_admin OR group_user (regional manager) switched into a dealer acts
   // as that dealer here too.
-  let activeDealerTextId: string | null = null;
-  if ((role === "group_admin" || role === "group_user") && profile?.active_dealer_id) {
-    const { data: d } = await admin
-      .from("dealers")
-      .select("dealer_id")
-      .eq("id", profile.active_dealer_id)
-      .maybeSingle<{ dealer_id: string }>();
-    activeDealerTextId = d?.dealer_id ?? null;
-  }
+  // Session-scoped active dealer (lib/active-dealer.ts) — the SAME resolver the
+  // API layer uses, re-authorized per request, so this page's chrome can never
+  // disagree with the data and writes it drives.
+  const activeDealerTextId = (await resolveActiveDealer(admin, {
+    userId: session.user.id,
+    role,
+    groupId: profile?.group_id ?? null,
+  })).textId;
 
   const isDealerRole = role === "dealer_admin" || role === "dealer_user";
   if (!isDealerRole && !ghostDealerId && !activeDealerTextId) redirect("/dashboard");

@@ -212,7 +212,7 @@ export async function middleware(request: NextRequest) {
         );
         res.headers.set(
           "Access-Control-Allow-Headers",
-          "Content-Type, Authorization, x-cron-secret, X-DA-Ghost-Token"
+          "Content-Type, Authorization, x-cron-secret, X-DA-Ghost-Token, X-DA-Active-Dealer"
         );
         res.headers.set("Access-Control-Max-Age", "86400");
       }
