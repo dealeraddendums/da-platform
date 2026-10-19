@@ -237,6 +237,45 @@ async function headS3(vin: string): Promise<S3Object[]> {
   );
 }
 
+/**
+ * Feed presence for one dealer. The single definition of "what feed is this
+ * dealer on and is it alive" — used by the per-VIN report AND by dealer mode
+ * (runDealerLookup), so the two can never drift apart.
+ *
+ * Roster keys mirror lib/dealer-feed-status: CDK on the text dealer_id, Tekion
+ * on either id. hasLiveFeed/provenance come straight from getDealerFeedStatus
+ * rather than being recomputed here.
+ */
+export async function buildFeedInfo(db: Db, d: DealerInfo): Promise<FeedInfo> {
+  const ids = Array.from(new Set([d.dealer_id, d.inventory_dealer_id].filter((x): x is string => !!x)));
+  const [fort, cdk, tek, latest, count, status] = await Promise.all([
+    db.from("fortellis_dealers").select("enabled, last_delta_at, last_status").eq("dealer_id", d.dealer_id).limit(1),
+    db.from("cdk_dealers").select("NEW, LAST_DELTA").eq("DEALER_ID", d.dealer_id).limit(1),
+    db.from("tekion_dealers").select("last_update").in("dealer_id", ids).limit(1),
+    db.from("dealer_vehicles").select("updated_at, created_by").eq("dealer_id", d.dealer_id).eq("status", "active")
+      .order("updated_at", { ascending: false }).limit(1),
+    db.from("dealer_vehicles").select("id", { count: "exact", head: true }).eq("dealer_id", d.dealer_id).eq("status", "active"),
+    getDealerFeedStatus(db, d.dealer_id, d.inventory_dealer_id),
+  ]);
+  const f = (fort.data ?? [])[0];
+  const c = (cdk.data ?? [])[0];
+  const t = (tek.data ?? [])[0];
+  const l = (latest.data ?? [])[0];
+  return {
+    dealer_id: d.dealer_id,
+    provider: d.inventory_provider,
+    feed_source: d.feed_source,
+    fortellis: f ? { enabled: !!f.enabled, last_delta_at: f.last_delta_at ?? null, last_status: f.last_status ?? null } : null,
+    cdk: c ? { new_flag: c.NEW == null ? null : String(c.NEW), last_delta: c.LAST_DELTA ?? null } : null,
+    tekion: t ? { last_update: t.last_update ?? null } : null,
+    active_vehicles: count.count ?? 0,
+    has_live_feed: status.hasLiveFeed,
+    provenance: status.signals.provenance,
+    last_vehicle_update: l?.updated_at ?? null,
+    last_vehicle_update_by: l?.created_by ?? null,
+  };
+}
+
 export async function runVinLookup(rawQuery: string, rawDealer: string | null): Promise<LookupReport> {
   const db: Db = createAdminSupabaseClient();
   const query = rawQuery.trim();
@@ -393,39 +432,7 @@ export async function runVinLookup(rawQuery: string, rawDealer: string | null): 
   const feedDealers = Array.from(dealerById.values()).filter(
     (d) => v5DealerIds.includes(d.dealer_id) || expectedIds.has(d.dealer_id) || Array.from(invMap.values()).some((x) => x.dealer_id === d.dealer_id),
   ).slice(0, 10);
-  const feeds: FeedInfo[] = await Promise.all(
-    feedDealers.map(async (d) => {
-      // Roster keys mirror lib/dealer-feed-status: CDK on the text dealer_id,
-      // Tekion on either id.
-      const ids = Array.from(new Set([d.dealer_id, d.inventory_dealer_id].filter((x): x is string => !!x)));
-      const [fort, cdk, tek, latest, count, status] = await Promise.all([
-        db.from("fortellis_dealers").select("enabled, last_delta_at, last_status").eq("dealer_id", d.dealer_id).limit(1),
-        db.from("cdk_dealers").select("NEW, LAST_DELTA").eq("DEALER_ID", d.dealer_id).limit(1),
-        db.from("tekion_dealers").select("last_update").in("dealer_id", ids).limit(1),
-        db.from("dealer_vehicles").select("updated_at, created_by").eq("dealer_id", d.dealer_id).eq("status", "active")
-          .order("updated_at", { ascending: false }).limit(1),
-        db.from("dealer_vehicles").select("id", { count: "exact", head: true }).eq("dealer_id", d.dealer_id).eq("status", "active"),
-        getDealerFeedStatus(db, d.dealer_id, d.inventory_dealer_id),
-      ]);
-      const f = (fort.data ?? [])[0];
-      const c = (cdk.data ?? [])[0];
-      const t = (tek.data ?? [])[0];
-      const l = (latest.data ?? [])[0];
-      return {
-        dealer_id: d.dealer_id,
-        provider: d.inventory_provider,
-        feed_source: d.feed_source,
-        fortellis: f ? { enabled: !!f.enabled, last_delta_at: f.last_delta_at ?? null, last_status: f.last_status ?? null } : null,
-        cdk: c ? { new_flag: c.NEW == null ? null : String(c.NEW), last_delta: c.LAST_DELTA ?? null } : null,
-        tekion: t ? { last_update: t.last_update ?? null } : null,
-        active_vehicles: count.count ?? 0,
-        has_live_feed: status.hasLiveFeed,
-        provenance: status.signals.provenance,
-        last_vehicle_update: l?.updated_at ?? null,
-        last_vehicle_update_by: l?.created_by ?? null,
-      };
-    }),
-  );
+  const feeds: FeedInfo[] = await Promise.all(feedDealers.map((d) => buildFeedInfo(db, d)));
 
   const verdict = buildVerdict({ kind, query, expected, vehicles, aurora, products, feeds });
 
@@ -601,4 +608,243 @@ function extraNotes(
     if (!r.v5_dealer) out.push(`4.0 row under DEALER_ID ${r.dealer_id}${r.dealer_name ? ` (${r.dealer_name})` : " (no 4.0 dealer record either)"} has no matching 5.0 dealer (inventory_dealer_id).`);
   }
   return Array.from(new Set(out));
+}
+
+// ── Dealer mode ───────────────────────────────────────────────────────────────
+// Entering a dealer with no VIN/stock answers a different question: "is this
+// dealer's inventory flowing, and what's in it?". It reuses the same dealer
+// resolution and the same buildFeedInfo signals as the per-VIN report — the
+// only new work is the paged inventory list. Still READ-ONLY.
+
+/** Dealer header fields beyond DealerInfo that only dealer mode shows. */
+export interface DealerDetail extends DealerInfo {
+  internal_id: string | null;
+  account_type: string | null;
+  group_id: string | null;
+  group_name: string | null;
+}
+
+export interface InventoryRow {
+  id: string;
+  vin: string | null;
+  stock_number: string | null;
+  year: number | string | null;
+  make: string | null;
+  model: string | null;
+  trim: string | null;
+  condition: string | null;
+  certified: unknown;
+  status: string | null;
+  msrp: number | string | null;
+  date_added: string | null;
+  updated_at: string | null;
+  created_by: string | null;
+  print_status: unknown;
+  print_date: string | null;
+}
+
+export interface DealerStats {
+  active_vehicles: number;
+  inactive_vehicles: number;
+  newest_added: string | null;
+  added_7d: number;
+  last_update: string | null;
+}
+
+export interface DealerReport {
+  mode: "dealer";
+  dealer_filter: string;
+  /** Populated (and dealer null) when the filter matched 0 or >1 dealers. */
+  candidates: DealerInfo[];
+  dealer: DealerDetail | null;
+  feed: FeedInfo | null;
+  stats: DealerStats | null;
+  verdict: Verdict;
+  /** dealer_id != inventory_dealer_id — a common silent cause of missing inventory. */
+  id_mismatch: boolean;
+  inventory: InventoryRow[];
+  /** Total matching the current filters (exact count), vs. what was returned. */
+  total: number;
+  page: number;
+  page_size: number;
+  include_inactive: boolean;
+  search: string | null;
+}
+
+export const INVENTORY_PAGE_SIZE = 100;
+
+const INVENTORY_COLS =
+  "id, vin, stock_number, year, make, model, trim, condition, certified, status, msrp, date_added, updated_at, created_by, print_status, print_date";
+
+const DEALER_DETAIL_COLS = `${DEALER_COLS}, internal_id, account_type, group_id`;
+
+/**
+ * One page of a dealer's inventory. Paged server-side with .range() and an
+ * exact count, so a dealer with thousands of vehicles never pulls an unbounded
+ * set (and never meets the PostgREST 1,000-row clamp).
+ */
+export async function fetchDealerInventory(
+  db: Db,
+  dealerTextId: string,
+  opts: { page?: number; search?: string | null; includeInactive?: boolean } = {},
+): Promise<{ rows: InventoryRow[]; total: number; page: number; page_size: number }> {
+  const page = Math.max(0, opts.page ?? 0);
+  const from = page * INVENTORY_PAGE_SIZE;
+  let q = db
+    .from("dealer_vehicles")
+    .select(INVENTORY_COLS, { count: "exact" })
+    .eq("dealer_id", dealerTextId);
+  if (!opts.includeInactive) q = q.eq("status", "active");
+  const search = (opts.search ?? "").trim();
+  if (search) {
+    const e = likeExact(search);
+    // Server-side so searching doesn't require loading the whole set first.
+    q = q.or(`stock_number.ilike.%${e}%,vin.ilike.%${e}%,make.ilike.%${e}%,model.ilike.%${e}%`);
+  }
+  const { data, count } = await q
+    .order("date_added", { ascending: false, nullsFirst: false })
+    .range(from, from + INVENTORY_PAGE_SIZE - 1);
+  return {
+    rows: (data ?? []) as InventoryRow[],
+    total: count ?? 0,
+    page,
+    page_size: INVENTORY_PAGE_SIZE,
+  };
+}
+
+function daysSince(iso: string | null): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 86_400_000);
+}
+
+function buildDealerVerdict(d: DealerDetail, feed: FeedInfo, stats: DealerStats, idMismatch: boolean): Verdict {
+  const notes: string[] = [];
+  const src = feed.provenance.length ? feed.provenance.join(", ") : "no recorded source";
+  const staleDays = daysSince(feed.last_vehicle_update ?? stats.newest_added);
+
+  if (idMismatch) {
+    notes.push(
+      `dealer_id (${d.dealer_id}) and inventory_dealer_id (${d.inventory_dealer_id ?? "—"}) DISAGREE — ` +
+      `vehicles are filed under dealer_id, but the feed publishes under the inventory id. This is a common silent cause of "inventory not showing".`,
+    );
+  }
+  if (!d.active) notes.push("Dealer record is marked inactive.");
+  if (d.is_test) notes.push("This is a test account.");
+  if (feed.provider) notes.push(`Inventory provider on the dealer record: ${feed.provider}.`);
+  if (stats.inactive_vehicles > 0) notes.push(`${stats.inactive_vehicles.toLocaleString()} inactive/sold rows also on this id.`);
+
+  if (stats.active_vehicles === 0) {
+    notes.push(
+      feed.has_live_feed
+        ? "A feed roster entry exists but no active vehicles are filed under this id — check the id the feed publishes under."
+        : "No feed roster entry and no feed-created vehicles — inventory would only arrive by CSV or manual add.",
+    );
+    return { tone: "red", headline: `No active inventory under ${d.dealer_id}`, notes };
+  }
+
+  const head = `${feed.has_live_feed ? src : "No live feed"} — ${stats.active_vehicles.toLocaleString()} active`;
+  const freshness = staleDays == null ? "" : staleDays === 0 ? ", updated today" : `, last updated ${staleDays}d ago`;
+  const added = `, ${stats.added_7d} added in 7d`;
+
+  if (!feed.has_live_feed) {
+    notes.push("No Fortellis/CDK/Tekion roster row and no feed-created vehicles — these rows came from CSV or manual adds.");
+    return { tone: "amber", headline: `${head}${freshness}${added} — no live feed`, notes };
+  }
+  if (staleDays != null && staleDays >= 14) {
+    notes.push(`Nothing has changed in ${staleDays} days. For a live feed that usually means the feed stopped, or it now publishes under a different id.`);
+    return { tone: "red", headline: `${head}${freshness}${added} — possibly stale`, notes };
+  }
+  if (staleDays != null && staleDays >= 3) {
+    notes.push("A healthy feed normally touches inventory at least daily.");
+    return { tone: "amber", headline: `${head}${freshness}${added} — slow`, notes };
+  }
+  if (stats.added_7d === 0) notes.push("No new vehicles in the last 7 days — normal for a small lot, worth a look on a large one.");
+  return { tone: "green", headline: `${head}${freshness}${added} — healthy`, notes };
+}
+
+/** Dealer-only lookup: feed status + a paged, searchable inventory list. */
+export async function runDealerLookup(
+  rawDealer: string,
+  opts: { page?: number; search?: string | null; includeInactive?: boolean } = {},
+): Promise<DealerReport> {
+  const db: Db = createAdminSupabaseClient();
+  const dealerFilter = rawDealer.trim();
+
+  const base: Omit<DealerReport, "verdict"> & { verdict?: Verdict } = {
+    mode: "dealer",
+    dealer_filter: dealerFilter,
+    candidates: [],
+    dealer: null,
+    feed: null,
+    stats: null,
+    id_mismatch: false,
+    inventory: [],
+    total: 0,
+    page: Math.max(0, opts.page ?? 0),
+    page_size: INVENTORY_PAGE_SIZE,
+    include_inactive: !!opts.includeInactive,
+    search: (opts.search ?? "").trim() || null,
+  };
+
+  // Same resolution the per-VIN report's dealer field uses.
+  const matches = await resolveDealerFilter(db, dealerFilter);
+  if (matches.length === 0) {
+    return { ...base, verdict: { tone: "grey", headline: `No dealer matches “${dealerFilter}”`, notes: ["Try the dealer_id, the inventory_dealer_id, or part of the dealer name."] } } as DealerReport;
+  }
+  if (matches.length > 1) {
+    return {
+      ...base,
+      candidates: matches,
+      verdict: {
+        tone: "amber",
+        headline: `“${dealerFilter}” matches ${matches.length} dealers — pick one`,
+        notes: ["Enter an exact dealer_id or inventory_dealer_id to go straight to a single dealer."],
+      },
+    } as DealerReport;
+  }
+
+  const m = matches[0];
+  const { data: detailRow } = await db.from("dealers").select(DEALER_DETAIL_COLS).eq("id", m.id).maybeSingle();
+  const row = (detailRow ?? m) as DealerDetail & { group_id?: string | null };
+  let groupName: string | null = null;
+  if (row.group_id) {
+    const { data: g } = await db.from("groups").select("name").eq("id", row.group_id).maybeSingle();
+    groupName = (g as { name?: string } | null)?.name ?? null;
+  }
+  const dealer: DealerDetail = { ...(row as DealerDetail), group_name: groupName };
+
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const [feed, inv, inactiveCount, newest, added7] = await Promise.all([
+    buildFeedInfo(db, dealer),
+    fetchDealerInventory(db, dealer.dealer_id, opts),
+    db.from("dealer_vehicles").select("id", { count: "exact", head: true }).eq("dealer_id", dealer.dealer_id).neq("status", "active"),
+    db.from("dealer_vehicles").select("date_added").eq("dealer_id", dealer.dealer_id).eq("status", "active")
+      .order("date_added", { ascending: false, nullsFirst: false }).limit(1),
+    db.from("dealer_vehicles").select("id", { count: "exact", head: true }).eq("dealer_id", dealer.dealer_id)
+      .eq("status", "active").gte("date_added", sevenDaysAgo),
+  ]);
+
+  const stats: DealerStats = {
+    active_vehicles: feed.active_vehicles,
+    inactive_vehicles: inactiveCount.count ?? 0,
+    newest_added: (newest.data ?? [])[0]?.date_added ?? null,
+    added_7d: added7.count ?? 0,
+    last_update: feed.last_vehicle_update,
+  };
+
+  const idMismatch = !!dealer.inventory_dealer_id && dealer.inventory_dealer_id !== dealer.dealer_id;
+
+  return {
+    ...base,
+    dealer,
+    feed,
+    stats,
+    id_mismatch: idMismatch,
+    inventory: inv.rows,
+    total: inv.total,
+    page: inv.page,
+    verdict: buildDealerVerdict(dealer, feed, stats, idMismatch),
+  } as DealerReport;
 }
