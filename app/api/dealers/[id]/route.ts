@@ -109,16 +109,25 @@ export async function PATCH(
   if (!resolved) return NextResponse.json({ error: "Dealer not found" }, { status: 404 });
   const dealerUuid = resolved.id;
 
-  // group_admin / group_user get a narrow whitelist — the inventory trio
-  // plus logo_url (group admins operate member dealers with dealer_admin
-  // parity, and the Dealer Logo card saves via this PATCH). Reject anything
-  // outside the whitelist up front so the 403 reason is explicit (the
-  // whitelist below would silently drop unknown fields otherwise). Scope via
-  // authorizeDealerAction: group_admin → in-group; group_user (regional
-  // manager) → in-group AND tag-scoped. (group_user previously fell through
-  // this gate entirely — no branch — and could PATCH any dealer.)
+  // group_admin / group_user operate in-scope member dealers with dealer_admin
+  // parity (docs/group-admin-dealer-parity.md): every field a dealer_admin can
+  // save here — My Profile → Dealership Info + Shipping, the logo — plus the
+  // inventory trio they already had. Anything else (active, billing routing,
+  // account type, group, ETL lock…) stays super_admin-only and is rejected up
+  // front so the 403 reason is explicit (the whitelist below would silently
+  // drop it otherwise). Scope via authorizeDealerAction: group_admin →
+  // in-group; group_user (regional manager) → in-group AND tag-scoped.
   if (claims.role === "group_admin" || claims.role === "group_user") {
-    const allowed = new Set(["inventory_provider", "inventory_provider_is_dms", "inventory_dealer_id", "logo_url"]);
+    const allowed = new Set([
+      // Dealership Info (dealer_admin parity, 2026-10-20 — previously refused)
+      "name", "primary_contact", "primary_contact_email", "phone",
+      "address", "city", "state", "zip", "country", "website_url", "makes",
+      // Shipping (Order Supplies ship-to) — dealer_admin parity
+      "shipping_name", "shipping_attention", "shipping_address", "shipping_address2",
+      "shipping_city", "shipping_state", "shipping_zip", "shipping_country", "shipping_phone",
+      "logo_url",
+      "inventory_provider", "inventory_provider_is_dms", "inventory_dealer_id",
+    ]);
     const submitted = Object.keys(body).filter(k => (body as Record<string, unknown>)[k] !== undefined);
     const extras = submitted.filter(k => !allowed.has(k));
     if (extras.length > 0) {
