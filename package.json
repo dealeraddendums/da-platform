@@ -29,7 +29,8 @@
     "test:image-builder": "tsx scripts/image-builder-verify-unit.ts",
     "test:svg-sanitize": "tsx scripts/svg-sanitize-verify-unit.ts",
     "test:qr-url": "tsx scripts/qr-url-verify-unit.ts",
-    "test:active-dealer": "tsx scripts/active-dealer-verify-unit.ts"
+    "test:active-dealer": "tsx scripts/active-dealer-verify-unit.ts",
+    "test:bg-profile": "tsx scripts/buyers-guide-profile-verify-unit.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

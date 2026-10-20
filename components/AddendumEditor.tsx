@@ -985,6 +985,7 @@ export default function AddendumEditor({ vehicle, dealerVehicleId, initialDocTyp
       {printDoc === 'buyer_guide' && (
         <BuyersGuideModal
           dealerVehicleId={dealerVehicleId}
+          vehicle={{ mileage: vehicle.MILEAGE, condition: vehicle.NEW_USED, certified: vehicle.CERTIFIED }}
           vehicleName={[vehicle.YEAR, vehicle.MAKE, vehicle.MODEL].filter(Boolean).join(" ") || "Vehicle"}
           onClose={() => setPrintDoc(null)}
           onPrinted={() => {

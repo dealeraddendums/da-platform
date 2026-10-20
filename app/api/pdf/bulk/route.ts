@@ -15,6 +15,7 @@ import { resolveTemplate, resolveSecondAddendum, createTemplateResolverCache, SE
 // how (fetch BG bytes from Supabase Storage, ship to service).
 import { buildBuyersGuidePdf } from "@/lib/buyers-guide-pdf";
 import { arrangeForPrint, printArrangement } from "@/lib/buyers-guide-duplex";
+import { resolveBuyersGuideWarranty } from "@/lib/buyers-guide-profile";
 import { useService as usePdfService, renderBulkViaService, type BulkItem, type PdfDocTypeTag } from "@/lib/pdf-service-client";
 import { BG_DEFAULT, IS_BG_DEFAULT, LAYOUT, LAYOUT_INFOSHEET, makeWidget } from "@/components/builder/constants";
 import { getGroupOptionsForDealer, getGroupDisclaimers, matchesRulesRow, autoMatchedLibraryRows, savedRowSurvivesLibraryRules, normalizeOptionName, buildLiveRequiredByName, newlyAddedLibraryMatches, libraryNameSet, libraryIdSet, libraryNameById, liveOptionName, pruneOrphanedDefaultRows } from "@/lib/options-engine";
@@ -196,10 +197,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             .eq("dealer_id", dv.dealer_id)
             .maybeSingle<{ buyers_guide_defaults: BuyersGuideDefaults | null; bg_preprinted_config: { enabled?: boolean; global?: { x?: number; y?: number }; fields?: Record<string, { x?: number; y?: number }> } | null }>();
 
-          const warranty: BuyersGuideDefaults = {
-            warranty_type: "as_is",
-            ...(bgSettings?.buyers_guide_defaults ?? {}),
-          };
+          // Guide by mileage / CPO (Limited only) — same resolver as the
+          // single route and the modal; rule off returns the defaults as-is.
+          const { warranty } = resolveBuyersGuideWarranty(
+            { warranty_type: "as_is", ...(bgSettings?.buyers_guide_defaults ?? {}) },
+            { mileage: dv.mileage, condition: dv.condition, certified: dv.certified },
+          );
           // Pre-printed-label mode (migration 150) — same semantics as the
           // single buyers-guide route: data-only at default coords + offsets.
           const bulkPp = bgSettings?.bg_preprinted_config;

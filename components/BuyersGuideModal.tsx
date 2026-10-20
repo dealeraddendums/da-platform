@@ -3,12 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import { printPdfFromBlobUrl } from "@/lib/print-pdf";
 import type { BuyersGuideDefaults } from "@/lib/db";
+import {
+  BG_SLOT_LABELS, applyBuyersGuideSlot, lowProfileOf, mileageRuleActive, selectBuyersGuideSlot,
+  type BgProfileVehicle, type BuyersGuideSlot,
+} from "@/lib/buyers-guide-profile";
 
 type Props = {
   dealerVehicleId: string;
   vehicleName: string;
   onClose: () => void;
   onPrinted?: () => void;
+  /** Mileage + condition/certified, for the dealer's guide-by-mileage/CPO rule. */
+  vehicle?: BgProfileVehicle;
 };
 
 const WARRANTY_LABELS: Record<string, string> = {
@@ -37,9 +43,15 @@ const NON_DEALER = [
   { key: "other_used", label: "Other used vehicle warranty applies" },
 ];
 
-export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose, onPrinted }: Props) {
+export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose, onPrinted, vehicle }: Props) {
   const [loading, setLoading] = useState(true);
   const [warranty, setWarranty] = useState<BuyersGuideDefaults>({ warranty_type: "as_is" });
+  /** Saved defaults, kept so a manual guide switch can restore the Low fields. */
+  const [saved, setSaved] = useState<BuyersGuideDefaults | null>(null);
+  /** Guide-by-mileage/CPO: what the rule picked, and what's selected now
+   *  (staff may override). Both null when the dealer's rule is off. */
+  const [autoSlot, setAutoSlot] = useState<BuyersGuideSlot | null>(null);
+  const [slot, setSlot] = useState<BuyersGuideSlot | null>(null);
   const [language, setLanguage] = useState<"en" | "es">("en");
   const [printMode, setPrintMode] = useState<PrintMode>("both_sides");
   /** Side of the last generated preview — drives the download filename. */
@@ -80,7 +92,13 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
       .then(j => {
         const bg = j.data?.buyers_guide_defaults;
         if (bg) {
-          setWarranty({ ...bg });
+          // Pre-fill from the profile the dealer's mileage/CPO rule picks for
+          // this vehicle (rule off → the defaults exactly as before).
+          const picked = vehicle ? selectBuyersGuideSlot(bg, vehicle) : null;
+          setSaved(bg);
+          setAutoSlot(picked);
+          setSlot(picked);
+          setWarranty(applyBuyersGuideSlot({ ...bg }, picked));
           // Open in the dealer's saved print mode. Changing the toggle below
           // only affects this guide — the saved default lives in Print
           // Settings → Buyer's Guide.
@@ -91,6 +109,8 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+    // Load once on open; `vehicle` is the vehicle this modal was opened for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -105,6 +125,14 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
 
   function setW<K extends keyof BuyersGuideDefaults>(key: K, val: BuyersGuideDefaults[K]) {
     setWarranty(w => ({ ...w, [key]: val }));
+  }
+
+  /** Manual guide switch: swap only the profile fields (Labor/Parts/Systems/
+   *  Duration/Non-Dealer); other edits on this screen are kept. */
+  function switchSlot(next: BuyersGuideSlot) {
+    if (!saved) return;
+    setSlot(next);
+    setWarranty(w => applyBuyersGuideSlot({ ...w, ...lowProfileOf(saved), mileage_rule: saved.mileage_rule }, next));
   }
 
   function toggleNdw(key: string) {
@@ -238,6 +266,20 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
                     <option value="es">Spanish</option>
                   </select>
                 </div>
+
+                {saved && mileageRuleActive(saved) && slot && (
+                  <div className="mb-4">
+                    <label className="label">Guide</label>
+                    <select className="input w-full" value={slot} onChange={e => switchSlot(e.target.value as BuyersGuideSlot)}>
+                      {(Object.keys(BG_SLOT_LABELS) as BuyersGuideSlot[]).map(s => (
+                        <option key={s} value={s}>{BG_SLOT_LABELS[s]}{s === autoSlot ? " — auto" : ""}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                      Picked by your mileage / CPO rule. Switch it for this guide only.
+                    </p>
+                  </div>
+                )}
 
                 <div className="mb-4">
                   <label className="label">Warranty Type *</label>

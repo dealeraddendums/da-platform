@@ -10,6 +10,7 @@ import type { BgKey } from "@/lib/buyers-guide-constants";
 import JSZip from "jszip";
 import { PDFDocument } from "pdf-lib";
 import { arrangeForPrint, printArrangement } from "@/lib/buyers-guide-duplex";
+import { resolveBuyersGuideWarranty } from "@/lib/buyers-guide-profile";
 
 /**
  * POST /api/pdf/buyers-guide
@@ -64,7 +65,7 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
   // ── Vehicle ───────────────────────────────────────────────────────────────
   const { data: dv } = await admin
     .from("dealer_vehicles")
-    .select("dealer_id, vin, make, model, year")
+    .select("dealer_id, vin, make, model, year, mileage, condition, certified")
     .eq("id", vehicleId)
     .maybeSingle();
 
@@ -101,9 +102,15 @@ async function handleBuyersGuide(req: NextRequest): Promise<NextResponse> {
   // guide to S3. Single-side prints skip it.
   const arrangement = printArrangement(savedDefaults);
   const forPrint = (buf: Buffer) => arrangeForPrint(buf, arrangement);
+  // Guide by mileage / CPO (Limited only): the rule picks this vehicle's
+  // profile as the base; the modal's fields (the operator's choice, which may
+  // be a manual profile switch) still override it, as before.
+  const { warranty: profileDefaults } = resolveBuyersGuideWarranty(
+    { warranty_type: 'as_is', ...savedDefaults },
+    { mileage: dv.mileage, condition: dv.condition, certified: dv.certified },
+  );
   const warranty: BuyersGuideDefaults = {
-    warranty_type: 'as_is',
-    ...savedDefaults,
+    ...profileDefaults,
     ...warrantyOverrides,
   };
 

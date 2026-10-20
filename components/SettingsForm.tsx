@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import MakeOverrides from "@/components/MakeOverrides";
 import CpoByMileageCard from "@/components/CpoByMileageCard";
-import type { DealerSettingsRow, TemplateRow, UserRole, BuyersGuideDefaults } from "@/lib/db";
+import type { DealerSettingsRow, TemplateRow, UserRole, BuyersGuideDefaults, BuyersGuideMileageRule, BuyersGuideWarrantyProfile } from "@/lib/db";
 import BuyersGuideAlignment from "@/components/BuyersGuideAlignment";
 import DealerLogoUploader from "@/components/DealerLogoUploader";
 import { BG_KEYS, BG_LABELS, type BgKey } from "@/lib/buyers-guide-constants";
@@ -366,6 +366,58 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
     });
   }
 
+  // Guide by mileage / CPO — lives in buyers_guide_defaults.mileage_rule.
+  function setBgRule(patch: Partial<BuyersGuideMileageRule>) {
+    setSettings(s => {
+      const bg = s.buyers_guide_defaults ?? { warranty_type: 'as_is' as const };
+      return { ...s, buyers_guide_defaults: { ...bg, mileage_rule: { ...bg.mileage_rule, ...patch } } };
+    });
+  }
+
+  function setBgProfile<K extends keyof BuyersGuideWarrantyProfile>(slot: "high" | "cpo", key: K, val: BuyersGuideWarrantyProfile[K]) {
+    setSettings(s => {
+      const bg = s.buyers_guide_defaults ?? { warranty_type: 'as_is' as const };
+      const rule = bg.mileage_rule ?? {};
+      return { ...s, buyers_guide_defaults: { ...bg, mileage_rule: { ...rule, [slot]: { ...rule[slot], [key]: val } } } };
+    });
+  }
+
+  /** Editor for the High or CPO profile — same Limited fields as the default. */
+  function bgProfileEditor(slot: "high" | "cpo", title: string, disabled: boolean) {
+    const p = settings.buyers_guide_defaults?.mileage_rule?.[slot] ?? {};
+    const ndw = p.non_dealer_warranties ?? [];
+    return (
+      <div className="mb-3" style={{ border: "1px solid var(--border)", borderRadius: 4, padding: 10 }}>
+        <p className="text-xs font-semibold mb-2" style={{ color: "var(--text-secondary)" }}>{title} <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>— Limited Warranty</span></p>
+        <div className="flex gap-3 mb-3">
+          <div className="flex-1">
+            <label className="label">Labor %</label>
+            <input className="input w-full" type="number" min={0} max={100} disabled={disabled} value={p.labor_pct ?? ""} onChange={e => setBgProfile(slot, "labor_pct", e.target.value === "" ? undefined : Number(e.target.value))} placeholder="50" />
+          </div>
+          <div className="flex-1">
+            <label className="label">Parts %</label>
+            <input className="input w-full" type="number" min={0} max={100} disabled={disabled} value={p.parts_pct ?? ""} onChange={e => setBgProfile(slot, "parts_pct", e.target.value === "" ? undefined : Number(e.target.value))} placeholder="50" />
+          </div>
+        </div>
+        <div className="mb-3">
+          <label className="label">Systems Covered</label>
+          <textarea className="input w-full" rows={2} style={{ height: "auto", resize: "vertical" }} disabled={disabled} value={p.systems_covered ?? ""} onChange={e => setBgProfile(slot, "systems_covered", e.target.value)} placeholder="Powertrain, Engine, Transmission" />
+        </div>
+        <div className="mb-3">
+          <label className="label">Duration</label>
+          <textarea className="input w-full" rows={2} style={{ height: "auto", resize: "vertical" }} disabled={disabled} value={p.duration ?? ""} onChange={e => setBgProfile(slot, "duration", e.target.value)} placeholder="30 days or 1,000 miles" />
+        </div>
+        <label className="label mb-2" style={{ display: "block" }}>Non-Dealer Warranties</label>
+        {NON_DEALER.map(({ key, label }) => (
+          <label key={key} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6, cursor: disabled ? "default" : "pointer" }}>
+            <input type="checkbox" disabled={disabled} checked={ndw.includes(key)} onChange={() => setBgProfile(slot, "non_dealer_warranties", ndw.includes(key) ? ndw.filter(k => k !== key) : [...ndw, key])} style={{ marginTop: 2, flexShrink: 0 }} />
+            <span className="text-xs" style={{ color: "var(--text-secondary)", lineHeight: 1.4 }}>{label}</span>
+          </label>
+        ))}
+      </div>
+    );
+  }
+
   async function handleSave() {
     if (!dealerId) return;
     setSaving(true);
@@ -507,6 +559,32 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
                   <label className="label">Duration</label>
                   <textarea className="input w-full" rows={2} style={{ height: "auto", resize: "vertical" }} value={settings.buyers_guide_defaults?.duration ?? ""} onChange={e => setBgDefaults("duration", e.target.value)} placeholder="30 days or 1,000 miles" />
                 </div>
+                {/* Guide by mileage / CPO: the fields above are the Low
+                    profile; High and CPO are full alternates picked per vehicle
+                    (lib/buyers-guide-profile.ts). Limited Warranty only. */}
+                {(() => {
+                  const rule = settings.buyers_guide_defaults?.mileage_rule;
+                  const off = rule?.enabled !== true;
+                  return (
+                    <div className="mb-3" style={{ border: "1px solid var(--border)", borderRadius: 4, padding: 12 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                        <input type="checkbox" checked={!off} onChange={e => setBgRule({ enabled: e.target.checked })} />
+                        <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Guide by mileage / CPO</span>
+                      </label>
+                      <p className="text-xs" style={{ color: "var(--text-muted)", marginTop: 4, marginBottom: 10 }}>
+                        Used vehicles at or above this mileage get the High guide; CPO vehicles get the CPO guide; everything else uses your default (Low). Limited Warranty guides only. Low = your default settings above.
+                      </p>
+                      <div style={{ opacity: off ? 0.5 : 1 }}>
+                        <div className="mb-3" style={{ maxWidth: 200 }}>
+                          <label className="label">Mileage threshold</label>
+                          <input className="input w-full" type="number" min={1} step={1000} disabled={off} value={rule?.threshold ?? ""} onChange={e => setBgRule({ threshold: e.target.value === "" ? null : Math.max(0, Math.round(Number(e.target.value))) })} placeholder="70000" />
+                        </div>
+                        {bgProfileEditor("high", "High mileage guide", off)}
+                        {bgProfileEditor("cpo", "CPO guide", off)}
+                      </div>
+                    </div>
+                  );
+                })()}
               </>
             )}
             <div className="mb-3">

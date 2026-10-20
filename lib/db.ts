@@ -531,6 +531,25 @@ export type BuyersGuideDefaults = {
    *  Honda, 2026-10-06). Opt-in; independent of flip_back_page, which still
    *  turns the BACK page wherever it lands. Same scope: printed output only. */
   back_page_first?: boolean;
+  /** Guide by mileage / CPO (Limited Warranty only). The fields above ARE the
+   *  "Low" profile; High and CPO are full alternates picked per vehicle at
+   *  generation time. Absent or enabled=false = one guide for every vehicle.
+   *  Resolved by lib/buyers-guide-profile.ts — never inline. */
+  mileage_rule?: BuyersGuideMileageRule;
+};
+
+/** The warranty fields one Buyer's Guide profile carries. */
+export type BuyersGuideWarrantyProfile = Pick<
+  BuyersGuideDefaults,
+  'labor_pct' | 'parts_pct' | 'systems_covered' | 'duration' | 'non_dealer_warranties'
+>;
+
+export type BuyersGuideMileageRule = {
+  enabled?: boolean;
+  /** Used vehicles with mileage >= threshold get the High profile. */
+  threshold?: number | null;
+  high?: BuyersGuideWarrantyProfile;
+  cpo?: BuyersGuideWarrantyProfile;
 };
 
 export type DealerCustomSizeRow = {
