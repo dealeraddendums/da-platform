@@ -14,6 +14,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
 import { hubspotConfigured, createConversationNote, updateConversationNote } from "@/lib/hubspot";
 import { hubspotHandoffEnabled, handoffSummary, publishToInbox, type HelpAttachment } from "@/lib/help-handoff";
+import { dacrmEnabled, notifyHumanRequested } from "@/lib/steven-dacrm";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dealeraddendums.com";
 const SUPPORT_EMAIL = "support@dealeraddendums.com";
@@ -87,7 +88,12 @@ export async function appendMessage(
     }).select("id").single();
   // 23505 on external_id = a retried relay for a reply already stored.
   if (error && error.code !== "23505") console.error("[help] appendMessage failed:", error.message);
-  await (admin as any).from("help_conversations").update({ updated_at: new Date().toISOString() }).eq("id", conversationId);
+  const now = new Date().toISOString();
+  await (admin as any).from("help_conversations").update({ updated_at: now }).eq("id", conversationId);
+  // A person has picked it up (status human_requested → agent_active for DA-CRM).
+  if (role === "agent" && data?.id) {
+    await (admin as any).from("help_conversations").update({ agent_engaged_at: now }).eq("id", conversationId).is("agent_engaged_at", null);
+  }
   return data?.id ?? null;
 }
 
@@ -131,8 +137,8 @@ export async function resolveAsker(
 }
 
 export interface EscalationResult {
-  channel: "hubspot" | "email" | "none";
-  /** True when a person can now reply inside the bubble (HubSpot). */
+  channel: "hubspot" | "dacrm" | "email" | "none";
+  /** True when a person can now reply inside the bubble (HubSpot or DA-CRM). */
   live: boolean;
   /** Poll cursor — the moment the conversation went live. */
   at?: string;
@@ -144,6 +150,10 @@ export interface EscalationResult {
  * HELP_HANDOFF_PROVIDER=hubspot; email otherwise, and email whenever the
  * HubSpot publish fails. Idempotent: an already-live conversation just returns
  * its cursor.
+ *
+ * DACRM_INTEGRATION_ENABLED (lib/steven-dacrm) runs DA-CRM alongside: every
+ * escalation is also sent to DA-CRM as human_requested, and when HubSpot isn't
+ * live for it DA-CRM becomes the live channel (support@ is still emailed).
  */
 export async function escalateConversation(conversationId: string): Promise<EscalationResult> {
   const admin = createAdminSupabaseClient();
@@ -153,8 +163,9 @@ export async function escalateConversation(conversationId: string): Promise<Esca
     .eq("id", conversationId).maybeSingle();
   if (!conv) return { channel: "none", live: false };
 
-  if (conv.handoff_provider === "hubspot" && conv.live_at) {
-    return { channel: "hubspot", live: true, at: new Date(new Date(conv.live_at).getTime() - 1000).toISOString() };
+  const liveAlready = conv.live_at && (conv.handoff_provider === "hubspot" || (conv.handoff_provider === "dacrm" && conv.status !== "resolved"));
+  if (liveAlready) {
+    return { channel: conv.handoff_provider, live: true, at: new Date(new Date(conv.live_at).getTime() - 1000).toISOString() };
   }
 
   if (await hubspotHandoffEnabled(conv.dealer_id)) {
@@ -171,12 +182,19 @@ export async function escalateConversation(conversationId: string): Promise<Esca
       await (admin as any).from("help_conversations").update({
         status: "escalated", escalated_at: now, handoff_provider: "hubspot", live_at: now, escalation_notified_at: now,
       }).eq("id", conversationId);
+      void notifyHumanRequested(conversationId);
       return { channel: "hubspot", live: true, at: new Date(Date.now() - 1000).toISOString() };
     }
     // fall through to email — a person must still hear about it
   }
 
   await escalateByEmail(conversationId);
+  if (dacrmEnabled()) {
+    const now = new Date().toISOString();
+    await (admin as any).from("help_conversations").update({ handoff_provider: "dacrm", live_at: now }).eq("id", conversationId);
+    void notifyHumanRequested(conversationId);
+    return { channel: "dacrm", live: true, at: new Date(Date.now() - 1000).toISOString() };
+  }
   return { channel: "email", live: false };
 }
 

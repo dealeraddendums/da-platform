@@ -11,6 +11,7 @@ import { redactSecrets } from "@/lib/secret-redact";
 import { createConversation, ownsConversation, appendMessage, escalateConversation, resolveAsker } from "@/lib/help-conversations";
 import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { publishToInbox } from "@/lib/help-handoff";
+import { notifyUserMessage } from "@/lib/steven-dacrm";
 
 // Sentinel the model appends (own final line) when it can't resolve and the user
 // needs a person. Buffered out of the stream (never shown), then triggers escalation.
@@ -92,11 +93,16 @@ export async function POST(req: NextRequest): Promise<Response> {
     const admin = createAdminSupabaseClient();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: conv } = await (admin as any).from("help_conversations")
-      .select("id, user_id, dealer_id, group_id, role, handoff_provider, live_at").eq("id", reqConvIdEarly).maybeSingle();
-    if (conv?.handoff_provider === "hubspot" && conv.live_at) {
+      .select("id, user_id, dealer_id, group_id, role, status, handoff_provider, live_at, dacrm_requested_at").eq("id", reqConvIdEarly).maybeSingle();
+    // DA-CRM-live (lib/steven-dacrm) until a DA-CRM agent closes it; HubSpot-live as before.
+    const live = conv?.live_at && (conv.handoff_provider === "hubspot" || (conv.handoff_provider === "dacrm" && conv.status !== "resolved"));
+    if (conv && live) {
       const mid = await appendMessage(conv.id, "user", lastUser.content);
-      const who = await resolveAsker(admin, conv);
-      await publishToInbox({ conversationId: conv.id, idempotencyId: mid ?? `${conv.id}:${Date.now()}`, text: lastUser.content, who, userId: conv.user_id });
+      if (conv.handoff_provider === "hubspot") {
+        const who = await resolveAsker(admin, conv);
+        await publishToInbox({ conversationId: conv.id, idempotencyId: mid ?? `${conv.id}:${Date.now()}`, text: lastUser.content, who, userId: conv.user_id });
+      }
+      void notifyUserMessage(conv, mid, lastUser.content);
       return new Response("", {
         headers: {
           "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store",

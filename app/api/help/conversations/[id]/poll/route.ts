@@ -20,6 +20,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   const after = req.nextUrl.searchParams.get("after") || "1970-01-01T00:00:00.000Z";
   const admin = createAdminSupabaseClient();
+  // Presence for DA-CRM's reply (`delivered`): stamp at most every ~15s, and
+  // only for the owner's own bubble (not super_admin viewing it).
+  const { data: conv } = await (admin as any).from("help_conversations")
+    .select("user_id, status, handoff_provider, last_seen_at").eq("id", params.id).maybeSingle();
+  if (conv && conv.user_id === claims.sub && (!conv.last_seen_at || Date.now() - new Date(conv.last_seen_at).getTime() > 15_000)) {
+    await (admin as any).from("help_conversations").update({ last_seen_at: new Date().toISOString() }).eq("id", params.id);
+  }
   const { data } = await (admin as any).from("help_messages")
     .select("id, role, content, sender_name, sender_email, attachments, created_at")
     .eq("conversation_id", params.id).eq("role", "agent").gt("created_at", after)
@@ -43,6 +50,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       })),
     })),
     at: rows.length ? rows[rows.length - 1].created_at : after,
+    // A DA-CRM agent closed it — the bubble drops back to Steven.
+    closed: conv?.handoff_provider === "dacrm" && conv?.status === "resolved",
     agent: lastAgent ? { name: lastAgent.sender_name, photo: photos.get((lastAgent.sender_email ?? "").trim().toLowerCase()) ?? null } : null,
   });
 }

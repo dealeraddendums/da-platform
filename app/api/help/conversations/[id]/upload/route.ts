@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { ownsConversation, appendMessage, resolveAsker } from "@/lib/help-conversations";
 import { storeHelpFile, publishToInbox, ALLOWED_HELP_MIME, MAX_HELP_FILE_BYTES } from "@/lib/help-handoff";
+import { notifyUserMessage } from "@/lib/steven-dacrm";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -21,8 +22,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const admin = createAdminSupabaseClient();
   const { data: conv } = await (admin as any).from("help_conversations")
-    .select("id, user_id, dealer_id, group_id, role, handoff_provider, live_at").eq("id", params.id).maybeSingle();
-  if (!conv || conv.handoff_provider !== "hubspot" || !conv.live_at) {
+    .select("id, user_id, dealer_id, group_id, role, status, handoff_provider, live_at, dacrm_requested_at").eq("id", params.id).maybeSingle();
+  const live = conv?.live_at && (conv.handoff_provider === "hubspot" || (conv.handoff_provider === "dacrm" && conv.status !== "resolved"));
+  if (!conv || !live) {
     return NextResponse.json({ error: "Files can be sent once you're talking to our team." }, { status: 409 });
   }
 
@@ -44,10 +46,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Upload failed — please try again." }, { status: 500 });
   }
   const mid = await appendMessage(conv.id, "user", caption, { attachments: [att] });
-  const who = await resolveAsker(admin, conv);
-  const pub = await publishToInbox({
-    conversationId: conv.id, idempotencyId: mid ?? `${conv.id}:${Date.now()}`, who, userId: conv.user_id,
-    text: caption || `Sent ${att.name}`, files: [{ name: att.name, mime: att.mime, bytes }],
-  });
-  return NextResponse.json({ ok: true, relayed: pub.ok, attachment: { name: att.name, mime: att.mime, size: att.size } });
+  // DA-CRM gets the caption + file name; the file itself stays in our private bucket.
+  void notifyUserMessage(conv, mid, [caption, `[file: ${att.name}]`].filter(Boolean).join("\n"));
+  let relayed = conv.handoff_provider === "dacrm";
+  if (conv.handoff_provider === "hubspot") {
+    const who = await resolveAsker(admin, conv);
+    const pub = await publishToInbox({
+      conversationId: conv.id, idempotencyId: mid ?? `${conv.id}:${Date.now()}`, who, userId: conv.user_id,
+      text: caption || `Sent ${att.name}`, files: [{ name: att.name, mime: att.mime, bytes }],
+    });
+    relayed = pub.ok;
+  }
+  return NextResponse.json({ ok: true, relayed, attachment: { name: att.name, mime: att.mime, size: att.size } });
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { ownsConversation, setFeedback, escalateConversation, logConversationToHubspot, canReviewConversations } from "@/lib/help-conversations";
+import { notifyClosed } from "@/lib/steven-dacrm";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Params = { params: { id: string } };
@@ -82,6 +83,9 @@ export async function PATCH(req: NextRequest, { params }: Params): Promise<NextR
   const { error: dbErr } = await (admin as any).from("help_conversations").update(patch).eq("id", params.id);
   if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
 
-  if (body.status === "resolved") void logConversationToHubspot(params.id); // fire-and-forget
+  if (body.status === "resolved") {
+    void logConversationToHubspot(params.id); // fire-and-forget
+    void notifyClosed(params.id, "agent");
+  }
   return NextResponse.json({ ok: true });
 }

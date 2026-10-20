@@ -135,6 +135,15 @@ export default function StevenChat({ firstName }: { firstName?: string | null } 
         if (fresh.length) {
           setMessages((cur) => [...cur, ...fresh.map((m) => ({ role: "agent" as const, content: m.body, sender: m.sender, photo: m.senderPhoto ?? null, files: m.attachments }))]);
         }
+        // A DA-CRM agent closed the conversation: back to Steven, and the next
+        // question starts a fresh conversation.
+        if (data.closed) {
+          liveRef.current = false;
+          convId.current = null;
+          setLive(false);
+          setEscalated(false);
+          setMessages((cur) => [...cur, { role: "system", content: "Our team closed this conversation. Ask Steven anything to start a new one." }]);
+        }
       } catch { /* keep polling */ }
     };
     void tick();
