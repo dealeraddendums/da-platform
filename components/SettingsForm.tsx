@@ -1072,7 +1072,11 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
           )}
 
           {/* Buyer's Guide tab content (also shown to isReadOnly roles) */}
-          {(isReadOnly || docTab === "buyers_guide") && <BuyersGuideTabContent />}
+          {/* Called, not rendered as <BuyersGuideTabContent />: a component
+              declared inside this render gets a new identity every render, so
+              React remounted the whole tab on each keystroke and every text
+              field lost focus after one character. */}
+          {(isReadOnly || docTab === "buyers_guide") && BuyersGuideTabContent()}
           {/* Pre-printed-label alignment (migration 150) — dealer_admin + admins.
               Per-DEALER print setting: the dealer's own FTC label stock carries
               the form; DA prints data-only at these calibrated positions. */}
