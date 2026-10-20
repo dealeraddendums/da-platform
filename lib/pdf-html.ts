@@ -1,6 +1,6 @@
 // Server-only: builds an HTML string for Puppeteer to render as a PDF.
 import { RESTYLER_ATTRIBUTION_TEXT, RESTYLER_ATTR_W, RESTYLER_ATTR_H, resolveRestylerAttrPos } from "@/lib/restyler";
-import { renderW } from '@/components/builder/widgetRenderer';
+import { renderW, resolveWholesaleAskingBase } from '@/components/builder/widgetRenderer';
 import { PAPERS } from '@/components/builder/constants';
 import type { Widget, PaperSize } from '@/components/builder/types';
 import { formatOptionPrice, parseOptionPriceValue, priceSetUsesDecimals, formatCurrencyAmount } from '@/lib/option-price';
@@ -150,7 +150,13 @@ export async function buildPdfHtml({
   const optionNumericValues = allOptions.map(o => parseOptionPriceValue(o.option_price));
   const requiredTotal = requiredOptions.reduce((s, o) => s + parseOptionPriceValue(o.option_price), 0);
   const allOptionsTotal = allOptions.reduce((s, o) => s + parseOptionPriceValue(o.option_price), 0);
-  const askingTotal = (msrpParsed ?? 0) + requiredTotal;
+  // Retail/Wholesale: when the template's widget resolves a wholesale price
+  // (MSRP − % / − $, or the price entered at Print Now), that price — not MSRP —
+  // is the Dealer Asking Price base. None resolved (skipped ask, bulk, mobile,
+  // no widget) → null → MSRP base exactly as before. Subtotal is unaffected.
+  const wholesaleBase = resolveWholesaleAskingBase(widgets, msrpParsed, retailWholesalePrice);
+  const askingBase = wholesaleBase ?? msrpParsed;
+  const askingTotal = (askingBase ?? 0) + requiredTotal;
   const suggestedTotal = (msrpParsed ?? 0) + allOptionsTotal;
   const decimals = alwaysShowCents === true || priceSetUsesDecimals([
     msrpParsed,
@@ -217,10 +223,11 @@ export async function buildPdfHtml({
     // survive when authoring with no vehicle context (vehicle == null).
     if (w.type === 'askbar' && vehicle) {
       if (paperSize === 'infosheet') {
-        // Infosheet: asking price = MSRP only (no addendum options total).
-        d.value = formatCurrencyAmount(msrpParsed ?? 0, decimals);
+        // Infosheet: asking price = MSRP (or the wholesale base) only — no
+        // addendum options total.
+        d.value = formatCurrencyAmount(askingBase ?? 0, decimals);
       } else {
-        // Asking price = MSRP + required (includable) options only.
+        // Asking price = MSRP (or the wholesale base) + required (includable) options only.
         d.value = formatCurrencyAmount(askingTotal, decimals);
       }
     }

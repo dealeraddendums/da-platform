@@ -9,7 +9,7 @@ import {
   DEFS, DEFAULT_CUSTOM_WIDGETS, snapV, makeWidget, makeStandardSeedWidget, getPaperDims,
   SAMPLE_SUGGESTED_ITEMS, VEHICLE_HEADER_FIELDS, VEHICLE_HEADER_FIELDS_OPT_IN,
 } from './constants';
-import { renderW } from './widgetRenderer';
+import { renderW, resolveWholesaleAskingBase } from './widgetRenderer';
 import RichTextEditor from '@/components/RichTextEditor';
 import { WATERMARK_BRANDS, watermarkUrl } from '@/lib/watermarks';
 import type { Widget, PaperSize, CustomWidgetDef, VehiclePreload, SavedTemplate, CustomSize } from './types';
@@ -233,8 +233,15 @@ function applyVehicleDataToWidgets(
       result[id] = lines.length ? { ...w, d: { ...w.d, text: lines.join('\n') } } : w;
     } else if (w.type === 'msrp' && vehicle.msrp) {
       result[id] = { ...w, d: { ...w.d, value: vehicle.msrp.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) } };
+    } else if (w.type === 'retail_wholesale' && vehicle.msrp && ((w.d.mode as string) || 'percent') !== 'ask') {
+      // Real MSRP so the struck price + wholesale line match the asking base
+      // below (and print). 'ask' keeps its authoring sample — nothing to ask here.
+      result[id] = { ...w, d: { ...w.d, live: true, msrpNum: vehicle.msrp } };
     } else if (w.type === 'askbar' && vehicle.msrp) {
-      result[id] = { ...w, d: { ...w.d, value: vehicle.msrp.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) } };
+      // Same base rule as print (pdf-html): a resolved Retail/Wholesale price
+      // replaces MSRP. The canvas can't ask, so 'ask' mode stays on MSRP here.
+      const base = resolveWholesaleAskingBase(Object.values(ws), vehicle.msrp) ?? vehicle.msrp;
+      result[id] = { ...w, d: { ...w.d, value: base.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) } };
     } else if (w.type === 'qrcode' && vehicle.vdp_link) {
       result[id] = { ...w, d: { ...w.d, url: vehicle.vdp_link } };
     } else {
@@ -3162,7 +3169,7 @@ function WidgetEditPanel({ widget: w, fontScale, dealerId, onUpdate, onAdjFont, 
             <span style={{ fontSize: 11, color: '#55595c' }}>Divider line below</span>
             <TogSwitch checked={d.divider !== false} onChange={v => u('divider', v)} />
           </div>
-          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>Display-only — does not change subtotal or asking-price math. Second price rounds to the nearest dollar.</div>
+          <div style={{ fontSize: 10, color: '#78828c', lineHeight: 1.5, paddingTop: 4 }}>When a wholesale price is used, it becomes the Dealer Asking Price base (wholesale + products) instead of MSRP. Subtotal is unaffected. Second price rounds to the nearest dollar.</div>
         </EpSection>
       )}
 

@@ -97,6 +97,43 @@ function markPreviewRow(row: string, isPreview: boolean): string {
   return isPreview ? `<div class="pv-row">${row}</div>` : row;
 }
 
+/**
+ * The Retail/Wholesale widget's second ("wholesale") price for a given MSRP —
+ * the ONE place this math lives. The renderer draws it; pdf-html uses it as the
+ * Dealer Asking Price base; the Builder canvas preload mirrors that.
+ * percent → MSRP − %, dollars → MSRP − $, ask → the price entered at Print Now
+ * (null when none was entered — skipped, bulk, mobile). Nearest whole dollar,
+ * never negative. null = no wholesale price in play.
+ */
+export function retailWholesaleSecondPrice(d: D, msrp: number, askPrice?: number | null): number | null {
+  const mode = (d.mode as string) || 'percent';
+  let second: number | null = null;
+  if (mode === 'percent') second = Math.round(msrp * (1 - (Number(d.percentOff) || 0) / 100));
+  else if (mode === 'dollars') second = Math.round(msrp - (Number(d.dollarsOff) || 0));
+  else if (mode === 'ask') {
+    second = typeof askPrice === 'number' && Number.isFinite(askPrice) ? Math.round(askPrice) : null;
+  }
+  if (second != null && second < 0) second = 0;
+  return second;
+}
+
+/** Dealer Asking Price base when the template has a Retail/Wholesale widget
+ *  whose wholesale price resolves (first such widget in template order); null
+ *  otherwise — the caller then bases off MSRP exactly as before. */
+export function resolveWholesaleAskingBase(
+  widgets: { type: string; d: D }[],
+  msrp: number | null,
+  askPrice?: number | null,
+): number | null {
+  if (msrp == null || !Number.isFinite(msrp)) return null;
+  for (const w of widgets) {
+    if (w.type !== 'retail_wholesale') continue;
+    const second = retailWholesaleSecondPrice(w.d ?? {}, msrp, askPrice);
+    if (second != null) return second;
+  }
+  return null;
+}
+
 export function renderW(type: string, d: D, fontScale: number): string {
   const fs = fontScale;
 
@@ -180,24 +217,16 @@ export function renderW(type: string, d: D, fontScale: number): string {
     // and, for mode 'ask', d.askPrice when the printer entered one. The canvas
     // never sets d.live, so sample numbers render in authoring ONLY — a real
     // print with NULL msrp renders NOTHING (no fabricated prices, the 23d09ef
-    // rule). Display-only: contributes to no subtotal/asking math.
+    // rule). Subtotal is unaffected; when the second price resolves it is the
+    // Dealer Asking Price base (pdf-html, via resolveWholesaleAskingBase).
     const sz = Math.round(11 * fs * ((d.fontSize as number) || 1));
     const live = d.live === true;
     const msrp = live
       ? (typeof d.msrpNum === 'number' && Number.isFinite(d.msrpNum) ? d.msrpNum : null)
       : 10000; // authoring sample
     if (msrp == null) return ''; // real print, no MSRP → render nothing
-    const mode = (d.mode as string) || 'percent';
     // Rounding rule: nearest whole dollar (Math.round), both modes.
-    let second: number | null = null;
-    if (mode === 'percent') second = Math.round(msrp * (1 - (Number(d.percentOff) || 0) / 100));
-    else if (mode === 'dollars') second = Math.round(msrp - (Number(d.dollarsOff) || 0));
-    else if (mode === 'ask') {
-      second = live
-        ? (typeof d.askPrice === 'number' && Number.isFinite(d.askPrice) ? Math.round(d.askPrice as number) : null)
-        : 9000; // authoring sample
-    }
-    if (second != null && second < 0) second = 0;
+    const second = retailWholesaleSecondPrice(d, msrp, live ? (d.askPrice as number | null | undefined) : 9000 /* authoring sample */);
     // Values stay whole-dollar rounded; the dealer's "Always show cents"
     // toggle (d.alwaysShowCents, set by pdf-html at print time only) just
     // appends .00 so this widget matches the rest of the sticker.
