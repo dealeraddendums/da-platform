@@ -264,7 +264,7 @@ export default function BuyersGuideModal({ dealerVehicleId, vehicleName, onClose
                     </div>
                     <div className="mb-4">
                       <label className="label">Duration</label>
-                      <input className="input w-full" value={warranty.duration ?? ""} onChange={e => setW("duration", e.target.value)} placeholder="30 days or 1,000 miles" />
+                      <textarea className="input w-full" rows={2} style={{ height: "auto", resize: "vertical" }} value={warranty.duration ?? ""} onChange={e => setW("duration", e.target.value)} placeholder="30 days or 1,000 miles" />
                     </div>
                   </>
                 )}

@@ -505,7 +505,7 @@ export default function SettingsForm({ fixedDealerId, fixedDealerUuid, role, gro
                 </div>
                 <div className="mb-3">
                   <label className="label">Duration</label>
-                  <input className="input w-full" value={settings.buyers_guide_defaults?.duration ?? ""} onChange={e => setBgDefaults("duration", e.target.value)} placeholder="30 days or 1,000 miles" />
+                  <textarea className="input w-full" rows={2} style={{ height: "auto", resize: "vertical" }} value={settings.buyers_guide_defaults?.duration ?? ""} onChange={e => setBgDefaults("duration", e.target.value)} placeholder="30 days or 1,000 miles" />
                 </div>
               </>
             )}
