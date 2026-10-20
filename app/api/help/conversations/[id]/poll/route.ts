@@ -23,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // Presence for DA-CRM's reply (`delivered`): stamp at most every ~15s, and
   // only for the owner's own bubble (not super_admin viewing it).
   const { data: conv } = await (admin as any).from("help_conversations")
-    .select("user_id, status, handoff_provider, last_seen_at").eq("id", params.id).maybeSingle();
+    .select("user_id, status, handoff_provider, dacrm_requested_at, last_seen_at").eq("id", params.id).maybeSingle();
   if (conv && conv.user_id === claims.sub && (!conv.last_seen_at || Date.now() - new Date(conv.last_seen_at).getTime() > 15_000)) {
     await (admin as any).from("help_conversations").update({ last_seen_at: new Date().toISOString() }).eq("id", params.id);
   }
@@ -50,8 +50,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       })),
     })),
     at: rows.length ? rows[rows.length - 1].created_at : after,
-    // A DA-CRM agent closed it — the bubble drops back to Steven.
-    closed: conv?.handoff_provider === "dacrm" && conv?.status === "resolved",
+    // Resolved after it was handed to DA-CRM (incl. a HubSpot-live one DA-CRM
+    // mirrored) — the bubble drops back to Steven. Pure-HubSpot chats unchanged.
+    closed: conv?.status === "resolved" && (conv.handoff_provider === "dacrm" || !!conv.dacrm_requested_at),
     agent: lastAgent ? { name: lastAgent.sender_name, photo: photos.get((lastAgent.sender_email ?? "").trim().toLowerCase()) ?? null } : null,
   });
 }
