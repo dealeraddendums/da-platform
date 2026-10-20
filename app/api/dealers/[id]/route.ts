@@ -3,7 +3,7 @@ import { normalizeOptionalWebsiteUrl } from "@/lib/website-url";
 import { z } from "zod";
 import { US_STATE_CODES } from "@/lib/constants/us-states";
 import { requireAuth, requireSuperAdmin } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { authorizeDealerAction } from "@/lib/dealer-authz";
 import type { DealerRow, DealerUpdate } from "@/lib/db";
 import { archiveCustomer, unarchiveCustomer, billingConfigured, updateCustomer, getTemplate, putTemplate } from "@/lib/billing";
@@ -381,6 +381,21 @@ export async function PATCH(
         .update({ downgraded_at: null, converted_at: new Date().toISOString() } as any)
         .eq("id", dealerUuid);
     }
+  }
+
+  // Who switched a dealer on or off, and when — the toggle used to leave no
+  // trace (DARCARS Orange Park CDJR, 2026-10-20: a deactivation nobody could
+  // attribute).
+  if (typeof patch.active === "boolean" && prevActive !== null && patch.active !== prevActive) {
+    fireWrite(
+      admin.from("admin_audit").insert({
+        admin_user_id: claims.sub,
+        action: patch.active ? "dealer_activated" : "dealer_deactivated",
+        target_dealer_id: (data as DealerRow).dealer_id,
+        metadata: { dealer_name: (data as DealerRow).name, dealer_uuid: dealerUuid, before: { active: prevActive }, after: { active: patch.active } },
+      }),
+      "dealer active audit",
+    );
   }
 
   // Event 5: archive/unarchive in da-billing on active flag transition.
