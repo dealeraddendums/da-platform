@@ -80,6 +80,11 @@ async function register() {
   const hook = (existing.items ?? []).find((w: any) => w.hook_url === WEBHOOK_URL);
   if (hook) console.log(`webhook already registered: ${WEBHOOK_URL} (id ${hook.id})`);
   else console.log(`${APPLY ? "creating" : "[dry-run] would create"} webhook ${WEBHOOK_URL} (HS256-signed)`);
+  if (hook) {
+    const subs: any = await dialpadFetch("/api/v2/subscriptions/call");
+    const sub = (subs.items ?? []).find((s: any) => String(s.webhook?.id) === String(hook.id));
+    if (sub) { console.log(`call subscription already exists: ${sub.id} (${(sub.call_states ?? []).length} states, ${sub.enabled ? "enabled" : "DISABLED"})`); return; }
+  }
   if (!APPLY) { console.log(`[dry-run] would subscribe call states: ${CALL_STATES.join(", ")}`); return; }
   const webhookId = hook?.id ?? (await dialpadFetch<any>("/api/v2/webhooks", { method: "POST", body: JSON.stringify({ hook_url: WEBHOOK_URL, secret }) })).id;
   // No target_type / target_id = every call in the company.
