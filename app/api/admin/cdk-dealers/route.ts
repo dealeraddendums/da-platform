@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
+import { loadCdkFeedStatus } from "@/lib/feed-health";
 
 // cdk_dealers table uses quoted UPPERCASE column names. PostgREST surfaces
 // them as-is via the JS client so .select('"DEALER_NAME"') etc. just works.
@@ -27,7 +28,10 @@ export async function GET(): Promise<NextResponse> {
     .select("*")
     .order("DEALER_NAME", { ascending: true });
   if (dbErr) return NextResponse.json({ error: dbErr.message }, { status: 500 });
-  return NextResponse.json({ data: (data ?? []) as CdkRow[] });
+  // Feed health per row (lib/feed-health.ts). Best effort: the list still loads without it.
+  const health = await loadCdkFeedStatus(admin, data ?? []).catch(() => null);
+  const rows = ((data ?? []) as CdkRow[]).map((r) => ({ ...r, feed_health: health?.get(String(r.DEALER_ID)) ?? null }));
+  return NextResponse.json({ data: rows });
 }
 
 /** POST /api/admin/cdk-dealers — create new CDK dealer row. super_admin only. */

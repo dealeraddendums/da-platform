@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
 import { PageHeader } from "@/components/PageHeader";
+import type { CdkFeedStatus } from "@/lib/feed-health";
+import { CDK_STALE_HOURS } from "@/lib/feed-health";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +14,7 @@ interface CdkRow {
   DEALER_NAME: string | null;
   NEW: string | null;
   LAST_DELTA?: string | null;
+  feed_health?: CdkFeedStatus | null;
 }
 
 type FormState = {
@@ -291,7 +294,7 @@ export default function CdkDealersPage() {
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: "var(--bg-subtle)", borderBottom: "1px solid var(--border)" }}>
-                {["Dealer Name", "Dealer ID", "iCompany", "New", "Actions"].map(h => (
+                {["Dealer Name", "Dealer ID", "iCompany", "New", "Feed health", "Actions"].map(h => (
                   <th key={h} className="px-4 py-2 text-left font-semibold" style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase" }}>{h}</th>
                 ))}
               </tr>
@@ -316,6 +319,7 @@ export default function CdkDealersPage() {
                           {isNew ? "Yes" : "No"}
                         </span>
                       </td>
+                      <td className="px-4 py-2.5"><FeedHealthCell h={r.feed_health ?? null} /></td>
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-2 flex-wrap">
                           {isNew && (
@@ -342,7 +346,7 @@ export default function CdkDealersPage() {
                     </tr>
                     {tr && (
                       <tr style={{ borderBottom: i < filtered.length - 1 ? "1px solid var(--border)" : "none" }}>
-                        <td colSpan={5} className="px-4 py-2 text-xs" style={{ background: tr.ok ? "#e8f5e9" : "#ffebee", color: tr.ok ? "#2e7d32" : "#c62828" }}>
+                        <td colSpan={6} className="px-4 py-2 text-xs" style={{ background: tr.ok ? "#e8f5e9" : "#ffebee", color: tr.ok ? "#2e7d32" : "#c62828" }}>
                           {tr.ok ? "✓" : "✕"} {tr.msg}
                           <button onClick={() => setTestResult(prev => ({ ...prev, [r.id]: null }))} style={{ background: "none", border: "none", color: "inherit", marginLeft: 12, cursor: "pointer", fontSize: 12, opacity: 0.6 }}>dismiss</button>
                         </td>
@@ -1114,6 +1118,24 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+/** Hours since the last successful CDK pull (red past CDK_STALE_HOURS), plus a failing pull's reason. */
+function FeedHealthCell({ h }: { h: CdkFeedStatus | null }) {
+  if (!h) return <span style={{ color: "var(--text-muted)" }}>—</span>;
+  const label = h.hoursSinceDelta == null ? "never pulled" : h.hoursSinceDelta < 1 ? "<1h ago" : `${h.hoursSinceDelta}h ago`;
+  const late = h.hoursSinceDelta == null || h.hoursSinceDelta > CDK_STALE_HOURS;
+  return (
+    <div title={h.reason ?? (h.lastDelta ? `Last successful pull ${new Date(h.lastDelta).toLocaleString()}` : undefined)}>
+      <span style={{ fontWeight: late ? 600 : 400, color: late ? "var(--error)" : "var(--text-secondary)" }}>{label}</span>
+      {h.failing && (
+        <div className="text-xs" style={{ color: "var(--error)", maxWidth: 260, whiteSpace: "normal" }}>{h.error ?? "Pull failing"}</div>
+      )}
+      {!h.failing && h.retired != null && h.retired > 0 && (
+        <div className="text-xs" style={{ color: "var(--text-muted)" }}>{h.retired} sold retired last refresh</div>
+      )}
     </div>
   );
 }
