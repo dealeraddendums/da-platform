@@ -3,6 +3,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { createGzip } from "node:zlib";
 import { PassThrough } from "node:stream";
+import { buildBackupReport, formatBytes, publishBackupReport, type BackupTableResult } from "@/lib/backup-report";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -109,6 +110,8 @@ async function backupTable(
   try {
     const gz = createGzip();
     const body = new PassThrough();
+    let bytes = 0;   // compressed size, for the run report
+    gz.on("data", (c: Buffer) => { bytes += c.length; });
     gz.pipe(body);
 
     const upload = new Upload({
@@ -151,8 +154,8 @@ async function backupTable(
     gz.end();
     await uploadDone;
 
-    console.log(`[backup-supabase] ✓ ${projectKey}/${table}: ${rowCount} rows (streamed) → s3://${BUCKET}/${s3Key}`);
-    return { table, ok: true, rows: rowCount, bytes: 0, s3_key: s3Key };
+    console.log(`[backup-supabase] ✓ ${projectKey}/${table}: ${rowCount} rows, ${formatBytes(bytes)} (streamed) → s3://${BUCKET}/${s3Key}`);
+    return { table, ok: true, rows: rowCount, bytes, s3_key: s3Key };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[backup-supabase] ✗ ${projectKey}/${table}: ${msg}`);
@@ -200,6 +203,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Fire-and-forget (sync-hubspot-computed pattern): the streamed run takes
   // ~an hour at 1,000 rows/page across ~7.5M rows, far past any LB/cron
   // timeout. EasyCron gets a fast 200; results land in the PM2 log.
+  const startedAt = new Date();
   void (async () => {
     const [daPlatform, daBilling] = await Promise.allSettled([
       backupProject("da-platform", PROJECTS["da-platform"], date),
@@ -221,7 +225,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     console.log(
       `[backup-supabase] Complete — da-platform: ${result["da-platform"].success} ok / ${result["da-platform"].failed} failed | da-billing: ${result["da-billing"].success} ok / ${result["da-billing"].failed} failed`
     );
-  })();
+
+    // One summary line → PM2 log, s3://…/_reports/, and the "[DA Backup] …" email the Morning Brief reads.
+    const tables: BackupTableResult[] = (["da-platform", "da-billing"] as const).flatMap((project) => {
+      const p = result[project];
+      if (p.tables.length) return p.tables.map((t) => (t.ok
+        ? { project, table: t.table, ok: true, rows: t.rows, bytes: t.bytes }
+        : { project, table: t.table, ok: false, error: t.error }));
+      const error = "error" in p ? String(p.error) : "project failed";
+      return PROJECTS[project].tables.map((table) => ({ project, table, ok: false, error }));
+    });
+    await publishBackupReport(s3, BUCKET, buildBackupReport(date, startedAt, new Date(), tables));
+  })().catch((e) => console.error("[backup-supabase] run crashed:", e instanceof Error ? e.message : e));
 
   return NextResponse.json({ ok: true, started: true, date });
 }
