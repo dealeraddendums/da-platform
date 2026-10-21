@@ -70,6 +70,9 @@
 - Buttons: Primary `#1976d2`, Success `#4caf50`, Danger `#ff5252`, Orange `#ffa500`
 - No gradients. No border-radius > 6px (pills at 20px OK). No animations > 150ms.
 
+## DA-CRM (staff-only module, `/crm`)
+Schema, phase plan, Dialpad, trial job, da-billing webhook contract and env vars: see `../CLAUDE.md` → **DA-CRM**. Migration `179_crm_foundation.sql`; code in `lib/crm/`, `app/(dashboard)/crm/`, `app/api/crm/`.
+
 ## Sidebar Navigation
 
 **Dealer roles:** Dashboard → Products → Builder → Users → My Profile → Print Settings → [divider] → Order Supplies

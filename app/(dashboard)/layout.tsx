@@ -19,6 +19,8 @@ import MainContent from "@/components/MainContent";
 import ProductFruitsWidget from "@/components/ProductFruitsWidget";
 import StevenChat from "@/components/StevenChat";
 import { BuilderBreadcrumbProvider } from "@/contexts/BuilderBreadcrumb";
+import { crmPermissions } from "@/lib/crm/access";
+import type { CrmNavContext } from "@/components/Sidebar";
 
 export default async function DashboardLayout({
   children,
@@ -179,6 +181,17 @@ export default async function DashboardLayout({
     await Promise.all(fetches);
   }
 
+  // ── DA-CRM (staff tool) — only super_admins holding the 'crm' permission ───
+  let crmNav: CrmNavContext | undefined;
+  if (isSuperAdmin) {
+    const perms = await crmPermissions(session.user.id, admin);
+    if (perms.crm) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: crmSettings } = await (admin as any).from("crm_settings").select("platform_name, logo_s3_key").eq("id", true).maybeSingle();
+      crmNav = { enabled: true, admin: perms.crmAdmin, name: crmSettings?.platform_name ?? "DA-CRM", hasLogo: !!crmSettings?.logo_s3_key };
+    }
+  }
+
   // ── Sidebar role ───────────────────────────────────────────────────────────
   // When a group_admin has selected a dealer, or super_admin is in dealer ghost mode,
   // show dealer nav items. When super_admin is in group ghost mode, show group_admin nav.
@@ -227,7 +240,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar role={sidebarRole} hideBuilder={isDealerRole && templatesLocked} showUpgrade={showUpgrade} showImageBuilder={profile?.can_use_image_builder === true} />
+      <Sidebar role={sidebarRole} hideBuilder={isDealerRole && templatesLocked} showUpgrade={showUpgrade} showImageBuilder={profile?.can_use_image_builder === true} crm={crmNav} />
       <div className="flex flex-col flex-1 overflow-hidden">
         <ImpersonationBanner />
         <PlatformBanner />

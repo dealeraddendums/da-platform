@@ -1,0 +1,31 @@
+{
+  "call_id": 900000000000002,
+  "master_call_id": null,
+  "entry_point_call_id": null,
+  "state": "hangup",
+  "direction": "inbound",
+  "external_number": "+12125550188",
+  "internal_number": "+18014159435",
+  "target": {
+    "phone": "+18014159435",
+    "type": "user",
+    "id": 5908860123456789,
+    "name": "Support Agent",
+    "email": "support-agent@example.com",
+    "office_id": 4632479632575683
+  },
+  "contact": {
+    "phone": "+18015550199",
+    "type": "local",
+    "name": "Kia One",
+    "email": ""
+  },
+  "date_started": 1793003600000,
+  "date_rang": 1793000000500,
+  "date_connected": null,
+  "date_ended": 1793003641000,
+  "event_timestamp": 1793003641000,
+  "was_recorded": false,
+  "voicemail_link": "https://example.invalid/voicemail/vm-2.mp3",
+  "group_id": null
+}
