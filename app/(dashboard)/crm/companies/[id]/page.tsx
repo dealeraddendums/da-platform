@@ -13,6 +13,7 @@ import CallsTable from "@/components/crm/CallsTable";
 import CompanyHeaderControls from "@/components/crm/CompanyHeaderControls";
 import CompanyFilesPanel from "@/components/crm/CompanyFilesPanel";
 import CompanyDetailsForm from "@/components/crm/CompanyDetailsForm";
+import EmailFromTemplate from "@/components/crm/EmailFromTemplate";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames, timeline } from "@/lib/crm/queries";
 import { KIND_LABEL, STAGE_LABEL, contactName, fmtAgo, fmtDate, ROLE_TAG_LABEL, type Stage } from "@/lib/crm/format";
@@ -94,6 +95,9 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
           allBrands={(allBrandsRes.data ?? []).map((b: any) => b.brand)} currentUserId={userId}
         />
         {!perms.crmAdmin && <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--text-muted)" }}>A DA-CRM admin assigns company owners.</p>}
+        <div style={{ marginTop: 12 }}>
+          <EmailFromTemplate companyId={co.id} to={(co.emails ?? [])[0]?.address ?? null} />
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: 4 }}>

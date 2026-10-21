@@ -7,6 +7,7 @@ import Timeline from "@/components/crm/Timeline";
 import AddNoteForm from "@/components/crm/AddNoteForm";
 import CallsTable from "@/components/crm/CallsTable";
 import ContactEditForm from "@/components/crm/ContactEditForm";
+import EmailFromTemplate from "@/components/crm/EmailFromTemplate";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames, timeline } from "@/lib/crm/queries";
 import { contactName, fmtDate, ROLE_TAG_LABEL } from "@/lib/crm/format";
@@ -44,7 +45,10 @@ export default async function CrmContactPage({ params }: { params: { id: string 
         <div><p className="label">Platform user</p>{c.user_id ? "Yes" : "No"}</div>
         <div><p className="label">Source</p>{c.source} · added {fmtDate(c.created_at)}</div>
       </div>
-      <ContactEditForm contact={c} />
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <ContactEditForm contact={c} />
+        <EmailFromTemplate companyId={c.company_id} contactId={c.id} to={c.email} />
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
         <div className="card">
           <p style={{ margin: 0, padding: "12px 16px", fontWeight: 600 }}>Timeline</p>
