@@ -65,6 +65,7 @@ export interface Rosters { fortellis: Set<string>; cdk: Set<string>; tekion: Set
 
 /** One CDK roster row's pull health (ETL2 jobs 9/10 + the 22:00 refresh). */
 export interface CdkFeedStatus {
+  rosterId: number | null;             // cdk_dealers.id — DEALER_ID is NOT unique (3PA0003717 = Rick Case Mazda + Kia Duluth)
   cdkId: string;
   name: string | null;
   mode: string | null;                 // cdk_dealers.NEW: "No" = hourly delta, "Yes" = waiting for its first bulk
@@ -77,17 +78,34 @@ export interface CdkFeedStatus {
   keptPrinted: number | null;          // absent from CDK but printed, so kept active
   stale: boolean;
   reason: string | null;               // why stale, in plain words
+  /** Other roster rows with the same DEALER_ID (the map holds the healthiest one). */
+  duplicates: CdkFeedStatus[];
 }
 
 const hoursSince = (iso: string | null) => iso && !Number.isNaN(Date.parse(iso)) ? (Date.now() - Date.parse(iso)) / 3_600_000 : null;
 
 /**
- * Every live (NEW <> 'Off') cdk_dealers row with its pull health. Rows come from
- * cdk_dealers itself, so a roster entry with no 5.0 store still appears.
+ * Every live (NEW <> 'Off') cdk_dealers row with its pull health, keyed by
+ * DEALER_ID. Rows come from cdk_dealers itself, so a roster entry with no 5.0
+ * store still appears. When several rows share a DEALER_ID the store is judged by
+ * the healthiest one; the rest ride along in `duplicates` (still reported).
  */
 export async function loadCdkFeedStatus(admin: Admin, roster?: any[]): Promise<Map<string, CdkFeedStatus>> {
+  const out = new Map<string, CdkFeedStatus>();
+  for (const c of await cdkRosterStatuses(admin, roster)) {
+    const cur = out.get(c.cdkId);
+    if (!cur) { out.set(c.cdkId, c); continue; }
+    const [keep, other] = cur.stale && !c.stale ? [c, cur] : [cur, c];
+    keep.duplicates = [...cur.duplicates, ...c.duplicates, other].filter((x) => x !== keep).map((x) => ({ ...x, duplicates: [] }));
+    out.set(c.cdkId, keep);
+  }
+  return out;
+}
+
+/** One status per cdk_dealers row (NEW <> 'Off'). */
+export async function cdkRosterStatuses(admin: Admin, roster?: any[]): Promise<CdkFeedStatus[]> {
   const [rows, st] = await Promise.all([
-    roster ? Promise.resolve({ data: roster, error: null }) : admin.from("cdk_dealers").select("DEALER_ID, DEALER_NAME, NEW, LAST_DELTA"),
+    roster ? Promise.resolve({ data: roster, error: null }) : admin.from("cdk_dealers").select("id, DEALER_ID, DEALER_NAME, NEW, LAST_DELTA"),
     admin.from("admin_settings").select("value").eq("key", CDK_RUN_STATUS_KEY).maybeSingle(),
   ]);
   if (rows.error) throw new Error(rows.error.message);
@@ -100,7 +118,7 @@ export async function loadCdkFeedStatus(admin: Admin, roster?: any[]): Promise<M
   };
   const delta = current("delta");
   const refresh = current("refresh");
-  const out = new Map<string, CdkFeedStatus>();
+  const out: CdkFeedStatus[] = [];
   for (const r of (rows.data ?? []) as any[]) {
     const mode = r.NEW == null ? null : String(r.NEW).trim();
     if ((mode ?? "").toLowerCase() === "off") continue;
@@ -112,7 +130,9 @@ export async function loadCdkFeedStatus(admin: Admin, roster?: any[]): Promise<M
     const failed = [d, f].find((x) => x && x.ok === false) ?? null;
     const failing = !!failed;
     const old = h == null || h > CDK_STALE_HOURS;
-    out.set(cdkId, {
+    const waiting = (mode ?? "").toLowerCase() === "yes";
+    out.push({
+      rosterId: r.id ?? null,
       cdkId,
       name: r.DEALER_NAME ?? null,
       mode,
@@ -125,8 +145,9 @@ export async function loadCdkFeedStatus(admin: Admin, roster?: any[]): Promise<M
       keptPrinted: typeof f?.kept_printed === "number" ? f.kept_printed : null,
       stale: failing || old,
       reason: failing ? `CDK pull failing: ${failed?.error ?? "error"}`
-        : old ? (h == null ? "never had a successful CDK pull" : `no successful CDK pull in ${Math.round(h)}h`)
+        : old ? (h == null ? (waiting ? "waiting for its first CDK bulk — none has succeeded" : "never had a successful CDK pull") : `no successful CDK pull in ${Math.round(h)}h`)
         : null,
+      duplicates: [],
     });
   }
   return out;
@@ -136,7 +157,7 @@ export async function loadCdkFeedStatus(admin: Admin, roster?: any[]): Promise<M
 export async function loadRosters(admin: Admin): Promise<Rosters> {
   const [f, c, t] = await Promise.all([
     admin.from("fortellis_dealers").select("dealer_id").eq("enabled", true),
-    admin.from("cdk_dealers").select("DEALER_ID, DEALER_NAME, NEW, LAST_DELTA"),
+    admin.from("cdk_dealers").select("id, DEALER_ID, DEALER_NAME, NEW, LAST_DELTA"),
     admin.from("tekion_dealers").select("dealer_id"),
   ]);
   if (c.error) throw new Error(c.error.message);

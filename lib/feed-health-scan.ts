@@ -46,10 +46,14 @@ const ALERT_TO = [
   { email: "alex@dealeraddendums.com", name: "Alex Friedrich", type: "to" as const },
 ];
 
-/** A stale CDK roster entry no active 5.0 store carries, as a row the digest can list. */
-function cdkOrphanRow(c: CdkFeedStatus): ScanRow {
+/**
+ * A stale CDK roster row the per-store scan can't show: no active 5.0 store
+ * carries its id, or it shares its DEALER_ID with a healthier row. Keyed by
+ * roster row so the alert state tracks each one.
+ */
+function cdkRosterRow(c: CdkFeedStatus, why: string): ScanRow {
   return {
-    dealerId: c.cdkId, name: `${c.name ?? c.cdkId} (no active 5.0 store)`, onV5: false,
+    dealerId: c.rosterId != null ? `${c.cdkId}#${c.rosterId}` : c.cdkId, name: `${c.name ?? c.cdkId} (${why})`, onV5: false,
     provider: "CDK", providerSource: "inferred", feedSource: "CDK", feedDealerId: c.cdkId,
     roster: { fortellis: false, cdk: true, tekion: false },
     activeVehicles: 0, feedVehicles: 0, feedRefreshedLast3d: 0, refreshedPct: null,
@@ -87,7 +91,10 @@ export async function scanFleet(): Promise<{ rows: ScanRow[]; errors: { dealerId
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
   const seen = new Set(dealers.map((d) => String(d.dealer_id)));
-  for (const c of Array.from(rosters.cdkStatus.values())) if (c.stale && !seen.has(c.cdkId)) rows.push(cdkOrphanRow(c));
+  for (const c of Array.from(rosters.cdkStatus.values())) {
+    if (c.stale && !seen.has(c.cdkId)) rows.push(cdkRosterRow(c, "no active 5.0 store"));
+    for (const d of c.duplicates) if (d.stale) rows.push(cdkRosterRow(d, `CDK roster row sharing id ${d.cdkId}`));
+  }
   return { rows, errors };
 }
 
