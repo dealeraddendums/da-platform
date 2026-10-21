@@ -18,6 +18,7 @@ import {
 } from "./graph";
 import { ingestGraphMessage, MAILBOX_COLS, relinkThreadActivities, type Mailbox } from "./inbox-ingest";
 import { normEmail } from "./inbox-match";
+import type { TemplateContext } from "./template-vars";
 
 export const OUTBOUND_ATTACHMENT_CAP = 20 * 1024 * 1024;
 
@@ -34,6 +35,8 @@ export type SendInput = {
   subject: string;
   bodyHtml: string;
   attachments?: { name: string; contentType: string; bytes: Buffer }[];
+  /** Extra template variables for composeEmail (feed orders). */
+  templateContext?: TemplateContext;
 };
 
 export class SendError extends Error {
@@ -78,7 +81,7 @@ export async function sendInboxEmail(input: SendInput, admin: any = createAdminS
 
   const companyId = thread?.company_id ?? input.companyId ?? null;
   const contactId = thread?.contact_id ?? input.contactId ?? null;
-  const composed = await composeEmail({ subject: input.subject ?? "", bodyHtml: input.bodyHtml ?? "", companyId, contactId, staffId: input.staffId }, admin);
+  const composed = await composeEmail({ subject: input.subject ?? "", bodyHtml: input.bodyHtml ?? "", companyId, contactId, staffId: input.staffId, extraContext: input.templateContext }, admin);
   if (composed.unknown.length) throw new SendError(400, `Fill in or remove: ${composed.unknown.join(", ")}`);
 
   // ── Draft → patch → attachments → send ─────────────────────────────────────

@@ -95,10 +95,14 @@ export type ComposedEmail = {
 
 /** Render + sanitize + sign. `signature: false` only for previews of the body alone. */
 export async function composeEmail(
-  input: { subject: string; bodyHtml: string; companyId?: string | null; contactId?: string | null; staffId: string; signature?: boolean },
+  input: {
+    subject: string; bodyHtml: string; companyId?: string | null; contactId?: string | null; staffId: string; signature?: boolean;
+    /** Extra variable values (feed orders: supplier.*, approver.*, order.*); they win over the defaults. */
+    extraContext?: TemplateContext;
+  },
   admin: any = createAdminSupabaseClient(),
 ): Promise<ComposedEmail> {
-  const ctx = await buildTemplateContext(input, admin);
+  const ctx = { ...(await buildTemplateContext(input, admin)), ...(input.extraContext ?? {}) };
   const subject = renderTemplate(input.subject ?? "", ctx, { html: false });
   const body = renderTemplate(input.bodyHtml ?? "", ctx, { html: true });
   const sigRaw = input.signature === false ? null : (await staffIdentity(admin, input.staffId)).signature;

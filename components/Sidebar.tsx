@@ -612,6 +612,7 @@ function crmNav(admin: boolean, unread = 0): NavEntry[] {
     { label: "Calls", href: "/crm/communications/calls", roles: r, itemStyle: sub, icon: icon(<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />) },
     { label: "Inbox", href: "/crm/communications/inbox", roles: r, itemStyle: sub, badge: unread, icon: icon(<><path d="M4 4h16v16H4z" /><polyline points="4 13 9 13 10 16 14 16 15 13 20 13" /></>) },
     { label: "Chat", href: "/crm/communications/chat", roles: r, itemStyle: sub, icon: CRM_ICON },
+    { label: "Feeds", href: "/crm/communications/feeds", roles: r, itemStyle: sub, icon: icon(<><path d="M4 11a9 9 0 0 1 9 9" /><path d="M4 4a16 16 0 0 1 16 16" /><circle cx="5" cy="19" r="1" /></>) },
     { label: "Tickets", href: "/crm/communications/tickets", roles: r, itemStyle: sub, icon: icon(<><path d="M3 7h18v4a2 2 0 0 0 0 4v4H3v-4a2 2 0 0 0 0-4z" /></>) },
     { label: "Templates", href: "/crm/communications/templates", roles: r, itemStyle: sub, icon: icon(<><rect x="3" y="5" width="18" height="14" rx="2" /><polyline points="3 7 12 13 21 7" /></>) },
     { section: "", roles: r },

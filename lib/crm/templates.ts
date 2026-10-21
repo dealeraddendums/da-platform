@@ -3,7 +3,34 @@
 import { sanitizeTemplateHtml } from "./email-html";
 import { findUnknownTokens, findVariables } from "./template-vars";
 
-export const TEMPLATE_COLUMNS = "id, name, category, subject, body_html, variables, source, import_report, needs_review, archived, created_by, updated_by, created_at, updated_at";
+export const TEMPLATE_COLUMNS = "id, name, category, subject, body_html, variables, source, import_report, needs_review, archived, feed_kind, supplier_company_id, created_by, updated_by, created_at, updated_at";
+
+const FEED_KINDS = ["request", "request_pdf", "dealer_followup", "supplier_followup", "feed_assigned"];
+
+/**
+ * Feed-request templates (Phase 2b): { feed_kind, supplier_company_id? } puts a
+ * template in the "Feed requests" category — the global folder, or the
+ * supplier's own ("Feed requests · vAuto"). feed_kind null takes it out.
+ */
+export async function feedFolderFields(admin: any, b: any): Promise<{ fields: Record<string, unknown> } | { error: string }> {
+  if (!("feed_kind" in b) && !("supplier_company_id" in b)) return { fields: {} };
+  const kind = b.feed_kind ?? null;
+  if (kind === null) return { fields: { feed_kind: null, supplier_company_id: null } };
+  if (!FEED_KINDS.includes(kind)) return { error: "Unknown feed template kind" };
+  const sup = typeof b.supplier_company_id === "string" && b.supplier_company_id ? b.supplier_company_id : null;
+  let category = "Feed requests";
+  if (sup) {
+    const { data } = await admin.from("crm_company_directory").select("name, kind").eq("id", sup).maybeSingle();
+    if (data?.kind !== "feed_supplier") return { error: "That company isn't a feed supplier" };
+    category = `Feed requests · ${data.name}`.slice(0, 80);
+  }
+  return { fields: { feed_kind: kind, supplier_company_id: sup, category } };
+}
+
+/** 23505 → which unique rule it was. */
+export function duplicateMessage(e: { message?: string }): string {
+  return /feed_kind/.test(e.message ?? "") ? "That folder already has a template of this kind — edit or archive it first" : "A template with that name already exists";
+}
 
 /** Validated, sanitized fields from a create / update body (only keys present). */
 export function templateFields(b: any, opts: { create: boolean }): { fields: Record<string, unknown> } | { error: string } {

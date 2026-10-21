@@ -44,6 +44,24 @@ export const TEMPLATE_VARIABLES: VarGroup[] = [
     { key: "trial.days_left", label: "Days left", example: "18" },
     { key: "trial.ends_on", label: "Ends on", example: "November 9, 2026" },
   ] },
+  // Feed orders (Phase 2b) — filled only when a feed-request email is composed for an order.
+  { group: "supplier", label: "Feed supplier", vars: [
+    { key: "supplier.name", label: "Name", example: "vAuto" },
+    { key: "supplier.request_email", label: "Request email", example: "vat.support@coxautoinc.com" },
+  ] },
+  { group: "approver", label: "Feed approver", vars: [
+    { key: "approver.name", label: "Name", example: "Bill Meier" },
+    { key: "approver.first_name", label: "First name", example: "Bill" },
+    { key: "approver.email", label: "Email", example: "bill@herzogmeier.com" },
+  ] },
+  { group: "dealer", label: "Dealer feed", vars: [
+    { key: "dealer.dms", label: "DMS / feed provider", example: "Reynolds" },
+  ] },
+  { group: "order", label: "Feed order", vars: [
+    { key: "order.id", label: "Order number", example: "FO-1A2B3C" },
+    { key: "order.sent_on", label: "Request sent on", example: "October 21, 2026" },
+    { key: "order.feed_id", label: "Feed ID", example: "MP12601" },
+  ] },
   { group: "date", label: "Date", vars: [
     { key: "today", label: "Today", example: "October 21, 2026" },
   ] },
