@@ -36,7 +36,10 @@
     "crm:seed": "tsx scripts/crm-seed.ts",
     "crm:dialpad-replay": "tsx scripts/crm-dialpad-replay.ts",
     "crm:dialpad-setup": "tsx scripts/crm-dialpad-setup.ts",
-    "test:crm-templates": "tsx scripts/crm-templates-verify-unit.ts"
+    "test:crm-templates": "tsx scripts/crm-templates-verify-unit.ts",
+    "test:crm-inbox": "tsx scripts/crm-inbox-verify-unit.ts",
+    "crm:graph-setup": "tsx scripts/crm-graph-setup.ts",
+    "crm:graph-backfill": "tsx scripts/crm-graph-backfill.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

@@ -188,7 +188,9 @@ export default async function DashboardLayout({
     if (perms.crm) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: crmSettings } = await (admin as any).from("crm_settings").select("platform_name, logo_s3_key").eq("id", true).maybeSingle();
-      crmNav = { enabled: true, admin: perms.crmAdmin, name: crmSettings?.platform_name ?? "DA-CRM", hasLogo: !!crmSettings?.logo_s3_key };
+      // Unread Inbox threads for the Communications badge (0 if migration 181 isn't applied).
+      const { data: unread } = await (admin as any).rpc("crm_inbox_unread_count");
+      crmNav = { enabled: true, admin: perms.crmAdmin, name: crmSettings?.platform_name ?? "DA-CRM", hasLogo: !!crmSettings?.logo_s3_key, unread: typeof unread === "number" ? unread : 0 };
     }
   }
 

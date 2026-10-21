@@ -2,8 +2,8 @@
 
 // Pick an email template and render it for this company / contact as the
 // signed-in staff member (POST /api/crm/templates/render — variables filled,
-// Outlook-safe, signature appended). Phase 2 compose / reply drops `onUse`
-// straight into the message; until then EmailFromTemplate copies it.
+// Outlook-safe, signature appended). The Inbox composer asks for the body
+// only (signature={false}) and drops it into the message.
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -11,11 +11,13 @@ export type RenderedEmail = { subject: string; html: string; text: string; hasSi
 type T = { id: string; name: string; category: string | null; subject: string; needs_review: boolean };
 
 export default function TemplatePicker({
-  companyId, contactId, onRendered,
+  companyId, contactId, onRendered, signature = true,
 }: {
   companyId?: string | null;
   contactId?: string | null;
   onRendered: (r: RenderedEmail | null, templateId: string | null) => void;
+  /** false = body only (the composer; composeEmail adds the signature at send). */
+  signature?: boolean;
 }) {
   const [templates, setTemplates] = useState<T[]>([]);
   const [q, setQ] = useState("");
@@ -34,7 +36,7 @@ export default function TemplatePicker({
     setErr(null);
     fetch("/api/crm/templates/render", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ template_id: id, company_id: companyId ?? null, contact_id: contactId ?? null }),
+      body: JSON.stringify({ template_id: id, company_id: companyId ?? null, contact_id: contactId ?? null, signature }),
     }).then(async (r) => {
       const j = await r.json().catch(() => ({}));
       if (!live) return;

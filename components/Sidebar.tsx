@@ -18,11 +18,14 @@ type NavItem = {
   exact?: boolean;
   /** Extra path prefixes that also mark this item active. */
   alsoActive?: string[];
+  /** Count bubble (DA-CRM unread Inbox threads). */
+  badge?: number;
 };
 
 type NavSection = {
   section: string;
   roles: UserRole[];
+  badge?: number;
 };
 
 type NavEntry = NavItem | NavSection;
@@ -583,23 +586,31 @@ const nav: NavEntry[] = [
 // On /crm routes the sidebar swaps to the CRM nav (the layout only passes
 // `crm` to users holding the 'crm' staff permission; /crm pages enforce it
 // again). Never shown to dealer or group roles.
-export type CrmNavContext = { enabled: boolean; admin: boolean; name: string; hasLogo: boolean };
+export type CrmNavContext = { enabled: boolean; admin: boolean; name: string; hasLogo: boolean; unread?: number };
 
 const icon = (d: React.ReactNode) => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">{d}</svg>
 );
 const CRM_ICON = icon(<><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><line x1="8" y1="9" x2="16" y2="9" /><line x1="8" y1="13" x2="13" y2="13" /></>);
 
-function crmNav(admin: boolean): NavEntry[] {
+function NavBadge({ n }: { n: number }) {
+  return (
+    <span aria-label={`${n} unread`} style={{ marginLeft: "auto", minWidth: 18, height: 18, padding: "0 5px", borderRadius: 9, background: "var(--orange)", color: "var(--text-on-orange)", fontSize: 10, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", letterSpacing: 0 }}>
+      {n > 99 ? "99+" : n}
+    </span>
+  );
+}
+
+function crmNav(admin: boolean, unread = 0): NavEntry[] {
   const r: UserRole[] = ["super_admin"];
   const sub: React.CSSProperties = { paddingLeft: 40, height: 38, fontSize: 13 };
   const items: NavEntry[] = [
     { label: "Dashboard", href: "/crm", exact: true, roles: r, icon: icon(<><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>) },
     { label: "Dealers", href: "/crm/dealers", alsoActive: ["/crm/companies"], roles: r, icon: icon(<><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></>) },
     { label: "Contacts", href: "/crm/contacts", roles: r, icon: icon(<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>) },
-    { section: "Communications", roles: r },
+    { section: "Communications", roles: r, badge: unread },
     { label: "Calls", href: "/crm/communications/calls", roles: r, itemStyle: sub, icon: icon(<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />) },
-    { label: "Inbox", href: "/crm/communications/inbox", roles: r, itemStyle: sub, icon: icon(<><path d="M4 4h16v16H4z" /><polyline points="4 13 9 13 10 16 14 16 15 13 20 13" /></>) },
+    { label: "Inbox", href: "/crm/communications/inbox", roles: r, itemStyle: sub, badge: unread, icon: icon(<><path d="M4 4h16v16H4z" /><polyline points="4 13 9 13 10 16 14 16 15 13 20 13" /></>) },
     { label: "Chat", href: "/crm/communications/chat", roles: r, itemStyle: sub, icon: CRM_ICON },
     { label: "Tickets", href: "/crm/communications/tickets", roles: r, itemStyle: sub, icon: icon(<><path d="M3 7h18v4a2 2 0 0 0 0 4v4H3v-4a2 2 0 0 0 0-4z" /></>) },
     { label: "Templates", href: "/crm/communications/templates", roles: r, itemStyle: sub, icon: icon(<><rect x="3" y="5" width="18" height="14" rx="2" /><polyline points="3 7 12 13 21 7" /></>) },
@@ -629,7 +640,7 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
       || (showImageBuilder && "href" in entry && entry.href === "/admin/image-builder"))
     .filter((entry) => !(hideBuilder && "href" in entry && (entry.href === "/builder" || entry.href === "/image-builder")));
   const inCrm = !!crm?.enabled && role === "super_admin" && (pathname === "/crm" || pathname.startsWith("/crm/"));
-  const visibleNav: NavEntry[] = inCrm ? crmNav(crm!.admin)
+  const visibleNav: NavEntry[] = inCrm ? crmNav(crm!.admin, crm!.unread ?? 0)
     : DEALER_NAV_ROLES.has(role) ? dealerOrdered(roleNav)
     : role === "super_admin" ? superAdminOrdered(crm?.enabled ? withCrmEntry(roleNav) : roleNav)
     : roleNav;
@@ -838,7 +849,7 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
                   fontFamily: "inherit",
                 }}
               >
-                <span>{entry.section}</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{entry.section}{!!entry.badge && <NavBadge n={entry.badge} />}</span>
                 <svg
                   width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
                   aria-hidden="true"
@@ -868,6 +879,7 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
             >
               {item.icon}
               <span>{item.label}</span>
+              {!!item.badge && <NavBadge n={item.badge} />}
             </Link>
           );
         }); })()}
