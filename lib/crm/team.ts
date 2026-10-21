@@ -1,7 +1,7 @@
 // DA-CRM team members (crm_staff_profiles). Two teams; Management's
 // specialities are capability tags.
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import DOMPurify from "isomorphic-dompurify";
+import { sanitizeTemplateHtml } from "./email-html";
 import { normalizePhone } from "./phone";
 
 export const TEAMS = { customer_support: "Customer Support", management: "Management" } as const;
@@ -9,9 +9,9 @@ export const CAPABILITIES = { tier1: "Tier 1", tier2: "Tier 2", feed_support: "F
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-/** Email signatures: formatting + links + images only. */
+/** Email signatures: the same strict email allowlist as templates (lib/crm/email-html.ts). */
 export function sanitizeSignature(html: string): string {
-  return DOMPurify.sanitize(html, { FORBID_TAGS: ["style", "iframe", "video", "audio", "source", "form", "input", "button", "object", "embed"] });
+  return sanitizeTemplateHtml(html);
 }
 
 export function parseWorkHours(v: unknown): Record<string, { start: string; end: string }> | null {

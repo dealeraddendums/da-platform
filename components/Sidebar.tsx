@@ -602,6 +602,7 @@ function crmNav(admin: boolean): NavEntry[] {
     { label: "Inbox", href: "/crm/communications/inbox", roles: r, itemStyle: sub, icon: icon(<><path d="M4 4h16v16H4z" /><polyline points="4 13 9 13 10 16 14 16 15 13 20 13" /></>) },
     { label: "Chat", href: "/crm/communications/chat", roles: r, itemStyle: sub, icon: CRM_ICON },
     { label: "Tickets", href: "/crm/communications/tickets", roles: r, itemStyle: sub, icon: icon(<><path d="M3 7h18v4a2 2 0 0 0 0 4v4H3v-4a2 2 0 0 0 0-4z" /></>) },
+    { label: "Templates", href: "/crm/communications/templates", roles: r, itemStyle: sub, icon: icon(<><rect x="3" y="5" width="18" height="14" rx="2" /><polyline points="3 7 12 13 21 7" /></>) },
     { section: "", roles: r },
     { label: "Trials", href: "/crm/trials", roles: r, icon: icon(<><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></>) },
     { label: "My tasks", href: "/crm/tasks", roles: r, icon: icon(<><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>) },

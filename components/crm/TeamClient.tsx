@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import RichTextEditor from "@/components/RichTextEditor";
+import EmailEditor from "./EmailEditor";
 import { formatPhone } from "@/lib/crm/phone";
 
 export type Member = {
@@ -219,7 +219,8 @@ function MemberEditor({ m, isAdmin, self, onDone }: { m: Member; isAdmin: boolea
 
       <div style={{ marginTop: 16 }}>
         <label className="label">Email signature</label>
-        <RichTextEditor value={sig} onChange={setSig} minHeight={110} toolbarOpen />
+        <EmailEditor value={sig} onChange={setSig} minHeight={110} variables={false} />
+        <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>Added to the end of every email you send from DA-CRM.</p>
       </div>
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 16 }}>
