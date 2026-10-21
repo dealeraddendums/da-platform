@@ -36,8 +36,9 @@ async function runPurgeJob(): Promise<void> {
     const objects = listRes.Contents ?? [];
     totalScanned += objects.length;
 
+    // crm/ holds DA-CRM call recordings (migration 179) — permanent, never purged.
     const stale = objects.filter(
-      o => o.Key && o.LastModified && o.LastModified < cutoff
+      o => o.Key && !o.Key.startsWith("crm/") && o.LastModified && o.LastModified < cutoff
     ) as { Key: string; LastModified: Date }[];
 
     for (let i = 0; i < stale.length; i += DELETE_CONCURRENCY) {

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DA-CRM Overview</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  @page { size: Letter; margin: 0.6in 0.65in 0.7in; }
+  :root { --navy:#2a2b3c; --orange:#ffa500; --blue:#1976d2; --app:#3a6897; --text:#333; --muted:#78828c; --border:#e0e0e0; --subtle:#f5f6f7; }
+  * { box-sizing: border-box; }
+  body { font-family: Roboto, Helvetica, Arial, sans-serif; color: var(--text); font-size: 10.5pt; line-height: 1.45; margin: 0; background: #fff; }
+  .cover { background: var(--navy); color: #fff; padding: 28px 30px 24px; border-radius: 6px; border-bottom: 5px solid var(--orange); }
+  .cover .row { display: flex; align-items: center; gap: 14px; }
+  .cover img { width: 46px; height: 46px; border-radius: 50%; background: rgba(255,255,255,.08); }
+  .cover h1 { margin: 0; font-size: 26pt; letter-spacing: -.01em; }
+  .cover p { margin: 10px 0 0; color: rgba(255,255,255,.8); font-size: 11pt; max-width: 6in; }
+  .meta { margin-top: 14px; font-size: 9pt; color: rgba(255,255,255,.6); }
+  table, tr { break-inside: avoid; }
+  h2 { break-after: avoid; font-size: 14pt; color: var(--navy); margin: 22px 0 8px; padding-bottom: 4px; border-bottom: 2px solid var(--orange); }
+  h3 { font-size: 11pt; color: var(--navy); margin: 14px 0 4px; }
+  p { margin: 6px 0; }
+  ul { margin: 4px 0 6px; padding-left: 18px; }
+  li { margin: 2px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 6px 0 4px; font-size: 9.5pt; }
+  th { text-align: left; background: var(--subtle); color: var(--muted); font-size: 8pt; text-transform: uppercase; letter-spacing: .05em; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .card { border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; break-inside: avoid; }
+  .card h3 { margin-top: 0; }
+  .pill { display: inline-block; font-size: 8pt; font-weight: 700; padding: 1px 7px; border-radius: 3px; }
+  .done { background: #e8f5e9; color: #2e7d32; }
+  .next { background: #fff8e1; color: #7a5c00; }
+  .later { background: #fafafa; color: #616161; border: 1px solid var(--border); }
+  .flow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+  .flow span.s { background: var(--blue); color: #fff; font-weight: 500; padding: 4px 10px; border-radius: 4px; font-size: 9.5pt; }
+  .flow span.x { background: #fff; color: var(--muted); border: 1px solid var(--border); padding: 4px 10px; border-radius: 4px; font-size: 9.5pt; }
+  .flow b { color: var(--muted); }
+  .action { border-left: 4px solid var(--orange); background: #fffaf0; padding: 8px 12px; border-radius: 0 6px 6px 0; margin: 8px 0; break-inside: avoid; }
+  .action h3 { margin: 0 0 2px; }
+  .num { display: inline-block; width: 18px; height: 18px; border-radius: 50%; background: var(--navy); color: #fff; font-size: 8.5pt; text-align: center; line-height: 18px; margin-right: 6px; }
+  code { font-family: "SF Mono", Menlo, monospace; font-size: 8.8pt; background: var(--subtle); padding: 0 3px; border-radius: 3px; }
+  .small { font-size: 9pt; color: var(--muted); }
+  .pb { break-before: page; }
+  .footer { margin-top: 18px; font-size: 8.5pt; color: var(--muted); border-top: 1px solid var(--border); padding-top: 6px; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="row">
+    <img src="../public/images/da-logo.png" alt="">
+    <h1>DA-CRM</h1>
+  </div>
+  <p>Our own customer platform, built inside DA Platform, replacing HubSpot's CRM, ticketing and workflow role for the team that supports roughly 2,100 franchise dealerships.</p>
+  <div class="meta">Project overview for Allan and the COO · October 20, 2026 · Phase 1 built (branch <code style="background:rgba(255,255,255,.12);color:#fff">crm-phase-1</code>, not yet deployed)</div>
+</div>
+
+<h2>What DA-CRM replaces, and why</h2>
+<p>Today, dealer relationships live in three places. Dealer and account data is in DA Platform. Conversations, tickets and follow-ups are in HubSpot. Calls are in Dialpad. A one-way sync keeps HubSpot roughly current, but nobody gets one picture of a dealer, and every new idea means another HubSpot property or workflow.</p>
+<p>DA-CRM puts that work next to the data it is about:</p>
+<ul>
+  <li><b>One record per dealership and group.</b> It points at the real DA Platform account, so names, plans and trial status are never copied and never drift.</li>
+  <li><b>One timeline.</b> Every call, email, chat, note, stage change, file, ticket and task, plus billing events from da-billing, lands in a single history per company and per contact.</li>
+  <li><b>Built around how we work.</b> We have no sales team, no contracts and no outbound prospecting: all business is inbound and Customer Support turns trials into paying dealers. The product says <i>Trial → Account setup &amp; training → Paying</i>, never "deal", "lead" or "prospect".</li>
+  <li><b>Staff only.</b> It lives at <code>/crm</code> behind a DA-CRM permission. Dealers never see it.</li>
+</ul>
+<p class="small">HubSpot keeps its marketing role for now. DA-CRM takes over CRM, ticketing and workflows. Retiring HubSpot completely is a decision for after Phase 7.</p>
+
+<h2>How it is organised</h2>
+<div class="grid">
+  <div class="card">
+    <h3>Companies</h3>
+    <p>There are four kinds: <b>dealers</b>, <b>groups</b>, <b>vendors</b> (paper and label suppliers, software vendors, associations) and <b>feed suppliers</b>. Only dealers have a pipeline stage, a trial clock and brands such as Chrysler, Jeep and Ford. Group pages list their member dealers. Any company can hold its own emails (for example support@), files such as feed-request PDFs, an owner and notes.</p>
+  </div>
+  <div class="card">
+    <h3>Team</h3>
+    <p>There are two teams, <b>Customer Support</b> and <b>Management</b>. Tier 1, Tier 2, Feed support and AR/AP are capability tags on a person, not separate teams. Each member has working hours, a time zone, a photo, an email signature and their Dialpad line. DA-CRM admins manage the team and assign company owners.</p>
+  </div>
+</div>
+<div class="flow"><span class="s">Trial</span><b>→</b><span class="s">Account setup &amp; training</span><b>→</b><span class="s">Paying</span><span class="x">Cancelled</span><span class="x">Lost</span></div>
+<p class="small">Every morning at 6:00 Pacific, the trial day is recalculated for each dealer in Trial. The timeline is noted at day 7, day 14, day 21 and expiry, and the dashboard lists the trials that end this week.</p>
+<p><b>Tickets vs. tasks.</b> A ticket is something that needs fixing. A task is something to do. Either one can be opened from a call, email, chat or company/contact record.</p>
+
+<h2>Phase plan</h2>
+<table>
+  <thead><tr><th style="width:11%">Phase</th><th style="width:17%">Module</th><th>What it delivers</th><th style="width:12%">Status</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><b>Foundation + Dialpad</b></td><td>Companies (every dealer and group back-filled automatically, plus vendors and feed suppliers), contacts, team, the single timeline, files, the trial pipeline and the daily trial job. Dialpad: every call logged and matched to a contact or company by phone number, with recordings, transcripts and Dialpad AI recaps. Unknown numbers land in an "Unmatched" queue for staff to assign. Click-to-call from any number, plus a nightly catch-up of missed calls. Signed webhooks to and from da-billing.</td><td><span class="pill done">Built</span></td></tr>
+    <tr><td>2</td><td><b>Inbox</b></td><td>The shared support mailbox (Microsoft 365) inside DA-CRM. Emails are threaded onto company and contact timelines, sent with each person's signature, and assigned to an owner.</td><td><span class="pill next">Next</span></td></tr>
+    <tr><td>3</td><td><b>Chat</b></td><td>When a dealer asks Steven (the in-app assistant) for a person, the chat is answered live from DA-CRM, and the conversation is saved to the timeline.</td><td><span class="pill later">Planned</span></td></tr>
+    <tr><td>4</td><td><b>Tickets</b></td><td>Things that need fixing, opened from any call, email, chat or record, with status, owner and history. Replaces HubSpot ticketing.</td><td><span class="pill later">Planned</span></td></tr>
+    <tr><td>5</td><td><b>Tasks</b></td><td>Things to do: follow-ups with due dates, plus "My tasks" for each team member.</td><td><span class="pill later">Planned</span></td></tr>
+    <tr><td>6</td><td><b>Workflows</b></td><td>Repeatable sequences such as trial follow-up, account setup and training, and win-back, replacing HubSpot workflows.</td><td><span class="pill later">Planned</span></td></tr>
+    <tr><td>7</td><td><b>Automations</b></td><td>Rules that react to timeline events, for example "payment failed → open a task for AR/AP" or "trial day 21 with no contact → alert the owner".</td><td><span class="pill later">Planned</span></td></tr>
+  </tbody>
+</table>
+<p class="small">The Phase 1 database already includes the ticket and task tables, so those phases add screens rather than rework. Ticket and task counts already appear on every company and on the dashboard.</p>
+
+<h3>Phase 1 screens</h3>
+<ul>
+  <li><b>Dashboard:</b> calls today, trials expiring this week, unmatched calls, plus placeholders for tickets and tasks.</li>
+  <li><b>Dealers:</b> tabs for Dealers, Groups and Partners. Each company page has a header (kind, brands, stage, owner, trial day, open tickets and tasks) and tabs for Timeline, Contacts, Calls, Files and Notes.</li>
+  <li><b>Contacts:</b> searchable list, and a detail page with its timeline and click-to-call.</li>
+  <li><b>Calls:</b> every Dialpad call, filterable by person, direction, outcome and date. Each call shows its recording, transcript and AI summary. Unmatched calls are assigned from here.</li>
+  <li><b>Trials:</b> dealers in Trial and in Setup &amp; training, with trial day, owner, last activity and days since last contact.</li>
+  <li><b>Team</b> (admins): member cards and editing, the DA-CRM name and logo, and webhook subscribers.</li>
+</ul>
+
+<h2 class="pb">Action items for Allan</h2>
+<p>In the steps below, "CC" means Claude Code: you hand that step to a Claude Code session, which does the server and database work. Steps 1, 3 and 4 can go to CC once you approve them. Steps 2, 5 and 6 need you.</p>
+<div class="action"><h3><span class="num">1</span>Approve, then apply the database migration</h3>
+<p>Review branch <code>crm-phase-1</code> in da-platform. Paste <code>supabase/migrations/179_crm_foundation.sql</code> into the Supabase SQL editor and run it. It only adds new tables and creates a DA-CRM record for every existing dealer and group. CC then deploys the code and runs the back-fill (<code>npm run crm:seed -- --all --apply</code>), which sets up brands, team profiles, a few test contacts and the clearly labelled test partners.</p></div>
+<div class="action"><h3><span class="num">2</span>Add two new secrets</h3>
+<p>Add <code>CRM_WEBHOOK_SECRET</code> and <code>CRM_EVENTS_TOKEN</code> (two long random values) to <code>/var/www/da-platform/.env.local</code>, next to the Dialpad and Microsoft keys that are already there. Share both with da-billing.</p></div>
+<div class="action"><h3><span class="num">3</span>Register the Dialpad webhook</h3>
+<p>The URL is <code>https://app.dealeraddendums.com/api/crm/dialpad/webhook</code>, signed with <code>DIALPAD_WEBHOOK_SECRET</code>. CC can do it in one step: <code>npm run crm:dialpad-setup -- --check --register --apply</code> creates the webhook and a company-wide call-event subscription. Then make one test call and confirm it appears under Calls.</p></div>
+<div class="action"><h3><span class="num">4</span>Map each team member to their Dialpad user</h3>
+<p>Each team member needs their Dialpad user linked for click-to-call and call attribution. <code>npm run crm:dialpad-setup -- --map --apply</code> matches people by email. Anyone it can't match is set on the Team page (Dialpad user id + number). Until someone is mapped, their phone buttons open the phone app instead.</p></div>
+<div class="action"><h3><span class="num">5</span>Schedule three jobs in EasyCron</h3>
+<p>All three send the <code>X-Cron-Secret</code> header as today:</p>
+<ul>
+  <li>Trial day: <code>/api/cron/crm-trial-day</code> at 06:00 America/Los_Angeles</li>
+  <li>Dialpad catch-up: <code>/api/cron/crm-dialpad-reconcile</code> nightly</li>
+  <li>Webhook retries: <code>/api/cron/crm-webhook-retry</code> every 5 minutes</li>
+</ul></div>
+<div class="action"><h3><span class="num">6</span>Microsoft 365 app registration (for Phase 2, Inbox)</h3>
+<p>The app's ID, secret and tenant are already in <code>.env.local</code>. Before Phase 2, confirm in Entra ID that the app has Microsoft Graph <b>application</b> permissions for mail (read, send, and mark read/move). Have it limited to the support mailbox only (an Exchange application access policy), and note when the client secret expires.</p></div>
+
+<h2>Decisions we need from you</h2>
+<ul>
+  <li><b>Teams and capabilities.</b> The seed places Allan and Alex in Management and Marlena, Claire and Carol in Customer Support, with guessed capabilities. Who is the sixth team member, and what should each person's tags be?</li>
+  <li><b>Pipeline sync.</b> When a dealer starts paying in DA Platform, should DA-CRM move them to Setup &amp; training (or Paying) automatically? Today stage changes are manual. The starting stages were taken from each account's current plan.</li>
+  <li><b>Recording storage.</b> Call recordings are copied to our S3 bucket under random, unguessable names. That bucket is public-read because dealer websites link to window-sticker PDFs. Should recordings get their own private bucket instead?</li>
+  <li><b>Billing events.</b> Which da-billing events should appear on the timeline (invoice sent, payment failed, card declined, others)? Should "payment failed" open a task for AR/AP once Tasks ships?</li>
+</ul>
+
+<div class="footer">DA-CRM · technical reference: <code>CLAUDE.md</code> → DA-CRM (schema, Dialpad, trial job, da-billing webhook contract, env vars).</div>
+</body>
+</html>

@@ -14,6 +14,10 @@ type NavItem = {
   disabled?: boolean;
   roles: UserRole[];
   itemStyle?: React.CSSProperties;
+  /** Active only on this exact path (the /crm dashboard). */
+  exact?: boolean;
+  /** Extra path prefixes that also mark this item active. */
+  alsoActive?: string[];
 };
 
 type NavSection = {
@@ -575,7 +579,43 @@ const nav: NavEntry[] = [
   },
 ];
 
-export default function Sidebar({ role = "dealer_user", hideBuilder = false, showUpgrade = false, showImageBuilder = false }: { role?: UserRole | "group_user"; hideBuilder?: boolean; showUpgrade?: boolean; showImageBuilder?: boolean }) {
+// ── DA-CRM (staff only) ───────────────────────────────────────────────────────
+// On /crm routes the sidebar swaps to the CRM nav (the layout only passes
+// `crm` to users holding the 'crm' staff permission; /crm pages enforce it
+// again). Never shown to dealer or group roles.
+export type CrmNavContext = { enabled: boolean; admin: boolean; name: string; hasLogo: boolean };
+
+const icon = (d: React.ReactNode) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">{d}</svg>
+);
+const CRM_ICON = icon(<><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><line x1="8" y1="9" x2="16" y2="9" /><line x1="8" y1="13" x2="13" y2="13" /></>);
+
+function crmNav(admin: boolean): NavEntry[] {
+  const r: UserRole[] = ["super_admin"];
+  const sub: React.CSSProperties = { paddingLeft: 40, height: 38, fontSize: 13 };
+  const items: NavEntry[] = [
+    { label: "Dashboard", href: "/crm", exact: true, roles: r, icon: icon(<><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>) },
+    { label: "Dealers", href: "/crm/dealers", alsoActive: ["/crm/companies"], roles: r, icon: icon(<><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></>) },
+    { label: "Contacts", href: "/crm/contacts", roles: r, icon: icon(<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>) },
+    { section: "Communications", roles: r },
+    { label: "Calls", href: "/crm/communications/calls", roles: r, itemStyle: sub, icon: icon(<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />) },
+    { label: "Inbox", href: "/crm/communications/inbox", roles: r, itemStyle: sub, icon: icon(<><path d="M4 4h16v16H4z" /><polyline points="4 13 9 13 10 16 14 16 15 13 20 13" /></>) },
+    { label: "Chat", href: "/crm/communications/chat", roles: r, itemStyle: sub, icon: CRM_ICON },
+    { label: "Tickets", href: "/crm/communications/tickets", roles: r, itemStyle: sub, icon: icon(<><path d="M3 7h18v4a2 2 0 0 0 0 4v4H3v-4a2 2 0 0 0 0-4z" /></>) },
+    { section: "", roles: r },
+    { label: "Trials", href: "/crm/trials", roles: r, icon: icon(<><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></>) },
+    { label: "My tasks", href: "/crm/tasks", roles: r, icon: icon(<><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>) },
+    { label: "Workflows", href: "/crm/workflows", roles: r, icon: icon(<><circle cx="6" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M6 9v3a3 3 0 0 0 3 3h6" /></>) },
+  ];
+  if (admin) items.push({ label: "Team", href: "/crm/team", roles: r, icon: icon(<><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>) });
+  items.push(
+    { section: "", roles: r },
+    { label: "DA Platform", href: "/dashboard", exact: true, roles: r, icon: icon(<><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></>) },
+  );
+  return items;
+}
+
+export default function Sidebar({ role = "dealer_user", hideBuilder = false, showUpgrade = false, showImageBuilder = false, crm }: { role?: UserRole | "group_user"; hideBuilder?: boolean; showUpgrade?: boolean; showImageBuilder?: boolean; crm?: CrmNavContext }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -587,8 +627,10 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
     .filter((entry) => entry.roles.includes(role as UserRole)
       || (showImageBuilder && "href" in entry && entry.href === "/admin/image-builder"))
     .filter((entry) => !(hideBuilder && "href" in entry && (entry.href === "/builder" || entry.href === "/image-builder")));
-  const visibleNav: NavEntry[] = DEALER_NAV_ROLES.has(role) ? dealerOrdered(roleNav)
-    : role === "super_admin" ? superAdminOrdered(roleNav)
+  const inCrm = !!crm?.enabled && role === "super_admin" && (pathname === "/crm" || pathname.startsWith("/crm/"));
+  const visibleNav: NavEntry[] = inCrm ? crmNav(crm!.admin)
+    : DEALER_NAV_ROLES.has(role) ? dealerOrdered(roleNav)
+    : role === "super_admin" ? superAdminOrdered(crm?.enabled ? withCrmEntry(roleNav) : roleNav)
     : roleNav;
 
   // Collapsed titled categories, remembered per browser. Everything starts
@@ -609,6 +651,13 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
       try { window.localStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
       return next;
     });
+  }
+
+  // The DA-CRM entry sits with the untitled top items, after My Profile.
+  function withCrmEntry(entries: NavEntry[]): NavEntry[] {
+    const at = entries.findIndex((e) => "section" in e);
+    const item: NavItem = { label: crm?.name || "DA-CRM", href: "/crm", roles: ["super_admin"], icon: CRM_ICON };
+    return at < 0 ? [...entries, item] : [...entries.slice(0, at), item, ...entries.slice(at)];
   }
 
   // See SUPER_ADMIN_* above. Untitled top items keep their order; any item the
@@ -683,6 +732,8 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
 
   function getIsActive(item: NavItem): boolean {
     if (item.disabled) return false;
+    if (item.exact) return pathname === item.href;
+    if (item.alsoActive?.some((p) => pathname === p || pathname.startsWith(p + "/"))) return true;
     if (item.href.includes("?")) {
       const [hrefPath, hrefSearch] = item.href.split("?");
       const hrefTab = new URLSearchParams(hrefSearch).get("tab");
@@ -704,8 +755,8 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
         style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
       >
         <img
-          src={brand.logoUrl}
-          alt={brand.displayName}
+          src={inCrm && crm?.hasLogo ? "/api/crm/settings/logo" : brand.logoUrl}
+          alt={inCrm ? crm?.name : brand.displayName}
           width={36}
           height={36}
           style={{ borderRadius: "50%", flexShrink: 0, objectFit: "contain", background: "rgba(255,255,255,0.06)" }}
@@ -714,7 +765,7 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
           className="font-semibold text-sm truncate"
           style={{ color: "var(--text-inverse)" }}
         >
-          {brand.displayName}
+          {inCrm ? crm?.name || "DA-CRM" : brand.displayName}
         </span>
       </div>
 
