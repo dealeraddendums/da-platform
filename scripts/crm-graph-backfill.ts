@@ -11,7 +11,7 @@
  *   … --restart ignores a saved deltaLink and walks from --days again.
  */
 import { createClient } from "@supabase/supabase-js";
-import { graphConfigured, initialDeltaUrl, walkDelta } from "../lib/crm/graph";
+import { graphConfigured, graphUserOf, initialDeltaUrl, walkDelta } from "../lib/crm/graph";
 import { activeMailboxes, FOLDERS, syncFolder } from "../lib/crm/inbox-sync";
 import { loadInboxContext } from "../lib/crm/inbox-ingest";
 import { loadScriptEnv } from "./crm-env";
@@ -37,7 +37,7 @@ async function main() {
     for (const folder of FOLDERS) {
       if (!APPLY) {
         let n = 0;
-        await walkDelta(initialDeltaUrl(mb.address, folder, since), async (ids) => { n += ids.length; });
+        await walkDelta(initialDeltaUrl(graphUserOf(mb), folder, since), async (ids) => { n += ids.length; });
         console.log(`[dry-run] ${mb.address} ${folder}: ${n} messages in the last ${DAYS} days`);
         continue;
       }

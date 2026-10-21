@@ -107,7 +107,16 @@ export async function graphFetchBytes(path: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
-const u = (address: string) => `/users/${encodeURIComponent(address)}`;
+// Every mailbox-scoped call goes to /users/{graph user id} — the mailbox's Entra
+// object id (crm_mailboxes.graph_user_id), never the address: support@ is an
+// alias on another mailbox, and the id survives renames.
+const u = (userId: string) => `/users/${encodeURIComponent(userId)}`;
+
+/** The Graph user id for a mailbox row; throws when it isn't set. */
+export function graphUserOf(mb: { address: string; graph_user_id?: string | null }): string {
+  if (!mb.graph_user_id) throw new GraphError(0, "not_configured", `crm_mailboxes.graph_user_id not set for ${mb.address}`);
+  return mb.graph_user_id;
+}
 
 // ── Messages ─────────────────────────────────────────────────────────────────
 
@@ -118,35 +127,35 @@ export const MESSAGE_SELECT = [
 ].join(",");
 
 /** One message by immutable id; null when it's gone (deleted / moved out of reach). */
-export async function getMessage(mailbox: string, id: string): Promise<any | null> {
+export async function getMessage(userId: string, id: string): Promise<any | null> {
   try {
-    return await graphFetch(`${u(mailbox)}/messages/${encodeURIComponent(id)}?$select=${MESSAGE_SELECT}`, { prefer: ['outlook.body-content-type="html"'] });
+    return await graphFetch(`${u(userId)}/messages/${encodeURIComponent(id)}?$select=${MESSAGE_SELECT}`, { prefer: ['outlook.body-content-type="html"'] });
   } catch (e) {
     if (e instanceof GraphError && e.status === 404) return null;
     throw e;
   }
 }
 
-export async function listAttachments(mailbox: string, messageId: string): Promise<any[]> {
-  const j: any = await graphFetch(`${u(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size,isInline`);
+export async function listAttachments(userId: string, messageId: string): Promise<any[]> {
+  const j: any = await graphFetch(`${u(userId)}/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size,isInline`);
   return j?.value ?? [];
 }
 
-export async function getAttachmentBytes(mailbox: string, messageId: string, attachmentId: string): Promise<Buffer> {
-  return graphFetchBytes(`${u(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/$value`);
+export async function getAttachmentBytes(userId: string, messageId: string, attachmentId: string): Promise<Buffer> {
+  return graphFetchBytes(`${u(userId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/$value`);
 }
 
 /** contentId isn't selectable on the base attachment type — read it per attachment. */
-export async function getAttachmentMeta(mailbox: string, messageId: string, attachmentId: string): Promise<any> {
-  return graphFetch(`${u(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}?$select=id,name,contentType,size,isInline,contentId`);
+export async function getAttachmentMeta(userId: string, messageId: string, attachmentId: string): Promise<any> {
+  return graphFetch(`${u(userId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}?$select=id,name,contentType,size,isInline,contentId`);
 }
 
 // ── Delta ────────────────────────────────────────────────────────────────────
 
 /** First delta URL for a folder: ids only, received on/after `since`. */
-export function initialDeltaUrl(mailbox: string, folder: GraphFolder, since: Date): string {
+export function initialDeltaUrl(userId: string, folder: GraphFolder, since: Date): string {
   const filter = encodeURIComponent(`receivedDateTime ge ${since.toISOString().replace(/\.\d{3}Z$/, "Z")}`);
-  return `${GRAPH_BASE}${u(mailbox)}/mailFolders/${folder}/messages/delta?$select=id,isDraft&$filter=${filter}`;
+  return `${GRAPH_BASE}${u(userId)}/mailFolders/${folder}/messages/delta?$select=id,isDraft&$filter=${filter}`;
 }
 
 /**
@@ -167,11 +176,11 @@ export async function walkDelta(startUrl: string, onIds: (ids: string[]) => Prom
 
 // ── Subscriptions ────────────────────────────────────────────────────────────
 
-export function subscriptionResource(mailbox: string, folder: GraphFolder): string {
-  return `users/${mailbox}/mailFolders('${folder}')/messages`;
+export function subscriptionResource(userId: string, folder: GraphFolder): string {
+  return `users/${userId}/mailFolders('${folder}')/messages`;
 }
 
-export async function createSubscription(mailbox: string, folder: GraphFolder): Promise<{ id: string; expirationDateTime: string }> {
+export async function createSubscription(userId: string, folder: GraphFolder): Promise<{ id: string; expirationDateTime: string }> {
   const clientState = crmEnv("MS_GRAPH_WEBHOOK_SECRET");
   if (!clientState) throw new GraphError(0, "not_configured", "MS_GRAPH_WEBHOOK_SECRET not set");
   return graphFetch("/subscriptions", {
@@ -179,7 +188,7 @@ export async function createSubscription(mailbox: string, folder: GraphFolder): 
     body: JSON.stringify({
       changeType: "created",
       notificationUrl: graphWebhookUrl(),
-      resource: subscriptionResource(mailbox, folder),
+      resource: subscriptionResource(userId, folder),
       expirationDateTime: new Date(Date.now() + SUBSCRIPTION_MINUTES * 60_000).toISOString(),
       clientState,
     }),
@@ -235,15 +244,19 @@ export function mergeQuotedBody(ourHtml: string, draftHtml: string | null | unde
 
 export type DraftPatch = {
   subject?: string;
+  from?: { emailAddress: { address: string; name?: string } };
   body: { contentType: "HTML"; content: string };
   toRecipients: ReturnType<typeof toGraphRecipients>;
   ccRecipients: ReturnType<typeof toGraphRecipients>;
   bccRecipients: ReturnType<typeof toGraphRecipients>;
 };
 
-export function buildDraftPatch(input: { subject?: string | null; html: string; quotedHtml?: string | null; to: Recipient[]; cc: Recipient[]; bcc: Recipient[] }): DraftPatch {
+export function buildDraftPatch(input: { subject?: string | null; from?: Recipient | null; html: string; quotedHtml?: string | null; to: Recipient[]; cc: Recipient[]; bcc: Recipient[] }): DraftPatch {
+  // `from` pins the sending address (e.g. the support@ alias, not the mailbox's primary).
+  const from = input.from ? toGraphRecipients([input.from])[0] : undefined;
   return {
     ...(input.subject != null ? { subject: input.subject } : {}),
+    ...(from ? { from } : {}),
     body: { contentType: "HTML", content: mergeQuotedBody(input.html, input.quotedHtml) },
     toRecipients: toGraphRecipients(input.to),
     ccRecipients: toGraphRecipients(input.cc),
@@ -255,32 +268,32 @@ export type ReplyMode = "reply" | "replyAll" | "forward";
 const CREATE: Record<ReplyMode, string> = { reply: "createReply", replyAll: "createReplyAll", forward: "createForward" };
 
 /** Draft reply / reply-all / forward of `messageId` (Graph fills recipients + quoted history). */
-export async function createReplyDraft(mailbox: string, messageId: string, mode: ReplyMode): Promise<any> {
-  return graphFetch(`${u(mailbox)}/messages/${encodeURIComponent(messageId)}/${CREATE[mode]}`, { method: "POST", body: "{}", prefer: ['outlook.body-content-type="html"'] });
+export async function createReplyDraft(userId: string, messageId: string, mode: ReplyMode): Promise<any> {
+  return graphFetch(`${u(userId)}/messages/${encodeURIComponent(messageId)}/${CREATE[mode]}`, { method: "POST", body: "{}", prefer: ['outlook.body-content-type="html"'] });
 }
 
-export async function createNewDraft(mailbox: string): Promise<any> {
-  return graphFetch(`${u(mailbox)}/messages`, { method: "POST", body: JSON.stringify({ subject: "", body: { contentType: "HTML", content: "" } }) });
+export async function createNewDraft(userId: string): Promise<any> {
+  return graphFetch(`${u(userId)}/messages`, { method: "POST", body: JSON.stringify({ subject: "", body: { contentType: "HTML", content: "" } }) });
 }
 
-export async function patchDraft(mailbox: string, draftId: string, patch: DraftPatch): Promise<any> {
-  return graphFetch(`${u(mailbox)}/messages/${encodeURIComponent(draftId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+export async function patchDraft(userId: string, draftId: string, patch: DraftPatch): Promise<any> {
+  return graphFetch(`${u(userId)}/messages/${encodeURIComponent(draftId)}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
-export async function sendDraft(mailbox: string, draftId: string): Promise<void> {
-  await graphFetch(`${u(mailbox)}/messages/${encodeURIComponent(draftId)}/send`, { method: "POST" });
+export async function sendDraft(userId: string, draftId: string): Promise<void> {
+  await graphFetch(`${u(userId)}/messages/${encodeURIComponent(draftId)}/send`, { method: "POST" });
 }
 
-export async function deleteDraft(mailbox: string, draftId: string): Promise<void> {
-  try { await graphFetch(`${u(mailbox)}/messages/${encodeURIComponent(draftId)}`, { method: "DELETE" }); } catch { /* best effort */ }
+export async function deleteDraft(userId: string, draftId: string): Promise<void> {
+  try { await graphFetch(`${u(userId)}/messages/${encodeURIComponent(draftId)}`, { method: "DELETE" }); } catch { /* best effort */ }
 }
 
 const SMALL_ATTACHMENT = 3 * 1024 * 1024;
 const CHUNK = 320 * 1024 * 10; // 3.125 MiB — upload-session chunks must be multiples of 320 KiB
 
 /** Attach a file to a draft: inline for < 3 MB, otherwise an upload session in chunks. */
-export async function addDraftAttachment(mailbox: string, draftId: string, file: { name: string; contentType: string; bytes: Buffer }): Promise<void> {
-  const base = `${u(mailbox)}/messages/${encodeURIComponent(draftId)}/attachments`;
+export async function addDraftAttachment(userId: string, draftId: string, file: { name: string; contentType: string; bytes: Buffer }): Promise<void> {
+  const base = `${u(userId)}/messages/${encodeURIComponent(draftId)}/attachments`;
   if (file.bytes.length < SMALL_ATTACHMENT) {
     await graphFetch(base, {
       method: "POST",
@@ -308,9 +321,9 @@ export async function addDraftAttachment(mailbox: string, draftId: string, file:
 // ── Diagnostics ──────────────────────────────────────────────────────────────
 
 /** Can the app read this mailbox? (Used by the setup script's --check.) */
-export async function probeMailbox(mailbox: string): Promise<{ ok: boolean; detail: string }> {
+export async function probeMailbox(userId: string): Promise<{ ok: boolean; detail: string }> {
   try {
-    const j: any = await graphFetch(`${u(mailbox)}/mailFolders/inbox?$select=displayName,totalItemCount,unreadItemCount`);
+    const j: any = await graphFetch(`${u(userId)}/mailFolders/inbox?$select=displayName,totalItemCount,unreadItemCount`);
     return { ok: true, detail: `${j.displayName}: ${j.totalItemCount} messages, ${j.unreadItemCount} unread` };
   } catch (e) {
     return { ok: false, detail: e instanceof Error ? e.message : String(e) };

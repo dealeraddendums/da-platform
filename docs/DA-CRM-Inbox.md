@@ -5,6 +5,20 @@ The DA-CRM Inbox (`/crm/communications/inbox`) syncs the shared mailboxes **supp
 mailbox itself, threaded in Outlook, so Outlook stays the system of record. Mandrill is for transactional
 system email only. The CRM never sends through Mandrill.
 
+**Graph addresses mailboxes by object id, not by email address.** Each `crm_mailboxes` row has a
+`graph_user_id` (the mailbox's Entra object id), and every Graph call is `/users/{graph_user_id}/…`.
+`address` is used only for display and as the sending address (`from` on every draft):
+
+| address (display / sending) | graph_user_id | Notes |
+|---|---|---|
+| support@dealeraddendums.com | `c5c91bb5-14ea-4408-bd6c-4760064f2817` | an alias on the mailbox whose primary username is "home" |
+| feeds@dealeraddendums.com | `8d4fe1f7-b311-402b-8bb9-75004244e11f` | shared mailbox |
+
+Migration 181 seeds both ids. A row without a `graph_user_id` is skipped, and `--check` reports it.
+Sending from the support@ alias rather than the primary address needs Exchange's
+`Set-OrganizationConfig -SendFromAliasEnabled $true`. support@'s Sent Items already show support@, so this
+looks to be in place. If a send ever fails with a send-as error, check this setting first.
+
 ## 1. Azure app registration (Allan, one time)
 
 The app already exists (its ids are `MS_TENANT_ID` / `MS_CLIENT_ID` / `MS_CLIENT_SECRET` in
@@ -88,8 +102,9 @@ before an expiry.
 ## Everyday operations
 
 - **Add a mailbox:**
-  1. Run `insert into crm_mailboxes (address, display_name, purpose) values ('x@dealeraddendums.com', 'Name', 'support');`
-     (`purpose` is `support` or `feeds`; widen the check constraint for a new kind).
+  1. Run `insert into crm_mailboxes (address, graph_user_id, display_name, purpose) values ('x@dealeraddendums.com', '<Entra object id>', 'Name', 'support');`
+     (`purpose` is `support` or `feeds`; widen the check constraint for a new kind). The object id is on the
+     user or shared mailbox in Entra, or from `(Get-Mailbox x@…).ExternalDirectoryObjectId`.
   2. Add the address to the `da-crm-graph` group.
   3. Wait for the policy to propagate.
   4. Run `crm:graph-setup -- --subscribe --apply`.

@@ -33,10 +33,11 @@ async function main() {
     await graphToken();
     console.log("token: ok (client credentials)");
     console.log(`webhook: ${graphWebhookUrl()} · MS_GRAPH_WEBHOOK_SECRET ${crmEnv("MS_GRAPH_WEBHOOK_SECRET") ? "set" : "MISSING"}`);
-    const { data: mbs } = await admin.from("crm_mailboxes").select("address, active").order("address");
+    const { data: mbs } = await admin.from("crm_mailboxes").select("address, graph_user_id, active").order("address");
     for (const m of (mbs ?? []).filter((x: any) => !ONLY || x.address === ONLY.toLowerCase())) {
-      const r = await probeMailbox(m.address);
-      console.log(`${m.address}${m.active ? "" : " (inactive)"}: ${r.ok ? "readable — " : "NOT readable — "}${r.detail}`);
+      if (!m.graph_user_id) { console.log(`${m.address}: graph_user_id NOT SET — set it to the mailbox's Entra object id`); process.exitCode = 1; continue; }
+      const r = await probeMailbox(m.graph_user_id);
+      console.log(`${m.address} (/users/${m.graph_user_id})${m.active ? "" : " (inactive)"}: ${r.ok ? "readable — " : "NOT readable — "}${r.detail}`);
       if (!r.ok) process.exitCode = 1;
     }
     const outside = opt("--outside");

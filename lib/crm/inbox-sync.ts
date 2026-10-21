@@ -9,8 +9,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createAdminSupabaseClient } from "@/lib/db";
-import { createSubscription, getMessage, initialDeltaUrl, renewSubscription, walkDelta, GraphError, type GraphFolder } from "./graph";
-import { ingestGraphMessage, loadInboxContext, type InboxContext, type Mailbox } from "./inbox-ingest";
+import { createSubscription, getMessage, graphUserOf, initialDeltaUrl, renewSubscription, walkDelta, GraphError, type GraphFolder } from "./graph";
+import { ingestGraphMessage, loadInboxContext, MAILBOX_COLS, type InboxContext, type Mailbox } from "./inbox-ingest";
 
 export const FOLDERS: GraphFolder[] = ["inbox", "sentitems"];
 const TOKEN_COL: Record<GraphFolder, string> = { inbox: "delta_token_inbox", sentitems: "delta_token_sent" };
@@ -35,7 +35,7 @@ export async function ingestById(admin: any, mailbox: Mailbox, id: string, folde
   try {
     const { data: known } = await admin.from("crm_emails").select("id").eq("graph_message_id", id).maybeSingle();
     if (known) { if (stats) stats.duplicate++; return; }
-    const msg = await getMessage(mailbox.address, id);
+    const msg = await getMessage(graphUserOf(mailbox), id);
     if (!msg) { if (stats) stats.skipped++; return; }
     const r = await ingestGraphMessage(admin, mailbox, msg, { folder, ctx });
     if (stats) stats[r.status === "stored" ? "stored" : r.status === "duplicate" ? "duplicate" : "skipped"]++;
@@ -55,15 +55,15 @@ export async function syncFolder(admin: any, mailbox: Mailbox, folder: GraphFold
   const stats: FolderSyncStats = { mailbox: mailbox.address, folder, seen: 0, stored: 0, duplicate: 0, skipped: 0, failed: 0 };
   const { data: row } = await admin.from("crm_mailboxes").select(TOKEN_COL[folder]).eq("id", mailbox.id).single();
   const saved: string | null = opts.restart ? null : row?.[TOKEN_COL[folder]] ?? null;
-  const start = saved ?? initialDeltaUrl(mailbox.address, folder, opts.since ?? new Date(Date.now() - 2 * 86_400_000));
   try {
+    const start = saved ?? initialDeltaUrl(graphUserOf(mailbox), folder, opts.since ?? new Date(Date.now() - 2 * 86_400_000));
     let link: string;
     try {
       link = await walkDelta(start, async (ids) => { stats.seen += ids.length; await pool(ids, 4, (id) => ingestById(admin, mailbox, id, folder, ctx, stats)); });
     } catch (e) {
       // An expired / invalid deltaLink (410 syncStateNotFound…) → start over from `since`.
       if (saved && e instanceof GraphError && (e.status === 410 || /syncState|resync/i.test(e.code ?? ""))) {
-        link = await walkDelta(initialDeltaUrl(mailbox.address, folder, opts.since ?? new Date(Date.now() - 7 * 86_400_000)),
+        link = await walkDelta(initialDeltaUrl(graphUserOf(mailbox), folder, opts.since ?? new Date(Date.now() - 7 * 86_400_000)),
           async (ids) => { stats.seen += ids.length; await pool(ids, 4, (id) => ingestById(admin, mailbox, id, folder, ctx, stats)); });
       } else throw e;
     }
@@ -76,7 +76,7 @@ export async function syncFolder(admin: any, mailbox: Mailbox, folder: GraphFold
 }
 
 export async function activeMailboxes(admin: any, only?: string): Promise<Mailbox[]> {
-  let q = admin.from("crm_mailboxes").select("id, address, display_name, purpose, active").eq("active", true).order("address");
+  let q = admin.from("crm_mailboxes").select(MAILBOX_COLS).eq("active", true).order("address");
   if (only) q = q.eq("address", only.toLowerCase());
   const { data, error } = await q;
   if (error) throw new Error(`crm_mailboxes: ${error.message}`);
@@ -108,7 +108,7 @@ export async function ensureSubscriptions(admin: any = createAdminSupabaseClient
         if (!apply) { out.push({ mailbox: mb.address, folder, action: subId ? "would_renew" : "would_create" }); continue; }
         let sub = subId ? await renewSubscription(subId) : null;
         const action: SubscriptionAction["action"] = sub ? "renewed" : "created";
-        if (!sub) sub = await createSubscription(mb.address, folder);
+        if (!sub) sub = await createSubscription(graphUserOf(mb), folder);
         await admin.from("crm_mailboxes").update({ [idCol]: sub.id, [expCol]: sub.expirationDateTime }).eq("id", mb.id);
         out.push({ mailbox: mb.address, folder, action, expires: sub.expirationDateTime });
       } catch (e) {
@@ -125,7 +125,7 @@ export async function ensureSubscriptions(admin: any = createAdminSupabaseClient
 export async function mailboxForSubscription(admin: any, subscriptionId: string): Promise<{ mailbox: Mailbox; folder: GraphFolder } | null> {
   // Graph subscription ids are GUIDs; anything else never reaches the filter string.
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(subscriptionId)) return null;
-  const { data } = await admin.from("crm_mailboxes").select("id, address, display_name, purpose, active, graph_subscription_id, graph_subscription_id_sent")
+  const { data } = await admin.from("crm_mailboxes").select(`${MAILBOX_COLS}, graph_subscription_id, graph_subscription_id_sent`)
     .or(`graph_subscription_id.eq.${subscriptionId},graph_subscription_id_sent.eq.${subscriptionId}`).maybeSingle();
   if (!data || !data.active) return null;
   return { mailbox: data as Mailbox, folder: data.graph_subscription_id === subscriptionId ? "inbox" : "sentitems" };

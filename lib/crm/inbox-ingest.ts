@@ -10,14 +10,16 @@
 
 import { randomUUID } from "crypto";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { getAttachmentBytes, getAttachmentMeta, listAttachments, type GraphFolder } from "./graph";
+import { getAttachmentBytes, getAttachmentMeta, graphUserOf, listAttachments, type GraphFolder } from "./graph";
 import { matchEmailParticipants, supabaseEmailLookup, type InboxRules } from "./inbox-match";
 import { baseSubject, isReplyAll, matchOrder, normalizeGraphMessage, participantsOf, priorMessage, skipReason, snippet, type Addr } from "./inbox-message";
 import { dispatchInboundEmail, type InboundEmailEvent } from "./email-hooks";
 import { putCrmObject } from "./recordings";
 import "./email-hook-modules";
 
-export type Mailbox = { id: string; address: string; display_name: string; purpose: "support" | "feeds"; active: boolean };
+export type Mailbox = { id: string; address: string; graph_user_id: string | null; display_name: string; purpose: "support" | "feeds"; active: boolean };
+/** crm_mailboxes columns every Mailbox select needs. */
+export const MAILBOX_COLS = "id, address, graph_user_id, display_name, purpose, active";
 
 export type InboxContext = { mailboxes: Mailbox[]; rules: InboxRules; loadedAt: number };
 
@@ -27,7 +29,7 @@ let ctxCache: InboxContext | null = null;
 export async function loadInboxContext(admin: any = createAdminSupabaseClient(), fresh = false): Promise<InboxContext> {
   if (!fresh && ctxCache && Date.now() - ctxCache.loadedAt < 60_000) return ctxCache;
   const [{ data: mbs, error }, { data: s }] = await Promise.all([
-    admin.from("crm_mailboxes").select("id, address, display_name, purpose, active").order("address"),
+    admin.from("crm_mailboxes").select(MAILBOX_COLS).order("address"),
     admin.from("crm_settings").select("email_ignore_senders, email_internal_domains").eq("id", true).maybeSingle(),
   ]);
   if (error) throw new Error(`crm_mailboxes: ${error.message}`);
@@ -147,7 +149,7 @@ export async function ingestGraphMessage(
   if (threadPatch.company_id) await relinkThreadActivities(admin, thread.id, threadPatch.company_id, threadPatch.contact_id ?? null);
 
   if (e.hasAttachments) {
-    await saveAttachments(admin, mailbox.address, e.graphMessageId, emailId, companyId).catch((err) =>
+    await saveAttachments(admin, graphUserOf(mailbox), e.graphMessageId, emailId, companyId).catch((err) =>
       console.error(`[crm-inbox] attachments ${emailId}:`, err instanceof Error ? err.message : err));
   }
 
@@ -199,8 +201,8 @@ export function attachmentKey(companyId: string | null, emailId: string, filenam
   return `crm/${companyId ?? "unmatched"}/email/${emailId}/${safe}`;
 }
 
-async function saveAttachments(admin: any, mailbox: string, graphId: string, emailId: string, companyId: string | null): Promise<void> {
-  const list = await listAttachments(mailbox, graphId);
+async function saveAttachments(admin: any, userId: string, graphId: string, emailId: string, companyId: string | null): Promise<void> {
+  const list = await listAttachments(userId, graphId);
   const used = new Set<string>();
   for (const a of list) {
     const isFile = /fileAttachment/i.test(a["@odata.type"] ?? "");
@@ -209,8 +211,8 @@ async function saveAttachments(admin: any, mailbox: string, graphId: string, ema
     used.add(name.toLowerCase());
     let s3Key: string | null = null, contentId: string | null = null;
     if (isFile && (a.size ?? 0) <= ATTACHMENT_MAX) {
-      if (a.isInline) contentId = (await getAttachmentMeta(mailbox, graphId, a.id).catch(() => null))?.contentId ?? null;
-      const bytes = await getAttachmentBytes(mailbox, graphId, a.id);
+      if (a.isInline) contentId = (await getAttachmentMeta(userId, graphId, a.id).catch(() => null))?.contentId ?? null;
+      const bytes = await getAttachmentBytes(userId, graphId, a.id);
       s3Key = attachmentKey(companyId, emailId, name);
       await putCrmObject(s3Key, bytes, a.contentType || "application/octet-stream");
     }

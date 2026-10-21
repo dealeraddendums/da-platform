@@ -17,7 +17,10 @@
 -- Items), each with its own delta link for the 10-minute fallback sync.
 create table if not exists public.crm_mailboxes (
   id                             uuid        primary key default gen_random_uuid(),
+  -- Display + sending address (may be an alias, e.g. support@ on the "home" mailbox).
   address                        text        not null check (address = lower(address) and address ~ '^[^@\s]+@[^@\s]+$'),
+  -- Entra object id of the mailbox; every Graph call is /users/{graph_user_id}, never the alias.
+  graph_user_id                  text        check (graph_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
   display_name                   text        not null,
   purpose                        text        not null check (purpose in ('support','feeds')),
   active                         boolean     not null default true,
@@ -32,12 +35,15 @@ create table if not exists public.crm_mailboxes (
   created_at                     timestamptz not null default now(),
   updated_at                     timestamptz not null default now()
 );
+alter table public.crm_mailboxes add column if not exists graph_user_id text;
 create unique index if not exists crm_mailboxes_address_uniq on public.crm_mailboxes (address);
+create unique index if not exists crm_mailboxes_graph_user_uniq on public.crm_mailboxes (graph_user_id) where graph_user_id is not null;
 
-insert into public.crm_mailboxes (address, display_name, purpose) values
-  ('support@dealeraddendums.com', 'DealerAddendums Support', 'support'),
-  ('feeds@dealeraddendums.com',   'DealerAddendums Feeds',   'feeds')
-on conflict (address) do nothing;
+-- support@ is an alias on the "home" mailbox; feeds@ is a shared mailbox.
+insert into public.crm_mailboxes (address, graph_user_id, display_name, purpose) values
+  ('support@dealeraddendums.com', 'c5c91bb5-14ea-4408-bd6c-4760064f2817', 'DealerAddendums Support', 'support'),
+  ('feeds@dealeraddendums.com',   '8d4fe1f7-b311-402b-8bb9-75004244e11f', 'DealerAddendums Feeds',   'feeds')
+on conflict (address) do update set graph_user_id = coalesce(public.crm_mailboxes.graph_user_id, excluded.graph_user_id);
 
 -- ── Threads ──────────────────────────────────────────────────────────────────
 create table if not exists public.crm_email_threads (

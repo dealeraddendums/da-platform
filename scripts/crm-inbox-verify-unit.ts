@@ -10,7 +10,7 @@ process.env.MS_GRAPH_WEBHOOK_SECRET = "test-client-state";
 
 import { matchEmailParticipants, isIgnoredSender, isInternalAddress, normEmail, type EmailMatchLookup } from "../lib/crm/inbox-match";
 import { normalizeGraphMessage, skipReason, isReplyAll, priorMessage, participantsOf, matchOrder, baseSubject, snippet } from "../lib/crm/inbox-message";
-import { buildDraftPatch, mergeQuotedBody, toGraphRecipients, validClientState, subscriptionResource, initialDeltaUrl } from "../lib/crm/graph";
+import { buildDraftPatch, graphUserOf, mergeQuotedBody, toGraphRecipients, validClientState, subscriptionResource, initialDeltaUrl } from "../lib/crm/graph";
 import { registerInboundEmailHandler, unregisterInboundEmailHandler, dispatchInboundEmail, type InboundEmailEvent } from "../lib/crm/email-hooks";
 import { displayEmailHtml } from "../lib/crm/inbox-display";
 import { ingestGraphMessage, attachmentKey, type InboxContext, type Mailbox } from "../lib/crm/inbox-ingest";
@@ -151,11 +151,17 @@ async function main() {
   eq("quoted body: none → ours only", mergeQuotedBody("<p>A</p>", ""), "<p>A</p>");
   const patch = buildDraftPatch({ subject: "RE: Labels", html: "<p>Hi</p>", quotedHtml: null, to: [{ email: "a@x.com" }], cc: [], bcc: [{ email: "B@x.com" }] });
   eq("draft PATCH shape", patch, { subject: "RE: Labels", body: { contentType: "HTML", content: "<p>Hi</p>" }, toRecipients: [{ emailAddress: { address: "a@x.com" } }], ccRecipients: [], bccRecipients: [{ emailAddress: { address: "b@x.com" } }] });
+  eq("draft PATCH: from pins the sending alias",
+    buildDraftPatch({ subject: null, from: { email: "Support@DealerAddendums.com", name: "DealerAddendums Support" }, html: "x", to: [], cc: [], bcc: [] }).from,
+    { emailAddress: { address: "support@dealeraddendums.com", name: "DealerAddendums Support" } });
+  eq("draft PATCH: no from unless given", "from" in patch, false);
+  eq("graphUserOf: the object id, never the alias", graphUserOf({ address: "support@dealeraddendums.com", graph_user_id: "c5c91bb5-14ea-4408-bd6c-4760064f2817" }), "c5c91bb5-14ea-4408-bd6c-4760064f2817");
+  eq("graphUserOf: missing id throws", (() => { try { graphUserOf({ address: "feeds@dealeraddendums.com", graph_user_id: null }); return "no throw"; } catch (e) { return e instanceof Error && /graph_user_id/.test(e.message); } })(), true);
   eq("draft PATCH: subject omitted when null", "subject" in buildDraftPatch({ subject: null, html: "x", to: [], cc: [], bcc: [] }), false);
   eq("send: cleanRecipients drops invalid + dupes", cleanRecipients([{ email: "A@b.com" }, { email: "a@b.com" }, { email: "nope" }]), [{ email: "a@b.com", name: null }]);
-  eq("subscription resource", subscriptionResource("feeds@dealeraddendums.com", "sentitems"), "users/feeds@dealeraddendums.com/mailFolders('sentitems')/messages");
-  eq("delta URL: ids only + receivedDateTime filter", initialDeltaUrl("support@dealeraddendums.com", "inbox", new Date("2026-07-22T00:00:00.000Z")),
-    "https://graph.microsoft.com/v1.0/users/support%40dealeraddendums.com/mailFolders/inbox/messages/delta?$select=id,isDraft&$filter=receivedDateTime%20ge%202026-07-22T00%3A00%3A00Z");
+  eq("subscription resource", subscriptionResource("8d4fe1f7-b311-402b-8bb9-75004244e11f", "sentitems"), "users/8d4fe1f7-b311-402b-8bb9-75004244e11f/mailFolders('sentitems')/messages");
+  eq("delta URL: ids only + receivedDateTime filter", initialDeltaUrl("c5c91bb5-14ea-4408-bd6c-4760064f2817", "inbox", new Date("2026-07-22T00:00:00.000Z")),
+    "https://graph.microsoft.com/v1.0/users/c5c91bb5-14ea-4408-bd6c-4760064f2817/mailFolders/inbox/messages/delta?$select=id,isDraft&$filter=receivedDateTime%20ge%202026-07-22T00%3A00%3A00Z");
   eq("clientState: match", validClientState("test-client-state"), true);
   eq("clientState: mismatch / missing", [validClientState("nope"), validClientState(undefined)], [false, false]);
   eq("attachment key: under the email row's uuid, filename made safe", attachmentKey(null, "e-1", "Signed form (1)/../x?.pdf"), "crm/unmatched/email/e-1/Signed form (1)_.._x_.pdf");
@@ -191,7 +197,7 @@ async function main() {
     const db = fakeDb({
       crm_contacts: [{ id: "ct-jane", company_id: "co-dealer", email: "jane@dealer.com", updated_at: "2026-09-01", deleted_at: null }],
     });
-    const mb: Mailbox = { id: "mb-support", address: "support@dealeraddendums.com", display_name: "Support", purpose: "support", active: true };
+    const mb: Mailbox = { id: "mb-support", address: "support@dealeraddendums.com", graph_user_id: "c5c91bb5-14ea-4408-bd6c-4760064f2817", display_name: "Support", purpose: "support", active: true };
     const ctx: InboxContext = { mailboxes: [mb], rules: RULES, loadedAt: Date.now() };
     const fired: string[] = [];
     registerInboundEmailHandler("t-ingest", (e) => { fired.push(e.email.id); });

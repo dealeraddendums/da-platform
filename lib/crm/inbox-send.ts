@@ -13,10 +13,10 @@
 import { createAdminSupabaseClient } from "@/lib/db";
 import { composeEmail } from "./email-compose";
 import {
-  addDraftAttachment, buildDraftPatch, createNewDraft, createReplyDraft, deleteDraft, getMessage, patchDraft, sendDraft,
+  addDraftAttachment, buildDraftPatch, createNewDraft, createReplyDraft, deleteDraft, getMessage, graphUserOf, patchDraft, sendDraft,
   type Recipient, type ReplyMode,
 } from "./graph";
-import { ingestGraphMessage, relinkThreadActivities, type Mailbox } from "./inbox-ingest";
+import { ingestGraphMessage, MAILBOX_COLS, relinkThreadActivities, type Mailbox } from "./inbox-ingest";
 import { normEmail } from "./inbox-match";
 
 export const OUTBOUND_ATTACHMENT_CAP = 20 * 1024 * 1024;
@@ -60,7 +60,7 @@ export async function sendInboxEmail(input: SendInput, admin: any = createAdminS
   // ── Mailbox + the CRM records the variables come from ─────────────────────
   let mailbox: Mailbox | null = null, original: any = null, thread: any = null;
   if (input.mode === "new") {
-    let q = admin.from("crm_mailboxes").select("id, address, display_name, purpose, active");
+    let q = admin.from("crm_mailboxes").select(MAILBOX_COLS);
     if (input.mailboxId) q = q.eq("id", input.mailboxId);
     else {
       const { data: s } = await admin.from("crm_settings").select("default_compose_mailbox").eq("id", true).maybeSingle();
@@ -72,7 +72,7 @@ export async function sendInboxEmail(input: SendInput, admin: any = createAdminS
     original = (await admin.from("crm_emails").select("id, thread_id, mailbox_id, graph_message_id").eq("id", input.emailId).maybeSingle()).data;
     if (!original) throw new SendError(404, "Message not found");
     thread = (await admin.from("crm_email_threads").select("id, company_id, contact_id").eq("id", original.thread_id).maybeSingle()).data;
-    mailbox = (await admin.from("crm_mailboxes").select("id, address, display_name, purpose, active").eq("id", original.mailbox_id).maybeSingle()).data;
+    mailbox = (await admin.from("crm_mailboxes").select(MAILBOX_COLS).eq("id", original.mailbox_id).maybeSingle()).data;
   }
   if (!mailbox || !mailbox.active) throw new SendError(400, "That mailbox isn't available");
 
@@ -82,22 +82,24 @@ export async function sendInboxEmail(input: SendInput, admin: any = createAdminS
   if (composed.unknown.length) throw new SendError(400, `Fill in or remove: ${composed.unknown.join(", ")}`);
 
   // ── Draft → patch → attachments → send ─────────────────────────────────────
-  const draft: any = input.mode === "new" ? await createNewDraft(mailbox.address) : await createReplyDraft(mailbox.address, original.graph_message_id, input.mode);
+  const user = graphUserOf(mailbox);
+  const draft: any = input.mode === "new" ? await createNewDraft(user) : await createReplyDraft(user, original.graph_message_id, input.mode);
   const fromDraft = (list: any[]): Recipient[] => (list ?? []).map((r: any) => ({ email: r?.emailAddress?.address, name: r?.emailAddress?.name ?? null }));
   const finalTo = to.length ? to : cleanRecipients(fromDraft(draft.toRecipients));
   const finalCc = input.cc ? cc : cleanRecipients(fromDraft(draft.ccRecipients));
-  if (!finalTo.length) { await deleteDraft(mailbox.address, draft.id); throw new SendError(400, "Add at least one recipient"); }
+  if (!finalTo.length) { await deleteDraft(user, draft.id); throw new SendError(400, "Add at least one recipient"); }
   try {
-    await patchDraft(mailbox.address, draft.id, buildDraftPatch({
+    await patchDraft(user, draft.id, buildDraftPatch({
       subject: composed.subject || (input.mode === "new" ? "(no subject)" : draft.subject),
+      from: { email: mailbox.address, name: mailbox.display_name },
       html: composed.html,
       quotedHtml: input.mode === "new" ? null : draft.body?.content,
       to: finalTo, cc: finalCc, bcc,
     }));
-    for (const a of input.attachments ?? []) await addDraftAttachment(mailbox.address, draft.id, a);
-    await sendDraft(mailbox.address, draft.id);
+    for (const a of input.attachments ?? []) await addDraftAttachment(user, draft.id, a);
+    await sendDraft(user, draft.id);
   } catch (e) {
-    await deleteDraft(mailbox.address, draft.id);
+    await deleteDraft(user, draft.id);
     throw e;
   }
 
@@ -105,7 +107,7 @@ export async function sendInboxEmail(input: SendInput, admin: any = createAdminS
   let sent: any = null;
   for (const wait of [700, 1500, 3000]) {
     await sleep(wait);
-    sent = await getMessage(mailbox.address, draft.id).catch(() => null);
+    sent = await getMessage(user, draft.id).catch(() => null);
     if (sent && !sent.isDraft) break;
   }
   const msg = sent && !sent.isDraft ? sent : {
