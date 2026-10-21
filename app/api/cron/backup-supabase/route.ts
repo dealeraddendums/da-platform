@@ -80,6 +80,8 @@ async function fetchPage(url: string, key: string, table: string, offset: number
           Range: `${offset}-${offset + PAGE_SIZE - 1}`,
           Prefer: "count=none",
         },
+        // A hung request used to stall the rest of the project forever (da-billing, 2026-10-21).
+        signal: AbortSignal.timeout(60_000),
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");

@@ -7,12 +7,13 @@
  *   - S3: s3://da-platform-backups/_reports/<date>.json (+ _reports/latest.json)
  *   - an email to allan@ whose subject IS the summary line ("[DA Backup] OK …"),
  *     which the Morning Brief reads.
- * backup-check (daily, after the run) independently lists the bucket and emails
- * "[DA Backup] MISSING …" when no backup object is newer than 36 h — the case
- * where the run never started or died before it could report.
+ * backup-check (daily, after the run) independently checks the bucket and emails
+ *   - "[DA Backup] MISSING …"    no backup object newer than 36 h (the run never started), or
+ *   - "[DA Backup] INCOMPLETE …" objects exist but no run REPORT finished in 36 h — the run was
+ *     killed mid-way (a deploy's pm2 reload or a memory restart kills this fire-and-forget job).
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { ListObjectsV2Command, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
 import { sendMandrillEmail } from "./mandrill";
 
 export const BACKUP_PROJECTS = ["da-platform", "da-billing"] as const;
@@ -96,6 +97,15 @@ export async function publishBackupReport(s3: S3Client, bucket: string, r: Backu
 // ── Freshness check ──────────────────────────────────────────────────────────
 
 export type BackupFreshness = { fresh: boolean; newest: string | null; objects: number; ageHours: number | null };
+export type LatestReport = { date: string; status: string; finished_at: string; summary?: string } | null;
+export type BackupHealth = BackupFreshness & { state: "ok" | "missing" | "incomplete"; report: LatestReport; reportAgeHours: number | null };
+
+/** Pure: combine object freshness with the latest run report. */
+export function evaluateBackupHealth(f: BackupFreshness, report: LatestReport, now: Date, maxAgeHours = BACKUP_MAX_AGE_HOURS): BackupHealth {
+  const reportAgeHours = report?.finished_at ? (now.getTime() - new Date(report.finished_at).getTime()) / 3_600_000 : null;
+  const state = !f.fresh ? "missing" : reportAgeHours === null || reportAgeHours > maxAgeHours ? "incomplete" : "ok";
+  return { ...f, state, report, reportAgeHours };
+}
 
 /** Pure: is any backup object newer than `maxAgeHours`? (`_reports/` files don't count.) */
 export function evaluateFreshness(objects: { key: string; lastModified: Date }[], now: Date, maxAgeHours = BACKUP_MAX_AGE_HOURS): BackupFreshness {
@@ -122,19 +132,39 @@ export async function checkBackupFreshness(s3: S3Client, bucket: string, now = n
   return evaluateFreshness(found, now);
 }
 
+export async function readLatestReport(s3: S3Client, bucket: string): Promise<LatestReport> {
+  try {
+    const r: any = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: "_reports/latest.json" }));
+    const j = JSON.parse(await r.Body.transformToString());
+    return { date: j.date, status: j.status, finished_at: j.finished_at, summary: j.summary };
+  } catch (e: any) {
+    if (e?.name === "NoSuchKey") return null;
+    throw e;
+  }
+}
+
 export function missingBackupSubject(f: BackupFreshness): string {
   return `[DA Backup] MISSING · no backup object in the last ${BACKUP_MAX_AGE_HOURS} h`
     + (f.newest ? ` · newest ${f.newest.slice(0, 16).replace("T", " ")} UTC (${Math.round(f.ageHours ?? 0)} h old)` : " · none in the last 3 days");
 }
 
-export async function sendMissingBackupAlert(f: BackupFreshness): Promise<void> {
+export function incompleteBackupSubject(h: BackupHealth): string {
+  return `[DA Backup] INCOMPLETE · no finished run in the last ${BACKUP_MAX_AGE_HOURS} h (objects written, run never reported)`
+    + (h.report ? ` · last report ${h.report.date} ${h.report.status.toUpperCase()}` : " · no report yet");
+}
+
+export async function sendBackupHealthAlert(h: BackupHealth): Promise<void> {
+  if (h.state === "ok") return;
+  const subject = h.state === "missing" ? missingBackupSubject(h) : incompleteBackupSubject(h);
   await sendMandrillEmail({
-    subject: missingBackupSubject(f),
+    subject,
     from_email: "noreply@dealeraddendums.com",
     from_name: "DealerAddendums",
     to: REPORT_TO,
-    html: `<div style="font-family:Roboto,Arial,sans-serif;font-size:14px;color:#2a2b3c"><p>${esc(missingBackupSubject(f))}</p>`
-      + `<p>The nightly Supabase backup (EasyCron → POST /api/cron/backup-supabase, 02:00 PT) didn't leave a fresh object in s3://da-platform-backups. `
-      + `Check the EasyCron job log and <code>/var/log/da-platform/out-*.log</code> for <code>[backup-supabase]</code>.</p></div>`,
+    html: `<div style="font-family:Roboto,Arial,sans-serif;font-size:14px;color:#2a2b3c"><p>${esc(subject)}</p>`
+      + (h.state === "missing"
+        ? `<p>The nightly Supabase backup (EasyCron → POST /api/cron/backup-supabase, 02:00 PT) didn't leave a fresh object in s3://da-platform-backups.</p>`
+        : `<p>The nightly run started (fresh objects exist) but never wrote its summary, so it was cut short. The usual cause is a deploy's <code>pm2 reload</code> or a memory restart of the worker it runs in; the tables after the cut-off are not in today's backup.</p>`)
+      + `<p>Check the EasyCron job log and <code>/var/log/da-platform/out-*.log</code> for <code>[backup-supabase]</code>.</p></div>`,
   });
 }

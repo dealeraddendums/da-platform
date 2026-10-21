@@ -1,5 +1,5 @@
 /* npm run test:backup-report — lib/backup-report.ts (backup-supabase summary + backup-check watchdog). */
-import { backupSummaryLine, buildBackupReport, evaluateFreshness, formatBytes, formatDuration, missingBackupSubject } from "../lib/backup-report";
+import { backupSummaryLine, buildBackupReport, evaluateBackupHealth, evaluateFreshness, formatBytes, formatDuration, incompleteBackupSubject, missingBackupSubject } from "../lib/backup-report";
 
 let fail = 0;
 function eq(name: string, got: unknown, want: unknown) {
@@ -37,6 +37,16 @@ eq("nothing at all → not fresh, newest null", evaluateFreshness([], now), { fr
 eq("missing subject (stale)", missingBackupSubject(evaluateFreshness([obj("da-platform/2026-10-20/d.json.gz", "2026-10-20T10:00:00Z")], now)),
   "[DA Backup] MISSING · no backup object in the last 36 h · newest 2026-10-20 10:00 UTC (52 h old)");
 eq("missing subject (none)", missingBackupSubject(evaluateFreshness([], now)), "[DA Backup] MISSING · no backup object in the last 36 h · none in the last 3 days");
+
+// Health = objects + run report (a killed run leaves fresh objects but no report)
+const freshObj = evaluateFreshness([obj("da-platform/2026-10-22/dealers.json.gz", "2026-10-22T09:10:00Z")], now);
+const rep = (finished: string, status = "ok") => ({ date: finished.slice(0, 10), status, finished_at: finished });
+eq("health ok: fresh objects + report finished 3 h ago", evaluateBackupHealth(freshObj, rep("2026-10-22T11:00:00Z"), now).state, "ok");
+eq("health incomplete: fresh objects, last report 2 days old (killed run)", evaluateBackupHealth(freshObj, rep("2026-10-20T11:00:00Z"), now).state, "incomplete");
+eq("health incomplete: fresh objects, no report ever", evaluateBackupHealth(freshObj, null, now).state, "incomplete");
+eq("health missing wins over report state", evaluateBackupHealth(evaluateFreshness([], now), rep("2026-10-22T11:00:00Z"), now).state, "missing");
+eq("incomplete subject", incompleteBackupSubject(evaluateBackupHealth(freshObj, rep("2026-10-20T11:00:00Z", "partial"), now)),
+  "[DA Backup] INCOMPLETE · no finished run in the last 36 h (objects written, run never reported) · last report 2026-10-20 PARTIAL");
 
 console.log(fail ? `\n${fail} FAILED` : "\nall passed");
 process.exit(fail ? 1 : 0);
