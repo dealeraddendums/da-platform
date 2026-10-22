@@ -42,12 +42,15 @@ export default async function ProfilePage() {
 
       const dealer = rawDealer as DealerRow | null;
       // A ghosted super_admin can place a label order for the dealer (the API
-      // authorizes super_admin for any dealer); profile editing stays off.
+      // authorizes super_admin for any dealer) and edit Website Integrations
+      // exactly as the dealer does (the APIs pin it to the ghosted dealer and
+      // audit each save as the staff member); other profile editing stays off.
       return (
         <ProfileClient
         labelProducts={labelProducts}
           dealer={dealer}
           canEdit={false}
+          canEditWebsite={!!dealer}
           canOrderLabels={!!dealer}
           recommendedPaperSizes={[]}
           userEmail={userEmail}

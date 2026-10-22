@@ -117,7 +117,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     admin_user_id: ctx.userId,
     action: "dealer_export_created",
     target_dealer_id: ctx.dealer.dealer_id,
-    metadata: { feed_id: feed.id, name: input.name, role: ctx.role, override: covering.length > 0 },
+    metadata: { feed_id: feed.id, name: input.name, role: ctx.role, override: covering.length > 0, ...(ctx.ghost ?? {}) },
   }), "admin_audit");
 
   return NextResponse.json({ export: serializeExport(feed, input.feed_dealer_id) }, { status: 201 });
