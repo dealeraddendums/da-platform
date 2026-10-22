@@ -11,6 +11,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { resolveDealerForRequest } from "@/lib/dealer-authz";
+import { ghostAttribution, type GhostAttribution } from "@/lib/ghost-containment";
 import {
   RAW_FIELDS, COMPUTED_FIELDS, LIST_FIELD_DEFAULT_SEPARATOR, LIST_SEPARATORS, resolveFeedDealers,
   type ColumnMapping, type FeedCompanyRow, type ListSeparator,
@@ -27,6 +28,8 @@ export interface ExportContext {
   userId: string;
   isSuperAdmin: boolean;
   dealer: { id: string; dealer_id: string; name: string; inventory_dealer_id: string | null; group_id: string | null };
+  /** Set when a super_admin is ghosting this dealer — spread into admin_audit metadata. */
+  ghost: GhostAttribution | null;
 }
 
 /**
@@ -50,13 +53,16 @@ export async function exportContext(req: NextRequest): Promise<{ ctx: ExportCont
     .eq("dealer_id", resolved.dealerId)
     .maybeSingle();
   if (!dealer) return { response: NextResponse.json({ error: "Dealer not found" }, { status: 404 }) };
+  const ghost = await ghostAttribution(admin, claims);
   return {
     ctx: {
       admin,
       role: claims.role,
       userId: claims.sub,
-      isSuperAdmin: claims.role === "super_admin",
+      // Ghosting a dealer = exactly what that dealer sees (no SuperAdmin override of covered exports).
+      isSuperAdmin: claims.role === "super_admin" && !ghost,
       dealer,
+      ghost,
     },
   };
 }

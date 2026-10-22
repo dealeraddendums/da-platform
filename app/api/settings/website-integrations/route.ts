@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { createAdminSupabaseClient } from "@/lib/db";
+import { createAdminSupabaseClient, fireWrite } from "@/lib/db";
 import { resolveDealerForRequest } from "@/lib/dealer-authz";
+import { ghostAttribution } from "@/lib/ghost-containment";
 
 // Dealer-facing config for the public Website Integrations widget
 // (dealer_website_integrations, provider='dealer_com'). Mirrors /api/settings
-// auth: dealer_admin / group_admin (acting as dealer) / super_admin; dealer_user
+// auth: dealer_admin / group_admin (acting as dealer) / super_admin (incl. ghost —
+// pinned to the ghosted dealer, saves audited as the staff member); dealer_user
 // is blocked. The table isn't in the generated Database types, so the client is
 // cast to any for these queries (same pattern as starter_templates).
 
@@ -119,6 +121,16 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
 
   if (upErr) {
     return NextResponse.json({ error: upErr.message }, { status: 500 });
+  }
+  // A ghosted super_admin's save is logged as theirs, on the dealer's behalf.
+  const ghost = await ghostAttribution(admin, claims);
+  if (ghost) {
+    fireWrite(admin.from("admin_audit").insert({
+      admin_user_id: claims.sub,
+      action: "website_integration_updated",
+      target_dealer_id: dealerId,
+      metadata: { provider, fields: Object.keys(upsertPayload).filter((k) => !["dealer_id", "provider", "updated_at"].includes(k)), ...ghost },
+    }), "admin_audit");
   }
   return NextResponse.json({ data });
 }

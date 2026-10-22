@@ -91,3 +91,38 @@ export function requireGhostGroup(
   if (scope.kind === "group" && groupUuid && scope.groupUuid === groupUuid) return null;
   return forbidden(what);
 }
+
+/** Audit metadata for a write a super_admin makes while ghosting a dealer. */
+export type GhostAttribution = {
+  ghost: true;
+  /** "staff <name> (ghost) on behalf of dealer" — the activity-log wording. */
+  actor_label: string;
+  staff_user_id: string;
+  staff_name: string;
+  on_behalf_of_dealer_id: string;
+  on_behalf_of_dealer_uuid: string | null;
+};
+
+/**
+ * Who a dealer-scoped write is really from, for admin_audit metadata. null
+ * unless the caller is a super_admin ghosting a dealer; spread the result
+ * into the row's metadata (`...(ghost ?? {})`) so ghost saves never read as
+ * the dealer's own.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function ghostAttribution(admin: any, claims: JwtClaims): Promise<GhostAttribution | null> {
+  const scope = ghostScope(claims);
+  if (scope.kind !== "dealer") return null;
+  // By auth uid, then by email (migrated profiles can carry a legacy id — lib/profile-session.ts).
+  let { data } = await admin.from("profiles").select("full_name, email").eq("id", claims.sub).maybeSingle();
+  if (!data && claims.email) ({ data } = await admin.from("profiles").select("full_name, email").ilike("email", claims.email).limit(1).maybeSingle());
+  const name = (data?.full_name as string | null)?.trim() || (data?.email as string | null) || claims.email || claims.sub;
+  return {
+    ghost: true,
+    actor_label: `staff ${name} (ghost) on behalf of dealer`,
+    staff_user_id: claims.sub,
+    staff_name: name,
+    on_behalf_of_dealer_id: scope.dealerTextId,
+    on_behalf_of_dealer_uuid: scope.dealerUuid,
+  };
+}
