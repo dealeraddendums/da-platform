@@ -59,8 +59,8 @@ export async function exportContext(req: NextRequest): Promise<{ ctx: ExportCont
       admin,
       role: claims.role,
       userId: claims.sub,
-      // Ghosting a dealer = exactly what that dealer sees (no SuperAdmin override of covered exports).
-      isSuperAdmin: claims.role === "super_admin" && !ghost,
+      // A ghosted super_admin keeps the SuperAdmin override of covered exports.
+      isSuperAdmin: claims.role === "super_admin",
       dealer,
       ghost,
     },
