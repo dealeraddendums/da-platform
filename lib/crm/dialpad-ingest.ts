@@ -17,7 +17,7 @@ import { createAdminSupabaseClient } from "@/lib/db";
 import { matchPhone, supabaseMatchLookup, type PhoneMatch } from "./matching";
 import { normalizePhone, formatPhone } from "./phone";
 import { formatDuration } from "./format";
-import { dialpadConfigured, fetchDialpadTranscript } from "./dialpad";
+import { dialpadConfigured, fetchDialpadAiRecap, fetchDialpadTranscript, isDialpadScopeError } from "./dialpad";
 import { copyRecordingToS3, recordingCopyEnabled } from "./recordings";
 
 export type CallState = "ringing" | "connected" | "voicemail" | "missed" | "completed";
@@ -95,6 +95,8 @@ export function pickRecordingUrl(ev: DialpadCallEvent): string | null {
   if (rec) return String(rec.url);
   if (Array.isArray(ev.recording_url) && ev.recording_url[0]) return String(ev.recording_url[0]);
   if (typeof ev.recording_url === "string" && ev.recording_url) return ev.recording_url;
+  // GET /api/v2/call/{id} and admin_recording events list company auto-recordings here.
+  if (Array.isArray(ev.admin_recording_urls) && ev.admin_recording_urls[0]) return String(ev.admin_recording_urls[0]);
   return null;
 }
 
@@ -115,6 +117,22 @@ export function buildSummary(ev: DialpadCallEvent): string | null {
   const items = Array.isArray(ev.recap_action_items) ? ev.recap_action_items.filter((x: unknown) => typeof x === "string" && x.trim()) : [];
   if (items.length) parts.push(`Action items:\n${items.map((x: string) => `- ${x.trim()}`).join("\n")}`);
   return parts.length ? parts.join("\n\n") : null;
+}
+
+const RECAP_FIELDS = ["recap_summary", "recap_outcome", "recap_action_items"] as const;
+
+/**
+ * The recap so far: each recap_* event carries only its own field, so merge
+ * this event with the earlier ones (raw[state]) and the API recap (raw.ai_recap)
+ * — otherwise a later recap_outcome would replace the summary.
+ */
+export function mergedRecap(raw: Record<string, any> | null | undefined, ev: DialpadCallEvent): DialpadCallEvent {
+  const out: DialpadCallEvent = {};
+  for (const f of RECAP_FIELDS) {
+    const v = ev[f] ?? raw?.[f]?.[f] ?? raw?.ai_recap?.[f];
+    if (v != null) out[f] = v;
+  }
+  return out;
 }
 
 export function callDirection(ev: DialpadCallEvent): "inbound" | "outbound" {
@@ -155,7 +173,7 @@ export function buildCallPatch(existing: Partial<CallRow> | null, ev: DialpadCal
     recording_url: pickRecordingUrl(ev) ?? existing?.recording_url ?? null,
     voicemail_url: pickVoicemailUrl(ev) ?? existing?.voicemail_url ?? null,
     transcript: existing?.transcript ?? voicemailTranscript,
-    summary: buildSummary(ev) ?? existing?.summary ?? null,
+    summary: buildSummary(mergedRecap(existing?.raw, ev)) ?? existing?.summary ?? null,
     last_event_at: lastEventAt,
     raw: { ...(existing?.raw ?? {}), [stateKey]: ev },
   };
@@ -178,7 +196,7 @@ export function callSubject(c: Pick<CallRow, "direction" | "state" | "from_numbe
 export type IngestResult =
   | { status: "ignored"; reason: string }
   | { status: "duplicate"; dialpadCallId: string }
-  | { status: "ok"; dialpadCallId: string; callId: string; created: boolean; followUp: Promise<void> };
+  | { status: "ok"; dialpadCallId: string; callId: string; created: boolean; followUp: Promise<FollowUpResult> };
 
 async function staffForDialpadUser(admin: any, ev: DialpadCallEvent): Promise<{ staffId: string | null; dialpadUserId: string | null }> {
   const t = ev.target;
@@ -286,8 +304,10 @@ export async function ingestDialpadEvent(
     await syncActivity(admin, call);
     if (logId) await admin.from("crm_dialpad_events").update({ processed_at: new Date().toISOString() }).eq("id", logId);
 
-    const followUp = runFollowUps(admin, call, stateKey, opts.source).catch((e) =>
-      console.error(`[crm-dialpad] follow-up ${dialpadCallId}:`, e instanceof Error ? e.message : e));
+    const followUp = runFollowUps(admin, call, stateKey, opts.source).catch((e): FollowUpResult => {
+      console.error(`[crm-dialpad] follow-up ${dialpadCallId}:`, e instanceof Error ? e.message : e);
+      return {};
+    });
     return { status: "ok", dialpadCallId, callId: call.id, created, followUp };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -319,31 +339,95 @@ async function syncActivity(admin: any, call: CallRow): Promise<void> {
   if (error) console.error("[crm-dialpad] activity sync:", error.message);
 }
 
-async function runFollowUps(admin: any, call: CallRow, stateKey: string, source: IngestSource): Promise<void> {
+export type FollowUpResult = {
+  recording?: "copied" | "failed" | "none";
+  transcript?: "saved" | "none" | "error";
+  recap?: "saved" | "none" | "missing_scope" | "error";
+  staff?: "attributed";
+};
+
+/** Dialpad user → team member, for calls that came in before the mapping existed. */
+async function fillStaff(admin: any, call: CallRow): Promise<CallRow> {
+  if (call.staff_id || !call.dialpad_user_id) return call;
+  const { data: staff } = await admin.from("crm_staff_profiles").select("staff_id").eq("dialpad_user_id", call.dialpad_user_id).maybeSingle();
+  if (!staff?.staff_id) return call;
+  const { data } = await admin.from("crm_calls").update({ staff_id: staff.staff_id }).eq("id", call.id).select("*").single();
+  return (data as CallRow) ?? call;
+}
+
+async function runFollowUps(admin: any, call: CallRow, stateKey: string, source: IngestSource): Promise<FollowUpResult> {
+  const out: FollowUpResult = {};
+  const finished = call.state === "completed" && (call.duration_sec ?? 0) > 0;
+  let changed = false;
+
+  const before = call.staff_id;
+  call = await fillStaff(admin, call);
+  if (call.staff_id !== before) { out.staff = "attributed"; changed = true; }
+
   // AI transcript: on Dialpad's call_transcription event, or a reconcile pass
   // over a finished call that still has none.
-  const wantTranscript = dialpadConfigured() && !call.transcript && (
-    stateKey === "call_transcription" || (source === "reconcile" && call.state === "completed" && (call.duration_sec ?? 0) > 0)
-  );
-  if (wantTranscript) {
+  if (dialpadConfigured() && !call.transcript && (stateKey === "call_transcription" || (source === "reconcile" && finished))) {
     try {
       const transcript = await fetchDialpadTranscript(call.dialpad_call_id);
+      out.transcript = transcript ? "saved" : "none";
       if (transcript) {
         const { data } = await admin.from("crm_calls").update({ transcript }).eq("id", call.id).select("*").single();
-        if (data) { call = data as CallRow; await syncActivity(admin, call); }
+        if (data) { call = data as CallRow; changed = true; }
       }
     } catch (e) {
       // 404 = no transcript for this call (AI off / too short) — expected.
       const msg = e instanceof Error ? e.message : String(e);
-      if (!msg.includes("→ 404")) console.error(`[crm-dialpad] transcript ${call.dialpad_call_id}:`, msg);
+      out.transcript = msg.includes("→ 404") ? "none" : "error";
+      if (out.transcript === "error") console.error(`[crm-dialpad] transcript ${call.dialpad_call_id}:`, msg);
     }
   }
+
+  // AI recap: the recap_* events carry it; reconcile asks the API for calls
+  // that finished without one (needs the key's ai_recap scope).
+  if (dialpadConfigured() && !call.summary && source === "reconcile" && finished) {
+    try {
+      const recap = await fetchDialpadAiRecap(call.dialpad_call_id);
+      out.recap = recap ? "saved" : "none";
+      if (recap) {
+        const raw = { ...(call.raw ?? {}), ai_recap: recap };
+        const summary = buildSummary(mergedRecap(raw, {}));
+        const { data } = await admin.from("crm_calls").update({ summary, raw }).eq("id", call.id).select("*").single();
+        if (data) { call = data as CallRow; changed = true; }
+      }
+    } catch (e) {
+      out.recap = isDialpadScopeError(e) ? "missing_scope" : (e instanceof Error && e.message.includes("→ 404")) ? "none" : "error";
+      if (out.recap === "error") console.error(`[crm-dialpad] recap ${call.dialpad_call_id}:`, e instanceof Error ? e.message : e);
+    }
+  }
+  if (changed) await syncActivity(admin, call);
 
   // Copy the audio once. Skipped on the bare `voicemail` event (the link 404s
   // until voicemail_uploaded); a failed copy is retried by the next event or
   // the nightly reconcile.
   const media = call.recording_url ?? call.voicemail_url;
-  if (media && stateKey !== "voicemail" && !call.recording_s3_key && recordingCopyEnabled()) {
-    await copyRecordingToS3(admin, call.id, call.company_id, media);
+  if (!media) out.recording = "none";
+  else if (stateKey !== "voicemail" && !call.recording_s3_key && recordingCopyEnabled()) {
+    const key = await copyRecordingToS3(admin, call.id, call.company_id, media).catch((e) => {
+      console.error(`[crm-recording] ${call.id}:`, e instanceof Error ? e.message : e);
+      return null;
+    });
+    out.recording = key ? "copied" : "failed";
+    if (key) await syncActivity(admin, { ...call, recording_s3_key: key });
   }
+  return out;
+}
+
+/**
+ * Reconcile pass for one stored call: staff, transcript, recap and the S3
+ * recording copy — whatever is still missing. `refresh` is the call's current
+ * Dialpad record (GET /api/v2/call/{id}) when the stored row had no media URL.
+ */
+export async function backfillCallMedia(admin: any, callId: string, refresh?: DialpadCallEvent): Promise<FollowUpResult> {
+  if (refresh) {
+    const r = await ingestDialpadEvent(refresh, { source: "reconcile", admin });
+    return r.status === "ok" ? r.followUp : {};
+  }
+  const { data, error } = await admin.from("crm_calls").select("*").eq("id", callId).single();
+  if (error) throw new Error(`crm_calls select: ${error.message}`);
+  return runFollowUps(admin, data as CallRow, "backfill", "reconcile");
 }

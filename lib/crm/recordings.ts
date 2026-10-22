@@ -7,11 +7,13 @@
 // guessable names under crm/. purge-old-pdfs skips crm/ (recordings are kept).
 // Company files and team photos live under the same prefix (see below).
 // CRM_COPY_RECORDINGS=0 turns the copy off (playback then proxies Dialpad).
+// Admin (auto-record) URLs are browser-only; those download through a Dialpad
+// recording share link (fetchDialpadRecording in lib/crm/dialpad.ts).
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { fetchDialpadMedia } from "./dialpad";
+import { fetchDialpadRecording } from "./dialpad";
 import { crmEnv } from "./env";
 
 const BUCKET = "dealer-addendums";
@@ -37,7 +39,7 @@ export function recordingKey(companyId: string | null, callId: string): string {
 
 /** Download `url` and store it under the call's key; records recording_s3_key. */
 export async function copyRecordingToS3(admin: any, callId: string, companyId: string | null, url: string): Promise<string | null> {
-  const res = await fetchDialpadMedia(url);
+  const res = await fetchDialpadRecording(url);
   if (!res.ok) {
     console.error(`[crm-recording] fetch ${callId} → ${res.status}`);
     return null;
