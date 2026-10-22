@@ -18,7 +18,8 @@ import { PDFDocument, PDFTextField } from "pdf-lib";
 import { fakeDb } from "./crm-fake-supabase";
 import { handleFeedsEmail } from "../lib/crm/feeds/inbound";
 import { unregisterInboundEmailHandler, type InboundEmailEvent } from "../lib/crm/email-hooks";
-import { applyOrderEvent, cancelOrder, createFeedOrder, feedIo, forwardSignedPdf, nudge, prepareRequest, sendRequest, updateOrderInfo } from "../lib/crm/feeds/orders";
+import { applyOrderEvent, cancelOrder, createFeedOrder, feedIo, forwardSignedPdf, notifyLive, nudge, prepareRequest, sendRequest, SYSTEM, updateOrderInfo } from "../lib/crm/feeds/orders";
+import { runStallJob } from "../lib/crm/feeds/stall";
 import { SUPPLIER_PROFILES, supplierProfile, type SupplierProfile } from "../lib/crm/feeds/suppliers";
 import { htmlToText } from "../lib/crm/email-html";
 import {
@@ -135,6 +136,11 @@ const event = (m: Msg): InboundEmailEvent => ({
 
 const ordRow = (db: any, id = "ord") => db.rows("crm_feed_orders").find((o: any) => o.id === id);
 const openTasks = (db: any) => db.rows("crm_tasks").filter((t: any) => t.status === "open").map((t: any) => t.kind);
+/** A dealership's Feed ID arrives and staff confirm it. */
+const goLive = async (db: any, id: string, feedId: string) => {
+  await applyOrderEvent(db, id, { type: "feed_id_detected", candidate: feedId, source: "regex" }, "system");
+  await applyOrderEvent(db, id, { type: "feed_id_confirmed", feedId, staffId: "staff-1" }, "staff-1");
+};
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 async function runFixture(file: string) {
@@ -293,6 +299,64 @@ async function main() {
     await applyOrderEvent(db, "ord-motors", { type: "feed_id_confirmed", feedId: "CEDB17", staffId: "staff-1" }, "staff-1");
     eq("dropping one dealership + confirming the other → the order is done", [ordRow(db, "ord-ford").status, ordRow(db).status], ["cancelled", "done"]);
   }
+  // "Your feed is set up" — at most two emails per order: the final one when no dealership is still
+  // waiting; one partial (live + pending) only if some are unconfirmed 2 business days after the first.
+  {
+    const confirm = (db: any, id: string, feedId: string, at: string) => goLive(db, id, feedId).then(() => { ordRow(db, id).assigned_at = at; });
+    const db = seedDb(asFx, as, { status: "awaiting_supplier" });
+    currentDb = db; sent = [];
+    await confirm(db, "ord-motors", "CEDB17", "2026-10-19T17:00:00Z");   // a Monday
+    eq("live email: one of two dealerships confirmed → nothing yet", [await notifyLive(db, "ord", "staff-1"), sent.length], [null, 0]);
+    eq("live email: the stall job's partial waits for 2 business days after the first confirmation",
+      [await notifyLive(db, "ord", SYSTEM, { partial: true, now: new Date("2026-10-20T18:00:00Z") }), sent.length], [null, 0]);
+    const stall = await runStallJob(db, new Date("2026-10-21T18:00:00Z"), { force: true });
+    const p = sent[0];
+    eq("live email: Ford still unconfirmed 2 business days on → the stall job sends ONE partial email to the approver",
+      [stall.notices, sent.length, p?.to, p?.subject, !!ordRow(db).live_partial_notified_at, ordRow(db).live_notified_at ?? null],
+      [1, 1, [asFx.approver.email], "Your inventory feed is set up — Cedar Bend Motors", true, null]);
+    eq("live email: the partial names the live store + Feed ID and the pending one",
+      [htmlToText(p.body).includes("Cedar Bend Motors — feed ID CEDB17"), htmlToText(p.body).includes("still waiting on Autosoft for Cedar Bend Ford"), p.body.includes("CEDB75")], [true, true, false]);
+    await runStallJob(db, new Date("2026-10-22T18:00:00Z"), { force: true });
+    eq("live email: the partial goes once", sent.length, 1);
+    await confirm(db, "ord-ford", "CEDB75", "2026-10-23T17:00:00Z");
+    const f = (await notifyLive(db, "ord", "staff-1")) && sent[1];
+    eq("live email: the rest confirm → the final email, every store with its Feed ID",
+      [sent.length, f && f.subject, f && htmlToText(f.body).includes("Cedar Bend Motors — feed ID CEDB17"), f && htmlToText(f.body).includes("Cedar Bend Ford — feed ID CEDB75"), f && f.body.includes("still waiting"), !!ordRow(db).live_notified_at],
+      [2, "Your inventory feed is set up — Cedar Bend Motors and Cedar Bend Ford", true, true, false, true]);
+    eq("live email: never more than two", [await notifyLive(db, "ord", "staff-1"), await notifyLive(db, "ord", SYSTEM, { partial: true, now: new Date("2026-11-30T18:00:00Z") }), sent.length], [null, null, 2]);
+    eq("live email: each send is on the order's timeline", db.rows("crm_feed_order_events").filter((e: any) => e.type === "dealer_notified").length, 2);
+  }
+  {
+    // Both confirmed within 2 business days → just the one final email.
+    const db = seedDb(asFx, as, { status: "awaiting_supplier" });
+    currentDb = db; sent = [];
+    await goLive(db, "ord-motors", "CEDB17");
+    await notifyLive(db, "ord", "staff-1");
+    await goLive(db, "ord-ford", "CEDB75");
+    eq("live email: both confirmed together → one final email, no partial", [await notifyLive(db, "ord", "staff-1"), sent.length, ordRow(db).live_partial_notified_at ?? null], ["final", 1, null]);
+  }
+  {
+    // Dropping the last pending dealership sends the final email for the live ones.
+    const db = seedDb(asFx, as, { status: "awaiting_supplier" });
+    currentDb = db; sent = [];
+    await goLive(db, "ord-motors", "CEDB17");
+    await cancelOrder(db, "ord-ford", "Ford isn't going automatic", "staff-1");
+    eq("live email: Ford dropped → the final email names only Motors",
+      [sent.length, sent[0]?.subject, htmlToText(sent[0]?.body ?? "").includes("Cedar Bend Ford")], [1, "Your inventory feed is set up — Cedar Bend Motors", false]);
+  }
+  {
+    // A failed send releases the claim and leaves a task (the next trigger can retry).
+    const db = seedDb(asFx, as, { status: "awaiting_supplier" });
+    currentDb = db; sent = [];
+    const real = feedIo.send;
+    feedIo.send = (async () => { throw new Error("Graph 503"); }) as any;
+    await goLive(db, "ord-motors", "CEDB17");
+    await goLive(db, "ord-ford", "CEDB75");
+    const r = await notifyLive(db, "ord", "staff-1");
+    feedIo.send = real;
+    eq("live email: send fails → claim released, a 'tell the dealer' task", [r, ordRow(db).live_notified_at ?? null, openTasks(db).includes("feed_notify_dealer")], [null, null, true]);
+    eq("live email: …and the retry sends it", [await notifyLive(db, "ord", "staff-1"), sent.length], ["final", 1]);
+  }
   {
     const db = seedDb(asFx, as, { status: "awaiting_supplier" });
     await cancelOrder(db, "ord", "Dealer went manual", "staff-1");
@@ -434,8 +498,8 @@ async function main() {
     const db3 = seedDb(asFx, as, { status: "ready", pdfMode: "combined" });
     const prep3 = await prepareRequest(db3, ordRow(db3));
     const v3 = await values(prep3.pdfs[0].bytes);
-    eq("Autosoft, combined form: one PDF naming both dealerships and accounts, the group's address",
-      [prep3.pdfs.length, prep3.pdfs[0].dealershipOrderId, v3("Dealership Name"), v3("Autosoft Acct"), v3("Address")], [1, null, "Cedar Bend Motors and Cedar Bend Ford", "CEDB17/CEDB75", "1 Group Plaza"]);
+    eq("Autosoft, combined form: one PDF naming both dealerships and accounts, the first ticked rooftop's address / phone (not the group's)",
+      [prep3.pdfs.length, prep3.pdfs[0].dealershipOrderId, v3("Dealership Name"), v3("Autosoft Acct"), v3("Address"), v3("Phone")], [1, null, "Cedar Bend Motors and Cedar Bend Ford", "CEDB17/CEDB75", "100 Fixture Way", "(409) 555-0100"]);
   }
 
   // ── Templates ───────────────────────────────────────────────────────────

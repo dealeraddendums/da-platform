@@ -25,7 +25,7 @@ import { resolveFeedTemplate, orderNumber, type FeedKind } from "./templates";
 import { fillRequestPdf } from "./pdf";
 import { checkOrderFields, describeSupplierFields, feedIdField, isPerDealership, parseExtraFields, splitSupplierFields, supplierFieldContext, type ExtraField } from "./extra-fields";
 import { matchPdfsToDealerships } from "./detect";
-import { nextBusinessDayDue } from "../business-days";
+import { businessDaysBetween, nextBusinessDayDue } from "../business-days";
 import { sendInboxEmail } from "../inbox-send";
 import { relinkThreadActivities } from "../inbox-ingest";
 import { putCrmObject } from "../recordings";
@@ -107,6 +107,7 @@ const EVENT_TEXT: Record<string, string> = {
   signed_pdf_received: "Signed PDF received from the dealer", case_number: "Supplier case number", cancellation_deadline: "Supplier will cancel without approval",
   supplier_message: "Supplier update", dealership_feed_id: "A dealership's Feed ID arrived", dealerships_complete: "Every dealership set up — order done",
   feed_id_unmatched: "Supplier named a Feed ID no dealership matches",
+  dealer_notified: "Dealer told their feed is set up",
 };
 
 export async function recordEvent(admin: Admin, order: any, type: string, detail: Record<string, unknown>, actor: string): Promise<void> {
@@ -565,9 +566,10 @@ export async function prepareRequest(admin: Admin, order: any): Promise<Prepared
       const { buildTemplateContext } = await import("../email-compose");
       const template = await feedIo.getObject(settings.pdf_template_s3_key);
       const staffId = order.owner_staff_id ?? order.initiated_by_staff_id ?? "";
-      // One form per dealership (filled with that rooftop's details and answers), or one for all of them.
+      // One form per dealership (filled with that rooftop's details and answers), or one for all of them —
+      // the combined form takes the first ticked rooftop's address / phone (not the group's), named for every rooftop.
       const perRoof = kids.length > 1 && order.pdf_mode !== "combined";
-      const forms = perRoof ? kids.map((k) => ({ k, companyId: k.companyId })) : [{ k: null as Dealership | null, companyId: kids.length === 1 ? kids[0].companyId : order.dealer_company_id }];
+      const forms = perRoof ? kids.map((k) => ({ k, companyId: k.companyId })) : [{ k: null as Dealership | null, companyId: kids[0]?.companyId ?? order.dealer_company_id }];
       for (const f of forms) {
         const ctx: TemplateContext = { ...(await buildTemplateContext({ companyId: f.companyId, staffId }, admin)), ...(f.k ? await orderTemplateContext(admin, order, { dealership: f.k.order }) : context) };
         if (!f.k && kids.length > 1) ctx["company.name"] = context["order.dealerships"];   // the combined form names every rooftop
@@ -781,10 +783,10 @@ export async function enterFeedId(admin: Admin, orderId: string, candidate: stri
 /**
  * Confirm a dealership's Feed ID: write the provider + Feed ID to that dealer
  * through the platform's own service (lib/dealer-feed-id.ts — cascade,
- * feed-aware inventory handling, HubSpot, admin_audit), email the approver
- * the Feed assigned template from feeds@, the dealership → assigned (→ done
- * once its first import lands; see checkImport). The order goes done when
- * every dealership is assigned or cancelled.
+ * feed-aware inventory handling, HubSpot, admin_audit), the dealership →
+ * assigned (→ done once its first import lands; see checkImport). The order
+ * goes done when every dealership is assigned or cancelled; the approver hears
+ * once every dealership is live (notifyLive).
  */
 export async function confirmFeedId(admin: Admin, orderId: string, feedId: string, staffId: string, dealershipOrderId?: string | null): Promise<any> {
   const kid = await resolveDealership(admin, orderId, dealershipOrderId);
@@ -816,19 +818,55 @@ export async function confirmFeedId(admin: Admin, orderId: string, feedId: strin
     fireWrite(admin.from("admin_audit").insert({ admin_user_id: staffId, action: "inventory_provider_changed", target_dealer_id: dealer.dealer_id, metadata: { via: "crm_feed_order", order_id: parent.id, dealership_order_id: kid.id, provider, is_dms: !!settings?.is_dms } }), "admin_audit");
   }
   let updated = await applyOrderEvent(admin, kid.id, { type: "feed_id_confirmed", feedId: id, staffId }, staffId, { feed_id: id, provider });
-
-  // Tell the dealer (new email from feeds@ to the approver), about this dealership.
-  if (parent.approver_email) {
-    try {
-      const mb = await feedsMailbox(admin);
-      const tpl = await resolveFeedTemplate(admin, "feed_assigned", parent.supplier_company_id);
-      await feedIo.send({ staffId, mode: "new", mailboxId: mb.id, companyId: updated.dealer_company_id, to: [{ email: parent.approver_email, name: parent.approver_name }], subject: tpl.subject, bodyHtml: tpl.body_html, templateContext: await orderTemplateContext(admin, updated) }, admin);
-    } catch (e) {
-      await createOrderTask(admin, updated, { kind: "feed_notify_dealer", title: "Tell the dealer their feed is set up (the email didn't send)", description: e instanceof Error ? e.message : String(e) }, SYSTEM);
-    }
-  }
   updated = (await checkImport(admin, updated)) ?? updated;
+  await notifyLive(admin, parent.id, staffId);
   return updated;
+}
+
+/**
+ * The "feed is set up" email to the approver (from feeds@, a new thread) — at most two per order:
+ *   final   — once no dealership is still waiting (each one assigned / done, or dropped): every live
+ *             store with its Feed ID. One dealership = this email at confirm, as before.
+ *   partial — only from the stall job (`partial: true`), when some dealerships are still unconfirmed
+ *             2 business days after the first confirmation: the live stores and the pending ones.
+ * Each is claimed on the parent (live_partial_notified_at / live_notified_at) before sending, so two
+ * confirmations at once can't both send; a failed send releases the claim and leaves a task.
+ */
+export async function notifyLive(admin: Admin, orderId: string, staffId: string, opts: { partial?: boolean; now?: Date } = {}): Promise<"final" | "partial" | null> {
+  const parent = await loadParent(admin, orderId);
+  if (!parent.approver_email || parent.live_notified_at) return null;
+  const kids = await orderDealerships(admin, parent, { open: true });
+  const live = kids.filter((k) => k.order.feed_id_confirmed && (k.order.status === "assigned" || k.order.status === "done"));
+  const pending = kids.filter((k) => !live.includes(k));
+  if (!live.length) return null;
+  let which: "final" | "partial" = "final";
+  if (pending.length) {
+    if (!opts.partial || parent.live_partial_notified_at) return null;
+    const first = live.map((k) => k.order.assigned_at).filter(Boolean).sort()[0];
+    if (!first || businessDaysBetween(first, opts.now ?? new Date()) < 2) return null;
+    which = "partial";
+  }
+  const col = which === "final" ? "live_notified_at" : "live_partial_notified_at";
+  const { data: claimed } = await admin.from("crm_feed_orders").update({ [col]: new Date().toISOString() }).eq("id", parent.id).is(col, null).select("id");
+  if (!claimed?.length) return null;
+  const names = (ks: Dealership[]) => joinNames(ks.map((k) => k.name));
+  try {
+    const mb = await feedsMailbox(admin);
+    const tpl = await resolveFeedTemplate(admin, which === "final" ? "feed_assigned" : "feed_assigned_partial", parent.supplier_company_id);
+    const templateContext: TemplateContext = {
+      ...(await orderTemplateContext(admin, parent)),
+      "order.dealerships": names(kids), "order.feed_id": live.map((k) => k.order.feed_id_confirmed).join("/"),
+      "order.live_dealerships": names(live), "order.pending_dealerships": pending.length ? names(pending) : null,
+      "order.feed_id_list": live.map((k) => `${k.name} — feed ID ${k.order.feed_id_confirmed}`).join("\n"),
+    };
+    await feedIo.send({ staffId, mode: "new", mailboxId: mb.id, companyId: parent.dealer_company_id, to: [{ email: parent.approver_email, name: parent.approver_name }], subject: tpl.subject, bodyHtml: tpl.body_html, templateContext }, admin);
+  } catch (e) {
+    await admin.from("crm_feed_orders").update({ [col]: null }).eq("id", parent.id);
+    await createOrderTask(admin, parent, { kind: "feed_notify_dealer", title: `Tell the dealer ${names(live)} ${live.length > 1 ? "are" : "is"} set up (the email didn't send)`, description: e instanceof Error ? e.message : String(e) }, SYSTEM);
+    return null;
+  }
+  await recordEvent(admin, parent, "dealer_notified", { note: which === "final" ? `Told ${parent.approver_email}: ${names(live)} live` : `Told ${parent.approver_email}: ${names(live)} live, still waiting on ${names(pending)}` }, staffId);
+  return which;
 }
 
 /** A dealership assigned → done once it has feed-owned vehicles (the platform's feed status). */
@@ -849,7 +887,11 @@ export const markDealerApproved = async (admin: Admin, id: string, staffId: stri
 /** Cancel the order (every open dealership with it), or — given a dealership's child id — just that dealership. */
 export async function cancelOrder(admin: Admin, id: string, reason: string, staffId: string): Promise<any> {
   const o = await loadOrder(admin, id);
-  if (o.parent_order_id) return applyOrderEvent(admin, o.id, { type: "cancelled", reason }, staffId, { reason });
+  if (o.parent_order_id) {
+    const dropped = await applyOrderEvent(admin, o.id, { type: "cancelled", reason }, staffId, { reason });
+    await notifyLive(admin, o.parent_order_id, staffId);   // the rest may all be live now
+    return dropped;
+  }
   // The order first (its reason, not the "every dealership cancelled" rollup), then its open dealerships.
   const cancelled = await applyOrderEvent(admin, o.id, { type: "cancelled", reason }, staffId, { reason });
   for (const k of await orderDealerships(admin, o)) {

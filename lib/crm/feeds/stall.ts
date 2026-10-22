@@ -4,25 +4,28 @@
 //   awaiting_supplier > turnaround + 2 → Supplier follow-up (once)        · > turnaround + 5 → task "Call supplier"
 //   needs_info > 3 bd with its task still open → task escalated to the feed_support group
 // Also moves assigned dealerships to done once their first feed import lands
-// (the order is done once every dealership is assigned or cancelled).
+// (the order is done once every dealership is assigned or cancelled), and —
+// some dealerships live, others still unconfirmed 2 business days after the
+// first confirmation — sends the approver the one partial "set up" email.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createAdminSupabaseClient } from "@/lib/db";
 import { businessDaysBetween, isBusinessDay, ptDate } from "../business-days";
 import { stallActions } from "./state";
-import { checkImport, createOrderTask, feedSupportAssignee, nudge, recordEvent, supplierSettings, SYSTEM } from "./orders";
+import { checkImport, createOrderTask, feedSupportAssignee, notifyLive, nudge, recordEvent, supplierSettings, SYSTEM } from "./orders";
 
-export type StallRunResult = { skipped?: string; checked: number; followups: number; tasks: number; escalated: number; done: number; errors: number };
+export type StallRunResult = { skipped?: string; checked: number; followups: number; tasks: number; escalated: number; done: number; notices: number; errors: number };
 
 export async function runStallJob(admin: any = createAdminSupabaseClient(), now = new Date(), opts: { force?: boolean } = {}): Promise<StallRunResult> {
-  const out: StallRunResult = { checked: 0, followups: 0, tasks: 0, escalated: 0, done: 0, errors: 0 };
+  const out: StallRunResult = { checked: 0, followups: 0, tasks: 0, escalated: 0, done: 0, notices: 0, errors: 0 };
   if (!opts.force && !isBusinessDay(ptDate(now))) return { ...out, skipped: "not a business day" };
-  const { data: orders } = await admin.from("crm_feed_orders").select("*").in("status", ["needs_info", "awaiting_dealer_approval", "awaiting_supplier", "assigned"]).limit(2000);
+  const { data: orders } = await admin.from("crm_feed_orders").select("*").in("status", ["needs_info", "awaiting_dealer_approval", "awaiting_supplier", "feed_id_received", "assigned"]).limit(2000);
   for (const o of orders ?? []) {
     out.checked++;
     try {
       if (o.status === "assigned") { if (await checkImport(admin, o)) out.done++; continue; }   // a dealership
       if (o.parent_order_id) continue;
+      if (o.status === "feed_id_received") { if (await notifyLive(admin, o.id, SYSTEM, { partial: true, now })) out.notices++; continue; }
       const settings = await supplierSettings(admin, o.supplier_company_id);
       const { data: tasks } = await admin.from("crm_tasks").select("kind, assigned_capability").eq("feed_order_id", o.id).eq("status", "open");
       const kinds = new Set((tasks ?? []).map((t: any) => t.kind));

@@ -56,6 +56,7 @@ export async function buildTemplateContext(
         // A feed order covering several dealerships overrides these (lib/crm/feeds/orders.ts orderTemplateContext).
         "order.dealerships": d.name, "order.dealership_count": 1,
         "order.dealership_list": `Dealership: ${d.name}${d.city || d.state ? `\nLocation: ${[d.city, d.state].filter(Boolean).join(", ")}` : ""}`,
+        "order.live_dealerships": d.name,
       });
       if (d.pipeline_stage === "trial" && d.trial_started_at) {
         const s = trialStatus(d.trial_started_at, now, src?.trial_ends_at ?? null);

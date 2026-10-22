@@ -20,6 +20,11 @@ alter table public.crm_feed_orders
   add column if not exists parent_order_id uuid references public.crm_feed_orders(id) on delete cascade,
   -- PDF suppliers, several rooftops: one form per rooftop (all attached to one email), or one form for all.
   add column if not exists pdf_mode text not null default 'per_dealership' check (pdf_mode in ('per_dealership','combined'));
+-- The "feed is set up" email to the approver — at most two per order: a partial one (some
+-- dealerships live, some still pending 2 business days after the first confirmation) and the final one.
+alter table public.crm_feed_orders
+  add column if not exists live_partial_notified_at timestamptz,
+  add column if not exists live_notified_at timestamptz;
 create index if not exists crm_feed_orders_parent_idx on public.crm_feed_orders (parent_order_id) where parent_order_id is not null;
 
 alter table public.crm_feed_orders drop constraint if exists crm_feed_orders_status_check;
@@ -35,6 +40,11 @@ alter table public.crm_feed_orders add constraint crm_feed_orders_pending_child 
 drop index if exists public.crm_feed_orders_one_open;
 create unique index if not exists crm_feed_orders_one_open_dealership
   on public.crm_feed_orders (dealer_company_id) where parent_order_id is not null and status not in ('done','cancelled');
+
+-- ── Templates: "Feed assigned, some pending" kind ───────────────────────────
+alter table public.crm_email_templates drop constraint if exists crm_email_templates_feed_kind_check;
+alter table public.crm_email_templates add constraint crm_email_templates_feed_kind_check check (feed_kind is null or feed_kind in
+  ('request','request_pdf','dealer_followup','supplier_followup','supplier_forward','feed_assigned','feed_assigned_partial'));
 
 -- ── Sender ("on behalf of") ──────────────────────────────────────────────────
 -- Graph's `sender` when it differs from `from`: Autosoft's replies go out through

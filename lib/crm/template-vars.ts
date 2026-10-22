@@ -69,6 +69,10 @@ export const TEMPLATE_VARIABLES: VarGroup[] = [
     { key: "order.dealerships", label: "Dealership name(s)", example: "Sour Lake Motors and Sour Lake Ford" },
     { key: "order.dealership_count", label: "Number of dealerships", example: "2" },
     { key: "order.dealership_list", label: "Dealership / Location lines", example: "Dealership: Sour Lake Motors\nLocation: Sour Lake, TX" },
+    // The "feed is set up" emails: the dealerships live so far (with their Feed IDs) and the ones still pending.
+    { key: "order.live_dealerships", label: "Live dealership name(s)", example: "Sour Lake Motors" },
+    { key: "order.feed_id_list", label: "Live dealership / Feed ID lines", example: "Sour Lake Motors — feed ID SOUR17" },
+    { key: "order.pending_dealerships", label: "Pending dealership name(s)", example: "Sour Lake Ford" },
     // One per supplier question (crm_feed_supplier_settings.extra_fields); any
     // order.supplier_fields.<key>[.<option>] is accepted — see isKnownVariable.
     { key: "order.supplier_fields.autosoft_account", label: "Supplier field (e.g. Autosoft account)", example: "ABCD17" },

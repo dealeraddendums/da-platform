@@ -2,10 +2,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { sanitizeTemplateHtml } from "./email-html";
 import { findUnknownTokens, findVariables } from "./template-vars";
+import { FEED_KINDS } from "./feeds/templates";
 
 export const TEMPLATE_COLUMNS = "id, name, category, subject, body_html, variables, source, import_report, needs_review, archived, feed_kind, supplier_company_id, created_by, updated_by, created_at, updated_at";
-
-const FEED_KINDS = ["request", "request_pdf", "dealer_followup", "supplier_followup", "feed_assigned"];
 
 /**
  * Feed-request templates (Phase 2b): { feed_kind, supplier_company_id? } puts a
@@ -16,7 +15,7 @@ export async function feedFolderFields(admin: any, b: any): Promise<{ fields: Re
   if (!("feed_kind" in b) && !("supplier_company_id" in b)) return { fields: {} };
   const kind = b.feed_kind ?? null;
   if (kind === null) return { fields: { feed_kind: null, supplier_company_id: null } };
-  if (!FEED_KINDS.includes(kind)) return { error: "Unknown feed template kind" };
+  if (!(FEED_KINDS as readonly string[]).includes(kind)) return { error: "Unknown feed template kind" };
   const sup = typeof b.supplier_company_id === "string" && b.supplier_company_id ? b.supplier_company_id : null;
   let category = "Feed requests";
   if (sup) {

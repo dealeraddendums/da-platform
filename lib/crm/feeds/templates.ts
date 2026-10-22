@@ -1,6 +1,7 @@
 // Feed-request templates: Communications → Templates → "Feed requests".
 // Kinds: request, request_pdf, dealer_followup, supplier_followup,
-// supplier_forward (the signed PDF → supplier), feed_assigned. A global default per kind (supplier_company_id null) and
+// supplier_forward (the signed PDF → supplier), feed_assigned (every dealership live),
+// feed_assigned_partial (some live, some still pending after 2 business days). A global default per kind (supplier_company_id null) and
 // optional per-supplier overrides; resolution is supplier override → global
 // default → the built-in text below (so a fresh install still sends).
 // The built-in wording is the team's own "Inventory Feed Request for: …"
@@ -9,11 +10,12 @@
 // name every dealership on the request (one dealership = its name / location).
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export const FEED_KINDS = ["request", "request_pdf", "dealer_followup", "supplier_followup", "supplier_forward", "feed_assigned"] as const;
+export const FEED_KINDS = ["request", "request_pdf", "dealer_followup", "supplier_followup", "supplier_forward", "feed_assigned", "feed_assigned_partial"] as const;
 export type FeedKind = (typeof FEED_KINDS)[number];
 export const FEED_KIND_LABEL: Record<FeedKind, string> = {
   request: "Request (email)", request_pdf: "Request with PDF", dealer_followup: "Dealer follow-up",
   supplier_followup: "Supplier follow-up", supplier_forward: "Signed PDF to supplier", feed_assigned: "Feed assigned (to dealer)",
+  feed_assigned_partial: "Feed assigned, some pending (to dealer)",
 };
 export const FEED_CATEGORY = "Feed requests";
 export const supplierFolder = (supplierName: string) => `${FEED_CATEGORY} · ${supplierName}`;
@@ -65,9 +67,21 @@ export const DEFAULT_FEED_TEMPLATES: Record<FeedKind, { name: string; subject: s
   },
   feed_assigned: {
     name: "Feed assigned — to dealer",
-    subject: "Your inventory feed is set up — {{order.dealerships}}",
+    subject: "Your inventory feed is set up — {{order.live_dealerships}}",
     body_html: `<p>Hi {{approver.first_name | "there"}},</p>
-<p>Good news: {{supplier.name}} has set up {{order.dealerships}}'s inventory feed to DealerAddendums (feed ID {{order.feed_id}}). Your vehicles will start appearing in your DealerAddendums account with the next inventory update, usually within a day.</p>
+<p>Good news: {{supplier.name}} has set up the inventory feed to DealerAddendums for:</p>
+<p>{{order.feed_id_list}}</p>
+<p>Your vehicles will start appearing in your DealerAddendums account with the next inventory update, usually within a day.</p>
+<p>If anything looks off once they arrive, just reply to this email. Thank you!</p>`,
+  },
+  feed_assigned_partial: {
+    name: "Feed assigned, some pending — to dealer",
+    subject: "Your inventory feed is set up — {{order.live_dealerships}}",
+    body_html: `<p>Hi {{approver.first_name | "there"}},</p>
+<p>Good news: {{supplier.name}} has set up the inventory feed to DealerAddendums for:</p>
+<p>{{order.feed_id_list}}</p>
+<p>Those vehicles will start appearing in your DealerAddendums account with the next inventory update, usually within a day.</p>
+<p>We're still waiting on {{supplier.name}} for {{order.pending_dealerships}}. We'll email you again as soon as those are live.</p>
 <p>If anything looks off once they arrive, just reply to this email. Thank you!</p>`,
   },
 };
