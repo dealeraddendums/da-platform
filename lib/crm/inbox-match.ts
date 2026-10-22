@@ -59,7 +59,17 @@ export type InboxRules = {
   ownAddresses: string[];       // our mailboxes
   internalDomains: string[];    // e.g. dealeraddendums.com
   ignoreSenders: string[];      // substrings of From (see crm_settings.email_ignore_senders)
+  /** Never ignored: feed suppliers' addresses / domains (crm_feed_supplier_settings) — a supplier match beats the noreply list. */
+  keepSenders?: string[];
 };
+
+/** A feed supplier's address (exact) or domain (subdomains too). */
+export function isKeptSender(address: string | null | undefined, keep: string[] = []): boolean {
+  const a = (address ?? "").toLowerCase();
+  if (!a) return false;
+  const d = emailDomain(a);
+  return keep.some((k) => { const x = k.trim().toLowerCase().replace(/^@/, ""); return !!x && (x.includes("@") ? a === x : d === x || d.endsWith(`.${x}`)); });
+}
 
 export function isInternalAddress(address: string, rules: Pick<InboxRules, "ownAddresses" | "internalDomains">): boolean {
   const a = address.toLowerCase();

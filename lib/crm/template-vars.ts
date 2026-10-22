@@ -3,7 +3,8 @@
 // the server compose path share it).
 //
 // Syntax: {{group.field}} with an optional fallback: {{contact.first_name | "there"}}.
-// Values are HTML-escaped when rendering a body. A token that isn't in the
+// Values are HTML-escaped when rendering a body (a line break in a value becomes
+// <br> — order.dealership_list). A token that isn't in the
 // catalogue is left untouched and reported as `unknown`; a known variable with
 // no value (and no fallback) renders empty and is reported as `missing`.
 
@@ -64,6 +65,10 @@ export const TEMPLATE_VARIABLES: VarGroup[] = [
     { key: "order.sent_on", label: "Request sent on", example: "October 21, 2026" },
     { key: "order.feed_id", label: "Feed ID", example: "MP12601" },
     { key: "order.case_number", label: "Supplier case number", example: "08192068" },
+    // Several dealerships on one request (a group's rooftops); one dealership = its name / location.
+    { key: "order.dealerships", label: "Dealership name(s)", example: "Sour Lake Motors and Sour Lake Ford" },
+    { key: "order.dealership_count", label: "Number of dealerships", example: "2" },
+    { key: "order.dealership_list", label: "Dealership / Location lines", example: "Dealership: Sour Lake Motors\nLocation: Sour Lake, TX" },
     // One per supplier question (crm_feed_supplier_settings.extra_fields); any
     // order.supplier_fields.<key>[.<option>] is accepted — see isKnownVariable.
     { key: "order.supplier_fields.autosoft_account", label: "Supplier field (e.g. Autosoft account)", example: "ABCD17" },
@@ -103,7 +108,7 @@ export function renderTemplate(text: string, ctx: TemplateContext, opts: { html:
     const v = ctx[key];
     const value = v == null || String(v).trim() === "" ? (fbDq ?? fbSq ?? null) : String(v);
     if (value == null) { missing.add(key); return ""; }
-    return opts.html ? escapeHtml(value) : value;
+    return opts.html ? escapeHtml(value).replace(/\r?\n/g, "<br>") : value;
   });
   return { text: out, missing: Array.from(missing), unknown: Array.from(unknown) };
 }

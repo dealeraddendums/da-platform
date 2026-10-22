@@ -17,6 +17,7 @@ type Row = {
   id: string; number: string; status: string; status_label: string; age_days: number; age_color: string;
   dealer_company_id: string; dealer_name: string | null; supplier_name: string | null; approver_name: string | null; approver_email: string | null;
   approver_phone: string | null; owner_staff_id: string | null; owner_name: string | null; next_action: string; feed_id_candidate: string | null; open_tasks: number;
+  dealerships: { id: string; status: string; feed_id_candidate: string | null }[];
 };
 type Unmatched = { id: string; thread_id: string; reason: string; created_at: string; email: { from_email: string | null; from_name: string | null; subject: string | null; body_text: string } | null };
 

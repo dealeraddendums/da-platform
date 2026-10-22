@@ -1,7 +1,8 @@
 "use client";
 
-// Dealer company page → Feeds tab: the dealer's feed-order history, Start feed
-// order, and each order in a slide-over.
+// Dealer / group company page → Feeds tab: feed-order history (a dealer's
+// own orders and the group orders it is on; a group's orders for its
+// rooftops), Start feed order (a group ticks rooftops), each order in a slide-over.
 
 import { useCallback, useEffect, useState } from "react";
 import SlideOver from "./SlideOver";
@@ -9,10 +10,10 @@ import FeedOrderForm from "./FeedOrderForm";
 import FeedOrderPanel, { AGE_COLOR, StatusChip } from "./FeedOrderPanel";
 import { fmtDate } from "@/lib/crm/format";
 
-type Row = { id: string; number: string; status: string; status_label: string; age_days: number; age_color: string; supplier_name: string | null; approver_name: string | null; owner_name: string | null; next_action: string; created_at: string; source: string };
+type Row = { id: string; number: string; status: string; status_label: string; age_days: number; age_color: string; dealer_name: string | null; supplier_name: string | null; approver_name: string | null; owner_name: string | null; next_action: string; created_at: string; source: string; dealerships: { id: string }[] };
 const TH: React.CSSProperties = { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", fontWeight: 600 };
 
-export default function CompanyFeedsPanel({ companyId, companyName, meId }: { companyId: string; companyName: string; meId: string }) {
+export default function CompanyFeedsPanel({ companyId, companyName, companyKind = "dealer", meId }: { companyId: string; companyName: string; companyKind?: "dealer" | "group"; meId: string }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [start, setStart] = useState(false);
@@ -21,12 +22,13 @@ export default function CompanyFeedsPanel({ companyId, companyName, meId }: { co
     setRows(j.rows ?? []);
   }, [companyId]);
   useEffect(() => { void load(); }, [load]);
-  const hasOpen = (rows ?? []).some((r) => !["done", "cancelled"].includes(r.status));
+  // A dealer has one open order at a time; a group can start one per set of rooftops.
+  const hasOpen = companyKind === "dealer" && (rows ?? []).some((r) => !["done", "cancelled"].includes(r.status));
 
   return (
     <div>
       <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Automatic inventory feed orders for this dealer.</span>
+        <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{companyKind === "group" ? "Automatic inventory feed orders for this group's dealerships." : "Automatic inventory feed orders for this dealer."}</span>
         {!hasOpen && <button type="button" className="btn btn-primary" style={{ height: 30 }} onClick={() => setStart(true)}>Start feed order</button>}
       </div>
       {rows && !rows.length && <p className="text-sm" style={{ color: "var(--text-muted)", padding: "0 16px 16px", margin: 0 }}>No feed orders yet.</p>}
@@ -39,7 +41,7 @@ export default function CompanyFeedsPanel({ companyId, companyName, meId }: { co
           <tbody>
             {rows.map((r) => (
               <tr key={r.id} onClick={() => setOpen(r.id)} style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }}>
-                <td className="px-3 py-2" style={{ color: "var(--blue)", fontWeight: 600 }}>{r.number}</td>
+                <td className="px-3 py-2" style={{ color: "var(--blue)", fontWeight: 600 }}>{r.number}{r.dealerships.length > 1 && <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>{r.dealer_name}</div>}</td>
                 <td className="px-3 py-2"><StatusChip status={r.status} label={r.status_label} />{!["done", "cancelled"].includes(r.status) && <span style={{ fontSize: 11, color: AGE_COLOR[r.age_color], marginLeft: 6 }}>● {r.age_days} bd</span>}</td>
                 <td className="px-3 py-2">{r.supplier_name ?? "—"}</td>
                 <td className="px-3 py-2">{r.approver_name ?? "—"}</td>
@@ -51,7 +53,7 @@ export default function CompanyFeedsPanel({ companyId, companyName, meId }: { co
         </table>
       )}
       <SlideOver open={start} title="Start feed order" onClose={() => setStart(false)}>
-        {start && <FeedOrderForm dealerCompanyId={companyId} dealerName={companyName} onCancel={() => setStart(false)} onCreated={(o) => { setStart(false); setOpen(o.id); void load(); }} />}
+        {start && <FeedOrderForm dealerCompanyId={companyId} dealerName={companyName} companyKind={companyKind} onCancel={() => setStart(false)} onCreated={(o) => { setStart(false); setOpen(o.id); void load(); }} />}
       </SlideOver>
       <SlideOver open={!!open} title="Feed order" onClose={() => { setOpen(null); void load(); }} width={760}>
         {open && <FeedOrderPanel orderId={open} meId={meId} onChanged={load} />}

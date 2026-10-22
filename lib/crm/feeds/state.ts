@@ -14,23 +14,35 @@
 //
 // "request_sent" is recorded as an event; the order moves straight on to
 // awaiting_dealer_approval (or awaiting_supplier for portal / API suppliers).
+//
+// Parent / child (migration 184): the diagram above is the PARENT — one per
+// request. Its Feed ID part belongs to the CHILDREN, one per dealership:
+//
+//   pending ──feed_id_detected / feed_id_entered──▶ feed_id_received ──feed_id_confirmed──▶ assigned ──import_succeeded──▶ done
+//      (any open state) ──cancelled──▶ cancelled
+//
+// and the parent follows them (rollup in orders.ts): the first child with a
+// Feed ID → parent feed_id_received ("dealership_feed_id"); every child
+// assigned / done / cancelled → parent done ("dealerships_complete").
 // The stall timer restarts on every state change and every manual action;
 // automatic nudges (the daily job) count stalled_nudges but don't restart it.
 
 export const ORDER_STATUSES = [
   "needs_info", "ready", "request_sent", "awaiting_dealer_approval", "awaiting_supplier",
-  "feed_id_received", "assigned", "done", "cancelled",
+  "pending", "feed_id_received", "assigned", "done", "cancelled",
 ] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
-export const OPEN_STATUSES: OrderStatus[] = ["needs_info", "ready", "request_sent", "awaiting_dealer_approval", "awaiting_supplier", "feed_id_received", "assigned"];
+export const OPEN_STATUSES: OrderStatus[] = ["needs_info", "ready", "request_sent", "awaiting_dealer_approval", "awaiting_supplier", "pending", "feed_id_received", "assigned"];
 export const isOpen = (s: OrderStatus) => OPEN_STATUSES.includes(s);
 
-import { checkSupplierFields, type ExtraField } from "./extra-fields";
+import { checkOrderFields, type DealershipAnswers, type ExtraField } from "./extra-fields";
 
 export type RequestMethod = "email" | "pdf" | "api";
 
 export type OrderState = {
   status: OrderStatus;
+  /** Set on a dealership's child order. */
+  parent_order_id?: string | null;
   supplier_company_id: string | null;
   approver_name: string | null;
   approver_email: string | null;
@@ -40,6 +52,8 @@ export type OrderState = {
   supplier_fields?: Record<string, string>;
   feed_id_candidate?: string | null;
   stalled_nudges?: number;
+  /** Parent: its dealerships' own answers (per_dealership questions). Absent = one dealership answering on the order itself. */
+  dealerships?: DealershipAnswers[];
 };
 
 export type OrderEvent =
@@ -55,7 +69,10 @@ export type OrderEvent =
   | { type: "import_succeeded"; via: "feed_status" | "no_status" }
   | { type: "nudged"; target: "dealer" | "supplier"; manual: boolean }
   | { type: "owner_changed"; ownerId: string | null }
-  | { type: "cancelled"; reason: string };
+  | { type: "cancelled"; reason: string }
+  // Parent rollups (orders.ts → rollupParent)
+  | { type: "dealership_feed_id"; fromSupplier: boolean }
+  | { type: "dealerships_complete" };
 
 export class TransitionError extends Error {
   constructor(public from: OrderStatus, public event: string, message?: string) {
@@ -70,10 +87,10 @@ export type Advance = { status: OrderStatus; patch: Record<string, unknown>; cha
  * Has what the request needs: a supplier, the approver's name and email unless the supplier uses a
  * portal / API, and valid answers to the supplier's required questions (Autosoft account number…).
  */
-export function hasRequiredInfo(o: Pick<OrderState, "supplier_company_id" | "approver_name" | "approver_email" | "supplier_fields">, method: RequestMethod | null, extraFields: ExtraField[] = []): boolean {
+export function hasRequiredInfo(o: Pick<OrderState, "supplier_company_id" | "approver_name" | "approver_email" | "supplier_fields" | "dealerships">, method: RequestMethod | null, extraFields: ExtraField[] = []): boolean {
   if (!o.supplier_company_id) return false;
   if (extraFields.length) {
-    const c = checkSupplierFields(extraFields, o.supplier_fields);
+    const c = checkOrderFields(extraFields, o.supplier_fields, o.dealerships ?? [{ name: "", fields: o.supplier_fields }]);
     if (c.missing.length || c.errors.length) return false;
   }
   if (method === "api") return true;
@@ -81,6 +98,9 @@ export function hasRequiredInfo(o: Pick<OrderState, "supplier_company_id" | "app
 }
 
 const PRE_ID: OrderStatus[] = ["needs_info", "ready", "request_sent", "awaiting_dealer_approval", "awaiting_supplier", "feed_id_received"];
+/** Events only a dealership's child order takes, and the ones it never takes. */
+const CHILD_ONLY = new Set(["feed_id_detected", "feed_id_entered", "feed_id_confirmed", "import_succeeded"]);
+const BOTH = new Set(["created", "info_updated", "cancelled"]);
 
 export function advanceOrder(order: OrderState, ev: OrderEvent, ctx: { method: RequestMethod | null; now?: Date; extraFields?: ExtraField[] }): Advance {
   const now = (ctx.now ?? new Date()).toISOString();
@@ -89,12 +109,17 @@ export function advanceOrder(order: OrderState, ev: OrderEvent, ctx: { method: R
   const go = (status: OrderStatus, patch: Record<string, unknown> = {}, timer = true): Advance =>
     ({ status, patch: { ...(timer ? restart : {}), ...patch, status }, changed: status !== s });
   const need = (allowed: OrderStatus[]) => { if (!allowed.includes(s)) throw new TransitionError(s, ev.type); };
+  const child = !!order.parent_order_id;
+  if (child && !CHILD_ONLY.has(ev.type) && !BOTH.has(ev.type)) throw new TransitionError(s, ev.type, `Can't ${ev.type.replace(/_/g, " ")} on one dealership — use the order`);
+  if (!child && CHILD_ONLY.has(ev.type)) throw new TransitionError(s, ev.type, "Feed IDs belong to the order's dealerships");
 
   switch (ev.type) {
     case "created":
+      if (child) return go("pending");
       return go(hasRequiredInfo(order, ctx.method, ctx.extraFields) ? "ready" : "needs_info");
 
     case "info_updated": {
+      if (child) { need(["pending", "feed_id_received"]); return go(s, { ...ev.fields }, false); }
       need(PRE_ID);
       const next = { ...order, ...ev.fields };
       if (s === "needs_info" || s === "ready") return go(hasRequiredInfo(next, ctx.method, ctx.extraFields) ? "ready" : "needs_info", { ...ev.fields });
@@ -121,7 +146,7 @@ export function advanceOrder(order: OrderState, ev: OrderEvent, ctx: { method: R
 
     case "feed_id_detected":
     case "feed_id_entered": {
-      need(PRE_ID);
+      need(["pending", "feed_id_received"]);
       const candidate = ev.candidate.trim();
       if (!candidate) throw new TransitionError(s, ev.type, "Feed ID is empty");
       return go("feed_id_received", { feed_id_candidate: candidate, ...(ev.type === "feed_id_detected" ? { supplier_replied_at: now } : {}) });
@@ -139,7 +164,8 @@ export function advanceOrder(order: OrderState, ev: OrderEvent, ctx: { method: R
       return go("done");
 
     case "nudged":
-      need(ev.target === "dealer" ? ["request_sent", "awaiting_dealer_approval"] : ["awaiting_dealer_approval", "awaiting_supplier"]);
+      // Supplier: also once some dealerships have their Feed ID and others are still pending.
+      need(ev.target === "dealer" ? ["request_sent", "awaiting_dealer_approval"] : ["awaiting_dealer_approval", "awaiting_supplier", "feed_id_received"]);
       return ev.manual ? go(s) : go(s, { stalled_nudges: (order.stalled_nudges ?? 0) + 1 }, false);
 
     case "owner_changed":
@@ -150,6 +176,15 @@ export function advanceOrder(order: OrderState, ev: OrderEvent, ctx: { method: R
       if (!isOpen(s)) throw new TransitionError(s, ev.type);
       if (!ev.reason?.trim()) throw new TransitionError(s, ev.type, "A cancel reason is required");
       return go("cancelled", { cancel_reason: ev.reason.trim() });
+
+    case "dealership_feed_id":
+      // Staff can enter a Feed ID before the request even went out (they had it from the dealer).
+      need(PRE_ID);
+      return go("feed_id_received", ev.fromSupplier ? { supplier_replied_at: now } : {});
+
+    case "dealerships_complete":
+      if (!isOpen(s)) throw new TransitionError(s, ev.type);
+      return go("done");
   }
 }
 
@@ -187,7 +222,7 @@ export function stallActions(
 export const STATUS_LABEL: Record<OrderStatus, string> = {
   needs_info: "Needs info", ready: "Ready to send", request_sent: "Request sent",
   awaiting_dealer_approval: "Awaiting dealer approval", awaiting_supplier: "Awaiting supplier",
-  feed_id_received: "Feed ID received", assigned: "Assigned", done: "Done", cancelled: "Cancelled",
+  pending: "Waiting for Feed ID", feed_id_received: "Feed ID received", assigned: "Assigned", done: "Done", cancelled: "Cancelled",
 };
 
 export const NEXT_ACTION: Record<OrderStatus, string> = {
@@ -196,6 +231,7 @@ export const NEXT_ACTION: Record<OrderStatus, string> = {
   request_sent: "Wait for the dealer's APPROVED",
   awaiting_dealer_approval: "Dealer replies APPROVED (nudge or call)",
   awaiting_supplier: "Supplier sends the Feed ID",
+  pending: "Supplier sends this dealership's Feed ID",
   feed_id_received: "Confirm the Feed ID",
   assigned: "First import",
   done: "—",
@@ -209,7 +245,8 @@ export function expectedDays(status: OrderStatus, turnaroundDays: number): numbe
     case "ready": return 1;
     case "request_sent":
     case "awaiting_dealer_approval": return 2;
-    case "awaiting_supplier": return Math.max(1, turnaroundDays);
+    case "awaiting_supplier":
+    case "pending": return Math.max(1, turnaroundDays);
     case "feed_id_received": return 1;
     case "assigned": return 2;
     default: return 0;

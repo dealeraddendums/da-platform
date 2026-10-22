@@ -7,6 +7,7 @@ import { feedErrorResponse, str, UUID } from "@/lib/crm/feeds/http";
 import { staffNames } from "@/lib/crm/queries";
 
 export const dynamic = "force-dynamic";
+const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
@@ -30,8 +31,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 /**
  * POST /api/crm/feeds/orders — Start feed order (rail, thread, chat, company page).
- * { dealer_company_id, supplier_company_id?, approver_name?, approver_email?, approver_phone?, approver_title?,
- *   supplier_fields?: { …the supplier's extra_fields answers }, notes?, source?: call|chat|email, email_thread_id? }
+ * { dealer_company_id (a dealer, or a group), supplier_company_id?, approver_name?, approver_email?, approver_phone?, approver_title?,
+ *   supplier_fields?: { …the supplier's extra_fields answers }, notes?, source?: call|chat|email, email_thread_id?,
+ *   dealership_company_ids?: [] (group: the rooftops ticked), dealership_fields?: { [dealerCompanyId]: { …per-rooftop answers } },
+ *   pdf_mode?: per_dealership|combined }
  *   — every field but the dealer optional (a WRONG supplier answer is a 400);
  * gaps → needs_info + "call the GM" task. Returns the open order if one exists.
  */
@@ -46,7 +49,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       dealerCompanyId: b.dealer_company_id, supplierCompanyId: UUID.test(b.supplier_company_id ?? "") ? b.supplier_company_id : null,
       source, initiatedBy: claims.sub, approverName: str(b.approver_name, 200), approverEmail: str(b.approver_email, 200),
       approverPhone: str(b.approver_phone, 40), approverTitle: str(b.approver_title, 120), notes: str(b.notes, 4000), emailThreadId: UUID.test(b.email_thread_id ?? "") ? b.email_thread_id : null,
-      supplierFields: b.supplier_fields && typeof b.supplier_fields === "object" && !Array.isArray(b.supplier_fields) ? b.supplier_fields : null,
+      supplierFields: obj(b.supplier_fields),
+      dealershipCompanyIds: Array.isArray(b.dealership_company_ids) ? b.dealership_company_ids.filter((x: unknown) => typeof x === "string" && UUID.test(x)).slice(0, 50) : null,
+      dealershipFields: obj(b.dealership_fields) as Record<string, Record<string, unknown>> | null,
+      pdfMode: b.pdf_mode === "combined" ? "combined" : null,
     });
     return NextResponse.json({ ok: true, order: r.order, existed: r.existed });
   } catch (e) { return feedErrorResponse(e); }

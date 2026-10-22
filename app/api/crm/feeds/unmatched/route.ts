@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCrmStaff } from "@/lib/crm/access";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { loadOrder, recordEvent } from "@/lib/crm/feeds/orders";
+import { loadParent, recordEvent } from "@/lib/crm/feeds/orders";
 import { handleFeedsEmail } from "@/lib/crm/feeds/inbound";
 import { feedErrorResponse, UUID } from "@/lib/crm/feeds/http";
 
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   if (!UUID.test(b.order_id ?? "")) return NextResponse.json({ error: "order_id required" }, { status: 400 });
   try {
-    const order = await loadOrder(admin, b.order_id);
+    const order = await loadParent(admin, b.order_id);
     if (!order.email_thread_id) await admin.from("crm_feed_orders").update({ email_thread_id: u.thread_id }).eq("id", order.id);
     await admin.from("crm_email_threads").update({ company_id: order.dealer_company_id, matched_by: "manual", match_candidates: [] }).eq("id", u.thread_id).is("company_id", null);
     await admin.from("crm_feed_unmatched").delete().eq("id", u.id);   // otherwise detection sees it as already handled

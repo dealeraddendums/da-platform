@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCrmStaff } from "@/lib/crm/access";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { cancelOrder, confirmFeedId, enterFeedId, forwardSignedPdf, markDealerApproved, nudge, reassignOwner, sendRequest } from "@/lib/crm/feeds/orders";
+import { cancelOrder, confirmFeedId, enterFeedId, forwardSignedPdf, loadOrder, markDealerApproved, nudge, reassignOwner, sendRequest } from "@/lib/crm/feeds/orders";
 import { feedErrorResponse, str, UUID } from "@/lib/crm/feeds/http";
 import { staffNames } from "@/lib/crm/queries";
 
@@ -14,8 +14,9 @@ export const maxDuration = 120;
  * / rail action. Each one logs an event and restarts the stall timer.
  *   send · resend           { subject?, body_html? }  (edited in the review slide-over)
  *   nudge_dealer · nudge_supplier · mark_approved { note? }
- *   enter_feed_id { feed_id } · confirm_feed_id { feed_id }
- *   reassign { owner_staff_id } · cancel { reason } · forward_signed_pdf
+ *   enter_feed_id { feed_id, dealership_order_id? } · confirm_feed_id { feed_id, dealership_order_id? }
+ *     (which dealership — required when the order has several)
+ *   reassign { owner_staff_id } · cancel { reason, dealership_order_id? } (just that dealership) · forward_signed_pdf
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
   const { claims, error } = await requireCrmStaff();
@@ -24,8 +25,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const b = await req.json().catch(() => ({}));
   const admin = createAdminSupabaseClient() as any;
   const me = claims.sub;
+  const dealership = UUID.test(b?.dealership_order_id ?? "") ? b.dealership_order_id as string : null;
   try {
     let order: any;
+    let extra: Record<string, unknown> = {};
+    if (dealership) {
+      const d = await loadOrder(admin, dealership);
+      if (d.parent_order_id !== params.id && d.id !== params.id) return NextResponse.json({ error: "That dealership isn't on this order" }, { status: 400 });
+    }
     switch (b?.action) {
       case "send":
       case "resend": {
@@ -39,13 +46,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       case "enter_feed_id": {
         const id = str(b.feed_id, 60);
         if (!id) return NextResponse.json({ error: "feed_id required" }, { status: 400 });
-        order = await enterFeedId(admin, params.id, id, me);
+        order = await enterFeedId(admin, params.id, id, me, dealership);
         break;
       }
       case "confirm_feed_id": {
         const id = str(b.feed_id, 60);
         if (!id) return NextResponse.json({ error: "feed_id required" }, { status: 400 });
-        order = await confirmFeedId(admin, params.id, id, me);
+        order = await confirmFeedId(admin, params.id, id, me, dealership);
         break;
       }
       case "reassign": {
@@ -57,12 +64,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       case "cancel": {
         const reason = str(b.reason, 1000);
         if (!reason) return NextResponse.json({ error: "A cancel reason is required" }, { status: 400 });
-        order = await cancelOrder(admin, params.id, reason, me);
+        order = await cancelOrder(admin, dealership ?? params.id, reason, me);
         break;
       }
-      case "forward_signed_pdf": await forwardSignedPdf(admin, params.id, me); break;
+      case "forward_signed_pdf": extra = await forwardSignedPdf(admin, params.id, me); break;
       default: return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
-    return NextResponse.json({ ok: true, order: order ?? null });
+    return NextResponse.json({ ok: true, order: order ?? null, ...extra });
   } catch (e) { return feedErrorResponse(e); }
 }

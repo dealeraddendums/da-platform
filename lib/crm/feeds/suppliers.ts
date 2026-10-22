@@ -5,7 +5,8 @@
 // anonymized threads in scripts/fixtures/crm-feeds/ (test:crm-feed-suppliers).
 //
 // Conventions every supplier shares (lib/crm/feeds/detect.ts, inbound.ts):
-//   • our subject is always "Inventory Feed Request for: {{company.name}}"
+//   • our subject is always "Inventory Feed Request for: {{order.dealerships}}" (the dealership's
+//     name; "A and B" for one request covering several of a group's rooftops)
 //   • suppliers reply on that thread AND start their own (Team Velocity's "DEALER APPROVAL
 //     REQUIRED RE: …", vAuto's "[ thread::…:: ]" case thread) — matched by thread first, then by
 //     the dealer's name from the supplier's or the dealer's domain
@@ -32,7 +33,9 @@ export type SupplierProfile = {
   templates: Partial<Record<FeedKind, { name: string; subject: string; body_html: string }>>;
 };
 
-const SUBJECT = "Inventory Feed Request for: {{company.name}}";
+// {{order.dealerships}} = the dealership's name, or "A and B" when one request covers several
+// (Autosoft's real reply: "Inventory Feed Request for: Sour Lake Motors and Sour Lake Ford").
+const SUBJECT = "Inventory Feed Request for: {{order.dealerships}}";
 
 // ── Team Velocity ────────────────────────────────────────────────────────────
 const TEAM_VELOCITY: SupplierProfile = {
@@ -56,8 +59,8 @@ const TEAM_VELOCITY: SupplierProfile = {
       subject: SUBJECT,
       body_html: `<p>Hello Team Velocity Support and {{approver.first_name | "there"}},</p>
 <p>We’re requesting an inventory feed for:</p>
-<p><strong>Dealership:</strong> {{company.name}}<br><strong>Location:</strong> {{company.city}}, {{company.state}}</p>
-<p><strong>Team Velocity Support:</strong><br>Please add {{company.name}} to the Dealer Addendums inventory feed file and provide the store’s <strong>unique Dealer ID</strong> once completed.</p>
+<p>{{order.dealership_list}}</p>
+<p><strong>Team Velocity Support:</strong><br>Please add {{order.dealerships}} to the Dealer Addendums inventory feed file and provide the <strong>unique Dealer ID</strong> for each store once completed.</p>
 <p><strong>{{approver.first_name | "Approver"}}:</strong><br>Please <strong>Reply All</strong> to this email and write <strong>APPROVED</strong> to confirm you approve this inventory feed request. Team Velocity will usually email you for the same approval — please Reply All APPROVED to theirs too, or they cancel the request.</p>
 <p>Once we have your approval and the Dealer ID from Team Velocity, we can complete the setup on our end.</p>
 <p>Please let us know if you have any questions. Thank you!</p>`,
@@ -66,7 +69,7 @@ const TEAM_VELOCITY: SupplierProfile = {
       name: "Team Velocity — dealer follow-up",
       subject: `RE: ${SUBJECT}`,
       body_html: `<p>Hi {{approver.first_name | "there"}},</p>
-<p>Team Velocity is waiting on your approval to send {{company.name}}’s inventory to Dealer Addendums, and cancels the request if they don’t hear from you.</p>
+<p>Team Velocity is waiting on your approval to send {{order.dealerships}}’s inventory to Dealer Addendums, and cancels the request if they don’t hear from you.</p>
 <p>Please <strong>Reply All</strong> to this email and write <strong>APPROVED</strong> — Team Velocity is copied, so that’s all they need.</p>
 <p>Thank you!</p>`,
     },
@@ -74,7 +77,7 @@ const TEAM_VELOCITY: SupplierProfile = {
       name: "Team Velocity — supplier follow-up",
       subject: `RE: ${SUBJECT}`,
       body_html: `<p>Hello Team Velocity Support,</p>
-<p>Following up on the inventory feed request for {{company.name}} ({{company.city}}, {{company.state}}), sent {{order.sent_on}}. The dealership has approved it.</p>
+<p>Following up on the inventory feed request for {{order.dealerships}}, sent {{order.sent_on}}. The dealership has approved it.</p>
 <p>Could you send us the feed filename / Dealer ID once the file is set up?</p>
 <p>Thank you!</p>`,
     },
@@ -103,8 +106,8 @@ const VAUTO: SupplierProfile = {
       subject: SUBJECT,
       body_html: `<p>Hello vAuto Support and {{approver.first_name | "there"}},</p>
 <p>We’re requesting an inventory feed for:</p>
-<p><strong>Dealership:</strong> {{company.name}}<br><strong>Location:</strong> {{company.city}}, {{company.state}}</p>
-<p><strong>vAuto Support:</strong><br>Please add {{company.name}} to the Dealer Addendums inventory feed file and provide the store’s <strong>unique Dealer ID</strong> once completed.</p>
+<p>{{order.dealership_list}}</p>
+<p><strong>vAuto Support:</strong><br>Please add {{order.dealerships}} to the Dealer Addendums inventory feed file and provide the <strong>unique Dealer ID</strong> for each store once completed.</p>
 <p><strong>{{approver.first_name | "Approver"}}:</strong><br>Please <strong>Reply All</strong> to this email with the words <strong>I approve</strong>. vAuto needs that exact wording from the dealership before it can enable the feed, and closes the request if approval doesn’t arrive within 3 business days.</p>
 <p>Once we have your approval and the Dealer ID from vAuto, we can complete the setup on our end.</p>
 <p>Please let us know if you have any questions. Thank you!</p>`,
@@ -113,7 +116,7 @@ const VAUTO: SupplierProfile = {
       name: "vAuto — dealer follow-up",
       subject: `RE: ${SUBJECT}`,
       body_html: `<p>Hi {{approver.first_name | "there"}},</p>
-<p>vAuto is waiting on your approval to send {{company.name}}’s inventory to Dealer Addendums (case {{order.case_number | "pending"}}), and closes the case if approval isn’t received within 3 business days.</p>
+<p>vAuto is waiting on your approval to send {{order.dealerships}}’s inventory to Dealer Addendums (case {{order.case_number | "pending"}}), and closes the case if approval isn’t received within 3 business days.</p>
 <p>Please <strong>Reply All</strong> to this email with the words <strong>I approve</strong>.</p>
 <p>Thank you!</p>`,
     },
@@ -121,7 +124,7 @@ const VAUTO: SupplierProfile = {
       name: "vAuto — supplier follow-up (new email)",
       subject: `${SUBJECT} — case# {{order.case_number | "not received"}}`,
       body_html: `<p>Hello vAuto Support,</p>
-<p>Following up on case# {{order.case_number | "(we didn’t receive a case number)"}}: the inventory feed request for {{company.name}} ({{company.city}}, {{company.state}}), sent {{order.sent_on}}. The dealership has approved it (“I approve”).</p>
+<p>Following up on case# {{order.case_number | "(we didn’t receive a case number)"}}: the inventory feed request for {{order.dealerships}}, sent {{order.sent_on}}. The dealership has approved it (“I approve”).</p>
 <p>Could you let us know the export ID once the feed is enabled?</p>
 <p>Thank you!</p>`,
     },
@@ -138,7 +141,10 @@ const AUTOSOFT: SupplierProfile = {
   settings: {
     request_method: "pdf", request_email: "dcsconnect@autosoftdms.com", cc_emails: [],
     domains: ["autosoftdms.com"],
-    feed_id_pattern: null, feed_id_manual: true, case_number_pattern: null,
+    // "DealerAddendums has been activated for SOUR17/SOUR75" — one code per dealership, each its Autosoft account.
+    feed_id_pattern: "activated for\\s*([A-Z0-9/]+)", feed_id_manual: false,
+    // Salesforce's "[ ref:!00Df20Cce8.!500iL0GsRLP:ref ]" on every reply = Autosoft's case reference.
+    case_number_pattern: "ref:(\\S+?):ref",
     approval_phrases: [], cancellation_patterns: [], followup_new_thread: false,
     typical_turnaround_days: 3, platform_provider: "Autosoft", is_dms: true,
     pdf_field_map: {
@@ -165,7 +171,8 @@ const AUTOSOFT: SupplierProfile = {
       "Title": "{{approver.title}}",
     },
     extra_fields: [
-      { key: "autosoft_account", label: "Autosoft account number", type: "text", required: true, uppercase: true, pattern: "^[A-Z]{4}\\d{2}$",
+      // Per dealership, and it IS the Feed ID: pre-fills each dealership's candidate; "activated for X/Y" is matched to it.
+      { key: "autosoft_account", label: "Autosoft account number", type: "text", required: true, uppercase: true, pattern: "^[A-Z]{4}\\d{2}$", per_dealership: true, feed_id: true,
         help: "the dealer's Autosoft Customer ID — four letters and two digits, e.g. ABCD17; the dealer can give it to you" },
       { key: "go_dealer", label: "Autosoft GO dealer?", type: "choice", required: true, default: "N",
         options: [{ value: "N", label: "No" }, { value: "Y", label: "Yes" }] },
@@ -179,14 +186,14 @@ const AUTOSOFT: SupplierProfile = {
       { key: "historical_years", label: "Years of historical data", type: "text", pattern: "^\\d{1,2}$", help: "GoBatch only, a number of years",
         only_with: { key: "transfer_row", value: "gobatch" } },
     ],
-    notes: "Autosoft needs its Data Transfer Authorization, signed by the dealer, for each dealership (\"The Autosoft Account Number must be included on the form\"). We pre-fill it, email it to the approver, the dealer returns it signed to feeds@, and staff Forward it to dcsconnect@autosoftdms.com. Autosoft replies \"DealerAddendums has been activated for ABCD17\" — no Feed ID pattern yet, so replies become an Enter Feed ID task (it is usually the Autosoft account). Autosoft rejected a form that ticked the GoBatch row for a non-GO dealer (2026-10-21): the default row is ASIS_VehInv2.",
+    notes: "Autosoft needs its Data Transfer Authorization, signed by the dealer, for each dealership (\"The Autosoft Account Number must be included on the form\"). We pre-fill it, email it to the approver, the dealer returns it signed to feeds@, and staff Forward it to dcsconnect@autosoftdms.com. Autosoft replies through Salesforce (noreply@salesforce.com on behalf of dcsconnect@) with a \"[ ref:…:ref ]\" token in the subject (kept as the case reference): \"DealerAddendums has been activated for SOUR17/SOUR75\" — the Feed ID IS the Autosoft account, one per dealership, so each code is matched to the dealership with that account. Autosoft rejected a form that ticked the GoBatch row for a non-GO dealer (2026-10-21): the default row is ASIS_VehInv2.",
   },
   templates: {
     request_pdf: {
       name: "Autosoft — authorization form",
       subject: SUBJECT,
       body_html: `<p>Hello {{approver.first_name | "there"}},</p>
-<p>Autosoft needs a signed <strong>Data Transfer Authorization</strong> before it can send {{company.name}}’s inventory to Dealer Addendums. The form is attached, already filled in with your dealership’s details and Autosoft account {{order.supplier_fields.autosoft_account}}.</p>
+<p>Autosoft needs a signed <strong>Data Transfer Authorization</strong> before it can send {{order.dealerships}}’s inventory to Dealer Addendums. The form is attached, already filled in with the dealership details and Autosoft account {{order.supplier_fields.autosoft_account}}.</p>
 <p>Please check the details, <strong>sign and date</strong> it at the bottom, and <strong>Reply All</strong> to this email with the signed form attached. We’ll forward it to Autosoft for activation — you don’t need to send it to them yourself.</p>
 <p>Please let us know if you have any questions. Thank you!</p>`,
     },
@@ -194,7 +201,7 @@ const AUTOSOFT: SupplierProfile = {
       name: "Autosoft — dealer follow-up",
       subject: `RE: ${SUBJECT}`,
       body_html: `<p>Hi {{approver.first_name | "there"}},</p>
-<p>We still need the signed Autosoft Data Transfer Authorization for {{company.name}} — it was attached to our email on {{order.sent_on}}.</p>
+<p>We still need the signed Autosoft Data Transfer Authorization for {{order.dealerships}} — it was attached to our email on {{order.sent_on}}.</p>
 <p>Please sign and date it, then <strong>Reply All</strong> with the signed copy attached and we’ll send it on to Autosoft.</p>
 <p>Thank you!</p>`,
     },
@@ -202,14 +209,14 @@ const AUTOSOFT: SupplierProfile = {
       name: "Autosoft — activation request (signed form)",
       subject: `Activation Rqst - Dealer Addendums - ${SUBJECT}`,
       body_html: `<p>Hello Autosoft DCS Connect,</p>
-<p>Attached is the signed Data Transfer Authorization for {{company.name}} (Autosoft account {{order.supplier_fields.autosoft_account}}). Please activate the Dealer Addendums inventory feed for this dealership.</p>
+<p>Attached is the signed Data Transfer Authorization for {{order.dealerships}} (Autosoft account {{order.supplier_fields.autosoft_account}}). Please activate the Dealer Addendums inventory feed.</p>
 <p>Thank you!</p>`,
     },
     supplier_followup: {
       name: "Autosoft — supplier follow-up",
       subject: `RE: Activation Rqst - Dealer Addendums - ${SUBJECT}`,
       body_html: `<p>Hello Autosoft DCS Connect,</p>
-<p>Following up on the signed Data Transfer Authorization for {{company.name}} (Autosoft account {{order.supplier_fields.autosoft_account}}). Could you let us know once Dealer Addendums is activated for this dealership?</p>
+<p>Following up on the signed Data Transfer Authorization for {{order.dealerships}} (Autosoft account {{order.supplier_fields.autosoft_account}}). Could you let us know once Dealer Addendums is activated?</p>
 <p>Thank you!</p>`,
     },
   },

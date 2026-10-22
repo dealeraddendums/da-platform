@@ -5,6 +5,12 @@
 // one variable per option, "X" when that option is selected and "" otherwise
 // ({{order.supplier_fields.transfer_row.asis_vehinv2}}), which is how a PDF's
 // per-row Activate boxes get ticked. Pure and client-safe.
+//
+// Orders for several dealerships: a `per_dealership` question is asked once per
+// rooftop and stored on that dealership's child order (Autosoft account); the
+// rest once per request on the parent. A `feed_id` question's answer IS the
+// dealership's Feed ID (Autosoft: the account number), so it pre-fills the
+// child's feed_id_candidate and is what supplier confirmations are matched to.
 
 export type ExtraFieldOption = {
   value: string;
@@ -27,6 +33,10 @@ export type ExtraField = {
   options?: ExtraFieldOption[];
   /** Asked, stored and filled only while another field has this value. */
   only_with?: { key: string; value: string };
+  /** Asked per dealership (stored on the child order), not once per request. */
+  per_dealership?: boolean;
+  /** The answer is the dealership's Feed ID (implies per_dealership). */
+  feed_id?: boolean;
 };
 
 const KEY = /^[a-z][a-z0-9_]{0,39}$/;
@@ -58,6 +68,8 @@ export function parseExtraFields(raw: unknown): ExtraField[] {
       ...(type === "text" && f.uppercase ? { uppercase: true } : {}),
       ...(options ? { options } : {}),
       ...(f.only_with && KEY.test(String(f.only_with.key ?? "")) ? { only_with: { key: String(f.only_with.key), value: String(f.only_with.value ?? "") } } : {}),
+      ...(f.per_dealership || f.feed_id ? { per_dealership: true } : {}),
+      ...(type === "text" && f.feed_id ? { feed_id: true } : {}),
     });
   }
   return out;
@@ -126,4 +138,42 @@ export function describeSupplierFields(defs: ExtraField[], values: Record<string
     const label = f.type === "choice" ? f.options!.find((o) => o.value === v)?.label ?? v : v;
     return `${f.label}: ${label}`;
   }).join(" · ");
+}
+
+// ── Per request / per dealership ─────────────────────────────────────────────
+
+export const isPerDealership = (f: ExtraField) => !!(f.per_dealership || f.feed_id);
+/** The question whose answer is the Feed ID (Autosoft account), if the supplier has one. */
+export const feedIdField = (defs: ExtraField[]) => defs.find((f) => f.feed_id) ?? null;
+
+/** Split cleaned answers: per-dealership keys → the child, the rest → the parent. */
+export function splitSupplierFields(defs: ExtraField[], values: Record<string, string>): { request: Record<string, string>; dealership: Record<string, string> } {
+  const per = new Set(defs.filter(isPerDealership).map((f) => f.key));
+  const request: Record<string, string> = {}, dealership: Record<string, string> = {};
+  for (const [k, v] of Object.entries(values)) (per.has(k) ? dealership : request)[k] = v;
+  return { request, dealership };
+}
+
+export type DealershipAnswers = { name: string; fields: Record<string, unknown> | null | undefined };
+
+/**
+ * Check a whole order: the request-level questions once, the per-dealership ones for each
+ * rooftop. `requires` / `only_with` must stay within one group (Autosoft's do: GO dealer ↔
+ * transfer row ↔ years are per request, the account per rooftop). Problems name the
+ * dealership when there are several.
+ */
+export function checkOrderFields(defs: ExtraField[], request: Record<string, unknown> | null | undefined, dealerships: DealershipAnswers[]): { request: Record<string, string>; dealerships: Record<string, string>[]; errors: string[]; missing: string[] } {
+  const perDefs = defs.filter(isPerDealership);
+  const reqDefs = defs.filter((f) => !isPerDealership(f));
+  const errors: string[] = [], missing: string[] = [];
+  const r = checkSupplierFields(reqDefs, request);
+  errors.push(...r.errors); missing.push(...r.missing);
+  const many = dealerships.length > 1;
+  const out = dealerships.map((d) => {
+    const c = checkSupplierFields(perDefs, d.fields);
+    const label = (s: string) => (many ? `${s} (${d.name})` : s);
+    errors.push(...c.errors.map(label)); missing.push(...c.missing.map(label));
+    return c.values;
+  });
+  return { request: r.values, dealerships: out, errors, missing };
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCrmStaff } from "@/lib/crm/access";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { loadOrder, nudge, reassignOwner } from "@/lib/crm/feeds/orders";
+import { loadParent, nudge, reassignOwner } from "@/lib/crm/feeds/orders";
 import { UUID } from "@/lib/crm/feeds/http";
 import { staffNames } from "@/lib/crm/queries";
 
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   for (const id of ids) {
     try {
       if (b.action === "nudge") {
-        const o = await loadOrder(admin, id);
+        const o = await loadParent(admin, id);
         await nudge(admin, id, o.status === "awaiting_supplier" ? "supplier" : "dealer", claims.sub, true);
       } else if (b.action === "reassign") await reassignOwner(admin, id, b.owner_staff_id ?? null, claims.sub);
       else return NextResponse.json({ error: "Unknown action" }, { status: 400 });

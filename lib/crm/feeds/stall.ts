@@ -3,7 +3,8 @@
 //   awaiting_dealer_approval > 2 bd → Dealer follow-up on the thread (once) · > 5 → task "Call approver"
 //   awaiting_supplier > turnaround + 2 → Supplier follow-up (once)        · > turnaround + 5 → task "Call supplier"
 //   needs_info > 3 bd with its task still open → task escalated to the feed_support group
-// Also moves assigned orders to done once the first feed import lands.
+// Also moves assigned dealerships to done once their first feed import lands
+// (the order is done once every dealership is assigned or cancelled).
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createAdminSupabaseClient } from "@/lib/db";
@@ -20,7 +21,8 @@ export async function runStallJob(admin: any = createAdminSupabaseClient(), now 
   for (const o of orders ?? []) {
     out.checked++;
     try {
-      if (o.status === "assigned") { if (await checkImport(admin, o)) out.done++; continue; }
+      if (o.status === "assigned") { if (await checkImport(admin, o)) out.done++; continue; }   // a dealership
+      if (o.parent_order_id) continue;
       const settings = await supplierSettings(admin, o.supplier_company_id);
       const { data: tasks } = await admin.from("crm_tasks").select("kind, assigned_capability").eq("feed_order_id", o.id).eq("status", "open");
       const kinds = new Set((tasks ?? []).map((t: any) => t.kind));

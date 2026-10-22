@@ -64,18 +64,36 @@ async function main() {
   eq("supplier_replied stamps, status unchanged", (() => { const a = advanceOrder(st("awaiting_supplier"), { type: "supplier_replied" }, email); return [a.status, a.changed, !!a.patch.supplier_replied_at]; })(), ["awaiting_supplier", false, true]);
   eq("supplier_replied refused in needs_info", throws(() => advanceOrder(st("needs_info"), { type: "supplier_replied" }, email)), true);
 
-  for (const from of ["awaiting_supplier", "awaiting_dealer_approval", "needs_info", "ready", "feed_id_received"] as OrderStatus[]) {
-    eq(`feed_id_detected from ${from} → feed_id_received`, advanceOrder(st(from), { type: "feed_id_detected", candidate: " MP12601 ", source: "regex" }, email).patch.feed_id_candidate, "MP12601");
+  // A dealership's child order carries the Feed ID part.
+  const kid = (status: OrderStatus, over: Partial<OrderState> = {}): OrderState => ({ ...full, status, parent_order_id: "parent", ...over });
+  eq("child created → pending", advanceOrder(kid("needs_info"), { type: "created" }, email).status, "pending");
+  for (const from of ["pending", "feed_id_received"] as OrderStatus[]) {
+    eq(`child feed_id_detected from ${from} → feed_id_received`, (() => { const a = advanceOrder(kid(from), { type: "feed_id_detected", candidate: " MP12601 ", source: "regex" }, email); return [a.status, a.patch.feed_id_candidate]; })(), ["feed_id_received", "MP12601"]);
   }
-  eq("feed_id_entered → feed_id_received", advanceOrder(st("awaiting_supplier"), { type: "feed_id_entered", candidate: "X1" }, email).status, "feed_id_received");
-  eq("feed_id refused when empty", throws(() => advanceOrder(st("awaiting_supplier"), { type: "feed_id_entered", candidate: "  " }, email)), true);
-  eq("feed_id refused once assigned", throws(() => advanceOrder(st("assigned"), { type: "feed_id_entered", candidate: "X" }, email)), true);
+  eq("child feed_id_entered → feed_id_received", advanceOrder(kid("pending"), { type: "feed_id_entered", candidate: "X1" }, email).status, "feed_id_received");
+  eq("feed_id refused when empty", throws(() => advanceOrder(kid("pending"), { type: "feed_id_entered", candidate: "  " }, email)), true);
+  eq("feed_id refused once assigned", throws(() => advanceOrder(kid("assigned"), { type: "feed_id_entered", candidate: "X" }, email)), true);
+  eq("Feed ID events refused on the parent (they belong to its dealerships)", ["feed_id_detected", "feed_id_entered", "feed_id_confirmed", "import_succeeded"].map((t) => throws(() => advanceOrder(st("awaiting_supplier"), { type: t, candidate: "X", feedId: "X", staffId: "s", source: "regex", via: "feed_status" } as unknown as OrderEvent, email))), [true, true, true, true]);
+  eq("request events refused on a dealership", ["request_sent", "dealer_approved", "nudged", "owner_changed"].map((t) => throws(() => advanceOrder(kid("pending"), { type: t, threadId: null, via: "email", target: "dealer", manual: true, ownerId: null } as unknown as OrderEvent, email))), [true, true, true, true]);
 
-  const conf = advanceOrder(st("feed_id_received"), { type: "feed_id_confirmed", feedId: "MP12601", staffId: "s1" }, email);
+  const conf = advanceOrder(kid("feed_id_received"), { type: "feed_id_confirmed", feedId: "MP12601", staffId: "s1" }, email);
   eq("feed_id_confirmed → assigned with who/when", [conf.status, conf.patch.feed_id_confirmed, conf.patch.confirmed_by_staff_id, conf.patch.assigned_at], ["assigned", "MP12601", "s1", NOW.toISOString()]);
-  eq("feed_id_confirmed refused without a candidate step", throws(() => advanceOrder(st("awaiting_supplier"), { type: "feed_id_confirmed", feedId: "X", staffId: "s" }, email)), true);
-  eq("import_succeeded → done", advanceOrder(st("assigned"), { type: "import_succeeded", via: "feed_status" }, email).status, "done");
-  eq("import_succeeded refused before assignment", throws(() => advanceOrder(st("feed_id_received"), { type: "import_succeeded", via: "no_status" }, email)), true);
+  eq("feed_id_confirmed refused without a candidate step", throws(() => advanceOrder(kid("pending"), { type: "feed_id_confirmed", feedId: "X", staffId: "s" }, email)), true);
+  eq("import_succeeded → done", advanceOrder(kid("assigned"), { type: "import_succeeded", via: "feed_status" }, email).status, "done");
+  eq("import_succeeded refused before assignment", throws(() => advanceOrder(kid("feed_id_received"), { type: "import_succeeded", via: "no_status" }, email)), true);
+  eq("child cancelled with a reason", advanceOrder(kid("pending"), { type: "cancelled", reason: "Sold the store" }, email).status, "cancelled");
+
+  // The parent follows its dealerships.
+  for (const from of ["awaiting_supplier", "awaiting_dealer_approval", "needs_info", "ready"] as OrderStatus[]) {
+    eq(`parent dealership_feed_id from ${from} → feed_id_received`, advanceOrder(st(from), { type: "dealership_feed_id", fromSupplier: true }, email).status, "feed_id_received");
+  }
+  eq("parent dealerships_complete → done", advanceOrder(st("feed_id_received"), { type: "dealerships_complete" }, email).status, "done");
+  eq("parent dealerships_complete refused when cancelled", throws(() => advanceOrder(st("cancelled"), { type: "dealerships_complete" }, email)), true);
+  eq("nudge supplier still allowed while some dealerships wait (feed_id_received)", advanceOrder(st("feed_id_received"), { type: "nudged", target: "supplier", manual: true }, email).status, "feed_id_received");
+  eq("required per-dealership answers: each rooftop needs its own",
+    [hasRequiredInfo({ ...full, dealerships: [{ name: "A", fields: { acct: "AAAA11" } }, { name: "B", fields: {} }] }, "email", [{ key: "acct", label: "Acct", type: "text", required: true, per_dealership: true }]),
+     hasRequiredInfo({ ...full, dealerships: [{ name: "A", fields: { acct: "AAAA11" } }, { name: "B", fields: { acct: "BBBB22" } }] }, "email", [{ key: "acct", label: "Acct", type: "text", required: true, per_dealership: true }])],
+    [false, true]);
 
   const autoNudge = advanceOrder(st("awaiting_dealer_approval", { stalled_nudges: 0 }), { type: "nudged", target: "dealer", manual: false }, email);
   eq("automatic nudge counts but keeps the timer", [autoNudge.patch.stalled_nudges, "stall_timer_started_at" in autoNudge.patch], [1, false]);
@@ -188,7 +206,10 @@ async function main() {
     unregisterInboundEmailHandler("feeds");
     const now = new Date().toISOString();
     const db = fakeDb({
-      crm_feed_orders: [{ id: "ord-1", dealer_company_id: "co-hm", supplier_company_id: "sup-tv", status: "awaiting_dealer_approval", approver_name: "Bill Meier", approver_email: "bill@herzogmeier.com", email_thread_id: "th-1", owner_staff_id: "staff-1", stall_timer_started_at: now, stalled_nudges: 0, created_at: now }],
+      crm_feed_orders: [
+        { id: "ord-1", dealer_company_id: "co-hm", supplier_company_id: "sup-tv", status: "awaiting_dealer_approval", approver_name: "Bill Meier", approver_email: "bill@herzogmeier.com", email_thread_id: "th-1", owner_staff_id: "staff-1", stall_timer_started_at: now, stalled_nudges: 0, created_at: now },
+        { id: "ord-1-d", parent_order_id: "ord-1", dealer_company_id: "co-hm", supplier_company_id: "sup-tv", status: "pending", supplier_fields: {}, owner_staff_id: "staff-1", stall_timer_started_at: now, stalled_nudges: 0, created_at: now },
+      ],
       crm_feed_supplier_settings: [{ company_id: "sup-tv", request_method: "email", request_email: "support@teamvelocitymarketing.com", cc_emails: [], feed_id_pattern: null, typical_turnaround_days: 2 }],
       crm_contacts: [], crm_companies: [{ id: "co-hm", website: "https://www.herzogmeier.com" }], crm_company_directory: [{ id: "co-hm", name: "Herzog-Meier Volkswagen" }],
       crm_settings: [{ id: true, feed_approval_phrases: ["APPROVED", "approve", "approved", "ok to send", "yes approved", "go ahead"] }],
@@ -200,6 +221,7 @@ async function main() {
       mailbox: { id: "mb-feeds", address: "feeds@dealeraddendums.com", purpose: "feeds" },
     });
     const o = () => db.rows("crm_feed_orders")[0];
+    const d = () => db.rows("crm_feed_orders")[1];
     eq("inbound: supplier's own approval-request email → logged only, no task (it isn't a Feed ID reply)",
       [await handleFeedsEmail(ev("e0", "support@teamvelocitymarketing.com", "Please REPLY ALL with APPROVED for this request to be completed."), db), o().status, db.rows("crm_tasks").map((t: any) => t.kind)],
       ["approval_request", "awaiting_dealer_approval", []]);
@@ -211,9 +233,9 @@ async function main() {
       ["dealer_approved", "awaiting_supplier", true]);
     eq("inbound: approval re-dispatched → ignored (idempotent on email id)", await handleFeedsEmail(ev("e2", "bill@herzogmeier.com", "Approved"), db), "duplicate");
     eq("inbound: supplier mail OUTSIDE the thread naming the dealer → Feed ID → confirm task",
-      [await handleFeedsEmail(ev("e3", "kate@teamvelocitymarketing.com", "Herzog-Meier Volkswagen is set up under the ID HMVW01.", "th-other", "Herzog-Meier Volkswagen export"), db), o().status, o().feed_id_candidate, db.rows("crm_tasks").find((t: any) => t.kind === "feed_confirm_id")?.title],
-      ["feed_id", "feed_id_received", "HMVW01", "Confirm Feed ID HMVW01"]);
-    eq("inbound: status changes are events + timeline rows", [db.rows("crm_feed_order_events").filter((e: any) => ["dealer_approved", "feed_id_detected"].includes(e.type)).length, db.rows("crm_activities").every((a: any) => a.type === "feed_order" && a.company_id === "co-hm")], [2, true]);
+      [await handleFeedsEmail(ev("e3", "kate@teamvelocitymarketing.com", "Herzog-Meier Volkswagen is set up under the ID HMVW01.", "th-other", "Herzog-Meier Volkswagen export"), db), o().status, d().status, d().feed_id_candidate, db.rows("crm_tasks").find((t: any) => t.kind === "feed_confirm_id")?.title],
+      ["feed_id", "feed_id_received", "feed_id_received", "HMVW01", "Confirm Feed ID HMVW01"]);
+    eq("inbound: status changes are events + timeline rows", [db.rows("crm_feed_order_events").filter((e: any) => ["dealer_approved", "feed_id_detected", "dealership_feed_id"].includes(e.type)).length, db.rows("crm_activities").every((a: any) => a.type === "feed_order" && a.company_id === "co-hm")], [3, true]);
     eq("inbound: closed tasks — approval closes the review task", db.rows("crm_tasks").filter((t: any) => t.status === "open").map((t: any) => t.kind), ["feed_confirm_id"]);
     eq("inbound: unrelated feeds@ mail → Unmatched", [await handleFeedsEmail(ev("e4", "someone@else.com", "hello", "th-x", "Question"), db), db.rows("crm_feed_unmatched").length], ["unmatched", 1]);
   }

@@ -100,7 +100,8 @@ export function extractFeedIds(latest: string, supplierPattern?: string | null):
     if (s && plausible(s) && !out.includes(s)) out.push(s);
   };
   const own = compilePattern(supplierPattern);
-  if (own) for (const m of Array.from(latest.matchAll(own))) add(m[1] ?? m[0]);
+  // One confirmation can name several ("activated for SOUR17/SOUR75"): a Feed ID never contains "/".
+  if (own) for (const m of Array.from(latest.matchAll(own))) for (const part of (m[1] ?? m[0]).split("/")) add(part);
   if (!out.length) for (const m of Array.from(latest.matchAll(GENERIC))) add(m[1]);
   return out;
 }
@@ -113,7 +114,21 @@ const domainOf = (e: string) => e.slice(e.lastIndexOf("@") + 1).toLowerCase();
 /** support@x.com's domain also covers mail from salesforce.x.com (Team Velocity's case notices). */
 export const domainMatches = (d: string, list: string[]) => list.some((x) => { const y = x.toLowerCase(); return d === y || d.endsWith(`.${y}`); });
 
-export function classifySender(from: string | null, ctx: { approverEmail: string | null; dealerDomains: string[]; supplierEmails: string[]; supplierDomains: string[] }): SenderKind {
+type SenderCtx = { approverEmail: string | null; dealerDomains: string[]; supplierEmails: string[]; supplierDomains: string[] };
+
+/** Is this address the supplier's (its request / Cc addresses or its domains)? */
+export const isSupplierAddress = (address: string | null | undefined, ctx: Pick<SenderCtx, "supplierEmails" | "supplierDomains">) => {
+  const a = (address ?? "").toLowerCase();
+  return !!a && (ctx.supplierEmails.map((x) => x.toLowerCase()).includes(a) || domainMatches(domainOf(a), ctx.supplierDomains));
+};
+
+/**
+ * Who wrote it. Graph's `from` AND `sender` both count for the supplier: Autosoft's replies go out
+ * through Salesforce (noreply@salesforce.com) on behalf of dcsconnect@autosoftdms.com — either
+ * address on the supplier's side makes it the supplier's message.
+ */
+export function classifySender(from: string | null, ctx: SenderCtx, sender: string | null = null): SenderKind {
+  if (isSupplierAddress(sender, ctx) && !isSupplierAddress(from, ctx)) return "supplier";
   const f = (from ?? "").toLowerCase();
   if (!f) return "other";
   const d = domainOf(f);
@@ -204,12 +219,12 @@ export type OrderMatchContext = {
 
 /** The rule set for a message ON an order's thread (or matched to an order). */
 export function detectOnOrder(
-  msg: { from: string | null; text: string | null; subject?: string | null },
+  msg: { from: string | null; sender?: string | null; text: string | null; subject?: string | null },
   order: OrderMatchContext,
   phrases: string[] = DEFAULT_APPROVAL_PHRASES,
 ): Detection {
   const latest = latestReplyText(msg.text);
-  const who = classifySender(msg.from, order);
+  const who = classifySender(msg.from, order, msg.sender ?? null);
   if (who === "supplier") {
     const supplier: SupplierSignals = {
       kind: classifySupplierMessage(latest, msg.subject ?? null),
@@ -234,5 +249,115 @@ export function mentionsDealer(subject: string | null, text: string | null, deal
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const name = norm(dealerName);
   if (name.length < 4) return false;
-  return ` ${norm(`${subject ?? ""} ${text ?? ""}`)} `.includes(` ${name} `);
+  return ` ${norm(`${stripSupplierTokens(subject)} ${text ?? ""}`)} `.includes(` ${name} `);
+}
+
+// Tokens suppliers' ticket systems append to OUR subject: Salesforce's "[ ref:!00Df20Cce8.!500iL0GsRLP:ref ]"
+// (Autosoft), vAuto's "[ thread::…:: ]" — and the "??" a mangled zero-width space leaves behind.
+const REF_TOKEN = /\[\s*ref:\S+?:ref\s*\]/gi;
+const THREAD_TOKEN = /\[\s*thread::\S*?::\s*\]/gi;
+
+/** Our subject without the suppliers' ticket tokens (for matching by dealer name). */
+export function stripSupplierTokens(subject: string | null | undefined): string {
+  return (subject ?? "").replace(REF_TOKEN, " ").replace(THREAD_TOKEN, " ").replace(/\?{2,}/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Does the subject carry one of the order's supplier case references (case number / Salesforce ref)? */
+export function subjectHasCaseRef(subject: string | null | undefined, refs: string[]): boolean {
+  const s = subject ?? "";
+  return refs.some((r) => r && r.length >= 6 && new RegExp(`(^|[^A-Za-z0-9])${escapeRe(r)}([^A-Za-z0-9]|$)`).test(s));
+}
+
+// ── Several dealerships on one order ─────────────────────────────────────────
+
+export type DealershipRef = { id: string; name: string; /** the answer that IS its Feed ID (Autosoft account), if any */ account?: string | null };
+
+const WORD_STOP = new Set(["the", "and", "of", "inc", "llc", "co", "company", "motor", "motors", "auto", "autos", "automotive", "group", "dealer", "dealership", "cars", "sales"]);
+const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter((w) => w.length >= 2);
+const wordHit = (w: string, hay: string[]) => hay.some((h) => h === w || (w.length >= 4 && h.length >= 4 && (h.startsWith(w) || w.startsWith(h))));
+
+/**
+ * How strongly `text` names each dealership: its account code (strongest), then the words of its
+ * name that tell it apart from the others on the order ("Ford" vs "Motors" for two Cedar Bend
+ * stores), then any of its name words. "MOTOR CO" in a filename counts for "Motors".
+ */
+function nameScores(text: string, list: DealershipRef[]): number[] {
+  const hay = words(text);
+  const sets = list.map((d) => words(d.name));
+  return list.map((d, i) => {
+    let score = 0;
+    if (d.account && new RegExp(`(^|[^A-Za-z0-9])${escapeRe(d.account)}([^A-Za-z0-9]|$)`, "i").test(text)) score += 100;
+    for (const w of sets[i]) {
+      if (!wordHit(w, hay)) continue;
+      const shared = sets.every((s, j) => j === i || s.some((x) => x === w || (x.length >= 4 && w.length >= 4 && (x.startsWith(w) || w.startsWith(x)))));
+      score += list.length > 1 && !shared ? 10 : WORD_STOP.has(w) ? 0.5 : 1;
+    }
+    return score;
+  });
+}
+
+/**
+ * Which signed PDF is which dealership's, from the filenames ("…DATA TRANSFER CEDAR BEND MOTOR CO.pdf",
+ * "…Form CEDAR BEND FORD.pdf"). Each dealership takes the file that names it best and no other
+ * dealership better; ties stay unplaced. `best` = the file that best names any dealership (one-form orders).
+ */
+export function matchPdfsToDealerships(filenames: string[], list: DealershipRef[]): { byDealership: Record<string, number>; unplaced: number[]; best: number | null } {
+  const scores = filenames.map((f) => nameScores(f.replace(/\.pdf$/i, ""), list));
+  const byDealership: Record<string, number> = {};
+  const used = new Set<number>();
+  if (list.length > 1) {
+    list.forEach((d, j) => {
+      const col = scores.map((row) => row[j]);
+      const top = Math.max(...col);
+      if (top < 10) return;
+      const files = col.map((v, i) => (v === top ? i : -1)).filter((i) => i >= 0);
+      if (files.length !== 1 || used.has(files[0])) return;
+      const row = scores[files[0]];
+      if (row.some((v, k) => k !== j && v >= top)) return;   // the file names another dealership as strongly
+      byDealership[d.id] = files[0];
+      used.add(files[0]);
+    });
+  }
+  let best: number | null = null, bestScore = 0;
+  scores.forEach((row, i) => { const m = Math.max(0, ...row); if (m > bestScore) { best = i; bestScore = m; } });
+  return { byDealership, unplaced: filenames.map((_, i) => i).filter((i) => !used.has(i)), best: best ?? (filenames.length ? 0 : null) };
+}
+
+export type FeedIdMapping = {
+  /** Feed ID → the dealership it belongs to (staff still confirm each). */
+  mapped: { dealershipId: string; feedId: string }[];
+  /** IDs no dealership could be matched to: with accounts on the order → flag for review; otherwise staff map them. */
+  unmatched: string[];
+  /** One-dealership orders: further matches, shown on its confirm task. */
+  others: string[];
+};
+
+/**
+ * Offer each Feed ID in a supplier message to the right dealership:
+ *   • the order's dealerships have accounts that ARE their Feed IDs (Autosoft) → by account, exact
+ *     (case-insensitive); a code no dealership has is unmatched
+ *   • one dealership → the first ID (the rest are "others")
+ *   • several → the dealership named on the same line / sentence as the ID; ambiguous → unmatched
+ */
+export function mapFeedIds(ids: string[], list: DealershipRef[], latest: string): FeedIdMapping {
+  const out: FeedIdMapping = { mapped: [], unmatched: [], others: [] };
+  if (!ids.length || !list.length) return { ...out, unmatched: [...ids] };
+  if (list.some((d) => d.account)) {
+    for (const id of ids) {
+      const hits = list.filter((d) => d.account && d.account.toUpperCase() === id.toUpperCase());
+      if (hits.length) hits.forEach((d) => out.mapped.push({ dealershipId: d.id, feedId: d.account! }));
+      else out.unmatched.push(id);
+    }
+    return out;
+  }
+  if (list.length === 1) return { mapped: [{ dealershipId: list[0].id, feedId: ids[0] }], unmatched: [], others: ids.slice(1) };
+  const segments = latest.split(/\n+|(?<=[.!?])\s+/);
+  const taken = new Set<string>();
+  for (const id of ids) {
+    const seg = segments.find((s) => s.includes(id)) ?? "";
+    const named = list.filter((d) => !taken.has(d.id) && mentionsDealer(null, seg, d.name));
+    if (named.length === 1) { out.mapped.push({ dealershipId: named[0].id, feedId: id }); taken.add(named[0].id); }
+    else out.unmatched.push(id);
+  }
+  return out;
 }

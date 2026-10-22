@@ -3,6 +3,8 @@
 // Feed-order actions — the same set in the order slide-over, the Feeds queue
 // rows (compact) and the rail card. Actions that need input (Feed ID, cancel
 // reason, owner, approver) open a small inline form instead of navigating.
+// Feed IDs belong to the order's dealerships: with one, Enter / Confirm act on
+// it here; with several, each dealership's row in the slide-over has its own.
 // Every action → POST /api/crm/feeds/orders/[id]/actions (logs an event,
 // restarts the stall timer).
 
@@ -11,6 +13,7 @@ import { useState } from "react";
 export type ActionOrder = {
   id: string; status: string; feed_id_candidate: string | null; owner_staff_id: string | null;
   approver_name: string | null; approver_email: string | null; approver_phone: string | null; approver_title?: string | null;
+  dealerships?: { id: string; status: string; feed_id_candidate: string | null }[];
 };
 
 type Form = null | "feed_id" | "confirm" | "cancel" | "reassign" | "approver";
@@ -21,7 +24,7 @@ export async function runFeedAction(id: string, body: Record<string, unknown>): 
   return res.ok ? { ok: true, order: j.order } : { ok: false, error: j.error ?? "Action failed" };
 }
 
-const OPEN = ["needs_info", "ready", "request_sent", "awaiting_dealer_approval", "awaiting_supplier", "feed_id_received", "assigned"];
+const OPEN = ["needs_info", "ready", "request_sent", "awaiting_dealer_approval", "awaiting_supplier", "pending", "feed_id_received", "assigned"];
 
 export default function FeedOrderActions({
   order, staff, compact = false, onDone, onSendRequest,
@@ -40,6 +43,10 @@ export default function FeedOrderActions({
   const [err, setErr] = useState<string | null>(null);
   const s = order.status;
   const open = OPEN.includes(s);
+  const live = (order.dealerships ?? []).filter((d) => d.status !== "cancelled");
+  // The one dealership the order-level Feed ID buttons act on (none when there are several).
+  const only = live.length === 1 ? live[0] : null;
+  const idOpen = !!only && ["pending", "feed_id_received"].includes(only.status);
 
   async function act(body: Record<string, unknown>, msg: string) {
     setBusy(true); setErr(null);
@@ -74,16 +81,16 @@ export default function FeedOrderActions({
         </>}
         {(s === "awaiting_supplier" || s === "awaiting_dealer_approval") && <B onClick={() => act({ action: "nudge_supplier" }, "Follow-up sent to the supplier")}>Nudge supplier</B>}
         {(s === "awaiting_dealer_approval" || s === "awaiting_supplier") && onSendRequest && <B onClick={() => onSendRequest(true)} title="e.g. after fixing the approver's address">Resend request</B>}
-        {s === "feed_id_received" && <B primary onClick={() => { setForm("confirm"); setVal(order.feed_id_candidate ?? ""); }}>Confirm Feed ID</B>}
-        {open && s !== "assigned" && <B onClick={() => { setForm("feed_id"); setVal(""); }}>Enter Feed ID</B>}
-        {open && s !== "assigned" && <B onClick={() => setForm("approver")}>Change approver</B>}
+        {only?.status === "feed_id_received" && <B primary onClick={() => { setForm("confirm"); setVal(only.feed_id_candidate ?? ""); }}>Confirm Feed ID</B>}
+        {open && idOpen && <B onClick={() => { setForm("feed_id"); setVal(""); }}>Enter Feed ID</B>}
+        {open && <B onClick={() => setForm("approver")}>Change approver</B>}
         {open && <B onClick={() => { setForm("reassign"); setVal(order.owner_staff_id ?? ""); }}>Reassign</B>}
         {open && <B onClick={() => { setForm("cancel"); setVal(""); }}>Cancel</B>}
       </div>
       {form === "feed_id" || form === "confirm" ? (
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           <input className="input" style={{ height: 30, maxWidth: 220 }} placeholder="Feed ID" value={val} onChange={(e) => setVal(e.target.value)} autoFocus />
-          <B primary onClick={() => val.trim() && act({ action: form === "confirm" ? "confirm_feed_id" : "enter_feed_id", feed_id: val.trim() }, form === "confirm" ? `Feed ID ${val.trim()} assigned to the dealer` : "Feed ID saved — confirm it next")}>
+          <B primary onClick={() => val.trim() && act({ action: form === "confirm" ? "confirm_feed_id" : "enter_feed_id", feed_id: val.trim(), dealership_order_id: only?.id ?? null }, form === "confirm" ? `Feed ID ${val.trim()} assigned to the dealer` : "Feed ID saved — confirm it next")}>
             {form === "confirm" ? "Confirm & write to the dealer" : "Save"}
           </B>
           <B onClick={() => setForm(null)}>Cancel</B>

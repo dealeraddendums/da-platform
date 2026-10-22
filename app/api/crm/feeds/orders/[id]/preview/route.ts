@@ -24,7 +24,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({
       method: prep.method, kind: prep.kind, templateSource: prep.templateSource, subject: prep.subject, body_html: prep.bodyHtml,
       to: prep.to, cc: prep.cc, problems: prep.problems, rendered,
-      pdf: prep.pdf ? { name: prep.pdf.name, size: prep.pdf.bytes.length, ...prep.pdf.report, base64: prep.pdf.bytes.toString("base64") } : null,
+      // One form, or one per dealership (all attached to the one email).
+      pdfs: prep.pdfs.map((p) => ({ name: p.name, size: p.bytes.length, dealership: p.dealershipName, ...p.report, base64: p.bytes.toString("base64") })),
     });
   } catch (e) { return feedErrorResponse(e); }
 }

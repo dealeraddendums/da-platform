@@ -44,7 +44,7 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
     { key: "contacts", label: `Contacts (${dir.contact_count})` },
     { key: "calls", label: "Calls" },
     { key: "email", label: "Email" },
-    ...(isDealer ? [{ key: "feeds", label: "Feeds" }] : []),
+    ...(isDealer || isGroup ? [{ key: "feeds", label: "Feeds" }] : []),
     ...(co.kind === "feed_supplier" ? [{ key: "settings", label: "Settings" }] : []),
     { key: "files", label: "Files" },
     { key: "notes", label: "Notes" },
@@ -122,7 +122,7 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
         {tab === "dealers" && isGroup && <GroupDealersTab groupId={co.group_id} admin={admin} staff={staff} />}
         {tab === "contacts" && <ContactsTab companyId={co.id} dial={dial} admin={admin} />}
         {tab === "calls" && <CallsTab companyId={co.id} admin={admin} />}
-        {tab === "feeds" && isDealer && <CompanyFeedsPanel companyId={co.id} companyName={dir.name ?? "Dealer"} meId={userId} />}
+        {tab === "feeds" && (isDealer || isGroup) && <CompanyFeedsPanel companyId={co.id} companyName={dir.name ?? "Dealer"} companyKind={isGroup ? "group" : "dealer"} meId={userId} />}
         {tab === "settings" && co.kind === "feed_supplier" && <FeedSupplierSettings supplierId={co.id} supplierName={dir.name ?? "Supplier"} canEdit={perms.crmAdmin} />}
         {tab === "email" && <EmailThreadsPanel companyId={co.id} meId={userId} to={(co.emails ?? [])[0]?.address ? [{ email: co.emails[0].address }] : []} />}
         {tab === "files" && <FilesTab companyId={co.id} admin={admin} staff={staff} />}

@@ -1,9 +1,13 @@
 // feeds@ auto-detection — an onInboundEmail subscriber (feeds mailbox only).
-// Which order: a thread linked to an order (crm_email_threads.feed_order_id —
-// ours, the supplier's own approval / case thread once matched, a fresh vAuto
-// follow-up) → the order's own thread → mail from the supplier's OR the
-// dealer's domain naming the dealer (subject or newest text); a match links
-// the thread so the rest of that conversation follows.
+// Which order (always the parent — one per request): a thread linked to an
+// order (crm_email_threads.feed_order_id — ours, the supplier's own approval /
+// case thread once matched, a fresh vAuto follow-up) → the order's own thread
+// → a subject carrying the order's supplier case reference (vAuto's case #,
+// Autosoft's Salesforce "[ ref:…:ref ]") → mail from the supplier's OR the
+// dealer's domain naming one of the order's dealerships (subject without the
+// suppliers' ticket tokens, or newest text); a match links the thread so the
+// rest of that conversation follows. "From the supplier" = Graph's from OR
+// sender (Autosoft writes through noreply@salesforce.com on its behalf).
 //   • from the dealer's domain (anyone there, not only the approver we addressed):
 //       – PDF supplier + a PDF attached → the signed authorization: stored on the
 //         order, "Signed form received — forward to {supplier}" task, dealer approved
@@ -11,8 +15,10 @@
 //   • from the supplier: its case number → order metadata; a cancellation deadline
 //     ("by end of day today", "within 3 Business days") while we wait on the dealer
 //     → an immediate dealer follow-up on THAT message + owner task; then
-//       – a Feed ID (supplier pattern, generic rules, AI second opinion) → "Confirm Feed ID"
-//         (never auto-confirmed)
+//       – Feed IDs (supplier pattern — several per message, "SOUR17/SOUR75" — generic rules,
+//         AI second opinion) → each offered to its dealership (Autosoft: by account; one
+//         dealership: it; several: the one named beside it) → "Confirm Feed ID" per dealership
+//         (never auto-confirmed); an ID no dealership matches → a review task
 //       – its own approval request / a case notice → logged only
 //       – a completion without a readable ID (or a manual-ID supplier) → "Enter Feed ID"
 //       – anything else → "Review supplier reply"
@@ -23,9 +29,10 @@
 import { createAdminSupabaseClient } from "@/lib/db";
 import { registerInboundEmailHandler, type InboundEmailEvent } from "../email-hooks";
 import { FREEMAIL_DOMAINS, emailDomain } from "../inbox-match";
-import { DEFAULT_APPROVAL_PHRASES, detectOnOrder, domainMatches, latestReplyText, mentionsDealer, type SupplierSignals } from "./detect";
+import { DEFAULT_APPROVAL_PHRASES, detectOnOrder, domainMatches, isSupplierAddress, latestReplyText, mapFeedIds, mentionsDealer, subjectHasCaseRef, type SupplierSignals } from "./detect";
 import { aiExtractFeedId } from "./ai-extract";
-import { applyOrderEvent, attachSignedPdfFromEmail, createOrderTask, linkThread, nudge, recordEvent, supplierSettings, SYSTEM } from "./orders";
+import { feedIdField } from "./extra-fields";
+import { applyOrderEvent, attachSignedPdfFromEmail, createOrderTask, joinNames, linkThread, nudge, orderDealerships, recordEvent, supplierSettings, SYSTEM } from "./orders";
 import { TransitionError } from "./state";
 
 const OPEN = "(done,cancelled)";
@@ -34,22 +41,27 @@ const hostOf = (u: string | null) => (u ?? "").toLowerCase().replace(/^\s*[a-z]+
 /** Don't send a second automatic "the supplier will cancel" follow-up within this window. */
 const DEADLINE_FOLLOWUP_GAP_MS = 12 * 3600_000;
 
+/** The parent order's people and names: the dealer side covers the starting company and every dealership. */
 export async function orderContext(admin: any, order: any) {
   const settings = await supplierSettings(admin, order.supplier_company_id);
   const supplierEmails = [settings?.request_email, ...(settings?.cc_emails ?? [])].filter((e): e is string => !!e).map((e) => e.toLowerCase());
-  const [{ data: contacts }, { data: co }, { data: dir }, { data: sup }] = await Promise.all([
-    admin.from("crm_contacts").select("email").eq("company_id", order.dealer_company_id).is("deleted_at", null).not("email", "is", null).limit(200),
-    admin.from("crm_companies").select("website").eq("id", order.dealer_company_id).maybeSingle(),
+  const dealerships = await orderDealerships(admin, order, { open: true });
+  const companyIds = Array.from(new Set([order.dealer_company_id, ...dealerships.map((d) => d.companyId)]));
+  const [{ data: contacts }, { data: cos }, { data: dir }, { data: sup }] = await Promise.all([
+    admin.from("crm_contacts").select("email").in("company_id", companyIds).is("deleted_at", null).not("email", "is", null).limit(400),
+    admin.from("crm_companies").select("website").in("id", companyIds),
     admin.from("crm_company_directory").select("name").eq("id", order.dealer_company_id).maybeSingle(),
     order.supplier_company_id ? admin.from("crm_company_directory").select("name").eq("id", order.supplier_company_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const dealerDomains = Array.from(new Set([
     order.approver_email ? emailDomain(order.approver_email) : "",
     ...(contacts ?? []).map((c: any) => emailDomain(String(c.email).toLowerCase())),
-    hostOf(co?.website ?? null),
+    ...(cos ?? []).map((c: any) => hostOf(c.website ?? null)),
   ].filter(notFree)));
   const supplierDomains = Array.from(new Set([...supplierEmails.map(emailDomain), ...(settings?.domains ?? [])].filter(notFree)));
-  return { settings, supplierEmails, supplierDomains, dealerDomains, dealerName: dir?.name ?? "", supplierName: sup?.name ?? null };
+  // Names the order can be recognised by: each dealership's, and the company it was started from (a group).
+  const names = Array.from(new Set([...dealerships.map((d) => d.name), dir?.name ?? ""].filter(Boolean)));
+  return { settings, supplierEmails, supplierDomains, dealerDomains, dealerName: joinNames(dealerships.map((d) => d.name)) || dir?.name || "", names, dealerships, supplierName: sup?.name ?? null };
 }
 
 async function alreadyHandled(admin: any, emailId: string): Promise<boolean> {
@@ -60,28 +72,33 @@ async function alreadyHandled(admin: any, emailId: string): Promise<boolean> {
   return !!(ev?.length || um?.length);
 }
 
-/** Find the open order this message belongs to (see the header). */
+/** Find the open (parent) order this message belongs to (see the header). */
 async function findOrder(admin: any, e: InboundEmailEvent): Promise<any | null> {
+  const parentOf = async (o: any | null) => (o?.parent_order_id ? (await admin.from("crm_feed_orders").select("*").eq("id", o.parent_order_id).not("status", "in", OPEN).maybeSingle()).data : o);
   const { data: th } = await admin.from("crm_email_threads").select("feed_order_id").eq("id", e.thread.id).maybeSingle();
   if (th?.feed_order_id) {
     const { data: linked } = await admin.from("crm_feed_orders").select("*").eq("id", th.feed_order_id).not("status", "in", OPEN).maybeSingle();
-    if (linked) return linked;
+    const p = await parentOf(linked);
+    if (p) return p;
   }
-  const { data: byThread } = await admin.from("crm_feed_orders").select("*").eq("email_thread_id", e.thread.id).not("status", "in", OPEN).maybeSingle();
+  const { data: byThread } = await admin.from("crm_feed_orders").select("*").eq("email_thread_id", e.thread.id).is("parent_order_id", null).not("status", "in", OPEN).maybeSingle();
   if (byThread) return byThread;
   const from = (e.email.from_email ?? "").toLowerCase();
-  if (!from) return null;
-  const { data: open } = await admin.from("crm_feed_orders").select("*").in("status", ["request_sent", "awaiting_dealer_approval", "awaiting_supplier", "feed_id_received"]).limit(500);
+  const sender = (e.email.sender_email ?? "").toLowerCase();
+  if (!from && !sender) return null;
+  const { data: open } = await admin.from("crm_feed_orders").select("*").is("parent_order_id", null).in("status", ["request_sent", "awaiting_dealer_approval", "awaiting_supplier", "feed_id_received"]).limit(500);
+  // The supplier's case reference in the subject is the strongest signal (its new threads keep it).
+  const byRef = (open ?? []).filter((o: any) => subjectHasCaseRef(e.email.subject, [o.metadata?.case_number, ...(o.metadata?.case_numbers ?? [])].filter(Boolean)));
+  if (byRef.length === 1) return byRef[0];
   const latest = latestReplyText(e.email.body_text);
-  const d = emailDomain(from);
   const hits: any[] = [];
   for (const o of open ?? []) {
     const ctx = await orderContext(admin, o);
-    const fromSupplier = ctx.supplierEmails.includes(from) || domainMatches(d, ctx.supplierDomains);
-    const fromDealer = (!!o.approver_email && o.approver_email === from) || domainMatches(d, ctx.dealerDomains);
-    if ((fromSupplier || fromDealer) && ctx.dealerName && mentionsDealer(e.email.subject, latest, ctx.dealerName)) hits.push(o);
+    const fromSupplier = isSupplierAddress(from, ctx) || isSupplierAddress(sender, ctx);
+    const fromDealer = !!from && ((!!o.approver_email && o.approver_email === from) || domainMatches(emailDomain(from), ctx.dealerDomains));
+    if ((fromSupplier || fromDealer) && ctx.names.some((n) => mentionsDealer(e.email.subject, latest, n))) hits.push(o);
   }
-  // Two orders named in one message ("… for: Store A and Store B") → a person decides.
+  // Two separate orders named in one message → a person decides (one order for both stores is one hit).
   return hits.length === 1 ? hits[0] : null;
 }
 
@@ -89,7 +106,8 @@ async function findOrder(admin: any, e: InboundEmailEvent): Promise<any | null> 
 export async function handleFeedsEmail(e: InboundEmailEvent, admin: any = createAdminSupabaseClient(), opts: { orderId?: string } = {}): Promise<string> {
   if (e.thread.internal && !opts.orderId) return "internal";
   if (await alreadyHandled(admin, e.email.id)) return "duplicate";
-  const order = opts.orderId ? (await admin.from("crm_feed_orders").select("*").eq("id", opts.orderId).maybeSingle()).data : await findOrder(admin, e);
+  let order = opts.orderId ? (await admin.from("crm_feed_orders").select("*").eq("id", opts.orderId).maybeSingle()).data : await findOrder(admin, e);
+  if (order?.parent_order_id) order = (await admin.from("crm_feed_orders").select("*").eq("id", order.parent_order_id).maybeSingle()).data;
   if (!order) {
     await admin.from("crm_feed_unmatched").insert({ email_id: e.email.id, thread_id: e.thread.id, reason: "No open feed order matches this message" });
     return "unmatched";
@@ -100,7 +118,7 @@ export async function handleFeedsEmail(e: InboundEmailEvent, admin: any = create
   const ctx = await orderContext(admin, order);
   const { data: s } = await admin.from("crm_settings").select("feed_approval_phrases").eq("id", true).maybeSingle();
   const phrases: string[] = [...(Array.isArray(s?.feed_approval_phrases) ? s.feed_approval_phrases : DEFAULT_APPROVAL_PHRASES), ...(ctx.settings?.approval_phrases ?? [])];
-  const d = detectOnOrder({ from: e.email.from_email, text: e.email.body_text, subject: e.email.subject }, {
+  const d = detectOnOrder({ from: e.email.from_email, sender: e.email.sender_email ?? null, text: e.email.body_text, subject: e.email.subject }, {
     status: order.status, approverEmail: order.approver_email, dealerDomains: ctx.dealerDomains,
     supplierEmails: ctx.supplierEmails, supplierDomains: ctx.supplierDomains, feedIdPattern: ctx.settings?.feed_id_pattern ?? null,
     feedIdManual: !!ctx.settings?.feed_id_manual, casePattern: ctx.settings?.case_number_pattern ?? null, cancellationPatterns: ctx.settings?.cancellation_patterns ?? [],
@@ -116,7 +134,7 @@ export async function handleFeedsEmail(e: InboundEmailEvent, admin: any = create
     if (ctx.settings?.request_method === "pdf" && e.email.has_attachments && (d.kind === "dealer_approved" || d.kind === "review_dealer_reply" || d.kind === "review_reply") && isDealer(e.email.from_email, order, ctx)) {
       const pdf = await attachSignedPdfFromEmail(admin, order, e.email.id, ctx.supplierName);
       if (pdf) {
-        await recordEvent(admin, order, "signed_pdf_received", { ...ref, note: `Signed PDF received: ${pdf.filename}` }, SYSTEM);
+        await recordEvent(admin, order, "signed_pdf_received", { ...ref, note: pdf.placed.length ? `Signed PDFs received: ${pdf.placed.map((p) => `${p.dealership} — ${p.filename}`).join("; ")}` : `Signed PDF received: ${pdf.filename}` }, SYSTEM);
         if (["request_sent", "awaiting_dealer_approval", "awaiting_supplier"].includes(order.status)) {
           await applyOrderEvent(admin, order.id, { type: "dealer_approved", via: "signed_pdf" }, SYSTEM, { ...ref, via: "signed_pdf" });
         }
@@ -143,30 +161,58 @@ export async function handleFeedsEmail(e: InboundEmailEvent, admin: any = create
           await review("feed_review_supplier_reply", "Review supplier reply");
           return "review_supplier_reply";
         }
-        // A completion: try for the ID (unless this supplier's IDs are entered by hand).
+        // A completion: try for the IDs (unless this supplier's IDs are entered by hand).
         const manual = !!ctx.settings?.feed_id_manual;
-        const ai = manual ? null : await aiExtractFeedId({ dealerName: ctx.dealerName, supplierName: ctx.supplierName, subject: e.email.subject, latestText: d.latest });
         const regex = d.kind === "feed_id" ? d.candidates : [];
-        const candidate = regex[0] ?? ai?.feed_id ?? null;
-        if (!candidate) {
+        const ai = manual || regex.length ? null : await aiExtractFeedId({ dealerName: ctx.dealerName, supplierName: ctx.supplierName, subject: e.email.subject, latestText: d.latest });
+        const ids = regex.length ? regex : ai?.feed_id ? [ai.feed_id] : [];
+        const idField = feedIdField(ctx.settings?.extra_fields ?? []);
+        const kids = ctx.dealerships;
+        const accountOf = (k: (typeof kids)[number]): string | null => (idField ? k.order.supplier_fields?.[idField.key] ?? null : null);
+        if (!ids.length) {
           await applyOrderEvent(admin, order.id, { type: "supplier_replied" }, SYSTEM, ref).catch(() => undefined);
-          const hint = order.supplier_fields?.autosoft_account ? ` The order's Autosoft account is ${order.supplier_fields.autosoft_account}.` : "";
+          const accounts = kids.filter(accountOf).map((k) => `${k.name}: ${accountOf(k)}`);
           await createOrderTask(admin, current, {
             kind: "feed_enter_feed_id",
             title: manual ? `${ctx.supplierName ?? "Supplier"} says it's set up — enter the Feed ID by hand` : "Supplier replied — no Feed ID found, enter it by hand",
-            description: `"${d.latest.slice(0, 300)}"${hint}`,
+            description: `"${d.latest.slice(0, 300)}"${accounts.length ? ` ${idField!.label} on the order — ${accounts.join(", ")}.` : ""}`,
           }, SYSTEM);
           return "supplier_no_id";
         }
-        const o = await applyOrderEvent(admin, order.id, { type: "feed_id_detected", candidate, source: regex.length ? "regex" : "ai" }, SYSTEM, {
-          ...ref, candidate, regex_candidates: regex, ai_feed_id: ai?.feed_id ?? null, ai_confidence: ai?.confidence ?? null, ai_quote: ai?.quote ?? null,
-        });
-        const notes = [
-          regex.length > 1 ? `Other matches: ${regex.slice(1).join(", ")}.` : "",
-          ai?.feed_id && ai.feed_id !== candidate ? `AI read it as ${ai.feed_id} (${ai.confidence}) — check before confirming.` : ai?.feed_id ? `AI agrees (${ai.confidence}).` : "",
-        ].filter(Boolean).join(" ");
-        await createOrderTask(admin, o, { kind: "feed_confirm_id", title: `Confirm Feed ID ${candidate}`, description: notes || null }, SYSTEM);
-        return "feed_id";
+        const map = mapFeedIds(ids, kids.map((k) => ({ id: k.order.id, name: k.name, account: accountOf(k) })), d.latest);
+        const source = regex.length ? "regex" : "ai";
+        let offered = 0;
+        for (const m of map.mapped) {
+          const k = kids.find((x) => x.order.id === m.dealershipId)!;
+          if (!["pending", "feed_id_received"].includes(k.order.status)) {
+            if (k.order.feed_id_confirmed !== m.feedId) await review("feed_review_supplier_reply", `${ctx.supplierName ?? "Supplier"} sent Feed ID ${m.feedId} for ${k.name}, which already has ${k.order.feed_id_confirmed ?? "a confirmed ID"}`);
+            continue;
+          }
+          const o = await applyOrderEvent(admin, k.order.id, { type: "feed_id_detected", candidate: m.feedId, source }, SYSTEM, {
+            ...ref, candidate: m.feedId, regex_candidates: regex, ai_feed_id: ai?.feed_id ?? null, ai_confidence: ai?.confidence ?? null, ai_quote: ai?.quote ?? null,
+          });
+          offered++;
+          const notes = [
+            map.others.length ? `Other matches: ${map.others.join(", ")}.` : "",
+            accountOf(k) ? `Matches the ${idField!.label.toLowerCase()} on the order.` : "",
+            kids.length > 1 && !accountOf(k) ? `Matched to ${k.name} by the name beside it — check it's this store's.` : "",
+            ai?.feed_id ? `Read by AI (${ai.confidence}) — check before confirming.` : "",
+          ].filter(Boolean).join(" ");
+          await createOrderTask(admin, o, { kind: "feed_confirm_id", title: `Confirm Feed ID ${m.feedId}${kids.length > 1 ? ` for ${k.name}` : ""}`, description: notes || null }, SYSTEM);
+        }
+        if (map.unmatched.length) {
+          const fresh = (await admin.from("crm_feed_orders").select("*").eq("id", order.id).maybeSingle()).data ?? order;
+          // With accounts on the order (Autosoft) an unknown code is a mistake to check; without them a person maps it.
+          const flagged = !!idField && kids.some((k) => accountOf(k));
+          const meta = { ...(fresh.metadata ?? {}), unmatched_feed_ids: Array.from(new Set([...(fresh.metadata?.unmatched_feed_ids ?? []), ...map.unmatched])) };
+          await admin.from("crm_feed_orders").update({ metadata: meta }).eq("id", order.id);
+          await recordEvent(admin, fresh, "feed_id_unmatched", { ...ref, note: `${map.unmatched.join(", ")} — ${flagged ? `no dealership on the order has that ${idField!.label.toLowerCase()}` : "couldn't tell which dealership"}` }, SYSTEM);
+          await createOrderTask(admin, fresh, flagged
+            ? { kind: "feed_review_supplier_reply", title: `${ctx.supplierName ?? "Supplier"} activated ${map.unmatched.join(", ")} — no dealership on this order has that ${idField!.label.toLowerCase()}`, description: `On the order: ${kids.map((k) => `${k.name} ${accountOf(k) ?? "(none)"}`).join(", ")}. "${d.latest.slice(0, 300)}"` }
+            : { kind: "feed_map_ids", title: `Feed IDs ${map.unmatched.join(", ")} — pick which dealership each is for`, description: `"${d.latest.slice(0, 300)}"` }, SYSTEM);
+        }
+        if (!offered && !map.unmatched.length) return "review_supplier_reply";
+        return offered ? "feed_id" : "feed_id_unmatched";
       }
       default:
         await review("feed_review_reply", "Review reply");
