@@ -7,10 +7,11 @@
  *   - S3: s3://da-platform-backups/_reports/<date>.json (+ _reports/latest.json)
  *   - an email to allan@ whose subject IS the summary line ("[DA Backup] OK …"),
  *     which the Morning Brief reads.
+ * The run itself is lib/backup-supabase.ts, in its own process (scripts/backup-supabase.ts).
  * backup-check (daily, after the run) independently checks the bucket and emails
  *   - "[DA Backup] MISSING …"    no backup object newer than 36 h (the run never started), or
  *   - "[DA Backup] INCOMPLETE …" objects exist but no run REPORT finished in 36 h — the run was
- *     killed mid-way (a deploy's pm2 reload or a memory restart kills this fire-and-forget job).
+ *     killed mid-way (the process crashed, or the box rebooted).
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
@@ -20,6 +21,10 @@ export const BACKUP_PROJECTS = ["da-platform", "da-billing"] as const;
 export const BACKUP_MAX_AGE_HOURS = 36;
 const REPORT_TO = [{ email: "allan@dealeraddendums.com", name: "Allan Tone", type: "to" as const }];
 
+/** Object tag set at upload; the bucket lifecycle expires daily at 30 d, monthly at 365 d. */
+export type BackupRetention = "daily" | "monthly";
+export const monthlyMarkerKey = (date: string) => `_reports/monthly/${date.slice(0, 7)}.json`;
+
 export type BackupTableResult = { project: string; table: string; ok: boolean; rows?: number; bytes?: number; error?: string };
 
 export type BackupReport = {
@@ -28,13 +33,14 @@ export type BackupReport = {
   finished_at: string;
   duration_s: number;
   status: "ok" | "partial" | "failed";
+  retention: BackupRetention;
   tables_ok: number;
   tables_failed: number;
   total_bytes: number;
   tables: BackupTableResult[];
 };
 
-export function buildBackupReport(date: string, startedAt: Date, finishedAt: Date, tables: BackupTableResult[]): BackupReport {
+export function buildBackupReport(date: string, startedAt: Date, finishedAt: Date, tables: BackupTableResult[], retention: BackupRetention = "daily"): BackupReport {
   const ok = tables.filter((t) => t.ok).length;
   const failed = tables.length - ok;
   return {
@@ -43,6 +49,7 @@ export function buildBackupReport(date: string, startedAt: Date, finishedAt: Dat
     finished_at: finishedAt.toISOString(),
     duration_s: Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000),
     status: failed === 0 && ok > 0 ? "ok" : ok === 0 ? "failed" : "partial",
+    retention,
     tables_ok: ok,
     tables_failed: failed,
     total_bytes: tables.reduce((n, t) => n + (t.ok ? t.bytes ?? 0 : 0), 0),
@@ -66,6 +73,7 @@ export function formatDuration(s: number): string {
 export function backupSummaryLine(r: BackupReport): string {
   const total = r.tables_ok + r.tables_failed;
   return `[DA Backup] ${r.status.toUpperCase()} ${r.date} · ${r.tables_ok}/${total} tables · ${formatBytes(r.total_bytes)} · ${formatDuration(r.duration_s)}`
+    + (r.retention === "monthly" ? " · monthly copy" : "")
     + (r.tables_failed ? ` · failed: ${r.tables.filter((t) => !t.ok).map((t) => `${t.project}/${t.table}`).join(", ")}` : "");
 }
 
@@ -77,7 +85,7 @@ function reportHtml(r: BackupReport): string {
     + `<td style="text-align:right">${t.ok ? formatBytes(t.bytes ?? 0) : "—"}</td><td>${t.ok ? "ok" : `<strong>failed</strong>: ${esc(t.error ?? "")}`}</td></tr>`).join("");
   return `<div style="font-family:Roboto,Arial,sans-serif;font-size:14px;color:#2a2b3c">`
     + `<p>${esc(backupSummaryLine(r))}</p>`
-    + `<p>Started ${esc(r.started_at)}, finished ${esc(r.finished_at)}. Objects are in s3://da-platform-backups/&lt;project&gt;/${esc(r.date)}/.</p>`
+    + `<p>Started ${esc(r.started_at)}, finished ${esc(r.finished_at)}. Objects are in s3://da-platform-backups/&lt;project&gt;/${esc(r.date)}/, tagged retention=${r.retention} (${r.retention === "monthly" ? "kept 12 months" : "kept 30 days"}).</p>`
     + `<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">Table</th><th>Rows</th><th>Size (gz)</th><th align="left">Status</th></tr>${rows}</table></div>`;
 }
 
@@ -164,7 +172,7 @@ export async function sendBackupHealthAlert(h: BackupHealth): Promise<void> {
     html: `<div style="font-family:Roboto,Arial,sans-serif;font-size:14px;color:#2a2b3c"><p>${esc(subject)}</p>`
       + (h.state === "missing"
         ? `<p>The nightly Supabase backup (EasyCron → POST /api/cron/backup-supabase, 02:00 PT) didn't leave a fresh object in s3://da-platform-backups.</p>`
-        : `<p>The nightly run started (fresh objects exist) but never wrote its summary, so it was cut short. The usual cause is a deploy's <code>pm2 reload</code> or a memory restart of the worker it runs in; the tables after the cut-off are not in today's backup.</p>`)
-      + `<p>Check the EasyCron job log and <code>/var/log/da-platform/out-*.log</code> for <code>[backup-supabase]</code>.</p></div>`,
+        : `<p>The nightly run started (fresh objects exist) but never wrote its summary, so it was cut short (the backup process crashed or the box restarted); the tables after the cut-off are not in today's backup. Supabase PITR (7 days) is unaffected.</p>`)
+      + `<p>Check the EasyCron job log and <code>/var/log/da-platform/backup-supabase.log</code>.</p></div>`,
   });
 }

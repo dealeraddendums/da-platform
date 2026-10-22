@@ -920,14 +920,14 @@ Existing app (screenshots captured) — use as UX reference, not codebase. The n
 | `new-infobox-images` | us-east-1 | Infobox PNGs |
 | `new-infosheet-backgrounds` | us-east-1 | Infosheet frames |
 | `new-addendum-backgrounds` | us-east-1 | Addendum frames |
-| `da-platform-backups` | us-west-1 | Daily Supabase backups |
+| `da-platform-backups` | us-west-1 | Daily Supabase backups (secondary copy — Supabase PITR, 7 days, is primary). CRR → `da-platform-backups-replica` (us-east-1). Lifecycle on both, by object tag set at upload: `retention=daily` expires 30 d, `retention=monthly` (first complete run of each month; marker `_reports/monthly/<YYYY-MM>.json`) 365 d; noncurrent versions 7 d; `_reports/` 400 d; incomplete multipart uploads 2 d |
 
 ## Cron Jobs (EasyCron)
 
 | Schedule | URL / Server | Status |
 |---|---|---|
-| `0 2 * * *` (PT) | `/api/cron/backup-supabase` | ✅ POST (EasyCron 10944634). Ends with a summary: PM2 `[backup-supabase] SUMMARY`, `s3://da-platform-backups/_reports/<date>.json` + `latest.json`, and an email to allan@ titled `[DA Backup] OK/PARTIAL/FAILED <date> · n/n tables · size · duration` (read by the Morning Brief) |
-| `0 7 * * *` (PT) | `/api/cron/backup-check` | ✅ Watchdog (EasyCron 11621149): emails `[DA Backup] MISSING …` when no backup object is newer than 36 h, or `[DA Backup] INCOMPLETE …` when objects exist but no run report finished in 36 h (run killed — a deploy's `pm2 reload` kills the fire-and-forget backup; don't deploy 02:00–~06:00 PT). `?dry=1` = check only |
+| `0 2 * * *` (PT) | `/api/cron/backup-supabase` | ✅ POST (EasyCron 10944634). The route only starts `scripts/backup-supabase.ts` as its own detached process (survives deploys / PM2 restarts; `flock /tmp/da-backup-supabase.lock`, 409 if one is running) → log `/var/log/da-platform/backup-supabase.log`. ~3 h. Ends with a summary: `s3://da-platform-backups/_reports/<date>.json` + `latest.json`, and an email to allan@ titled `[DA Backup] OK/PARTIAL/FAILED <date> · n/n tables · size · duration` (read by the Morning Brief) |
+| `0 7 * * *` (PT) | `/api/cron/backup-check` | ✅ Watchdog (EasyCron 11621149): emails `[DA Backup] MISSING …` when no backup object is newer than 36 h, or `[DA Backup] INCOMPLETE …` when objects exist but no run report finished in 36 h (the run crashed). `?dry=1` = check only |
 | `0 3 * * 0` (PT) | `/api/cron/archive-vehicles` | ✅ EasyCron 10890586. Deletes a vehicle only after its row + full audit trail are copied and verified (`lib/vehicle-archive.ts`); a copy failure skips and logs it |
 | `0 3 1 * *` | `/api/cron/purge-old-pdfs` | ✅ |
 | `0 2 1 * *` | `/api/cron/sync-vehicle-reference` | ✅ |

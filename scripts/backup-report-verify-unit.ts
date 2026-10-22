@@ -1,5 +1,5 @@
 /* npm run test:backup-report — lib/backup-report.ts (backup-supabase summary + backup-check watchdog). */
-import { backupSummaryLine, buildBackupReport, evaluateBackupHealth, evaluateFreshness, formatBytes, formatDuration, incompleteBackupSubject, missingBackupSubject } from "../lib/backup-report";
+import { backupSummaryLine, buildBackupReport, evaluateBackupHealth, evaluateFreshness, formatBytes, formatDuration, incompleteBackupSubject, missingBackupSubject, monthlyMarkerKey } from "../lib/backup-report";
 
 let fail = 0;
 function eq(name: string, got: unknown, want: unknown) {
@@ -22,6 +22,10 @@ const partial = buildBackupReport("2026-10-21", t0, t1, [
   { project: "da-billing", table: "invoices", ok: false, error: "HTTP 404" },
 ]);
 eq("partial run: status + failed tables named", backupSummaryLine(partial), "[DA Backup] PARTIAL 2026-10-21 · 1/2 tables · 10 B · 1h52m · failed: da-billing/invoices");
+const monthly = buildBackupReport("2026-11-01", t0, t1, okRun.tables, "monthly");
+eq("monthly run: retention recorded + flagged in the summary", [monthly.retention, okRun.retention, backupSummaryLine(monthly)],
+  ["monthly", "daily", "[DA Backup] OK 2026-11-01 · 3/3 tables · 1.30 GB · 1h52m · monthly copy"]);
+eq("monthly marker is per calendar month", [monthlyMarkerKey("2026-11-01"), monthlyMarkerKey("2026-11-30")], ["_reports/monthly/2026-11.json", "_reports/monthly/2026-11.json"]);
 eq("all failed → FAILED", buildBackupReport("d", t0, t1, [{ project: "p", table: "t", ok: false, error: "x" }]).status, "failed");
 eq("no tables at all → FAILED (never OK)", buildBackupReport("d", t0, t1, []).status, "failed");
 eq("bytes formatting", [formatBytes(999), formatBytes(42_000), formatBytes(1_400_000), formatBytes(1_330_000_000)], ["999 B", "42 KB", "1.4 MB", "1.33 GB"]);
