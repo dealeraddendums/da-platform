@@ -26,9 +26,12 @@ const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i +
 const APPLY = has("--apply");
 const WEBHOOK_URL = opt("--url") ?? "https://app.dealeraddendums.com/api/crm/dialpad/webhook";
 // Every state DA-CRM handles (lib/crm/dialpad-ingest.ts eventCallState + follow-ups).
+// Not admin_recording: Dialpad refuses it for our key ("Access denied to create
+// subscription to state 'admin_recording'"), and the hangup event already
+// carries the auto-recording in recording_details.
 const CALL_STATES = [
   "calling", "ringing", "connected", "hold", "voicemail", "voicemail_uploaded", "missed", "hangup",
-  "recording", "admin_recording", "transcription", "call_transcription", "recap_summary", "recap_outcome", "recap_action_items",
+  "recording", "transcription", "call_transcription", "recap_summary", "recap_outcome", "recap_action_items",
 ];
 
 async function check() {
