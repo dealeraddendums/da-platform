@@ -1,6 +1,6 @@
 // DA-CRM company record (dealer, group, vendor or feed supplier).
 // Header: kind, brands, pipeline stage, owner, trial day, open ticket / task
-// counts. Tabs: Timeline · Contacts · Calls · Files · Notes (+ Dealers on a group).
+// counts. Tabs: Timeline · Contacts · Calls · Email · Files · Notes (+ Dealers on a group).
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -14,6 +14,7 @@ import CompanyHeaderControls from "@/components/crm/CompanyHeaderControls";
 import CompanyFilesPanel from "@/components/crm/CompanyFilesPanel";
 import CompanyDetailsForm from "@/components/crm/CompanyDetailsForm";
 import EmailFromTemplate from "@/components/crm/EmailFromTemplate";
+import EmailThreadsPanel from "@/components/crm/EmailThreadsPanel";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames, timeline } from "@/lib/crm/queries";
 import { KIND_LABEL, STAGE_LABEL, contactName, fmtAgo, fmtDate, ROLE_TAG_LABEL, type Stage } from "@/lib/crm/format";
@@ -39,6 +40,7 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
     ...(isGroup ? [{ key: "dealers", label: "Dealers" }] : []),
     { key: "contacts", label: `Contacts (${dir.contact_count})` },
     { key: "calls", label: "Calls" },
+    { key: "email", label: "Email" },
     { key: "files", label: "Files" },
     { key: "notes", label: "Notes" },
   ];
@@ -115,6 +117,7 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
         {tab === "dealers" && isGroup && <GroupDealersTab groupId={co.group_id} admin={admin} staff={staff} />}
         {tab === "contacts" && <ContactsTab companyId={co.id} dial={dial} admin={admin} />}
         {tab === "calls" && <CallsTab companyId={co.id} admin={admin} />}
+        {tab === "email" && <EmailThreadsPanel companyId={co.id} meId={userId} to={(co.emails ?? [])[0]?.address ? [{ email: co.emails[0].address }] : []} />}
         {tab === "files" && <FilesTab companyId={co.id} admin={admin} staff={staff} />}
         {tab === "notes" && (
           <>

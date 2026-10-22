@@ -1,5 +1,6 @@
 // DA-CRM dashboard: calls today, trials expiring this week, unmatched calls,
-// open tickets / my tasks (0 until phases 4–5 fill the stub tables).
+// the Inbox per mailbox (unassigned threads, open threads waiting on us for
+// 24h+), open tickets / my tasks (0 until phases 4–5 fill the stub tables).
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
@@ -31,11 +32,24 @@ export default async function CrmDashboardPage() {
       .order("trial_ends_on").limit(50),
     staffNames(admin),
   ]);
+  const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
+  const { data: mailboxes } = await admin.from("crm_mailboxes").select("id, address").eq("active", true).order("address");
+  const inbox = await Promise.all((mailboxes ?? []).map(async (m: any) => {
+    const [{ count: unassigned }, { count: stale }] = await Promise.all([
+      admin.from("crm_email_threads").select("id", { count: "exact", head: true }).eq("mailbox_id", m.id).is("company_id", null).eq("internal", false).neq("status", "closed"),
+      admin.from("crm_email_threads").select("id", { count: "exact", head: true }).eq("mailbox_id", m.id).eq("status", "open").eq("last_direction", "inbound").lt("last_message_at", dayAgo),
+    ]);
+    return { ...m, unassigned: unassigned ?? 0, stale: stale ?? 0 };
+  }));
 
   const cards: { label: string; value: number; sub: string; href: string; muted?: boolean }[] = [
     { label: "Calls today", value: callsToday ?? 0, sub: `${missedToday ?? 0} missed / voicemail`, href: "/crm/communications/calls" },
     { label: "Trials expiring this week", value: (expiring ?? []).length, sub: "Ending in the next 7 days", href: "/crm/trials" },
     { label: "Unmatched calls", value: unmatched ?? 0, sub: "Need a company", href: "/crm/communications/calls?unmatched=1" },
+    ...inbox.flatMap((m: any) => [
+      { label: `Unassigned · ${m.address.split("@")[0]}@`, value: m.unassigned, sub: "Email threads with no company", href: `/crm/communications/inbox?view=unassigned&mailbox=${m.id}` },
+      { label: `Open 24h+ · ${m.address.split("@")[0]}@`, value: m.stale, sub: "Last message from them, no reply in 24h", href: `/crm/communications/inbox?view=open&mailbox=${m.id}` },
+    ]),
     { label: "Open tickets", value: openTickets ?? 0, sub: "Tickets arrive in phase 4", href: "/crm/communications/tickets", muted: true },
     { label: "My tasks", value: myTasks ?? 0, sub: "Tasks arrive in phase 5", href: "/crm/tasks", muted: true },
   ];
