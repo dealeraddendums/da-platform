@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS, supplierSettings } from "@/lib/crm/feeds/orders";
 import { compilePattern } from "@/lib/crm/feeds/detect";
 import { normEmail } from "@/lib/crm/inbox-match";
 import { DMS_PROVIDERS, OTHER_PROVIDERS } from "@/lib/inventory-providers";
+import { parseExtraFields } from "@/lib/crm/feeds/extra-fields";
 import { UUID } from "@/lib/crm/feeds/http";
 
 export const dynamic = "force-dynamic";
@@ -67,8 +68,37 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     if (!b.pdf_field_map || typeof b.pdf_field_map !== "object" || Array.isArray(b.pdf_field_map)) return NextResponse.json({ error: "PDF field map must be an object" }, { status: 400 });
     next.pdf_field_map = Object.fromEntries(Object.entries(b.pdf_field_map).filter(([k, v]) => k.trim() && typeof v === "string").slice(0, 200));
   }
+  if ("domains" in b) {
+    const list = (Array.isArray(b.domains) ? b.domains : String(b.domains ?? "").split(/[,;\s]+/)).map((x: unknown) => String(x).trim().toLowerCase().replace(/^@/, "")).filter(Boolean);
+    const bad = list.filter((d: string) => !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d));
+    if (bad.length) return NextResponse.json({ error: `Not a domain: ${bad.join(", ")}` }, { status: 400 });
+    next.domains = Array.from(new Set(list)).slice(0, 20);
+  }
+  if ("approval_phrases" in b) {
+    if (!Array.isArray(b.approval_phrases)) return NextResponse.json({ error: "Approval phrases must be a list" }, { status: 400 });
+    next.approval_phrases = b.approval_phrases.map((x: unknown) => String(x).trim()).filter((x: string) => x && x.length <= 60).slice(0, 20);
+  }
+  for (const k of ["cancellation_patterns"]) if (k in b) {
+    if (!Array.isArray(b[k])) return NextResponse.json({ error: "Cancellation patterns must be a list" }, { status: 400 });
+    const list = b[k].map((x: unknown) => String(x).trim()).filter(Boolean);
+    const bad = list.filter((p: string) => p.length > 300 || !compilePattern(p));
+    if (bad.length) return NextResponse.json({ error: `Not a valid regular expression: ${bad.join(" · ")}` }, { status: 400 });
+    next[k] = list.slice(0, 10);
+  }
+  if ("case_number_pattern" in b) {
+    const p = typeof b.case_number_pattern === "string" ? b.case_number_pattern.trim() : "";
+    if (p && (p.length > 300 || !compilePattern(p))) return NextResponse.json({ error: "Case number pattern isn't a valid regular expression" }, { status: 400 });
+    next.case_number_pattern = p || null;
+  }
+  if ("extra_fields" in b) {
+    const raw = Array.isArray(b.extra_fields) ? b.extra_fields : null;
+    if (!raw) return NextResponse.json({ error: "Order questions must be a JSON list" }, { status: 400 });
+    const parsed = parseExtraFields(raw);
+    if (parsed.length !== raw.length) return NextResponse.json({ error: "Some order questions are invalid (each needs a lower-case key and a label; choices need options)" }, { status: 400 });
+    next.extra_fields = parsed;
+  }
   for (const k of ["platform_provider", "notes"]) if (k in b) next[k] = typeof b[k] === "string" && b[k].trim() ? b[k].trim().slice(0, 2000) : null;
-  for (const k of ["is_dms", "needs_review"]) if (k in b) next[k] = !!b[k];
+  for (const k of ["is_dms", "needs_review", "followup_new_thread", "feed_id_manual"]) if (k in b) next[k] = !!b[k];
   const { created_at: _c, updated_at: _u, ...row } = next;
   const { error: upErr } = await admin.from("crm_feed_supplier_settings").upsert({ ...row, company_id: s.id, updated_by: claims.sub }, { onConflict: "company_id" });
   if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });

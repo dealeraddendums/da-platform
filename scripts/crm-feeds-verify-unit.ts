@@ -148,7 +148,7 @@ async function main() {
   eq("on order: approver says APPROVED", detectOnOrder({ from: "bill@herzogmeier.com", text: "APPROVED\n\nFrom: feeds" }, order).kind, "dealer_approved");
   eq("on order: approver asks a question → review dealer reply", detectOnOrder({ from: "bill@herzogmeier.com", text: "What does this cost?" }, order).kind, "review_dealer_reply");
   eq("on order: supplier's own 'Please REPLY ALL with APPROVED' request → supplier, no ID", detectOnOrder({ from: "support@teamvelocitymarketing.com", text: "Hi Bill, Team Velocity has received a request to send inventory to Dealer Addendums for Herzog-Meier Volkswagen. Please REPLY ALL with APPROVED for this request to be completed." }, order).kind, "supplier_no_id");
-  eq("on order: supplier sends the ID", detectOnOrder({ from: "support@teamvelocitymarketing.com", text: "Done — enabled under the ID HMVW01." }, { ...order, status: "awaiting_supplier" }), { kind: "feed_id", candidates: ["HMVW01"], latest: "Done — enabled under the ID HMVW01." });
+  eq("on order: supplier sends the ID", detectOnOrder({ from: "support@teamvelocitymarketing.com", text: "Done — enabled under the ID HMVW01." }, { ...order, status: "awaiting_supplier" }), { kind: "feed_id", candidates: ["HMVW01"], latest: "Done — enabled under the ID HMVW01.", supplier: { kind: "completion", caseNumber: null, cancellation: null } });
   eq("on order: somebody else → review reply", detectOnOrder({ from: "random@other.com", text: "approved" }, order).kind, "review_reply");
   eq("on order: dealer reply after approval → review reply", detectOnOrder({ from: "bill@herzogmeier.com", text: "approved" }, { ...order, status: "awaiting_supplier" }).kind, "review_reply");
   eq("mentions dealer (punctuation / case-insensitive)", [mentionsDealer("RE: Inventory Feed Request for: Herzog-Meier Volkswagen", null, "Herzog Meier Volkswagen"), mentionsDealer("Other store", "nothing", "Herzog Meier Volkswagen")], [true, false]);
@@ -200,9 +200,9 @@ async function main() {
       mailbox: { id: "mb-feeds", address: "feeds@dealeraddendums.com", purpose: "feeds" },
     });
     const o = () => db.rows("crm_feed_orders")[0];
-    eq("inbound: supplier's approval-request email → supplier, no ID → Enter Feed ID task",
+    eq("inbound: supplier's own approval-request email → logged only, no task (it isn't a Feed ID reply)",
       [await handleFeedsEmail(ev("e0", "support@teamvelocitymarketing.com", "Please REPLY ALL with APPROVED for this request to be completed."), db), o().status, db.rows("crm_tasks").map((t: any) => t.kind)],
-      ["supplier_no_id", "awaiting_dealer_approval", ["feed_enter_feed_id"]]);
+      ["approval_request", "awaiting_dealer_approval", []]);
     eq("inbound: approver's question → Review dealer reply task, status unchanged",
       [await handleFeedsEmail(ev("e1", "bill@herzogmeier.com", "Is there a cost?\n\nFrom: Feeds\nPlease Reply All and write APPROVED"), db), o().status, db.rows("crm_tasks").some((t: any) => t.kind === "feed_review_dealer_reply")],
       ["review_dealer_reply", "awaiting_dealer_approval", true]);
@@ -214,7 +214,7 @@ async function main() {
       [await handleFeedsEmail(ev("e3", "kate@teamvelocitymarketing.com", "Herzog-Meier Volkswagen is set up under the ID HMVW01.", "th-other", "Herzog-Meier Volkswagen export"), db), o().status, o().feed_id_candidate, db.rows("crm_tasks").find((t: any) => t.kind === "feed_confirm_id")?.title],
       ["feed_id", "feed_id_received", "HMVW01", "Confirm Feed ID HMVW01"]);
     eq("inbound: status changes are events + timeline rows", [db.rows("crm_feed_order_events").filter((e: any) => ["dealer_approved", "feed_id_detected"].includes(e.type)).length, db.rows("crm_activities").every((a: any) => a.type === "feed_order" && a.company_id === "co-hm")], [2, true]);
-    eq("inbound: closed tasks — approval closes the review task, the ID closes 'enter Feed ID'", db.rows("crm_tasks").filter((t: any) => t.status === "open").map((t: any) => t.kind), ["feed_confirm_id"]);
+    eq("inbound: closed tasks — approval closes the review task", db.rows("crm_tasks").filter((t: any) => t.status === "open").map((t: any) => t.kind), ["feed_confirm_id"]);
     eq("inbound: unrelated feeds@ mail → Unmatched", [await handleFeedsEmail(ev("e4", "someone@else.com", "hello", "th-x", "Question"), db), db.rows("crm_feed_unmatched").length], ["unmatched", 1]);
   }
 

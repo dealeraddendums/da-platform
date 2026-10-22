@@ -6,8 +6,10 @@
 // day. An open order for the dealer is reused, not duplicated.
 
 import { useEffect, useState } from "react";
+import SupplierFieldsInputs from "./SupplierFieldsInputs";
+import { checkSupplierFields, type ExtraField } from "@/lib/crm/feeds/extra-fields";
 
-type Supplier = { id: string; name: string; request_method: string; needs_review: boolean };
+type Supplier = { id: string; name: string; request_method: string; needs_review: boolean; extra_fields?: ExtraField[] };
 
 export default function FeedOrderForm({
   dealerCompanyId, dealerName, emailThreadId, source = "call", defaultApprover, onCreated, onCancel,
@@ -28,6 +30,8 @@ export default function FeedOrderForm({
   const [name, setName] = useState(defaultApprover?.name ?? "");
   const [email, setEmail] = useState(defaultApprover?.email ?? "");
   const [phone, setPhone] = useState(defaultApprover?.phone ?? "");
+  const [title, setTitle] = useState("");
+  const [extra, setExtra] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
   const [src, setSrc] = useState(source);
   const [busy, setBusy] = useState(false);
@@ -48,10 +52,12 @@ export default function FeedOrderForm({
 
   async function save() {
     if (email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) { setErr("That approver email doesn't look right — fix it or leave it blank."); return; }
+    const extraCheck = checkSupplierFields(sel?.extra_fields ?? [], extra);
+    if (extraCheck.errors.length) { setErr(extraCheck.errors.join(" ")); return; }
     setBusy(true); setErr(null);
     const res = await fetch("/api/crm/feeds/orders", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dealer_company_id: dealerCompanyId, supplier_company_id: supplierId || null, approver_name: name, approver_email: email, approver_phone: phone, notes, source: src, email_thread_id: emailThreadId ?? null }),
+      body: JSON.stringify({ dealer_company_id: dealerCompanyId, supplier_company_id: supplierId || null, approver_name: name, approver_email: email, approver_phone: phone, approver_title: title, supplier_fields: sel?.extra_fields?.length ? extra : null, notes, source: src, email_thread_id: emailThreadId ?? null }),
     });
     const j = await res.json().catch(() => ({}));
     setBusy(false);
@@ -69,7 +75,7 @@ export default function FeedOrderForm({
         <label className="label">Feed supplier</label>
         {!adding ? (
           <div style={{ display: "flex", gap: 6 }}>
-            <select className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+            <select className="input" value={supplierId} onChange={(e) => { setSupplierId(e.target.value); setExtra({}); }}>
               <option value="">Not known yet</option>
               {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}{s.request_method === "api" ? " (portal)" : s.request_method === "pdf" ? " (PDF)" : ""}{s.needs_review ? " · needs review" : ""}</option>)}
             </select>
@@ -85,10 +91,12 @@ export default function FeedOrderForm({
         )}
         {sel?.needs_review && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#b26a00" }}>This supplier&apos;s request address isn&apos;t confirmed yet — a DA-CRM admin checks it on the supplier&apos;s Settings tab.</p>}
       </div>
+      {sel && <SupplierFieldsInputs defs={sel.extra_fields ?? []} values={extra} onChange={setExtra} supplierName={sel.name} />}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div><label className="label">Approver name</label><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Who approves at the dealership" /></div>
         <div><label className="label">Approver email</label><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
         <div><label className="label">Approver phone</label><input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
+        <div><label className="label">Approver title</label><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. General Manager (goes on PDF forms)" /></div>
         <div>
           <label className="label">Came in by</label>
           <select className="input" value={src} onChange={(e) => setSrc(e.target.value as typeof src)}>

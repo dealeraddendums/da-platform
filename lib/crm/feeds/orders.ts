@@ -15,6 +15,7 @@ import { activeVehicleCount, applyFeedIdChange, FeedIdChangeError } from "@/lib/
 import { advanceOrder, hasRequiredInfo, isOpen, STATUS_LABEL, TransitionError, type OrderEvent, type OrderStatus, type RequestMethod } from "./state";
 import { resolveFeedTemplate, orderNumber, type FeedKind } from "./templates";
 import { fillRequestPdf } from "./pdf";
+import { checkSupplierFields, describeSupplierFields, parseExtraFields, supplierFieldContext, type ExtraField } from "./extra-fields";
 import { nextBusinessDayDue } from "../business-days";
 import { sendInboxEmail } from "../inbox-send";
 import { relinkThreadActivities } from "../inbox-ingest";
@@ -34,17 +35,29 @@ export type SupplierSettings = {
   company_id: string; request_method: RequestMethod; request_email: string | null; cc_emails: string[];
   pdf_template_s3_key: string | null; pdf_field_map: Record<string, string>; feed_id_pattern: string | null;
   typical_turnaround_days: number; platform_provider: string | null; is_dms: boolean; needs_review: boolean; notes: string | null;
+  // 183: per-supplier behaviour (lib/crm/feeds/suppliers.ts documents the three real ones)
+  domains: string[]; extra_fields: ExtraField[]; approval_phrases: string[]; cancellation_patterns: string[];
+  case_number_pattern: string | null; followup_new_thread: boolean; feed_id_manual: boolean;
 };
 
 export const DEFAULT_SETTINGS = (companyId: string): SupplierSettings => ({
   company_id: companyId, request_method: "email", request_email: null, cc_emails: [], pdf_template_s3_key: null, pdf_field_map: {},
   feed_id_pattern: null, typical_turnaround_days: 2, platform_provider: null, is_dms: false, needs_review: true, notes: null,
+  domains: [], extra_fields: [], approval_phrases: [], cancellation_patterns: [], case_number_pattern: null, followup_new_thread: false, feed_id_manual: false,
 });
+
+const strList = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x.trim()) : []);
 
 export async function supplierSettings(admin: Admin, companyId: string | null): Promise<SupplierSettings | null> {
   if (!companyId) return null;
   const { data } = await admin.from("crm_feed_supplier_settings").select("*").eq("company_id", companyId).maybeSingle();
-  return data ? { ...data, cc_emails: Array.isArray(data.cc_emails) ? data.cc_emails : [] } : DEFAULT_SETTINGS(companyId);
+  if (!data) return DEFAULT_SETTINGS(companyId);
+  return {
+    ...DEFAULT_SETTINGS(companyId), ...data,
+    cc_emails: strList(data.cc_emails), domains: strList(data.domains).map((d) => d.toLowerCase()),
+    approval_phrases: strList(data.approval_phrases), cancellation_patterns: strList(data.cancellation_patterns),
+    extra_fields: parseExtraFields(data.extra_fields), followup_new_thread: !!data.followup_new_thread, feed_id_manual: !!data.feed_id_manual,
+  };
 }
 
 export async function loadOrder(admin: Admin, id: string): Promise<any> {
@@ -61,6 +74,8 @@ const EVENT_TEXT: Record<string, string> = {
   feed_id_detected: "Feed ID received", feed_id_entered: "Feed ID entered", feed_id_confirmed: "Feed ID confirmed and assigned",
   import_succeeded: "First feed import — order done", nudged: "Follow-up sent", owner_changed: "Owner changed", cancelled: "Feed order cancelled",
   task_created: "Task created", signed_pdf_forwarded: "Signed PDF forwarded to the supplier", signed_pdf_uploaded: "Signed PDF uploaded", unmatched_linked: "Email linked to the order", review: "Reply needs review",
+  signed_pdf_received: "Signed PDF received from the dealer", case_number: "Supplier case number", cancellation_deadline: "Supplier will cancel without approval",
+  supplier_message: "Supplier update",
 };
 
 export async function recordEvent(admin: Admin, order: any, type: string, detail: Record<string, unknown>, actor: string): Promise<void> {
@@ -83,7 +98,7 @@ const pick = (o: Record<string, unknown>, keys: string[]) => Object.fromEntries(
 export async function applyOrderEvent(admin: Admin, orderId: string, ev: OrderEvent, actor: string, detail: Record<string, unknown> = {}): Promise<any> {
   const order = await loadOrder(admin, orderId);
   const settings = await supplierSettings(admin, order.supplier_company_id);
-  const adv = advanceOrder(order, ev, { method: settings?.request_method ?? null });
+  const adv = advanceOrder(order, ev, { method: settings?.request_method ?? null, extraFields: settings?.extra_fields ?? [] });
   const { data, error } = await admin.from("crm_feed_orders").update(adv.patch).eq("id", orderId).eq("status", order.status).select("*").maybeSingle();
   if (error) throw new FeedOrderError(500, error.message);
   if (!data) throw new FeedOrderError(409, "The order changed while you were working on it — reload and try again");
@@ -101,7 +116,7 @@ function evDetail(ev: OrderEvent): Record<string, unknown> {
 async function onStatusChange(admin: Admin, from: OrderStatus, order: any): Promise<void> {
   const done: Record<string, string[]> = {
     ready: ["feed_get_info"], awaiting_dealer_approval: ["feed_get_info"],
-    awaiting_supplier: ["feed_get_info", "feed_call_approver", "feed_review_dealer_reply"],
+    awaiting_supplier: ["feed_get_info", "feed_call_approver", "feed_review_dealer_reply", "feed_supplier_deadline"],
     feed_id_received: ["feed_call_supplier", "feed_call_approver", "feed_enter_feed_id"],
     assigned: ["feed_confirm_id", "feed_enter_feed_id", "feed_call_supplier"],
   };
@@ -153,8 +168,17 @@ export async function feedSupportAssignee(admin: Admin): Promise<string | null> 
 export type CreateInput = {
   dealerCompanyId: string; supplierCompanyId?: string | null; source: "call" | "chat" | "email" | "self_serve";
   initiatedBy?: string | null; ownerId?: string | null; approverName?: string | null; approverEmail?: string | null; approverPhone?: string | null;
-  notes?: string | null; emailThreadId?: string | null;
+  approverTitle?: string | null; notes?: string | null; emailThreadId?: string | null;
+  /** Answers to the supplier's extra_fields (Autosoft: autosoft_account, go_dealer, transfer_row). */
+  supplierFields?: Record<string, unknown> | null;
 };
+
+/** Clean + validate answers for this supplier's questions; wrong answers are a 400, missing ones leave the order in Needs info. */
+export function cleanSupplierFields(settings: SupplierSettings | null, input: Record<string, unknown> | null | undefined): Record<string, string> {
+  const c = checkSupplierFields(settings?.extra_fields ?? [], input);
+  if (c.errors.length) throw new FeedOrderError(400, c.errors.join(". "));
+  return c.values;
+}
 
 export async function createFeedOrder(admin: Admin, input: CreateInput): Promise<{ order: any; existed: boolean }> {
   const { data: dealer } = await admin.from("crm_companies").select("id, kind").eq("id", input.dealerCompanyId).maybeSingle();
@@ -171,6 +195,10 @@ export async function createFeedOrder(admin: Admin, input: CreateInput): Promise
     if (!existing.approver_email && input.approverEmail) fill.approver_email = normEmail(input.approverEmail);
     if (!existing.approver_name && input.approverName) fill.approver_name = input.approverName.trim();
     if (!existing.approver_phone && input.approverPhone) fill.approver_phone = input.approverPhone.trim();
+    if (!existing.approver_title && input.approverTitle) fill.approver_title = input.approverTitle.trim();
+    if (input.supplierFields && !Object.keys(existing.supplier_fields ?? {}).length) {
+      fill.supplier_fields = cleanSupplierFields(await supplierSettings(admin, fill.supplier_company_id as string ?? existing.supplier_company_id), input.supplierFields);
+    }
     if (Object.keys(fill).length && ["needs_info", "ready"].includes(existing.status)) {
       return { order: await applyOrderEvent(admin, existing.id, { type: "info_updated", fields: fill as any }, input.initiatedBy ?? SYSTEM, { note: `Details added (${input.source})` }), existed: true };
     }
@@ -183,20 +211,24 @@ export async function createFeedOrder(admin: Admin, input: CreateInput): Promise
   const base = {
     status: "needs_info" as OrderStatus, supplier_company_id: input.supplierCompanyId ?? null,
     approver_name: input.approverName?.trim() || null, approver_email: normEmail(input.approverEmail) ?? null,
+    supplier_fields: cleanSupplierFields(settings, input.supplierFields),
   };
-  const adv = advanceOrder(base, { type: "created" }, { method: settings?.request_method ?? null });
+  const adv = advanceOrder(base, { type: "created" }, { method: settings?.request_method ?? null, extraFields: settings?.extra_fields ?? [] });
   const { data: order, error } = await admin.from("crm_feed_orders").insert({
     ...base, ...adv.patch, dealer_company_id: input.dealerCompanyId, source: input.source,
     initiated_by_staff_id: input.initiatedBy ?? null, owner_staff_id: owner, approver_phone: input.approverPhone?.trim() || null,
+    approver_title: input.approverTitle?.trim() || null,
     notes: input.notes?.trim() || null, email_thread_id: input.emailThreadId ?? null,
   }).select("*").single();
   if (error) {
     if (error.code === "23505") return createFeedOrder(admin, input);   // raced another create — return that one
     throw new FeedOrderError(500, error.message);
   }
-  await recordEvent(admin, order, "created", { source: input.source, note: input.notes ?? null }, input.initiatedBy ?? SYSTEM);
+  if (order.email_thread_id) await linkThread(admin, order.email_thread_id, order.id);
+  const answers = describeSupplierFields(settings?.extra_fields ?? [], order.supplier_fields ?? {});
+  await recordEvent(admin, order, "created", { source: input.source, note: [input.notes, answers].filter(Boolean).join(" — ") || null }, input.initiatedBy ?? SYSTEM);
   if (order.status === "needs_info") {
-    const missing = missingInfo(order, settings?.request_method ?? null);
+    const missing = missingInfo(order, settings?.request_method ?? null, settings?.extra_fields ?? []);
     await createOrderTask(admin, order, {
       kind: "feed_get_info", title: "Get feed provider/approver — call the GM",
       description: `Missing: ${missing.join(", ")}.`, assignee: input.initiatedBy ?? owner,
@@ -208,17 +240,21 @@ export async function createFeedOrder(admin: Admin, input: CreateInput): Promise
   return { order, existed: false };
 }
 
-export function missingInfo(o: any, method: RequestMethod | null): string[] {
+export function missingInfo(o: any, method: RequestMethod | null, extraFields: ExtraField[] = []): string[] {
   const m: string[] = [];
   if (!o.supplier_company_id) m.push("feed provider");
   if (method !== "api") {
     if (!o.approver_name) m.push("approver name");
     if (!o.approver_email) m.push("approver email");
   }
+  if (o.supplier_company_id && extraFields.length) {
+    const c = checkSupplierFields(extraFields, o.supplier_fields);
+    m.push(...c.missing.map((l) => l.charAt(0).toLowerCase() + l.slice(1)), ...c.errors);
+  }
   return m;
 }
 
-export async function updateOrderInfo(admin: Admin, orderId: string, fields: { supplier_company_id?: string | null; approver_name?: string | null; approver_email?: string | null; approver_phone?: string | null }, actor: string): Promise<any> {
+export async function updateOrderInfo(admin: Admin, orderId: string, fields: { supplier_company_id?: string | null; approver_name?: string | null; approver_email?: string | null; approver_phone?: string | null; approver_title?: string | null; supplier_fields?: Record<string, unknown> | null }, actor: string): Promise<any> {
   const clean: Record<string, unknown> = {};
   if ("supplier_company_id" in fields) {
     if (fields.supplier_company_id) {
@@ -234,6 +270,13 @@ export async function updateOrderInfo(admin: Admin, orderId: string, fields: { s
     clean.approver_email = e;
   }
   if ("approver_phone" in fields) clean.approver_phone = fields.approver_phone?.trim() || null;
+  if ("approver_title" in fields) clean.approver_title = fields.approver_title?.trim() || null;
+  if ("supplier_fields" in fields || "supplier_company_id" in clean) {
+    const cur = await loadOrder(admin, orderId);
+    const supplierId = ("supplier_company_id" in clean ? clean.supplier_company_id : cur.supplier_company_id) as string | null;
+    // A new supplier asks different questions: keep only what it understands.
+    clean.supplier_fields = cleanSupplierFields(await supplierSettings(admin, supplierId), "supplier_fields" in fields ? fields.supplier_fields : cur.supplier_fields);
+  }
   return applyOrderEvent(admin, orderId, { type: "info_updated", fields: clean as any }, actor);
 }
 
@@ -249,11 +292,29 @@ export async function orderTemplateContext(admin: Admin, order: any): Promise<Te
   ]);
   const { data: dealer } = co?.dealer_id ? await admin.from("dealers").select("inventory_provider, inventory_provider_is_dms").eq("id", co.dealer_id).maybeSingle() : { data: null };
   const dms = settings?.is_dms ? (settings.platform_provider ?? sup?.name ?? null) : dealer?.inventory_provider_is_dms ? dealer.inventory_provider : null;
+  // The approver's title: what staff typed on the order, else their contact card.
+  let title: string | null = order.approver_title ?? null;
+  if (!title && order.approver_email) {
+    const { data: c } = await admin.from("crm_contacts").select("title").eq("company_id", order.dealer_company_id).ilike("email", order.approver_email).is("deleted_at", null).limit(1).maybeSingle();
+    title = c?.title ?? null;
+  }
   return {
     "supplier.name": sup?.name ?? null, "supplier.request_email": settings?.request_email ?? null,
     "approver.name": order.approver_name, "approver.first_name": (order.approver_name ?? "").trim().split(/\s+/)[0] || null, "approver.email": order.approver_email,
+    "approver.title": title,
+    // No fax on dealer / company records yet — the variable exists so PDF maps can name it (renders blank).
+    "company.fax": null,
     "dealer.dms": dms, "order.id": orderNumber(order.id), "order.sent_on": longDate(order.sent_at), "order.feed_id": order.feed_id_confirmed ?? order.feed_id_candidate ?? null,
+    "order.case_number": order.metadata?.case_number ?? null,
+    ...supplierFieldContext(settings?.extra_fields ?? [], order.supplier_fields ?? {}),
   };
+}
+
+/** Mark a thread as belonging to an order (detection finds the order from any of its threads). */
+export async function linkThread(admin: Admin, threadId: string | null, orderId: string): Promise<void> {
+  if (!threadId) return;
+  const { error } = await admin.from("crm_email_threads").update({ feed_order_id: orderId }).eq("id", threadId).is("feed_order_id", null);
+  if (error) console.error(`[crm-feeds] link thread ${threadId} → ${orderId}: ${error.message}`);
 }
 
 // ── Sending ──────────────────────────────────────────────────────────────────
@@ -272,6 +333,12 @@ async function getCrmObject(key: string): Promise<Buffer> {
   return Buffer.from(await (r.Body as any).transformToByteArray());
 }
 
+/** Mail + S3 seams (the fixture tests swap these for recorders; nothing else should). */
+export const feedIo = {
+  send: (...args: Parameters<typeof sendInboxEmail>) => sendInboxEmail(...args),
+  getObject: (key: string) => getCrmObject(key),
+};
+
 export type PreparedRequest = {
   method: RequestMethod; kind: FeedKind; subject: string; bodyHtml: string; templateSource: string;
   to: { email: string; name: string | null }[]; cc: { email: string; name: string | null }[];
@@ -286,7 +353,7 @@ export async function prepareRequest(admin: Admin, order: any): Promise<Prepared
   const kind: FeedKind = method === "pdf" ? "request_pdf" : "request";
   const tpl = await resolveFeedTemplate(admin, kind, order.supplier_company_id);
   const context = await orderTemplateContext(admin, order);
-  const problems = missingInfo(order, method).map((m) => `Missing ${m}`);
+  const problems = missingInfo(order, method, settings.extra_fields).map((m) => (/^[a-z]/.test(m) ? `Missing ${m}` : m));
   if (method !== "api" && !settings.request_email) problems.push("The supplier has no request email on its Settings tab");
   let pdf: PreparedRequest["pdf"] = null;
   if (method === "pdf") {
@@ -294,13 +361,14 @@ export async function prepareRequest(admin: Admin, order: any): Promise<Prepared
     else {
       const { buildTemplateContext } = await import("../email-compose");
       const ctx = { ...(await buildTemplateContext({ companyId: order.dealer_company_id, staffId: order.owner_staff_id ?? order.initiated_by_staff_id ?? "" }, admin)), ...context };
-      const filled = await fillRequestPdf(await getCrmObject(settings.pdf_template_s3_key), settings.pdf_field_map, ctx);
+      const filled = await fillRequestPdf(await feedIo.getObject(settings.pdf_template_s3_key), settings.pdf_field_map, ctx);
       pdf = { name: `Feed authorization ${orderNumber(order.id)}.pdf`, bytes: filled.bytes, report: { missingFields: filled.missingFields, emptyValues: filled.emptyValues } };
       if (filled.missingFields.length) problems.push(`PDF fields not in the template: ${filled.missingFields.join(", ")}`);
     }
   }
   const to = order.approver_email ? [{ email: order.approver_email, name: order.approver_name }] : [];
-  const cc = [settings.request_email, ...settings.cc_emails].map((e) => normEmail(e)).filter((e): e is string => !!e).map((email) => ({ email, name: null }));
+  // PDF suppliers get the SIGNED form later (Forward to supplier), not the blank request.
+  const cc = method === "pdf" ? [] : [settings.request_email, ...settings.cc_emails].map((e) => normEmail(e)).filter((e): e is string => !!e).map((email) => ({ email, name: null }));
   return { method, kind, subject: tpl.subject, bodyHtml: tpl.body_html, templateSource: tpl.source, to, cc, pdf, context, problems };
 }
 
@@ -316,7 +384,7 @@ export async function sendRequest(admin: Admin, orderId: string, staffId: string
   if (prep.method === "api") return applyOrderEvent(admin, orderId, { type: evType, threadId: null } as OrderEvent, staffId, { note: "Marked as sent (supplier portal)" });
   if (prep.problems.length) throw new FeedOrderError(400, prep.problems.join(". "));
   const mb = await feedsMailbox(admin);
-  const { emailId, threadId } = await sendInboxEmail({
+  const { emailId, threadId } = await feedIo.send({
     staffId, mode: "new", mailboxId: mb.id, companyId: order.dealer_company_id,
     to: prep.to, cc: prep.cc, subject: opts.override?.subject ?? prep.subject, bodyHtml: opts.override?.bodyHtml ?? prep.bodyHtml,
     templateContext: prep.context,
@@ -326,6 +394,7 @@ export async function sendRequest(admin: Admin, orderId: string, staffId: string
   if (threadId) {
     await admin.from("crm_email_threads").update({ company_id: order.dealer_company_id, matched_by: "manual", match_candidates: [] }).eq("id", threadId).is("company_id", null);
     await relinkThreadActivities(admin, threadId, order.dealer_company_id, null);
+    await linkThread(admin, threadId, order.id);
   }
   return applyOrderEvent(admin, orderId, { type: evType, threadId } as OrderEvent, staffId, { email_id: emailId, thread_id: threadId });
 }
@@ -346,17 +415,37 @@ export async function forwardSignedPdf(admin: Admin, orderId: string, staffId: s
   if (!order.signed_pdf_s3_key) throw new FeedOrderError(400, "Upload the signed PDF first");
   const settings = await supplierSettings(admin, order.supplier_company_id);
   if (!settings?.request_email) throw new FeedOrderError(400, "The supplier has no request email");
-  const latest = await latestThreadEmail(admin, order.email_thread_id);
   const ctx = await orderTemplateContext(admin, order);
-  const body = `<p>Hello {{supplier.name}} Support,</p><p>Attached is the signed inventory feed authorization for {{company.name}}. Please send us the Dealer ID once the feed is set up.</p><p>Thank you!</p>`;
-  const att = [{ name: `Signed feed authorization ${orderNumber(order.id)}.pdf`, contentType: "application/pdf", bytes: await getCrmObject(order.signed_pdf_s3_key) }];
-  const to = [{ email: settings.request_email, name: null }];
-  if (latest) await sendInboxEmail({ staffId, mode: "replyAll", emailId: latest.id, to, cc: settings.cc_emails.map((email) => ({ email })), subject: `RE: ${latest.subject ?? ""}`, bodyHtml: body, attachments: att, templateContext: ctx }, admin);
-  else {
-    const mb = await feedsMailbox(admin);
-    await sendInboxEmail({ staffId, mode: "new", mailboxId: mb.id, companyId: order.dealer_company_id, to, subject: "Signed inventory feed authorization: {{company.name}}", bodyHtml: body, attachments: att, templateContext: ctx }, admin);
-  }
-  await recordEvent(admin, order, "signed_pdf_forwarded", { note: "Signed PDF forwarded to the supplier" }, staffId);
+  // A new email to the supplier only — not a reply-all on the dealer's thread (the supplier's
+  // "Signed PDF to supplier" template; Autosoft's is its own "Activation Rqst" wording).
+  const tpl = await resolveFeedTemplate(admin, "supplier_forward", order.supplier_company_id);
+  const att = [{ name: `Signed feed authorization ${orderNumber(order.id)}.pdf`, contentType: "application/pdf", bytes: await feedIo.getObject(order.signed_pdf_s3_key) }];
+  const mb = await feedsMailbox(admin);
+  const r = await feedIo.send({ staffId, mode: "new", mailboxId: mb.id, companyId: order.dealer_company_id, to: [{ email: settings.request_email, name: null }], cc: settings.cc_emails.map((email) => ({ email })), subject: tpl.subject, bodyHtml: tpl.body_html, attachments: att, templateContext: ctx }, admin);
+  await linkThread(admin, r.threadId ?? null, order.id);
+  await admin.from("crm_tasks").update({ status: "done", completed_at: new Date().toISOString() }).eq("feed_order_id", order.id).eq("kind", "feed_forward_signed_pdf").eq("status", "open");
+  await recordEvent(admin, order, "signed_pdf_forwarded", { note: `Signed PDF forwarded to ${settings.request_email}`, thread_id: r.threadId ?? null }, staffId);
+}
+
+/**
+ * A dealer's reply on the order carrying a PDF = the signed authorization (pdf suppliers): it
+ * becomes the order's signed PDF (pointing at the stored attachment — no copy) and a company
+ * file, and "Signed form received — forward to {supplier}" lands on the owner. Returns null
+ * when the message has no stored PDF attachment.
+ */
+export async function attachSignedPdfFromEmail(admin: Admin, order: any, emailId: string, supplierName: string | null): Promise<{ filename: string; others: string[] } | null> {
+  const { data: atts } = await admin.from("crm_email_attachments").select("id, filename, content_type, size, s3_key, is_inline").eq("email_id", emailId);
+  const pdfs = (atts ?? []).filter((a: any) => !a.is_inline && a.s3_key && (/pdf/i.test(a.content_type ?? "") || /\.pdf$/i.test(a.filename ?? "")));
+  if (!pdfs.length) return null;
+  const a = pdfs[0];
+  await admin.from("crm_feed_orders").update({ signed_pdf_s3_key: a.s3_key }).eq("id", order.id);
+  await admin.from("crm_company_files").insert({ company_id: order.dealer_company_id, filename: a.filename, content_type: "application/pdf", size: a.size ?? null, s3_key: a.s3_key, label: "Signed feed authorization", uploaded_by: null });
+  const others = pdfs.slice(1).map((x: any) => x.filename);
+  await createOrderTask(admin, order, {
+    kind: "feed_forward_signed_pdf", title: `Signed form received — forward to ${supplierName ?? "the supplier"}`,
+    description: `${a.filename}${others.length ? ` (also attached: ${others.join(", ")} — check which one is this dealership's)` : ""}. Check it's signed and dated, then Forward to supplier.`,
+  }, SYSTEM);
+  return { filename: a.filename, others };
 }
 
 async function latestThreadEmail(admin: Admin, threadId: string | null): Promise<any | null> {
@@ -366,7 +455,12 @@ async function latestThreadEmail(admin: Admin, threadId: string | null): Promise
 }
 
 /** Follow-up on the order's thread (reply all keeps the supplier copied). */
-export async function nudge(admin: Admin, orderId: string, target: "dealer" | "supplier", actor: string, manual: boolean): Promise<any> {
+/**
+ * `opts.replyToEmailId`: answer THAT message (reply all) — the supplier's own approval email when it
+ * sets a cancellation deadline, so the dealer's Reply All lands in the supplier's case. Suppliers
+ * with followup_new_thread (vAuto: closed cases ignore replies) get a fresh email instead.
+ */
+export async function nudge(admin: Admin, orderId: string, target: "dealer" | "supplier", actor: string, manual: boolean, opts: { replyToEmailId?: string } = {}): Promise<any> {
   const order = await loadOrder(admin, orderId);
   const staffId = actor !== SYSTEM ? actor : order.owner_staff_id ?? order.initiated_by_staff_id;
   if (!staffId) throw new FeedOrderError(400, "The order has no owner to send the follow-up as");
@@ -382,12 +476,18 @@ export async function nudge(admin: Admin, orderId: string, target: "dealer" | "s
   const to = target === "dealer" ? approver : supplierRcpts;
   const cc = target === "dealer" ? supplierRcpts : approver;
   if (!to.length) throw new FeedOrderError(400, target === "dealer" ? "No approver email on the order" : "The supplier has no request email");
-  if (latest) {
-    await sendInboxEmail({ staffId, mode: "replyAll", emailId: latest.id, to, cc, subject: `RE: ${(latest.subject ?? "").replace(/^\s*(re:\s*)+/i, "")}`, bodyHtml: tpl.body_html, templateContext: ctx }, admin);
+  const replyTo = opts.replyToEmailId ? (await admin.from("crm_emails").select("id, subject").eq("id", opts.replyToEmailId).maybeSingle()).data : null;
+  const fresh = target === "supplier" && !!settings?.followup_new_thread;
+  if (replyTo && !fresh) {
+    await feedIo.send({ staffId, mode: "replyAll", emailId: replyTo.id, to, cc, subject: `RE: ${(replyTo.subject ?? "").replace(/^\s*(re:\s*)+/i, "")}`, bodyHtml: tpl.body_html, templateContext: ctx }, admin);
+  } else if (latest && !fresh) {
+    await feedIo.send({ staffId, mode: "replyAll", emailId: latest.id, to, cc, subject: `RE: ${(latest.subject ?? "").replace(/^\s*(re:\s*)+/i, "")}`, bodyHtml: tpl.body_html, templateContext: ctx }, admin);
   } else {
     const mb = await feedsMailbox(admin);
-    const r = await sendInboxEmail({ staffId, mode: "new", mailboxId: mb.id, companyId: order.dealer_company_id, to, cc, subject: tpl.subject, bodyHtml: tpl.body_html, templateContext: ctx }, admin);
-    if (r.threadId) await admin.from("crm_feed_orders").update({ email_thread_id: r.threadId }).eq("id", order.id);
+    // vAuto's follow-up goes to the supplier alone, as a new case-quoting email; the order keeps its thread.
+    const r = await feedIo.send({ staffId, mode: "new", mailboxId: mb.id, companyId: order.dealer_company_id, to, cc: fresh ? [] : cc, subject: tpl.subject, bodyHtml: tpl.body_html, templateContext: ctx }, admin);
+    if (r.threadId && !order.email_thread_id) await admin.from("crm_feed_orders").update({ email_thread_id: r.threadId }).eq("id", order.id);
+    await linkThread(admin, r.threadId ?? null, order.id);
   }
   return applyOrderEvent(admin, orderId, { type: "nudged", target, manual }, actor);
 }
@@ -440,7 +540,7 @@ export async function confirmFeedId(admin: Admin, orderId: string, feedId: strin
     try {
       const mb = await feedsMailbox(admin);
       const tpl = await resolveFeedTemplate(admin, "feed_assigned", updated.supplier_company_id);
-      await sendInboxEmail({ staffId, mode: "new", mailboxId: mb.id, companyId: updated.dealer_company_id, to: [{ email: updated.approver_email, name: updated.approver_name }], subject: tpl.subject, bodyHtml: tpl.body_html, templateContext: await orderTemplateContext(admin, updated) }, admin);
+      await feedIo.send({ staffId, mode: "new", mailboxId: mb.id, companyId: updated.dealer_company_id, to: [{ email: updated.approver_email, name: updated.approver_name }], subject: tpl.subject, bodyHtml: tpl.body_html, templateContext: await orderTemplateContext(admin, updated) }, admin);
     } catch (e) {
       await createOrderTask(admin, updated, { kind: "feed_notify_dealer", title: "Tell the dealer their feed is set up (the email didn't send)", description: e instanceof Error ? e.message : String(e) }, SYSTEM);
     }

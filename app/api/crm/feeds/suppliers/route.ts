@@ -3,6 +3,7 @@ import { requireCrmStaff } from "@/lib/crm/access";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { normEmail } from "@/lib/crm/inbox-match";
 import { str } from "@/lib/crm/feeds/http";
+import { parseExtraFields } from "@/lib/crm/feeds/extra-fields";
 
 export const dynamic = "force-dynamic";
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -14,9 +15,9 @@ export async function GET(): Promise<NextResponse> {
   const admin = createAdminSupabaseClient() as any;
   const [{ data: cos }, { data: st }] = await Promise.all([
     admin.from("crm_companies").select("id, name").eq("kind", "feed_supplier").order("name"),
-    admin.from("crm_feed_supplier_settings").select("company_id, request_method, request_email, needs_review, platform_provider, is_dms"),
+    admin.from("crm_feed_supplier_settings").select("company_id, request_method, request_email, needs_review, platform_provider, is_dms, extra_fields"),
   ]);
-  const by = Object.fromEntries((st ?? []).map((s: any) => [s.company_id, s]));
+  const by = Object.fromEntries((st ?? []).map((s: any) => [s.company_id, { ...s, extra_fields: parseExtraFields(s.extra_fields) }]));
   return NextResponse.json({ suppliers: (cos ?? []).map((c: any) => ({ id: c.id, name: c.name, ...(by[c.id] ?? { request_method: "email", request_email: null, needs_review: true }) })) });
 }
 

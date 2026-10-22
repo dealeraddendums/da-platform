@@ -4,7 +4,9 @@
 // Feed supplier → Settings tab: how requests go out (email / PDF / portal),
 // where (request + Cc addresses), the PDF template and field map, the Feed ID
 // regex, typical turnaround, the platform provider name written to the dealer
-// record. "Test render" fills the request for a sample dealer; "Edit
+// record, and how this supplier behaves (its mail domains, case numbers,
+// cancellation deadlines, its own approval wording, the questions an order asks).
+// Team Velocity / vAuto / Autosoft are seeded from lib/crm/feeds/suppliers.ts. "Test render" fills the request for a sample dealer; "Edit
 // templates" opens this supplier's Feed requests folder. crm_admin edits.
 
 import { useEffect, useRef, useState } from "react";
@@ -17,6 +19,7 @@ export default function FeedSupplierSettings({ supplierId, supplierName, canEdit
   const [overrides, setOverrides] = useState<{ id: string; name: string; feed_kind: string }[]>([]);
   const [map, setMap] = useState("");
   const [cc, setCc] = useState("");
+  const [lists, setLists] = useState({ domains: "", approval_phrases: "", cancellation_patterns: "", extra_fields: "" });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [fields, setFields] = useState<string[] | null>(null);
@@ -26,14 +29,24 @@ export default function FeedSupplierSettings({ supplierId, supplierName, canEdit
     const j = await fetch(`/api/crm/feeds/suppliers/${supplierId}`).then((r) => r.json()).catch(() => ({}));
     setS(j.settings); setProviders(j.providers ?? { dms: [], other: [] }); setOverrides(j.overrides ?? []);
     setMap(JSON.stringify(j.settings?.pdf_field_map ?? {}, null, 2)); setCc((j.settings?.cc_emails ?? []).join(", "));
+    setLists({
+      domains: (j.settings?.domains ?? []).join(", "), approval_phrases: (j.settings?.approval_phrases ?? []).join("\n"),
+      cancellation_patterns: (j.settings?.cancellation_patterns ?? []).join("\n"), extra_fields: JSON.stringify(j.settings?.extra_fields ?? [], null, 2),
+    });
   }
   useEffect(() => { void load(); }, [supplierId]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     let pdfMap: unknown;
     try { pdfMap = JSON.parse(map || "{}"); } catch { setMsg({ ok: false, text: "The PDF field map isn't valid JSON" }); return; }
+    let extraFields: unknown;
+    try { extraFields = JSON.parse(lists.extra_fields || "[]"); } catch { setMsg({ ok: false, text: "The order questions aren't valid JSON" }); return; }
+    const lines = (t: string) => t.split("\n").map((x) => x.trim()).filter(Boolean);
     setBusy(true); setMsg(null);
-    const res = await fetch(`/api/crm/feeds/suppliers/${supplierId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...s, cc_emails: cc, pdf_field_map: pdfMap }) });
+    const res = await fetch(`/api/crm/feeds/suppliers/${supplierId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      ...s, cc_emails: cc, pdf_field_map: pdfMap, extra_fields: extraFields,
+      domains: lists.domains, approval_phrases: lines(lists.approval_phrases), cancellation_patterns: lines(lists.cancellation_patterns),
+    }) });
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) { setMsg({ ok: false, text: j.error ?? "Couldn't save" }); return; }
@@ -90,6 +103,25 @@ export default function FeedSupplierSettings({ supplierId, supplierName, canEdit
           <textarea className="input" style={{ height: 140, padding: 8, fontFamily: "monospace", fontSize: 12 }} value={map} disabled={dis} onChange={(e) => setMap(e.target.value)} />
         </div>
       )}
+      <details>
+        <summary style={{ cursor: "pointer", fontWeight: 600 }}>How this supplier behaves</summary>
+        <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+            <div><label className="label">Mail domains (beyond the request / Cc addresses)</label><input className="input" value={lists.domains} disabled={dis} onChange={(e) => setLists({ ...lists, domains: e.target.value })} placeholder="supplier.com — subdomains match too" /></div>
+            <div><label className="label">Case number pattern (group 1)</label><input className="input" style={{ fontFamily: "monospace" }} value={s.case_number_pattern ?? ""} disabled={dis} onChange={(e) => set("case_number_pattern", e.target.value)} placeholder={"case\\s*#\\s*(\\d+)"} /></div>
+          </div>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={!!s.followup_new_thread} disabled={dis} onChange={(e) => set("followup_new_thread", e.target.checked)} /> Supplier follow-up is a new email (closed cases ignore replies — vAuto)</label>
+            <label style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={!!s.feed_id_manual} disabled={dis} onChange={(e) => set("feed_id_manual", e.target.checked)} /> Feed IDs are entered by hand (no reliable ID in replies)</label>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div><label className="label">Its own approval wording (one per line, on top of the global phrases)</label><textarea className="input" style={{ height: 60, padding: 8 }} value={lists.approval_phrases} disabled={dis} onChange={(e) => setLists({ ...lists, approval_phrases: e.target.value })} placeholder="I approve" /></div>
+            <div><label className="label">Cancellation deadline patterns (regex, one per line)</label><textarea className="input" style={{ height: 60, padding: 8, fontFamily: "monospace", fontSize: 12 }} value={lists.cancellation_patterns} disabled={dis} onChange={(e) => setLists({ ...lists, cancellation_patterns: e.target.value })} /></div>
+          </div>
+          <div><label className="label">Order questions (JSON — asked on Start feed order, used as {"{{order.supplier_fields.<key>}}"})</label>
+            <textarea className="input" style={{ height: 120, padding: 8, fontFamily: "monospace", fontSize: 12 }} value={lists.extra_fields} disabled={dis} onChange={(e) => setLists({ ...lists, extra_fields: e.target.value })} /></div>
+        </div>
+      </details>
       <div><label className="label">Notes</label><textarea className="input" style={{ height: 60, padding: 8 }} value={s.notes ?? ""} disabled={dis} onChange={(e) => set("notes", e.target.value)} /></div>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         {canEdit && <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save settings"}</button>}

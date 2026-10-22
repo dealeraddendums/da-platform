@@ -25,6 +25,8 @@ export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export const OPEN_STATUSES: OrderStatus[] = ["needs_info", "ready", "request_sent", "awaiting_dealer_approval", "awaiting_supplier", "feed_id_received", "assigned"];
 export const isOpen = (s: OrderStatus) => OPEN_STATUSES.includes(s);
 
+import { checkSupplierFields, type ExtraField } from "./extra-fields";
+
 export type RequestMethod = "email" | "pdf" | "api";
 
 export type OrderState = {
@@ -33,16 +35,19 @@ export type OrderState = {
   approver_name: string | null;
   approver_email: string | null;
   approver_phone?: string | null;
+  approver_title?: string | null;
+  /** Answers to the supplier's questions (extra-fields.ts). */
+  supplier_fields?: Record<string, string>;
   feed_id_candidate?: string | null;
   stalled_nudges?: number;
 };
 
 export type OrderEvent =
   | { type: "created" }
-  | { type: "info_updated"; fields: Partial<Pick<OrderState, "supplier_company_id" | "approver_name" | "approver_email" | "approver_phone">> }
+  | { type: "info_updated"; fields: Partial<Pick<OrderState, "supplier_company_id" | "approver_name" | "approver_email" | "approver_phone" | "approver_title" | "supplier_fields">> }
   | { type: "request_sent"; threadId: string | null }
   | { type: "resent"; threadId: string | null }
-  | { type: "dealer_approved"; via: "email" | "phone" }
+  | { type: "dealer_approved"; via: "email" | "phone" | "signed_pdf" }
   | { type: "supplier_replied" }
   | { type: "feed_id_detected"; candidate: string; source: "regex" | "ai" }
   | { type: "feed_id_entered"; candidate: string }
@@ -61,16 +66,23 @@ export class TransitionError extends Error {
 
 export type Advance = { status: OrderStatus; patch: Record<string, unknown>; changed: boolean };
 
-/** Has what the request needs: a supplier, plus the approver's name and email unless the supplier uses a portal / API. */
-export function hasRequiredInfo(o: Pick<OrderState, "supplier_company_id" | "approver_name" | "approver_email">, method: RequestMethod | null): boolean {
+/**
+ * Has what the request needs: a supplier, the approver's name and email unless the supplier uses a
+ * portal / API, and valid answers to the supplier's required questions (Autosoft account number…).
+ */
+export function hasRequiredInfo(o: Pick<OrderState, "supplier_company_id" | "approver_name" | "approver_email" | "supplier_fields">, method: RequestMethod | null, extraFields: ExtraField[] = []): boolean {
   if (!o.supplier_company_id) return false;
+  if (extraFields.length) {
+    const c = checkSupplierFields(extraFields, o.supplier_fields);
+    if (c.missing.length || c.errors.length) return false;
+  }
   if (method === "api") return true;
   return !!(o.approver_email && o.approver_name?.trim());
 }
 
 const PRE_ID: OrderStatus[] = ["needs_info", "ready", "request_sent", "awaiting_dealer_approval", "awaiting_supplier", "feed_id_received"];
 
-export function advanceOrder(order: OrderState, ev: OrderEvent, ctx: { method: RequestMethod | null; now?: Date }): Advance {
+export function advanceOrder(order: OrderState, ev: OrderEvent, ctx: { method: RequestMethod | null; now?: Date; extraFields?: ExtraField[] }): Advance {
   const now = (ctx.now ?? new Date()).toISOString();
   const s = order.status;
   const restart = { stall_timer_started_at: now, stalled_nudges: 0 };
@@ -80,12 +92,12 @@ export function advanceOrder(order: OrderState, ev: OrderEvent, ctx: { method: R
 
   switch (ev.type) {
     case "created":
-      return go(hasRequiredInfo(order, ctx.method) ? "ready" : "needs_info");
+      return go(hasRequiredInfo(order, ctx.method, ctx.extraFields) ? "ready" : "needs_info");
 
     case "info_updated": {
       need(PRE_ID);
       const next = { ...order, ...ev.fields };
-      if (s === "needs_info" || s === "ready") return go(hasRequiredInfo(next, ctx.method) ? "ready" : "needs_info", { ...ev.fields });
+      if (s === "needs_info" || s === "ready") return go(hasRequiredInfo(next, ctx.method, ctx.extraFields) ? "ready" : "needs_info", { ...ev.fields });
       return go(s, { ...ev.fields });
     }
 
@@ -98,7 +110,9 @@ export function advanceOrder(order: OrderState, ev: OrderEvent, ctx: { method: R
       return go(s, ev.threadId ? { email_thread_id: ev.threadId } : {});
 
     case "dealer_approved":
-      need(["request_sent", "awaiting_dealer_approval"]);
+      // A signed authorization can arrive after the supplier bounced the first one (Autosoft: wrong
+      // transfer row) — it's the dealer's approval again, so awaiting_supplier accepts it too.
+      need(ev.via === "signed_pdf" ? ["request_sent", "awaiting_dealer_approval", "awaiting_supplier"] : ["request_sent", "awaiting_dealer_approval"]);
       return go("awaiting_supplier", { dealer_approved_at: now });
 
     case "supplier_replied":

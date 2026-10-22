@@ -30,8 +30,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 /**
  * POST /api/crm/feeds/orders — Start feed order (rail, thread, chat, company page).
- * { dealer_company_id, supplier_company_id?, approver_name?, approver_email?, approver_phone?, notes?,
- *   source?: call|chat|email, email_thread_id? } — every field but the dealer optional;
+ * { dealer_company_id, supplier_company_id?, approver_name?, approver_email?, approver_phone?, approver_title?,
+ *   supplier_fields?: { …the supplier's extra_fields answers }, notes?, source?: call|chat|email, email_thread_id? }
+ *   — every field but the dealer optional (a WRONG supplier answer is a 400);
  * gaps → needs_info + "call the GM" task. Returns the open order if one exists.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -44,7 +45,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const r = await createFeedOrder(createAdminSupabaseClient() as any, {
       dealerCompanyId: b.dealer_company_id, supplierCompanyId: UUID.test(b.supplier_company_id ?? "") ? b.supplier_company_id : null,
       source, initiatedBy: claims.sub, approverName: str(b.approver_name, 200), approverEmail: str(b.approver_email, 200),
-      approverPhone: str(b.approver_phone, 40), notes: str(b.notes, 4000), emailThreadId: UUID.test(b.email_thread_id ?? "") ? b.email_thread_id : null,
+      approverPhone: str(b.approver_phone, 40), approverTitle: str(b.approver_title, 120), notes: str(b.notes, 4000), emailThreadId: UUID.test(b.email_thread_id ?? "") ? b.email_thread_id : null,
+      supplierFields: b.supplier_fields && typeof b.supplier_fields === "object" && !Array.isArray(b.supplier_fields) ? b.supplier_fields : null,
     });
     return NextResponse.json({ ok: true, order: r.order, existed: r.existed });
   } catch (e) { return feedErrorResponse(e); }

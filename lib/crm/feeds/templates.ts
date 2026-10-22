@@ -1,6 +1,6 @@
 // Feed-request templates: Communications → Templates → "Feed requests".
 // Kinds: request, request_pdf, dealer_followup, supplier_followup,
-// feed_assigned. A global default per kind (supplier_company_id null) and
+// supplier_forward (the signed PDF → supplier), feed_assigned. A global default per kind (supplier_company_id null) and
 // optional per-supplier overrides; resolution is supplier override → global
 // default → the built-in text below (so a fresh install still sends).
 // The built-in wording is the team's own "Inventory Feed Request for: …"
@@ -8,11 +8,11 @@
 // instruction the detection relies on.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export const FEED_KINDS = ["request", "request_pdf", "dealer_followup", "supplier_followup", "feed_assigned"] as const;
+export const FEED_KINDS = ["request", "request_pdf", "dealer_followup", "supplier_followup", "supplier_forward", "feed_assigned"] as const;
 export type FeedKind = (typeof FEED_KINDS)[number];
 export const FEED_KIND_LABEL: Record<FeedKind, string> = {
   request: "Request (email)", request_pdf: "Request with PDF", dealer_followup: "Dealer follow-up",
-  supplier_followup: "Supplier follow-up", feed_assigned: "Feed assigned (to dealer)",
+  supplier_followup: "Supplier follow-up", supplier_forward: "Signed PDF to supplier", feed_assigned: "Feed assigned (to dealer)",
 };
 export const FEED_CATEGORY = "Feed requests";
 export const supplierFolder = (supplierName: string) => `${FEED_CATEGORY} · ${supplierName}`;
@@ -53,6 +53,13 @@ export const DEFAULT_FEED_TEMPLATES: Record<FeedKind, { name: string; subject: s
     body_html: `<p>Hello {{supplier.name}} Support,</p>
 <p>Following up on the inventory feed request for {{company.name}} ({{company.city}}, {{company.state}}), sent {{order.sent_on}}. The dealership has approved it.</p>
 <p>Could you let us know the Dealer ID for the Dealer Addendums feed, or whether you need anything else from us?</p>
+<p>Thank you!</p>`,
+  },
+  supplier_forward: {
+    name: "Signed authorization — to supplier",
+    subject: "Signed inventory feed authorization: {{company.name}}",
+    body_html: `<p>Hello {{supplier.name}} Support,</p>
+<p>Attached is the signed inventory feed authorization for {{company.name}}. Please send us the Dealer ID once the feed is set up.</p>
 <p>Thank you!</p>`,
   },
   feed_assigned: {

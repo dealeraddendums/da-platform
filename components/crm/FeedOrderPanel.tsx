@@ -8,6 +8,8 @@
 // inline (reply from here).
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import SupplierFieldsInputs from "./SupplierFieldsInputs";
+import { describeSupplierFields, parseExtraFields } from "@/lib/crm/feeds/extra-fields";
 import FeedOrderActions, { runFeedAction } from "./FeedOrderActions";
 import ThreadView from "./ThreadView";
 import EmailEditor from "./EmailEditor";
@@ -110,7 +112,14 @@ export default function FeedOrderPanel({ orderId, meId, onChanged }: { orderId: 
           <div><p style={H}>Owner</p>{o.owner_name ?? "Unassigned"}</div>
           {(o.feed_id_candidate || o.feed_id_confirmed) && <div><p style={H}>Feed ID</p><strong>{o.feed_id_confirmed ?? o.feed_id_candidate}</strong>{!o.feed_id_confirmed && <span style={{ fontSize: 11, color: "var(--text-muted)" }}> · not confirmed</span>}</div>}
           <div><p style={H}>Next</p>{o.next_action}</div>
+          {o.metadata?.case_number && <div><p style={H}>Supplier case</p>#{o.metadata.case_number}</div>}
         </div>
+        {o.metadata?.cancellation_deadline?.text && ["request_sent", "awaiting_dealer_approval"].includes(o.status) && (
+          <p style={{ margin: "10px 0 0", fontSize: 12, background: "#fdecea", color: "var(--error)", padding: "6px 10px", borderRadius: 4 }}>
+            {o.supplier_name ?? "The supplier"} will cancel without approval: &ldquo;{o.metadata.cancellation_deadline.text}&rdquo;
+          </p>
+        )}
+        <SupplierFieldsBlock order={o} settings={d.settings} onSaved={() => done("Supplier details saved")} />
         {d.missing.length > 0 && o.status === "needs_info" && <p style={{ margin: "10px 0 0", fontSize: 12, background: "#fff3e0", color: "#b26a00", padding: "6px 10px", borderRadius: 4 }}>Missing: {d.missing.join(", ")} — call the GM, then use Change approver / pick the supplier.</p>}
         {o.status === "needs_info" && <SupplierPicker orderId={o.id} current={o.supplier_company_id} onSaved={() => done("Supplier updated")} />}
       </div>
@@ -212,8 +221,41 @@ function eventLabel(t: string): string {
     supplier_replied: "Supplier replied", feed_id_detected: "Feed ID detected", feed_id_entered: "Feed ID entered", feed_id_confirmed: "Feed ID confirmed",
     import_succeeded: "First import — done", nudged: "Follow-up sent", owner_changed: "Owner changed", cancelled: "Cancelled", task_created: "Task created",
     review: "Needs review", unmatched_linked: "Email linked", signed_pdf_uploaded: "Signed PDF uploaded", signed_pdf_forwarded: "Signed PDF forwarded",
+    signed_pdf_received: "Signed PDF received", case_number: "Supplier case number", cancellation_deadline: "Supplier deadline", supplier_message: "Supplier update",
   };
   return m[t] ?? t.replace(/_/g, " ");
+}
+
+/** The supplier's questions on an existing order: a summary, editable until the Feed ID is confirmed. */
+function SupplierFieldsBlock({ order, settings, onSaved }: { order: any; settings: any; onSaved: () => void }) {
+  const defs = parseExtraFields(settings?.extra_fields);
+  const [editing, setEditing] = useState(false);
+  const [v, setV] = useState<Record<string, string>>(order.supplier_fields ?? {});
+  const [err, setErr] = useState<string | null>(null);
+  if (!defs.length) return null;
+  const editable = !["assigned", "done", "cancelled"].includes(order.status);
+  if (!editing) return (
+    <p style={{ margin: "8px 0 0", fontSize: 12 }}>
+      <span style={{ color: "var(--text-muted)" }}>{order.supplier_name ?? "Supplier"}: </span>{describeSupplierFields(defs, order.supplier_fields ?? {}) || <span style={{ color: "#b26a00" }}>not filled in</span>}
+      {editable && <> · <a href="#" style={{ color: "var(--blue)" }} onClick={(e) => { e.preventDefault(); setEditing(true); }}>Edit</a></>}
+    </p>
+  );
+  return (
+    <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+      <SupplierFieldsInputs defs={defs} values={v} onChange={setV} supplierName={order.supplier_name} />
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <button type="button" className="btn btn-primary" style={{ height: 30, fontSize: 12 }} onClick={async () => {
+          const r = await fetch(`/api/crm/feeds/orders/${order.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ supplier_fields: v }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) { setErr(j.error ?? "Couldn't save"); return; }
+          setEditing(false); onSaved();
+        }}>Save</button>
+        <button type="button" className="btn btn-secondary" style={{ height: 30, fontSize: 12 }} onClick={() => setEditing(false)}>Cancel</button>
+        {err && <span style={{ fontSize: 12, color: "var(--error)" }}>{err}</span>}
+      </div>
+      {["awaiting_dealer_approval", "awaiting_supplier"].includes(order.status) && settings?.request_method === "pdf" && <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)" }}>Already sent? Use Resend request so the dealer gets a corrected form.</p>}
+    </div>
+  );
 }
 
 function SupplierPicker({ orderId, current, onSaved }: { orderId: string; current: string | null; onSaved: () => void }) {

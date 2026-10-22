@@ -15,6 +15,8 @@ const firstName = (full: string | null | undefined) => (full ?? "").trim().split
 const longDate = (d: Date | string) =>
   new Date(typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00Z` : d)
     .toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "long", day: "numeric", year: "numeric" });
+/** 10/21/2026 — what paper forms (the Autosoft authorization) expect. */
+const shortDate = (d: Date) => d.toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "2-digit", day: "2-digit", year: "numeric" });
 
 /** Variable values for this company / contact / sender. Unknown ids → those groups stay empty. */
 export async function buildTemplateContext(
@@ -22,7 +24,7 @@ export async function buildTemplateContext(
   admin: any = createAdminSupabaseClient(),
   now = new Date(),
 ): Promise<TemplateContext> {
-  const ctx: TemplateContext = { today: longDate(now) };
+  const ctx: TemplateContext = { today: longDate(now), "today.short": shortDate(now) };
 
   let companyId = ids.companyId ?? null;
   if (ids.contactId) {

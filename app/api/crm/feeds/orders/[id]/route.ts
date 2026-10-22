@@ -26,7 +26,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       admin.from("crm_staff_profiles").select("feed_send_without_review").eq("staff_id", claims.sub).maybeSingle(),
     ]);
     return NextResponse.json({
-      order: { ...order, ...row }, settings, missing: missingInfo(order, settings?.request_method ?? null),
+      order: { ...order, ...row }, settings, missing: missingInfo(order, settings?.request_method ?? null, settings?.extra_fields ?? []),
       events: (events ?? []).map((e: any) => ({ ...e, actor_name: e.actor === "system" ? "DA-CRM" : staff[e.actor] ?? "Staff" })),
       tasks: (tasks ?? []).map((t: any) => ({ ...t, assigned_name: t.assigned_staff_id ? staff[t.assigned_staff_id] ?? null : null })),
       sendWithoutReview: !!me?.feed_send_without_review,
@@ -35,13 +35,14 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   } catch (e) { return feedErrorResponse(e); }
 }
 
-/** PATCH /api/crm/feeds/orders/[id] — { supplier_company_id?, approver_name?, approver_email?, approver_phone? } (Change approver etc.). */
+/** PATCH /api/crm/feeds/orders/[id] — { supplier_company_id?, approver_name?, approver_email?, approver_phone?, approver_title?, supplier_fields? } (Change approver, supplier questions…). */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
   const { claims, error } = await requireCrmStaff();
   if (error) return error;
   const b = await req.json().catch(() => ({}));
   const fields: Record<string, any> = {};
-  for (const k of ["supplier_company_id", "approver_name", "approver_email", "approver_phone"]) if (k in b) fields[k] = typeof b[k] === "string" ? b[k] : null;
+  for (const k of ["supplier_company_id", "approver_name", "approver_email", "approver_phone", "approver_title"]) if (k in b) fields[k] = typeof b[k] === "string" ? b[k] : null;
+  if ("supplier_fields" in b) fields.supplier_fields = b.supplier_fields && typeof b.supplier_fields === "object" && !Array.isArray(b.supplier_fields) ? b.supplier_fields : {};
   if (!Object.keys(fields).length) return NextResponse.json({ error: "Nothing to change" }, { status: 400 });
   try {
     return NextResponse.json({ ok: true, order: await updateOrderInfo(createAdminSupabaseClient() as any, params.id, fields, claims.sub) });

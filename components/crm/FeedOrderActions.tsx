@@ -10,7 +10,7 @@ import { useState } from "react";
 
 export type ActionOrder = {
   id: string; status: string; feed_id_candidate: string | null; owner_staff_id: string | null;
-  approver_name: string | null; approver_email: string | null; approver_phone: string | null;
+  approver_name: string | null; approver_email: string | null; approver_phone: string | null; approver_title?: string | null;
 };
 
 type Form = null | "feed_id" | "confirm" | "cancel" | "reassign" | "approver";
@@ -35,7 +35,7 @@ export default function FeedOrderActions({
 }) {
   const [form, setForm] = useState<Form>(null);
   const [val, setVal] = useState("");
-  const [appr, setAppr] = useState({ name: order.approver_name ?? "", email: order.approver_email ?? "", phone: order.approver_phone ?? "" });
+  const [appr, setAppr] = useState({ name: order.approver_name ?? "", email: order.approver_email ?? "", phone: order.approver_phone ?? "", title: order.approver_title ?? "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const s = order.status;
@@ -51,7 +51,7 @@ export default function FeedOrderActions({
   }
   async function saveApprover() {
     setBusy(true); setErr(null);
-    const res = await fetch(`/api/crm/feeds/orders/${order.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approver_name: appr.name, approver_email: appr.email, approver_phone: appr.phone }) });
+    const res = await fetch(`/api/crm/feeds/orders/${order.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approver_name: appr.name, approver_email: appr.email, approver_phone: appr.phone, approver_title: appr.title }) });
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) { setErr(j.error ?? "Couldn't save"); return; }
@@ -105,10 +105,11 @@ export default function FeedOrderActions({
           <B onClick={() => setForm(null)}>Back</B>
         </div>
       ) : form === "approver" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6 }}>
           <input className="input" style={{ height: 30 }} placeholder="Name" value={appr.name} onChange={(e) => setAppr({ ...appr, name: e.target.value })} />
           <input className="input" style={{ height: 30 }} placeholder="Email" value={appr.email} onChange={(e) => setAppr({ ...appr, email: e.target.value })} />
           <input className="input" style={{ height: 30 }} placeholder="Phone" value={appr.phone} onChange={(e) => setAppr({ ...appr, phone: e.target.value })} />
+          <input className="input" style={{ height: 30 }} placeholder="Title" value={appr.title} onChange={(e) => setAppr({ ...appr, title: e.target.value })} />
           <div style={{ display: "flex", gap: 6 }}><B primary onClick={saveApprover}>Save approver</B><B onClick={() => setForm(null)}>Back</B></div>
         </div>
       ) : null}
