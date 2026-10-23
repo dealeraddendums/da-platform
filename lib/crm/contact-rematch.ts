@@ -10,11 +10,14 @@
 import { normalizePhone } from "./phone";
 import { relinkThreadActivities } from "./inbox-ingest";
 
-export type ContactHit = { id: string; company_id: string; updated_at: string };
+/** user: platform user. weak: "verify" record contact not yet verified (migration 190) — never picked. */
+export type ContactHit = { id: string; company_id: string; updated_at: string; user?: boolean; weak?: boolean };
 
 /** The contact to use, or null. With companyId only contacts there count; without one, hits must agree on a company. */
 export function pickContact(hits: ContactHit[], companyId: string | null): ContactHit | null {
-  const pool = companyId ? hits.filter((h) => h.company_id === companyId) : hits;
+  const strong = (companyId ? hits.filter((h) => h.company_id === companyId) : hits).filter((h) => !h.weak);
+  const users = strong.filter((h) => h.user);
+  const pool = users.length ? users : strong;
   if (!pool.length) return null;
   if (!companyId && new Set(pool.map((h) => h.company_id)).size > 1) return null;
   return [...pool].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
@@ -65,11 +68,12 @@ function chunks<T>(xs: T[], n = 200): T[][] {
 async function contactsBy(admin: any, col: "phone" | "email", values: string[]): Promise<Map<string, ContactHit[]>> {
   const map = new Map<string, ContactHit[]>();
   for (const part of chunks(Array.from(new Set(values)))) {
-    const { data, error } = await admin.from("crm_contacts").select("id, company_id, updated_at, phone, email").is("deleted_at", null).in(col, part);
+    const { data, error } = await admin.from("crm_contacts").select("id, company_id, updated_at, phone, email, user_id, verify_reason, verified_at").is("deleted_at", null).in(col, part);
     if (error) throw new Error(error.message);
     for (const c of data ?? []) {
       const k = col === "email" ? String(c.email).toLowerCase() : c.phone;
-      map.set(k, [...(map.get(k) ?? []), c]);
+      const hit: ContactHit = { id: c.id, company_id: c.company_id, updated_at: c.updated_at, user: !!c.user_id, weak: !!c.verify_reason && !c.verified_at };
+      map.set(k, [...(map.get(k) ?? []), hit]);
     }
   }
   return map;

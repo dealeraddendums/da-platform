@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/PageHeader";
 import Pager from "@/components/Pager";
 import PartnerForm from "@/components/crm/PartnerForm";
 import { StagePill } from "@/components/crm/CompanyHeader";
+import { Tag } from "@/components/crm/CrmBadges";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { crmAdmin, staffNames } from "@/lib/crm/queries";
 import { KIND_LABEL, STAGES, STAGE_LABEL, fmtAgo, type Stage } from "@/lib/crm/format";
@@ -20,7 +21,7 @@ const TABS = [
   { key: "partners", label: "Partners", kinds: ["vendor", "feed_supplier"] },
 ] as const;
 
-type SP = { tab?: string; q?: string; page?: string; inactive?: string; stage?: string; owner?: string };
+type SP = { tab?: string; q?: string; page?: string; inactive?: string; stage?: string; owner?: string; review?: string };
 
 export default async function CrmDirectoryPage({ searchParams }: { searchParams: SP }) {
   await requireCrmPage("/crm/dealers");
@@ -29,6 +30,12 @@ export default async function CrmDirectoryPage({ searchParams }: { searchParams:
   const q = (searchParams.q ?? "").trim().replace(/[%_,()\\]/g, " ").slice(0, 80);
   const page = Math.max(1, Number(searchParams.page) || 1);
   const showInactive = searchParams.inactive === "1";
+  // Partners: feed suppliers whose settings still need a human look (crm_feed_supplier_settings.needs_review).
+  const reviewIds: string[] = tab.key === "partners"
+    ? ((await admin.from("crm_feed_supplier_settings").select("company_id").eq("needs_review", true)).data ?? []).map((r: any) => r.company_id)
+    : [];
+  const reviewSet = new Set(reviewIds);
+  const onlyReview = tab.key === "partners" && searchParams.review === "1";
 
   let query = admin.from("crm_company_directory")
     .select("id, kind, name, dealer_text_id, active, city, state, phone, account_type, pipeline_stage, owner_staff_id, trial_day, last_activity_at, contact_count, open_tickets, open_tasks", { count: "exact" })
@@ -39,6 +46,7 @@ export default async function CrmDirectoryPage({ searchParams }: { searchParams:
   if (q) query = query.or(`name.ilike.%${q}%,dealer_text_id.ilike.%${q}%,city.ilike.%${q}%`);
   if (!showInactive && tab.key !== "partners") query = query.eq("active", true);
   if (tab.key === "dealers" && searchParams.stage && (STAGES as readonly string[]).includes(searchParams.stage)) query = query.eq("pipeline_stage", searchParams.stage);
+  if (onlyReview) query = query.in("id", reviewIds.length ? reviewIds : ["00000000-0000-0000-0000-000000000000"]);
   if (searchParams.owner === "none") query = query.is("owner_staff_id", null);
   else if (searchParams.owner) query = query.eq("owner_staff_id", searchParams.owner);
   const [{ data: rows, count, error }, staff] = await Promise.all([query, staffNames(admin)]);
@@ -72,6 +80,11 @@ export default async function CrmDirectoryPage({ searchParams }: { searchParams:
             <input type="checkbox" name="inactive" value="1" defaultChecked={showInactive} /> Include inactive
           </label>
         )}
+        {tab.key === "partners" && (
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--text-secondary)" }}>
+            <input type="checkbox" name="review" value="1" defaultChecked={onlyReview} /> Needs review ({reviewIds.length})
+          </label>
+        )}
         <button className="btn btn-primary" type="submit">Search</button>
       </form>
 
@@ -97,7 +110,8 @@ export default async function CrmDirectoryPage({ searchParams }: { searchParams:
               {(rows ?? []).map((d: any) => (
                 <tr key={d.id} style={{ borderBottom: "1px solid var(--border)" }}>
                   <td className="px-3 py-2">
-                    <Link href={`/crm/companies/${d.id}`} className="crm-link" style={{ fontWeight: 500 }}>{d.name}</Link>
+                    <Link href={`/crm/companies/${d.id}${reviewSet.has(d.id) ? "?panel=settings" : ""}`} className="crm-link" style={{ fontWeight: 500 }}>{d.name}</Link>
+                    {reviewSet.has(d.id) && <Tag tone="warn" style={{ marginLeft: 6 }} title="Feed supplier settings need review — opens Settings">Needs review</Tag>}
                     {d.dealer_text_id && <span style={{ color: "var(--text-muted)", fontSize: 11 }}> · {d.dealer_text_id}</span>}
                     {!d.active && <span style={{ color: "var(--text-muted)", fontSize: 11 }}> · inactive</span>}
                   </td>

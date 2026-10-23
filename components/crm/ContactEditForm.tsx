@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ROLE_TAG_LABEL } from "@/lib/crm/format";
 import { platformUserHref } from "@/lib/crm/contact-links";
 
-type C = { id: string; company_id: string; user_id?: string | null; first_name: string | null; last_name: string | null; email: string | null; phone: string | null; title: string | null; role_tag: string | null };
+type C = { id: string; company_id: string; user_id?: string | null; verify_reason?: string | null; verified_at?: string | null; first_name: string | null; last_name: string | null; email: string | null; phone: string | null; title: string | null; role_tag: string | null };
 
 export default function ContactEditForm({ contact }: { contact: C }) {
   const router = useRouter();
@@ -27,8 +27,18 @@ export default function ContactEditForm({ contact }: { contact: C }) {
     return true;
   }
 
+  const needsVerify = !!contact.verify_reason && !contact.verified_at;
   if (!open) {
-    return <div style={{ marginBottom: 16 }}><button type="button" className="btn btn-secondary" style={{ background: "#fff" }} onClick={() => setOpen(true)}>Edit contact</button></div>;
+    return (
+      <div style={{ marginBottom: 16, display: "flex", gap: 6 }}>
+        <button type="button" className="btn btn-secondary" style={{ background: "#fff" }} onClick={() => setOpen(true)}>Edit contact</button>
+        {needsVerify && (
+          <button type="button" className="btn btn-secondary" disabled={busy} title="This person really is at this company — let their email link here"
+            onClick={async () => { if (await send({ verified: true })) router.refresh(); }}>Mark verified</button>
+        )}
+        {err && <span style={{ fontSize: 12, color: "var(--error)", alignSelf: "center" }}>{err}</span>}
+      </div>
+    );
   }
 
   // A platform user's email (and removal) is managed in DA Users — the contact follows the user.

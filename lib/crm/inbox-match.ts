@@ -16,7 +16,9 @@
 // so scripts/crm-inbox-verify-unit.ts tests the rules without a database.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export type EmailContactHit = { id: string; company_id: string; updated_at: string };
+/** user: a platform user's contact. weak: a record contact flagged "verify" and not yet verified (migration
+ *  190) — weak hits never link a thread on their own, they only become candidates. */
+export type EmailContactHit = { id: string; company_id: string; updated_at: string; user?: boolean; weak?: boolean };
 export type EmailCompanyHit = { id: string; kind: string; active: boolean };
 
 export interface EmailMatchLookup {
@@ -99,20 +101,29 @@ export async function matchEmailParticipants(ordered: (string | null | undefined
   const none: EmailMatch = { companyId: null, contactId: null, matchedBy: null, matchedAddress: null, candidates: [], external, internal: external.length === 0 };
   if (!external.length) return none;
 
-  // Exact addresses first, across every participant…
+  // Exact addresses first, across every participant. Platform users outrank the team's own contacts, which
+  // outrank "verify" record contacts (weak: candidates only). An address that is a contact at more than one
+  // company doesn't pick one — those companies become candidates and matching carries on.
+  const candidates: string[] = [];
+  const weakCandidates: string[] = [];
   for (const a of external) {
     const contacts = await lookup.contactsByEmail(a);
-    if (contacts.length) {
-      const best = [...contacts].sort((x, y) => y.updated_at.localeCompare(x.updated_at))[0];
+    const strong = contacts.filter((c) => !c.weak);
+    const users = strong.filter((c) => c.user);
+    const pool = users.length ? users : strong;
+    const companies = Array.from(new Set(pool.map((c) => c.company_id)));
+    if (companies.length === 1) {
+      const best = [...pool].sort((x, y) => y.updated_at.localeCompare(x.updated_at))[0];
       return { ...none, companyId: best.company_id, contactId: best.id, matchedBy: "contact", matchedAddress: a };
     }
+    for (const c of companies) if (!candidates.includes(c)) candidates.push(c);
+    for (const c of contacts) if (c.weak && !weakCandidates.includes(c.company_id)) weakCandidates.push(c.company_id);
   }
   for (const a of external) {
     const cos = await lookup.companiesByEmail(a);
     if (cos.length) return { ...none, companyId: bestCompany(cos).id, matchedBy: "company_email", matchedAddress: a };
   }
   // …then domains.
-  const candidates: string[] = [];
   for (const a of external) {
     const d = emailDomain(a);
     if (FREEMAIL_DOMAINS.has(d)) continue;
@@ -124,6 +135,7 @@ export async function matchEmailParticipants(ordered: (string | null | undefined
       for (const c of cos) if (!candidates.includes(c.id)) candidates.push(c.id);
     }
   }
+  for (const c of weakCandidates) if (!candidates.includes(c)) candidates.push(c);
   return { ...none, candidates: candidates.slice(0, 10) };
 }
 
@@ -133,10 +145,10 @@ const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 export function supabaseEmailLookup(admin: any): EmailMatchLookup {
   return {
     async contactsByEmail(email) {
-      const { data, error } = await admin.from("crm_contacts").select("id, company_id, updated_at")
+      const { data, error } = await admin.from("crm_contacts").select("id, company_id, updated_at, user_id, verify_reason, verified_at")
         .ilike("email", likeEscape(email)).is("deleted_at", null).limit(20);
       if (error) throw new Error(`crm_contacts lookup: ${error.message}`);
-      return (data ?? []) as EmailContactHit[];
+      return (data ?? []).map((c: any) => ({ id: c.id, company_id: c.company_id, updated_at: c.updated_at, user: !!c.user_id, weak: !!c.verify_reason && !c.verified_at }));
     },
     async companiesByEmail(email) {
       const { data, error } = await admin.rpc("crm_companies_by_email", { p_email: email });

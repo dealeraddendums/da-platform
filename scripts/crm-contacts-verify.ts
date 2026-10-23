@@ -2,7 +2,7 @@
    Supabase Management API. The SQL always aborts at the end, so its fixtures roll back.
    Token: see scripts/sql-test.ts.
    --unit runs only the TypeScript checks (no database).
-   --with-migration prepends supabase/migrations/188_crm_contacts_from_users.sql (test before applying it). */
+   --with-migration prepends the latest contacts migration (190) to test an edit before applying it. */
 import { loadScriptEnv } from "./crm-env";
 import { runSqlTest } from "./sql-test";
 import { orderedAddresses, pickByAddresses, pickContact } from "../lib/crm/contact-rematch";
@@ -24,6 +24,8 @@ function unit() {
   eq("two companies, company given → that one", pickContact([h("a", "c1", "2026-01-01"), h("b", "c2", "2026-02-01")], "c1")?.id, "a");
   eq("same company → newest", pickContact([h("a", "c1", "2026-01-01"), h("b", "c1", "2026-02-01")], null)?.id, "b");
   eq("company given, no hit there → none", pickContact([h("a", "c1", "2026-01-01")], "c9"), null);
+  eq("weak contact never picked", pickContact([{ ...h("w", "c1", "2026-09-01"), weak: true }], null), null);
+  eq("platform user beats a newer contact", pickContact([h("a", "c1", "2026-09-01"), { ...h("u", "c1", "2026-01-01"), user: true }], null)?.id, "u");
   eq("addresses: from first, DA dropped, lowercased, unique",
     orderedAddresses([{ address: "cc@x.com", role: "cc" }, { address: "support@dealeraddendums.com", role: "to" }, { address: "Dana@X.com", role: "from" }, { address: "dana@x.com", role: "to" }]),
     ["dana@x.com", "cc@x.com"]);
@@ -39,7 +41,7 @@ async function main() {
   if (fail) { console.log(`\n${fail} unit check(s) failed`); process.exit(1); }
   if (process.argv.includes("--unit")) return;
   const ok = await runSqlTest("scripts/sql/crm-contacts-verify.sql", "CRM_CONTACTS_TEST",
-    process.argv.includes("--with-migration") ? ["supabase/migrations/188_crm_contacts_from_users.sql"] : []);
+    process.argv.includes("--with-migration") ? ["supabase/migrations/190_crm_contact_verify_phone_raw.sql"] : []);
   if (!ok) process.exit(1);
 }
 

@@ -14,7 +14,8 @@ import CompanyDetailsForm from "@/components/crm/CompanyDetailsForm";
 import CompanyHeaderControls from "@/components/crm/CompanyHeaderControls";
 import { STALE_DAYS, type Freshness } from "@/lib/crm/inventory-freshness";
 import { platformUserHref } from "@/lib/crm/contact-links";
-import { Tag } from "@/components/crm/CrmBadges";
+import { Tag, VerifyTag } from "@/components/crm/CrmBadges";
+import ContactPhone from "@/components/crm/ContactPhone";
 import CompanyFeedsPanel from "@/components/crm/CompanyFeedsPanel";
 import { StagePill } from "@/components/crm/CompanyHeader";
 import type { Stage } from "@/lib/crm/format";
@@ -112,12 +113,16 @@ export function DetailsCard({ d, canDial, feeds }: { d: DetailsData; canDial: bo
 
 // ── Contacts (+ a group's member dealers) ───────────────────────────────────
 
-export type ContactRow = { id: string; company_id: string; first_name: string | null; last_name: string | null; email: string | null; phone: string | null; title: string | null; role_tag: string | null; user_id: string | null };
+export type ContactRow = { id: string; company_id: string; first_name: string | null; last_name: string | null; email: string | null; phone: string | null; title: string | null; role_tag: string | null; user_id: string | null;
+  phone_raw?: string | null; verify_reason?: string | null; verified_at?: string | null };
 export type MemberDealer = { id: string; name: string; text_id: string | null; stage: Stage | null; stageLabel: string | null };
 
-// Platform users first (they follow DA Users — migration 188), then the team's own contacts; by name.
+// Platform users first (they follow DA Users — migration 188), then the team's own contacts, "verify"
+// record contacts last; by name.
 function byUserThenName(a: ContactRow, b: ContactRow): number {
   if (!!a.user_id !== !!b.user_id) return a.user_id ? -1 : 1;
+  const weak = (c: ContactRow) => !!c.verify_reason && !c.verified_at;
+  if (weak(a) !== weak(b)) return weak(a) ? 1 : -1;
   const n = (c: ContactRow) => ([c.first_name, c.last_name].filter(Boolean).join(" ") || c.email || "").toLowerCase();
   return n(a).localeCompare(n(b));
 }
@@ -142,9 +147,10 @@ export function ContactsCard({ companyId, contacts, canDial, members }: { compan
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
                 <div style={{ minWidth: 0 }}>
                   <Link href={`/crm/contacts/${c.id}`} style={{ fontSize: 14, fontWeight: 600, color: "var(--crm-ink)", textDecoration: "none" }}>{name}</Link>
-                  {(c.title || c.user_id) && (
+                  {(c.title || c.user_id || (c.verify_reason && !c.verified_at)) && (
                     <div style={{ fontSize: 12, color: "var(--crm-muted)", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 2 }}>
                       {c.user_id && <Tag tone="accent">Platform user</Tag>}
+                      {c.verify_reason && !c.verified_at && <VerifyTag reason={c.verify_reason} />}
                       {c.title && <span>{c.title}</span>}
                       {c.user_id && <a className="crm-link" href={platformUserHref(c.email)} target="_blank" rel="noreferrer">DA Users</a>}
                     </div>
@@ -160,7 +166,7 @@ export function ContactsCard({ companyId, contacts, canDial, members }: { compan
                 </div>
               </div>
               {c.email && <div className="crm-detail-row" style={{ padding: "4px 0 0", fontSize: 13 }}><Icon d="M4 4h16v16H4z M22 6l-10 7L2 6" /><a className="crm-link" href={`mailto:${c.email}`} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{c.email}</a></div>}
-              {c.phone && <div className="crm-detail-row" style={{ padding: "2px 0 0", fontSize: 13 }}><ClickToCall phone={c.phone} canDial={canDial} /></div>}
+              {(c.phone || c.phone_raw) && <div className="crm-detail-row" style={{ padding: "2px 0 0", fontSize: 13 }}><ContactPhone phone={c.phone} phoneRaw={c.phone_raw} canDial={canDial} /></div>}
             </div>
           );
         })}

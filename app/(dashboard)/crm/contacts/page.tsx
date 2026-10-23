@@ -4,13 +4,13 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import Pager from "@/components/Pager";
-import ClickToCall from "@/components/crm/ClickToCall";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { canDial, companyNames, crmAdmin } from "@/lib/crm/queries";
 import { contactName, fmtAgo, ROLE_TAG_LABEL } from "@/lib/crm/format";
 import { normalizePhone } from "@/lib/crm/phone";
 import { pageHref } from "@/lib/crm/paging";
-import { Tag } from "@/components/crm/CrmBadges";
+import { Tag, VerifyTag } from "@/components/crm/CrmBadges";
+import ContactPhone from "@/components/crm/ContactPhone";
 import { platformUserHref } from "@/lib/crm/contact-links";
 
 export const metadata = { title: "Contacts — DA-CRM" };
@@ -24,7 +24,7 @@ export default async function CrmContactsPage({ searchParams }: { searchParams: 
   const page = Math.max(1, Number(searchParams.page) || 1);
 
   let query = admin.from("crm_contacts")
-    .select("id, company_id, user_id, first_name, last_name, email, phone, title, role_tag, updated_at", { count: "exact" })
+    .select("id, company_id, user_id, first_name, last_name, email, phone, phone_raw, title, role_tag, verify_reason, verified_at, updated_at", { count: "exact" })
     .is("deleted_at", null)
     .order("updated_at", { ascending: false })
     .range((page - 1) * PAGE, page * PAGE - 1);
@@ -75,12 +75,13 @@ export default async function CrmContactsPage({ searchParams }: { searchParams: 
               <tr key={c.id} style={{ borderBottom: "1px solid var(--border)" }}>
                 <td className="px-3 py-2">
                   <Link href={`/crm/contacts/${c.id}`} className="crm-link" style={{ fontWeight: 500 }}>{contactName(c)}</Link>
+                  {c.verify_reason && !c.verified_at && <span style={{ marginLeft: 6 }}><VerifyTag reason={c.verify_reason} /></span>}
                   {c.user_id && <> <Tag tone="accent" style={{ marginLeft: 6 }}>Platform user</Tag> <a href={platformUserHref(c.email)} target="_blank" rel="noreferrer" className="crm-link" style={{ fontSize: 12, marginLeft: 4 }}>DA Users</a></>}
                 </td>
                 <td className="px-3 py-2"><Link href={`/crm/companies/${c.company_id}`} style={{ color: "var(--blue)" }}>{dName[c.company_id] ?? "—"}</Link></td>
                 <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{[c.title, c.role_tag ? ROLE_TAG_LABEL[c.role_tag] : null].filter(Boolean).join(" · ") || "—"}</td>
                 <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{c.email ?? "—"}</td>
-                <td className="px-3 py-2"><ClickToCall phone={c.phone} canDial={dial} /></td>
+                <td className="px-3 py-2"><ContactPhone phone={c.phone} phoneRaw={c.phone_raw} canDial={dial} /></td>
                 <td className="px-3 py-2" style={{ whiteSpace: "nowrap", color: "var(--text-secondary)" }}>{fmtAgo(lastAct[c.id])}</td>
               </tr>
             ))}

@@ -68,7 +68,7 @@ export default function FeedSupplierSettings({ supplierId, supplierName, canEdit
   const folder = encodeURIComponent(`Feed requests · ${supplierName}`);
   return (
     <div style={{ padding: 16, display: "grid", gap: 14, fontSize: 13 }}>
-      {s.needs_review && <p style={{ margin: 0, fontSize: 12, background: "#fff3e0", color: "#b26a00", padding: "6px 10px", borderRadius: 4 }}>Needs review — confirm the request address and method, then untick &ldquo;Needs review&rdquo;.</p>}
+      {s.needs_review && <p className="crm-notice" style={{ margin: 0, fontSize: 12 }}>Needs review — confirm the request address and method, then untick &ldquo;Needs review&rdquo;.</p>}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
         <div><label className="label">Request method</label>
           <select className="input" value={s.request_method} disabled={dis} onChange={(e) => set("request_method", e.target.value)}>
