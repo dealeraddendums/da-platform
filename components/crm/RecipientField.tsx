@@ -128,7 +128,9 @@ export default function RecipientField({ label, value, onChange, company, autoFo
   return (
     <div style={{ display: "grid", gridTemplateColumns: "64px 1fr", gap: 8, alignItems: "start" }}>
       <span className="label" style={{ margin: 0, paddingTop: 7 }}>{label}</span>
-      <div style={{ position: "relative", minWidth: 0 }}>
+      <div style={{ minWidth: 0 }}>
+        {/* The dropdown anchors to the chip box, not to the decision lines below it. */}
+        <div style={{ position: "relative" }}>
         <div className="input" onClick={() => input.current?.focus()}
           style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", height: "auto", minHeight: 36, padding: "3px 6px", cursor: "text" }}>
           {value.map((c) => <Chip key={c.email} chip={c} onRemove={() => onChange(value.filter((v) => v.email !== c.email))} />)}
@@ -157,6 +159,7 @@ export default function RecipientField({ label, value, onChange, company, autoFo
             ))}
           </div>
         )}
+        </div>
         {bad.length > 0 && <div style={{ fontSize: 12, color: "var(--error)", marginTop: 4 }}>Not an email address: {bad.join(", ")}</div>}
         {needs.length > 0 && (
           <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
