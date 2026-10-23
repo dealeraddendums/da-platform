@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { invalidateBillingStatusCache } from "@/lib/print-eligibility";
+import { createAdminSupabaseClient } from "@/lib/db";
 
 // Server-to-server webhook: da-billing calls this when a customer's Overdue Days
 // changes or an invoice is paid/voided, so the past-due print lock reflects the
@@ -25,5 +26,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   invalidateBillingStatusCache(customerId);
+  // DA-CRM's stored DA-Billing status: mark stale so the next read refetches (migration 191).
+  const admin = createAdminSupabaseClient() as any;
+  const stale = new Date(0).toISOString();
+  const q = admin.from("crm_billing_status").update({ fetched_at: stale });
+  await (customerId ? q.eq("customer_id", customerId) : q.gte("fetched_at", stale));   // errors are returned, not thrown
   return NextResponse.json({ ok: true, invalidated: customerId ?? "all" });
 }

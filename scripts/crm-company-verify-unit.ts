@@ -4,7 +4,7 @@
    inventory freshness. No database
    or network. */
 import { assembleSummaryInput, hasAnyActivity, latestChange, parseSummary, summaryDue, DEBOUNCE_MS, type SummaryData } from "../lib/crm/company-summary";
-import { deriveBillingState } from "../lib/crm/billing-status";
+import { billingSummary, payerFor } from "../lib/crm/billing-status";
 import { ownerForStage } from "../lib/crm/companies";
 import { workPatch } from "../lib/crm/work-items";
 import { feedName, inventoryFreshness, isFed } from "../lib/crm/inventory-freshness";
@@ -82,12 +82,14 @@ async function main() {
   eq("parse: junk → null", parseSummary("I can't do that", refs), null);
   eq("parse: no sentences → null", parseSummary('{"sentences":[]}', refs), null);
 
-  // ── Billing state ─────────────────────────────────────────────────────────
-  eq("past_due (print lock) → suspended", deriveBillingState(true, [], NOW), "suspended");
-  eq("unpaid past its due date → past due", deriveBillingState(false, [{ status: "pending", dueDate: "2026-10-01" }], NOW), "past_due");
-  eq("paid late invoice doesn't count", deriveBillingState(false, [{ status: "paid", dueDate: "2026-10-01" }], NOW), "current");
-  eq("archived doesn't count", deriveBillingState(false, [{ status: "pending", dueDate: "2026-10-01", archived: true }], NOW), "current");
-  eq("due later → current", deriveBillingState(false, [{ status: "pending", dueDate: "2026-11-01" }], NOW), "current");
+  // ── Billing: DA-Billing decides; we resolve the payer and format ─────────
+  eq("group-billed dealer → the group's customer", payerFor({ subscription_billed_to: "group", group_id: "g1", billing_customer_id: "own" }, "grp"), { customerId: "grp", billedBy: "group" });
+  eq("group-billed, group has no customer → none", payerFor({ subscription_billed_to: "group", group_id: "g1", billing_customer_id: "own" }, null), { customerId: null, billedBy: "group" });
+  eq("self-billed dealer → its own customer", payerFor({ subscription_billed_to: "dealer", group_id: "g1", billing_customer_id: "own" }, "grp"), { customerId: "own", billedBy: "self" });
+  eq("no billing customer → none", payerFor({ billing_customer_id: null }, null), { customerId: null, billedBy: "self" });
+  eq("summary: open invoices, balance, next due", billingSummary({ open_invoices: 3, unpaid_balance: 2376, next_due_date: "2026-10-30" }), "3 open invoices · $2,376 · next due Oct 30");
+  eq("summary: none open", billingSummary({ open_invoices: 0, unpaid_balance: 0, next_due_date: null }), "No open invoices");
+  eq("summary: all past due → oldest due", billingSummary({ open_invoices: 1, unpaid_balance: 149, next_due_date: null, oldest_unpaid_due_date: "2026-09-01" }), "1 open invoice · $149 · oldest due Sep 1");
 
   // ── Owner auto-clear ──────────────────────────────────────────────────────
   eq("converting to paying clears the owner", ownerForStage("paying", "u1", undefined), { owner: null });

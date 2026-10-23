@@ -13,6 +13,8 @@ export function stageDisplay(stage: Stage, billing: BillingState | null): { labe
     if (billing === "past_due") return { label: BILLING_STATE_LABEL.past_due, dot: "var(--crm-warn)" };
     if (billing === "suspended") return { label: BILLING_STATE_LABEL.suspended, dot: "var(--crm-danger)" };
     if (billing === "current") return { label: BILLING_STATE_LABEL.current, dot: "var(--crm-success)" };
+    if (billing === "archived") return { label: BILLING_STATE_LABEL.archived, dot: "var(--crm-muted)" };
+    if (billing === "none") return { label: BILLING_STATE_LABEL.none, dot: "var(--crm-border-strong)" };
     return { label: "Billing unknown", dot: "var(--crm-border-strong)" };
   }
   const dot: Record<Stage, string> = {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { crmEnv } from "@/lib/crm/env";
+import { storeStatuses } from "@/lib/crm/billing-status";
 
 export const dynamic = "force-dynamic";
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -19,7 +20,8 @@ export const dynamic = "force-dynamic";
  *   body?: "…", occurred_at?: ISO, metadata?: {…}, source?: "da-billing"
  * }
  * → 200 { ok, activity_id, duplicate? } · 401 bad token · 404 company not found.
- * Retries with the same event_id are no-ops.
+ * Retries with the same event_id are no-ops. type billing.status_changed also stores
+ * metadata.billing in crm_billing_status (migration 191).
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const want = crmEnv("CRM_EVENTS_TOKEN");
@@ -37,6 +39,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const source = typeof e.source === "string" && /^[a-z0-9-]{1,30}$/.test(e.source) ? e.source : "da-billing";
 
   const admin = createAdminSupabaseClient() as any;
+  // DA-Billing status flips (billing.status_changed, metadata.billing = its status payload) refresh the
+  // stored status every dealer billed by that customer reads — before the timeline write, so a company
+  // that can't be resolved still gets the new status.
+  if (type === "billing.status_changed" && e.metadata?.billing?.customer_id && e.metadata.billing.status) {
+    await storeStatuses(admin, [e.metadata.billing], "event").catch(() => {});
+  }
   const companyId = await resolveCompany(admin, e.company ?? {});
   if (!companyId) return NextResponse.json({ error: "Company not found" }, { status: 404 });
 

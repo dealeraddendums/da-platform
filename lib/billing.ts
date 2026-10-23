@@ -1089,3 +1089,36 @@ export async function getPaymentsByPeriod(month: string): Promise<PaymentsByPeri
     return null;
   }
 }
+
+
+// ── Customer status (DA-CRM) ────────────────────────────────────────────────
+// DA-Billing's own status per customer (lib/customer-status.ts there): past_due is exactly the
+// billing-status past_due the print lock uses; archived / suspended come from the customer record.
+export interface BillingCustomerStatus {
+  customer_id: string;
+  status: "current" | "past_due" | "suspended" | "archived";
+  print_locked: boolean;
+  overdue_days: number;
+  open_invoices: number;
+  unpaid_balance: number;
+  oldest_unpaid_due_date: string | null;
+  oldest_overdue_invoice_date: string | null;
+  next_due_date: string | null;
+  extension_active: boolean;
+  computed_at: string;
+}
+
+/** One request for many customers (DA-Billing scans its invoices once). Unknown ids are left out. */
+export async function getCustomerStatuses(ids: string[]): Promise<Record<string, BillingCustomerStatus>> {
+  if (!ids.length) return {};
+  const res = await fetch(`${BASE}/customers/statuses`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ ids }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new BillingError(res.status, `DA-Billing statuses ${res.status}`, await readBody(res));
+  const j = (await res.json()) as { statuses?: Record<string, BillingCustomerStatus> };
+  return j.statuses ?? {};
+}
