@@ -3,13 +3,15 @@
 // "Start feed order" (CompanyContextRail action — from a call, chat, email
 // thread or the company page). Every field is optional: saving with gaps makes
 // the order "Needs info" plus a "call the GM" task for you, due next business
-// day. An open order for the dealer is reused, not duplicated.
+// day. An open order for the dealer is reused, not duplicated. The approver is picked from the dealer's
+// contacts (ApproverPicker) or typed in — then saved as a contact of the dealer.
 // From a GROUP: tick the rooftops the request covers (one email, one approver);
 // the supplier's per-dealership questions (Autosoft account) are asked per
 // rooftop, and a PDF supplier gets one form per rooftop or one for all.
 
 import { useEffect, useState } from "react";
 import SupplierFieldsInputs from "./SupplierFieldsInputs";
+import ApproverPicker, { type ApproverValue } from "./ApproverPicker";
 import { checkOrderFields, isPerDealership, type ExtraField } from "@/lib/crm/feeds/extra-fields";
 
 type Supplier = { id: string; name: string; request_method: string; needs_review: boolean; extra_fields?: ExtraField[] };
@@ -33,10 +35,10 @@ export default function FeedOrderForm({
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
-  const [name, setName] = useState(defaultApprover?.name ?? "");
-  const [email, setEmail] = useState(defaultApprover?.email ?? "");
-  const [phone, setPhone] = useState(defaultApprover?.phone ?? "");
-  const [title, setTitle] = useState("");
+  const [approver, setApprover] = useState<ApproverValue>({
+    contactId: null, name: defaultApprover?.name ?? "", email: defaultApprover?.email ?? "", phone: defaultApprover?.phone ?? "", title: "",
+  });
+  const { name, email, phone, title } = approver;
   const [extra, setExtra] = useState<Record<string, string>>({});
   const [rooftops, setRooftops] = useState<Rooftop[] | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
@@ -74,7 +76,7 @@ export default function FeedOrderForm({
     const res = await fetch("/api/crm/feeds/orders", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        dealer_company_id: dealerCompanyId, supplier_company_id: supplierId || null, approver_name: name, approver_email: email, approver_phone: phone, approver_title: title,
+        dealer_company_id: dealerCompanyId, supplier_company_id: supplierId || null, approver_contact_id: approver.contactId, approver_name: name, approver_email: email, approver_phone: phone, approver_title: title,
         supplier_fields: sel?.extra_fields?.length ? extra : null, notes, source: src, email_thread_id: emailThreadId ?? null,
         ...(group ? { dealership_company_ids: picked, dealership_fields: Object.fromEntries(picked.map((id) => [id, perRoof[id] ?? {}])), pdf_mode: pdfMode } : {}),
       }),
@@ -145,11 +147,8 @@ export default function FeedOrderForm({
           </select>
         </div>
       )}
+      <ApproverPicker companyId={dealerCompanyId} companyName={dealerName} value={approver} onChange={setApprover} />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div><label className="label">Approver name</label><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Who approves at the dealership" /></div>
-        <div><label className="label">Approver email</label><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-        <div><label className="label">Approver phone</label><input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
-        <div><label className="label">Approver title</label><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. General Manager (goes on PDF forms)" /></div>
         <div>
           <label className="label">Came in by</label>
           <select className="input" value={src} onChange={(e) => setSrc(e.target.value as typeof src)}>
