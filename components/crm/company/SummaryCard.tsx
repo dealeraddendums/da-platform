@@ -68,8 +68,10 @@ export default function SummaryCard({ companyId }: { companyId: string }) {
       const row = box?.querySelector<HTMLElement>(`[data-source="${CSS.escape(k)}"]`);
       if (!box || !row) return;
       const top = row.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
-      if (top < box.scrollTop || top + row.offsetHeight > box.scrollTop + box.clientHeight) {
-        box.scrollTo({ top: Math.max(0, top - box.clientHeight + row.offsetHeight + 8), behavior: "smooth" });
+      // The box fades its last ~18px (plus 14px padding) — keep the row clear of it.
+      const FADE = 34;
+      if (top < box.scrollTop || top + row.offsetHeight > box.scrollTop + box.clientHeight - FADE) {
+        box.scrollTo({ top: Math.max(0, top - box.clientHeight + row.offsetHeight + FADE), behavior: "smooth" });
       }
     });
   };
