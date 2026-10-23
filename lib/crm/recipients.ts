@@ -92,9 +92,14 @@ export async function suggestRecipients(admin: any, q: string, companyId: string
   }
   const words = term.split(" ");
   const w = likeEscape(words[0]);
-  const { data } = await admin.from("crm_contacts").select(CONTACT_COLS).is("deleted_at", null).not("email", "is", null)
-    .or(`email.ilike.%${w}%,first_name.ilike.%${w}%,last_name.ilike.%${w}%`).limit(200);
-  let rows: any[] = data ?? [];
+  const match = () => admin.from("crm_contacts").select(CONTACT_COLS).is("deleted_at", null).not("email", "is", null)
+    .or(`email.ilike.%${w}%,first_name.ilike.%${w}%,last_name.ilike.%${w}%`);
+  // This company's matches separately, so a common string can't push them out of the CRM-wide page.
+  const [{ data: here }, { data }] = await Promise.all([
+    companyId ? match().eq("company_id", companyId).limit(50) : Promise.resolve({ data: [] }),
+    match().limit(200),
+  ]);
+  let rows: any[] = [...(here ?? []), ...(data ?? [])].filter((r, i, all) => all.findIndex((x) => x.id === r.id) === i);
   // "jane doe": every word must hit the name or the address.
   if (words.length > 1) {
     rows = rows.filter((r) => {
