@@ -1,100 +1,129 @@
-// DA-CRM contacts list — search name / email / phone. ?company=<id> narrows to
-// one company and ?users=1 to its platform users (the company page's CRM Users link).
+// DA-CRM contacts list. Search matches name, email, company and phone; every column sorts (server-side,
+// crm_contacts_page — migration 193); "Group by person" (default on) collapses contacts that share an email
+// into one row with their companies. Sort / group choices persist per user (ContactsViewPrefs).
+// ?company=<id> narrows to one company and ?users=1 to its platform users (the company page's CRM Users link).
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { Suspense } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import Pager from "@/components/Pager";
 import { requireCrmPage } from "@/lib/crm/page-guard";
-import { canDial, companyNames, crmAdmin } from "@/lib/crm/queries";
-import { contactName, fmtAgo, ROLE_TAG_LABEL } from "@/lib/crm/format";
-import { normalizePhone } from "@/lib/crm/phone";
+import { canDial, crmAdmin } from "@/lib/crm/queries";
+import { fmtAgo, ROLE_TAG_LABEL } from "@/lib/crm/format";
 import { pageHref } from "@/lib/crm/paging";
-import { Tag, VerifyTag } from "@/components/crm/CrmBadges";
+import { Tag } from "@/components/crm/CrmBadges";
 import ContactPhone from "@/components/crm/ContactPhone";
+import ContactsViewPrefs from "@/components/crm/ContactsViewPrefs";
 import { platformUserHref } from "@/lib/crm/contact-links";
 
 export const metadata = { title: "Contacts — DA-CRM" };
 const PAGE = 50;
-const TH: React.CSSProperties = { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", fontWeight: 600 };
+const SORTS = ["name", "company", "title", "email", "phone", "last_activity"] as const;
+type Sort = (typeof SORTS)[number];
+const COLS: [Sort, string][] = [["name", "Name"], ["company", "Company"], ["title", "Title / role"], ["email", "Email"], ["phone", "Phone"], ["last_activity", "Last activity"]];
+type SP = { q?: string; page?: string; company?: string; users?: string; s?: string; d?: string; g?: string };
 
-export default async function CrmContactsPage({ searchParams }: { searchParams: { q?: string; page?: string; company?: string; users?: string } }) {
+export default async function CrmContactsPage({ searchParams }: { searchParams: SP }) {
   const { userId } = await requireCrmPage("/crm/contacts");
   const admin = crmAdmin();
-  const q = (searchParams.q ?? "").trim().replace(/[%_,()\\]/g, " ").slice(0, 80);
+  const q = (searchParams.q ?? "").trim().slice(0, 80);
   const page = Math.max(1, Number(searchParams.page) || 1);
-
-  let query = admin.from("crm_contacts")
-    .select("id, company_id, user_id, first_name, last_name, email, phone, phone_raw, title, role_tag, verify_reason, verified_at, updated_at", { count: "exact" })
-    .is("deleted_at", null)
-    .order("updated_at", { ascending: false })
-    .range((page - 1) * PAGE, page * PAGE - 1);
+  const sort: Sort = (SORTS as readonly string[]).includes(searchParams.s ?? "") ? (searchParams.s as Sort) : "last_activity";
+  const desc = searchParams.d ? searchParams.d === "desc" : sort === "last_activity";
+  const group = searchParams.g !== "0";
   const company = /^[0-9a-f-]{36}$/i.test(searchParams.company ?? "") ? searchParams.company! : null;
-  if (company) query = query.eq("company_id", company);
-  if (company && searchParams.users === "1") query = query.not("user_id", "is", null);
-  if (q) {
-    const ors = [`first_name.ilike.%${q}%`, `last_name.ilike.%${q}%`, `email.ilike.%${q}%`];
-    const phone = normalizePhone(q);
-    if (phone) ors.push(`phone.eq.${phone}`);
-    query = query.or(ors.join(","));
-  }
-  const [{ data: rows, count }, dial] = await Promise.all([query, canDial(userId, admin)]);
-  const contacts: any[] = rows ?? [];
 
-  const ids = contacts.map((c) => c.id);
-  const [dName, { data: acts }] = await Promise.all([
-    companyNames(contacts.map((c) => c.company_id), admin),
-    // Latest activity per contact on this page (bounded: 50 contacts).
-    ids.length ? admin.from("crm_activities").select("contact_id, occurred_at").in("contact_id", ids).order("occurred_at", { ascending: false }).limit(500) : Promise.resolve({ data: [] }),
+  const [{ data, error }, dial] = await Promise.all([
+    admin.rpc("crm_contacts_page", {
+      p_q: q || null, p_sort: sort, p_desc: desc, p_group: group, p_company: company,
+      p_users: !!company && searchParams.users === "1", p_limit: PAGE, p_offset: (page - 1) * PAGE,
+    }),
+    canDial(userId, admin),
   ]);
-  const lastAct: Record<string, string> = {};
-  for (const a of acts ?? []) if (!lastAct[a.contact_id]) lastAct[a.contact_id] = a.occurred_at;
+  const rows: any[] = data ?? [];
+  const total = Number(rows[0]?.total ?? 0);
+
+  const href = (patch: Partial<SP>) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries({ ...searchParams, ...patch })) if (v != null && v !== "" && k !== "page") p.set(k, String(v));
+    return `/crm/contacts${p.toString() ? `?${p}` : ""}`;
+  };
+  const sortHref = (k: Sort) => href({ s: k, d: sort === k ? (desc ? "asc" : "desc") : k === "last_activity" ? "desc" : "asc" });
 
   return (
     <div>
+      <Suspense fallback={null}><ContactsViewPrefs userId={userId} /></Suspense>
       <PageHeader title="Contacts" subtitle="People at dealerships, groups and partners — decision makers, GMs, F&I, admins." />
-      <form className="card" style={{ padding: 12, marginBottom: 16, display: "flex", gap: 10 }}>
-        <input className="input" name="q" defaultValue={searchParams.q ?? ""} placeholder="Search name, email or phone…" style={{ maxWidth: 360 }} />
+      <form className="card" style={{ padding: 12, marginBottom: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <input className="input" name="q" defaultValue={searchParams.q ?? ""} placeholder="Search name, email, company or phone…" style={{ maxWidth: 360 }} />
         {company && <input type="hidden" name="company" value={company} />}
         {company && searchParams.users === "1" && <input type="hidden" name="users" value="1" />}
+        {searchParams.s && <input type="hidden" name="s" value={sort} />}
+        {searchParams.d && <input type="hidden" name="d" value={desc ? "desc" : "asc"} />}
+        {searchParams.g && <input type="hidden" name="g" value={group ? "1" : "0"} />}
         <button className="btn btn-primary" type="submit">Search</button>
+        <Link href={href({ g: group ? "0" : "1" })} className="crm-chip" aria-pressed={group} role="switch" aria-checked={group}
+          style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", textDecoration: "none" }}
+          title="Contacts that share an email show as one person with all their companies">
+          Group by person
+        </Link>
       </form>
       <div className="card">
+        {error && <p style={{ padding: 16, margin: 0, color: "var(--error)" }}>Couldn&apos;t load: {error.message}</p>}
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}>
-              <th className="px-3 py-2" style={TH}>Name</th>
-              <th className="px-3 py-2" style={TH}>Company</th>
-              <th className="px-3 py-2" style={TH}>Title / role</th>
-              <th className="px-3 py-2" style={TH}>Email</th>
-              <th className="px-3 py-2" style={TH}>Phone</th>
-              <th className="px-3 py-2" style={TH}>Last activity</th>
+              {COLS.map(([k, label]) => (
+                <th key={k} className="px-3 py-2" aria-sort={sort === k ? (desc ? "descending" : "ascending") : "none"}>
+                  <Link href={sortHref(k)} className="crm-sort" data-active={sort === k}>
+                    {label}<span aria-hidden="true">{sort === k ? (desc ? " ↓" : " ↑") : " ↕"}</span>
+                  </Link>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {contacts.map((c) => (
-              <tr key={c.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                <td className="px-3 py-2">
-                  <Link href={`/crm/contacts/${c.id}`} className="crm-link" style={{ fontWeight: 500 }}>{contactName(c)}</Link>
-                  {c.verify_reason && !c.verified_at && <span style={{ marginLeft: 6 }}><VerifyTag reason={c.verify_reason} /></span>}
-                  {c.user_id && <> <Tag tone="accent" style={{ marginLeft: 6 }}>Platform user</Tag> <a href={platformUserHref(c.email)} target="_blank" rel="noreferrer" className="crm-link" style={{ fontSize: 12, marginLeft: 4 }}>DA Users</a></>}
-                </td>
-                <td className="px-3 py-2"><Link href={`/crm/companies/${c.company_id}`} style={{ color: "var(--blue)" }}>{dName[c.company_id] ?? "—"}</Link></td>
-                <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{[c.title, c.role_tag ? ROLE_TAG_LABEL[c.role_tag] : null].filter(Boolean).join(" · ") || "—"}</td>
-                <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{c.email ?? "—"}</td>
-                <td className="px-3 py-2"><ContactPhone phone={c.phone} phoneRaw={c.phone_raw} canDial={dial} /></td>
-                <td className="px-3 py-2" style={{ whiteSpace: "nowrap", color: "var(--text-secondary)" }}>{fmtAgo(lastAct[c.id])}</td>
-              </tr>
-            ))}
-            {!contacts.length && <tr><td colSpan={6} className="px-3 py-4" style={{ color: "var(--text-muted)" }}>No contacts match.</td></tr>}
+            {rows.map((r) => {
+              const cos: any[] = r.companies ?? [];
+              const flagged = cos.find((c) => c.needs_verify);
+              return (
+                <tr key={r.row_key} style={{ borderBottom: "1px solid var(--border)", verticalAlign: "top" }}>
+                  <td className="px-3 py-2">
+                    <Link href={`/crm/contacts/${r.contact_id}`} className="crm-link" style={{ fontWeight: 500 }}>{r.name ?? r.email ?? "Unnamed"}</Link>
+                    {flagged && (
+                      <Link href={`/crm/contacts/${flagged.contact_id}?verify=1`} style={{ marginLeft: 6, textDecoration: "none" }} title="Check this contact — opens the explanation">
+                        <Tag tone="warn">Verify</Tag>
+                      </Link>
+                    )}
+                    {r.is_user && <> <Tag tone="accent" style={{ marginLeft: 6 }}>Platform user</Tag> <a href={platformUserHref(r.email)} target="_blank" rel="noreferrer" className="crm-link" style={{ fontSize: 12, marginLeft: 4 }}>DA Users</a></>}
+                  </td>
+                  <td className="px-3 py-2">
+                    {cos.length <= 1
+                      ? <Link href={`/crm/companies/${cos[0]?.id}`} className="crm-link">{cos[0]?.name ?? "—"}</Link>
+                      : (
+                        <details className="crm-cos">
+                          <summary title={cos.map((c) => c.name).join("\n")}>{r.company_count} companies</summary>
+                          <ul>{cos.map((c) => <li key={c.contact_id}><Link href={`/crm/companies/${c.id}`} className="crm-link">{c.name}</Link>{c.needs_verify && <span style={{ marginLeft: 6 }}><Tag tone="warn">Verify</Tag></span>}</li>)}</ul>
+                        </details>
+                      )}
+                  </td>
+                  <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{[r.title, r.role_tag ? ROLE_TAG_LABEL[r.role_tag] : null].filter(Boolean).join(" · ") || "—"}</td>
+                  <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{r.email ?? "—"}</td>
+                  <td className="px-3 py-2"><ContactPhone phone={r.phone} phoneRaw={r.phone_raw} canDial={dial} /></td>
+                  <td className="px-3 py-2" style={{ whiteSpace: "nowrap", color: "var(--text-secondary)" }}>{fmtAgo(r.last_activity_at)}</td>
+                </tr>
+              );
+            })}
+            {!rows.length && !error && <tr><td colSpan={6} className="px-3 py-4" style={{ color: "var(--text-muted)" }}>No contacts match.</td></tr>}
           </tbody>
         </table>
       </div>
       <Pager
         page={page}
-        totalPages={Math.max(1, Math.ceil((count ?? 0) / PAGE))}
+        totalPages={Math.max(1, Math.ceil(total / PAGE))}
         prevHref={pageHref("/crm/contacts", searchParams, page - 1)}
         nextHref={pageHref("/crm/contacts", searchParams, page + 1)}
-        summary={`${count ?? 0} contacts`}
+        summary={`${total} ${group ? "people" : "contacts"}`}
       />
     </div>
   );
