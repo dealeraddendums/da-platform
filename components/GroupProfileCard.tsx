@@ -1681,8 +1681,9 @@ function MemberPlanCell({ dealer, canEdit, onChanged }: {
         <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
           Switching to {feedModal.tierName} sets up an inventory feed — tell us who supplies it and who approves access.
         </p>
-        <label className="label">Inventory Provider</label>
+        <label className="label">Inventory Provider <span style={{ fontWeight: 400, color: "var(--text-muted)", textTransform: "none" }}>(optional)</span></label>
         <InventoryProviderSelect value={feedProvider} onChange={setFeedProvider} noneLabel="— select provider —" autoFocus />
+        <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Don&rsquo;t know? No problem — leave it blank and we&rsquo;ll reach out.</p>
         <label className="label" style={{ marginTop: 10 }}>Authorized Contact Name <span style={{ fontWeight: 400, color: "var(--text-muted)", textTransform: "none" }}>(optional)</span></label>
         <input className="input" value={feedName} onChange={(e) => setFeedName(e.target.value)} placeholder="Full name of person approving feed access" />
         <label className="label" style={{ marginTop: 10 }}>Authorized Contact Email <span style={{ fontWeight: 400, color: "var(--text-muted)", textTransform: "none" }}>(optional)</span></label>
@@ -1691,15 +1692,14 @@ function MemberPlanCell({ dealer, canEdit, onChanged }: {
         <div className="flex justify-end gap-2 mt-4">
           <button className="btn btn-secondary" onClick={() => setFeedModal(null)}>Cancel</button>
           <button className="btn btn-primary" onClick={() => {
-            // Only the provider is required — the authorized contact can be
-            // filled in later (Allan 2026-08-27). An email that IS entered
-            // still gets a light format check.
-            if (!feedProvider) { setFeedError("Select the inventory provider."); return; }
+            // Nothing is required (provider optional since 2026-10-21, DA-CRM
+            // Phase 2b — missing details open a feed order and staff follow up).
+            // An email that IS entered still gets a light format check.
             if (feedEmail.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(feedEmail.trim())) { setFeedError("That email doesn't look right — fix it or leave it blank."); return; }
             const m = feedModal;
             setFeedModal(null);
             void submitPlan(m.choice, m.tierName, {
-              feedProvider,
+              ...(feedProvider ? { feedProvider } : {}),
               ...(feedName.trim() ? { feedAuthorizedName: feedName.trim() } : {}),
               ...(feedEmail.trim() ? { feedAuthorizedEmail: feedEmail.trim() } : {}),
             });

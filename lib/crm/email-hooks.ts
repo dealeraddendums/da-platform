@@ -23,6 +23,8 @@ export type InboundEmailEvent = {
     in_reply_to: string | null;
     from_email: string | null;
     from_name: string | null;
+    /** Graph's `sender` when it differs from `from` ("noreply@salesforce.com on behalf of dcsconnect@…"). */
+    sender_email?: string | null;
     to: { email: string; name: string | null }[];
     cc: { email: string; name: string | null }[];
     subject: string | null;

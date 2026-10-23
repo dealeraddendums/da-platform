@@ -38,6 +38,9 @@
     "crm:dialpad-setup": "tsx scripts/crm-dialpad-setup.ts",
     "test:crm-templates": "tsx scripts/crm-templates-verify-unit.ts",
     "test:crm-inbox": "tsx scripts/crm-inbox-verify-unit.ts",
+    "test:crm-feeds": "tsx scripts/crm-feeds-verify-unit.ts",
+    "test:crm-feed-suppliers": "tsx scripts/crm-feed-suppliers-verify-unit.ts",
+    "crm:feeds-seed": "tsx scripts/crm-feeds-seed.ts",
     "crm:graph-setup": "tsx scripts/crm-graph-setup.ts",
     "crm:graph-backfill": "tsx scripts/crm-graph-backfill.ts"
   },

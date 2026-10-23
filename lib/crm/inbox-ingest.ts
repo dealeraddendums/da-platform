@@ -28,10 +28,14 @@ let ctxCache: InboxContext | null = null;
 
 export async function loadInboxContext(admin: any = createAdminSupabaseClient(), fresh = false): Promise<InboxContext> {
   if (!fresh && ctxCache && Date.now() - ctxCache.loadedAt < 60_000) return ctxCache;
-  const [{ data: mbs, error }, { data: s }] = await Promise.all([
+  const [{ data: mbs, error }, { data: s }, sup] = await Promise.all([
     admin.from("crm_mailboxes").select(MAILBOX_COLS).order("address"),
     admin.from("crm_settings").select("email_ignore_senders, email_internal_domains").eq("id", true).maybeSingle(),
+    // Feed suppliers are never "ignored senders" (a missing table before migration 182 = none).
+    admin.from("crm_feed_supplier_settings").select("request_email, cc_emails, domains"),
   ]);
+  const keep = (sup?.error ? [] : sup?.data ?? []).flatMap((r: any) => [r.request_email, ...(Array.isArray(r.cc_emails) ? r.cc_emails : []), ...(Array.isArray(r.domains) ? r.domains : [])])
+    .filter((x: unknown): x is string => typeof x === "string" && !!x.trim());
   if (error) throw new Error(`crm_mailboxes: ${error.message}`);
   ctxCache = {
     mailboxes: (mbs ?? []) as Mailbox[],
@@ -39,6 +43,7 @@ export async function loadInboxContext(admin: any = createAdminSupabaseClient(),
       ownAddresses: (mbs ?? []).map((m: any) => m.address),
       internalDomains: Array.isArray(s?.email_internal_domains) ? s.email_internal_domains : ["dealeraddendums.com"],
       ignoreSenders: Array.isArray(s?.email_ignore_senders) ? s.email_ignore_senders : [],
+      keepSenders: Array.from(new Set(keep)),
     },
     loadedAt: Date.now(),
   };
@@ -112,7 +117,7 @@ export async function ingestGraphMessage(
   // ── Email ─────────────────────────────────────────────────────────────────
   const { data: ins, error: insErr } = await admin.from("crm_emails").upsert({
     thread_id: thread.id, mailbox_id: mailbox.id, graph_message_id: e.graphMessageId, internet_message_id: e.internetMessageId,
-    in_reply_to: e.inReplyTo, direction: e.direction, from_email: e.from?.email ?? null, from_name: e.from?.name ?? null,
+    in_reply_to: e.inReplyTo, direction: e.direction, from_email: e.from?.email ?? null, from_name: e.from?.name ?? null, sender_email: e.sender?.email ?? null,
     to: toJson(e.to), cc: toJson(e.cc), bcc: toJson(e.bcc), subject: e.subject, body_html: e.bodyHtml, body_text: e.bodyText,
     received_at: e.receivedAt, sent_by_staff_id: opts.sentByStaffId ?? null, is_reply_all: replyAll, has_attachments: e.hasAttachments, raw: e.raw,
   }, { onConflict: "graph_message_id", ignoreDuplicates: true }).select("id");
@@ -158,7 +163,7 @@ export async function ingestGraphMessage(
       email: {
         id: emailId, thread_id: thread.id, mailbox_id: mailbox.id, graph_message_id: e.graphMessageId,
         internet_message_id: e.internetMessageId, in_reply_to: e.inReplyTo, from_email: e.from?.email ?? null,
-        from_name: e.from?.name ?? null, to: e.to, cc: e.cc, subject: e.subject, body_text: e.bodyText,
+        from_name: e.from?.name ?? null, sender_email: e.sender?.email ?? null, to: e.to, cc: e.cc, subject: e.subject, body_text: e.bodyText,
         body_html: e.bodyHtml, received_at: e.receivedAt, is_reply_all: replyAll, has_attachments: e.hasAttachments,
       },
       thread: {

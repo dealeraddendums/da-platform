@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCrmStaff } from "@/lib/crm/access";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { TEMPLATE_COLUMNS, derived, templateFields } from "@/lib/crm/templates";
+import { duplicateMessage, feedFolderFields, TEMPLATE_COLUMNS, derived, templateFields } from "@/lib/crm/templates";
 
 export const dynamic = "force-dynamic";
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -20,9 +20,13 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
   const { claims, error } = await requireCrmStaff({ admin: true });
   if (error) return error;
-  const parsed = templateFields(await req.json().catch(() => ({})), { create: false });
+  const body = await req.json().catch(() => ({}));
+  const parsed = templateFields(body, { create: false });
   if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const admin = createAdminSupabaseClient() as any;
+  const feed = await feedFolderFields(admin, body);
+  if ("error" in feed) return NextResponse.json({ error: feed.error }, { status: 400 });
+  Object.assign(parsed.fields, feed.fields);
   const { data: cur } = await admin.from("crm_email_templates").select("subject, body_html, import_report").eq("id", params.id).maybeSingle();
   if (!cur) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -37,7 +41,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const { data, error: e } = await admin.from("crm_email_templates").update(patch).eq("id", params.id).select(TEMPLATE_COLUMNS).single();
   if (e) {
     const dup = e.code === "23505";
-    return NextResponse.json({ error: dup ? "A template with that name already exists" : e.message }, { status: dup ? 409 : 500 });
+    return NextResponse.json({ error: dup ? duplicateMessage(e) : e.message }, { status: dup ? 409 : 500 });
   }
   return NextResponse.json({ ok: true, template: data });
 }

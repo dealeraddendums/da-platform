@@ -8,6 +8,7 @@ import { requireCrmPage } from "@/lib/crm/page-guard";
 import { crmAdmin, staffNames } from "@/lib/crm/queries";
 import { fmtAgo, fmtDate, startOfTodayPT } from "@/lib/crm/format";
 import { pacificDate } from "@/lib/crm/trial";
+import { queueCounts } from "@/lib/crm/feeds/queue";
 
 export const metadata = { title: "DA-CRM — DA Platform" };
 const TH: React.CSSProperties = { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", fontWeight: 600 };
@@ -32,6 +33,7 @@ export default async function CrmDashboardPage() {
       .order("trial_ends_on").limit(50),
     staffNames(admin),
   ]);
+  const feeds = await queueCounts(admin, userId).catch(() => null);
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
   const { data: mailboxes } = await admin.from("crm_mailboxes").select("id, address").eq("active", true).order("address");
   const inbox = await Promise.all((mailboxes ?? []).map(async (m: any) => {
@@ -50,6 +52,10 @@ export default async function CrmDashboardPage() {
       { label: `Unassigned · ${m.address.split("@")[0]}@`, value: m.unassigned, sub: "Email threads with no company", href: `/crm/communications/inbox?view=unassigned&mailbox=${m.id}` },
       { label: `Open 24h+ · ${m.address.split("@")[0]}@`, value: m.stale, sub: "Last message from them, no reply in 24h", href: `/crm/communications/inbox?view=open&mailbox=${m.id}` },
     ]),
+    ...(feeds ? [
+      { label: "Stalled feed orders", value: feeds.stalled, sub: "Past their expected time in step", href: "/crm/communications/feeds?view=stalled" },
+      { label: "Feed IDs to confirm", value: feeds.awaiting_confirmation, sub: "Supplier sent an ID — confirm it", href: "/crm/communications/feeds?view=awaiting_confirmation" },
+    ] : []),
     { label: "Open tickets", value: openTickets ?? 0, sub: "Tickets arrive in phase 4", href: "/crm/communications/tickets", muted: true },
     { label: "My tasks", value: myTasks ?? 0, sub: "Tasks arrive in phase 5", href: "/crm/tasks", muted: true },
   ];

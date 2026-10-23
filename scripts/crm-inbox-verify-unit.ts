@@ -11,10 +11,11 @@ process.env.MS_GRAPH_WEBHOOK_SECRET = "test-client-state";
 import { matchEmailParticipants, isIgnoredSender, isInternalAddress, normEmail, type EmailMatchLookup } from "../lib/crm/inbox-match";
 import { normalizeGraphMessage, skipReason, isReplyAll, priorMessage, participantsOf, matchOrder, baseSubject, snippet } from "../lib/crm/inbox-message";
 import { buildDraftPatch, graphUserOf, mergeQuotedBody, toGraphRecipients, validClientState, subscriptionResource, initialDeltaUrl } from "../lib/crm/graph";
-import { registerInboundEmailHandler, unregisterInboundEmailHandler, dispatchInboundEmail, type InboundEmailEvent } from "../lib/crm/email-hooks";
+import { registerInboundEmailHandler, unregisterInboundEmailHandler, dispatchInboundEmail, inboundEmailHandlers, type InboundEmailEvent } from "../lib/crm/email-hooks";
 import { displayEmailHtml } from "../lib/crm/inbox-display";
 import { ingestGraphMessage, attachmentKey, type InboxContext, type Mailbox } from "../lib/crm/inbox-ingest";
 import { cleanRecipients } from "../lib/crm/inbox-send";
+import { fakeDb } from "./crm-fake-supabase";
 
 let fail = 0, pass = 0;
 function eq(name: string, got: unknown, want: unknown) {
@@ -174,6 +175,8 @@ async function main() {
   eq("display: text fallback escaped", displayEmailHtml(null, "<b>x</b>", {}).includes("&lt;b&gt;"), true);
 
   // ── onInboundEmail registry ────────────────────────────────────────────
+  eq("hooks: modules loaded with the sync (feeds subscriber registered)", inboundEmailHandlers().includes("feeds"), true);
+  unregisterInboundEmailHandler("feeds");   // the rest of this file tests the registry / ingest in isolation
   {
     const seen: string[] = [];
     registerInboundEmailHandler("t-all", (e) => { seen.push(`all:${e.email.id}`); });
@@ -195,6 +198,7 @@ async function main() {
   // ── Ingest end-to-end (in-memory Supabase) ─────────────────────────────
   {
     const db = fakeDb({
+      crm_email_threads: [], crm_emails: [], crm_email_participants: [], crm_activities: [],
       crm_contacts: [{ id: "ct-jane", company_id: "co-dealer", email: "jane@dealer.com", updated_at: "2026-09-01", deleted_at: null }],
     });
     const mb: Mailbox = { id: "mb-support", address: "support@dealeraddendums.com", graph_user_id: "c5c91bb5-14ea-4408-bd6c-4760064f2817", display_name: "Support", purpose: "support", active: true };
@@ -246,63 +250,6 @@ async function main() {
 
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
-}
-
-// ── In-memory Supabase fake: just the query surface lib/crm/inbox-ingest.ts uses ──
-function fakeDb(seed: Record<string, any[]>) {
-  const tables: Record<string, any[]> = { crm_email_threads: [], crm_emails: [], crm_email_participants: [], crm_activities: [], crm_contacts: [], ...seed };
-  const uniques: Record<string, string[][]> = {
-    crm_email_threads: [["mailbox_id", "graph_conversation_id"]],
-    crm_emails: [["graph_message_id"], ["mailbox_id", "internet_message_id"]],
-    crm_email_participants: [["email_id", "address", "role"]],
-    crm_activities: [["type", "external_id"]],
-  };
-  let seq = 0;
-  const clash = (t: string, row: any, cols?: string[]) => (cols ? [cols] : uniques[t] ?? []).map((c) => tables[t].find((r) => c.every((k) => row[k] != null && r[k] === row[k]))).find(Boolean);
-  function builder(t: string) {
-    let filters: ((r: any) => boolean)[] = [];
-    let op: { kind: "select" | "insert" | "upsert" | "update"; rows?: any[]; patch?: any; onConflict?: string; ignore?: boolean } = { kind: "select" };
-    let limit = Infinity;
-    const run = () => {
-      const all = tables[t] ?? (tables[t] = []);
-      if (op.kind === "insert" || op.kind === "upsert") {
-        const out: any[] = [];
-        for (const raw of op.rows!) {
-          const row = { id: `${t}-${++seq}`, ...raw };
-          const hit = op.kind === "upsert" && op.onConflict ? clash(t, row, op.onConflict.split(",")) : null;
-          if (hit) { if (!op.ignore) { Object.assign(hit, raw); out.push(hit); } continue; }
-          if (clash(t, row)) return { data: null, error: { code: "23505", message: "duplicate key" } };
-          all.push(row); out.push(row);
-        }
-        return { data: out, error: null };
-      }
-      const hits = all.filter((r) => filters.every((f) => f(r)));
-      if (op.kind === "update") { hits.forEach((r) => Object.assign(r, op.patch)); return { data: hits, error: null }; }
-      return { data: hits.slice(0, limit), error: null };
-    };
-    const b: any = {
-      select() { return b; },
-      insert(rows: any) { op = { kind: "insert", rows: Array.isArray(rows) ? rows : [rows] }; return b; },
-      upsert(rows: any, o: any = {}) { op = { kind: "upsert", rows: Array.isArray(rows) ? rows : [rows], onConflict: o.onConflict, ignore: !!o.ignoreDuplicates }; return b; },
-      update(patch: any) { op = { kind: "update", patch }; return b; },
-      eq(k: string, v: any) { filters.push((r) => r[k] === v); return b; },
-      is(k: string, v: any) { filters.push((r) => (r[k] ?? null) === v); return b; },
-      in(k: string, vs: any[]) { filters.push((r) => vs.includes(r[k])); return b; },
-      not(k: string, _op: string, _v: any) { filters.push((r) => r[k] != null); return b; },
-      ilike(k: string, v: string) { const want = v.replace(/\\([\\%_])/g, "$1").toLowerCase(); filters.push((r) => String(r[k] ?? "").toLowerCase() === want); return b; },
-      order() { return b; },
-      limit(n: number) { limit = n; return b; },
-      maybeSingle() { const r = run(); return Promise.resolve({ data: r.data?.[0] ?? null, error: r.error }); },
-      single() { const r = run(); return Promise.resolve({ data: r.data?.[0] ?? null, error: r.error ?? (r.data?.length ? null : { message: "no rows" }) }); },
-      then(res: any, rej: any) { return Promise.resolve(run()).then(res, rej); },
-    };
-    return b;
-  }
-  return {
-    from: (t: string) => builder(t),
-    rpc: async () => ({ data: [], error: null }),
-    rows: (t: string) => tables[t] ?? [],
-  } as any;
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

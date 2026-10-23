@@ -149,7 +149,7 @@ export default function InboxClient({ meId, initial }: { meId: string; initial: 
 
         <div className="card crm-inbox-pane crm-inbox-rail" style={{ padding: 0 }}>
           {selected
-            ? <CompanyContextRail companyId={ctx.companyId} contactId={ctx.contactId} meId={meId} refreshKey={railTick}
+            ? <CompanyContextRail companyId={ctx.companyId} contactId={ctx.contactId} meId={meId} refreshKey={railTick} threadId={selected}
                 onReplyEmail={() => setReplyTick((n) => n + 1)} onOpenThread={(id) => setSelected(id)} />
             : <p style={{ padding: 14, margin: 0, color: "var(--text-muted)", fontSize: 13 }}>Company details show here.</p>}
         </div>

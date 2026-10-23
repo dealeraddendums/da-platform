@@ -3,7 +3,7 @@
 // No database or network — scripts/crm-inbox-verify-unit.ts tests all of it.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { isIgnoredSender, normEmail, type InboxRules } from "./inbox-match";
+import { isIgnoredSender, isKeptSender, normEmail, type InboxRules } from "./inbox-match";
 import { htmlToText } from "./email-html";
 
 export type Addr = { email: string; name: string | null };
@@ -15,6 +15,8 @@ export type NormalizedEmail = {
   inReplyTo: string | null;
   direction: "inbound" | "outbound";
   from: Addr | null;
+  /** Graph's `sender`, only when it isn't the From address (mail sent on someone's behalf). */
+  sender: Addr | null;
   to: Addr[];
   cc: Addr[];
   bcc: Addr[];
@@ -40,7 +42,7 @@ function header(msg: any, name: string): string | null {
 }
 
 /** Why a message is not stored, or null to store it. */
-export function skipReason(msg: any, mailboxAddress: string, rules: Pick<InboxRules, "ignoreSenders">): string | null {
+export function skipReason(msg: any, mailboxAddress: string, rules: Pick<InboxRules, "ignoreSenders" | "keepSenders">): string | null {
   if (!msg || typeof msg.id !== "string") return "no id";
   if (msg.isDraft) return "draft";
   const type = String(msg["@odata.type"] ?? "");
@@ -50,7 +52,11 @@ export function skipReason(msg: any, mailboxAddress: string, rules: Pick<InboxRu
   const from = normEmail(msg.from?.emailAddress?.address);
   // Our own outbound mail is never "automated".
   // Auto-Submitted mail is NOT skipped wholesale: feed suppliers' systems send
-  // Feed IDs that way (Phase 2b). The ignore list is the control.
+  // Feed IDs that way (Phase 2b). The ignore list is the control — and a feed
+  // supplier in From OR Sender overrides it (Autosoft writes through
+  // noreply@salesforce.com on behalf of dcsconnect@autosoftdms.com).
+  const sender = normEmail(msg.sender?.emailAddress?.address);
+  if (isKeptSender(from, rules.keepSenders) || isKeptSender(sender, rules.keepSenders)) return null;
   if (from && from !== mailboxAddress.toLowerCase() && isIgnoredSender(from, rules.ignoreSenders)) return "ignored sender";
   return null;
 }
@@ -58,6 +64,8 @@ export function skipReason(msg: any, mailboxAddress: string, rules: Pick<InboxRu
 /** Graph message → our shape. `folder` tells sent vs received when From is ambiguous. */
 export function normalizeGraphMessage(msg: any, mailboxAddress: string, folder?: "inbox" | "sentitems"): NormalizedEmail {
   const from = addr(msg.from) ?? addr(msg.sender);
+  const senderRaw = addr(msg.sender);
+  const sender = senderRaw && senderRaw.email !== from?.email ? senderRaw : null;
   const self = mailboxAddress.toLowerCase();
   const direction: "inbound" | "outbound" = folder === "sentitems" || from?.email === self ? "outbound" : "inbound";
   const bodyHtml = msg.body?.contentType?.toLowerCase() === "html" ? (msg.body?.content ?? null) : null;
@@ -70,6 +78,7 @@ export function normalizeGraphMessage(msg: any, mailboxAddress: string, folder?:
     inReplyTo: header(msg, "In-Reply-To"),
     direction,
     from,
+    sender,
     to: addrs(msg.toRecipients),
     cc: addrs(msg.ccRecipients),
     bcc: addrs(msg.bccRecipients),

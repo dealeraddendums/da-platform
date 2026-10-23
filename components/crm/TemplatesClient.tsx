@@ -4,15 +4,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import EmailEditor from "./EmailEditor";
 import { RenderedPreview, type RenderedEmail } from "./TemplatePicker";
 import { TEMPLATE_VARIABLES } from "@/lib/crm/template-vars";
+import { FEED_KINDS, FEED_KIND_LABEL } from "@/lib/crm/feeds/templates";
 
 type Finding = { from: string; to?: string; count: number; why?: string };
 type Template = {
   id: string; name: string; category: string | null; subject: string; body_html: string; variables: string[];
   source: string; needs_review: boolean; archived: boolean; updated_at: string;
+  feed_kind: string | null; supplier_company_id: string | null;
   import_report: { converted?: Finding[]; approximated?: Finding[]; unmapped?: Finding[] } | null;
 };
-type Draft = { id: string | null; name: string; category: string; subject: string; body_html: string };
-const EMPTY: Draft = { id: null, name: "", category: "", subject: "", body_html: "" };
+// feed_kind "" = an ordinary template; set = a "Feed requests" template (global, or a supplier's folder).
+type Draft = { id: string | null; name: string; category: string; subject: string; body_html: string; feed_kind: string; supplier_company_id: string };
+const EMPTY: Draft = { id: null, name: "", category: "", subject: "", body_html: "", feed_kind: "", supplier_company_id: "" };
 
 async function api(url: string, init?: RequestInit) {
   const res = await fetch(url, init);
@@ -20,11 +23,11 @@ async function api(url: string, init?: RequestInit) {
   return { ok: res.ok, j };
 }
 
-export default function TemplatesClient({ canEdit }: { canEdit: boolean }) {
+export default function TemplatesClient({ canEdit, initialCategory = "" }: { canEdit: boolean; initialCategory?: string }) {
   const [list, setList] = useState<Template[]>([]);
   const [archived, setArchived] = useState(false);
   const [q, setQ] = useState("");
-  const [cat, setCat] = useState("");
+  const [cat, setCat] = useState(initialCategory);
   const [sel, setSel] = useState<Template | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [importing, setImporting] = useState(false);
@@ -42,7 +45,10 @@ export default function TemplatesClient({ canEdit }: { canEdit: boolean }) {
   async function save() {
     if (!draft) return;
     setMsg(null);
-    const body = { name: draft.name, category: draft.category || null, subject: draft.subject, body_html: draft.body_html };
+    const body = {
+      name: draft.name, category: draft.category || null, subject: draft.subject, body_html: draft.body_html,
+      feed_kind: draft.feed_kind || null, supplier_company_id: draft.feed_kind ? draft.supplier_company_id || null : null,
+    };
     const { ok, j } = draft.id
       ? await api(`/api/crm/templates/${draft.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       : await api("/api/crm/templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -103,7 +109,7 @@ export default function TemplatesClient({ canEdit }: { canEdit: boolean }) {
           <EditorPanel draft={draft} setDraft={setDraft} onSave={save} onCancel={() => setDraft(null)} />
         ) : sel ? (
           <ViewPanel t={sel} canEdit={canEdit}
-            onEdit={() => setDraft({ id: sel.id, name: sel.name, category: sel.category ?? "", subject: sel.subject, body_html: sel.body_html })}
+            onEdit={() => setDraft({ id: sel.id, name: sel.name, category: sel.category ?? "", subject: sel.subject, body_html: sel.body_html, feed_kind: sel.feed_kind ?? "", supplier_company_id: sel.supplier_company_id ?? "" })}
             onArchive={(v) => setArchivedFlag(sel, v)} />
         ) : !importing && (
           <div className="card" style={{ padding: 24, fontSize: 13, color: "var(--text-secondary)" }}>Pick a template to preview it{canEdit ? ", or create a new one" : ""}.</div>
@@ -120,8 +126,9 @@ function EditorPanel({ draft, setDraft, onSave, onCancel }: { draft: Draft; setD
       <strong>{draft.id ? "Edit template" : "New template"}</strong>
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
         <div><label className="label">Name</label><input className="input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
-        <div><label className="label">Category</label><input className="input" value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} placeholder="e.g. Trials" /></div>
+        <div><label className="label">Category</label><input className="input" value={draft.feed_kind ? "Feed requests (set automatically)" : draft.category} disabled={!!draft.feed_kind} onChange={(e) => setDraft({ ...draft, category: e.target.value })} placeholder="e.g. Trials" /></div>
       </div>
+      <FeedFolderFields draft={draft} setDraft={setDraft} />
       <div>
         <label className="label">Subject</label>
         <div style={{ display: "flex", gap: 6 }}>
@@ -143,7 +150,7 @@ function EditorPanel({ draft, setDraft, onSave, onCancel }: { draft: Draft; setD
         <button type="button" className="btn btn-primary" disabled={busy || !draft.name.trim()} onClick={async () => { setBusy(true); await onSave(); setBusy(false); }}>{busy ? "Saving…" : "Save template"}</button>
         <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
       </div>
-      <Preview subject={draft.subject} body={draft.body_html} />
+      <Preview subject={draft.subject} body={draft.body_html} feedKind={draft.feed_kind || null} supplierId={draft.supplier_company_id || null} />
     </div>
   );
 }
@@ -178,7 +185,7 @@ function ViewPanel({ t, canEdit, onEdit, onArchive }: { t: Template; canEdit: bo
 }
 
 /** Fill the template for a chosen company / contact, as the viewer, with their signature. */
-function Preview({ subject, body, templateId }: { subject: string; body: string; templateId?: string }) {
+function Preview({ subject, body, templateId, feedKind, supplierId }: { subject: string; body: string; templateId?: string; feedKind?: string | null; supplierId?: string | null }) {
   const [q, setQ] = useState("");
   const [companies, setCompanies] = useState<{ id: string; name: string; kind: string }[]>([]);
   const [company, setCompany] = useState<{ id: string; name: string } | null>(null);
@@ -198,7 +205,8 @@ function Preview({ subject, body, templateId }: { subject: string; body: string;
   }, [company]);
   useEffect(() => {
     const t = setTimeout(async () => {
-      const payload = templateId ? { template_id: templateId } : { subject, body_html: body };
+      // Feed templates fill supplier / approver / order variables from a sample order.
+      const payload = templateId ? { template_id: templateId } : { subject, body_html: body, feed_kind: feedKind ?? null, supplier_company_id: supplierId ?? null };
       const { ok, j } = await api("/api/crm/templates/render", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...payload, company_id: company?.id ?? null, contact_id: contactId || null }),
@@ -206,7 +214,7 @@ function Preview({ subject, body, templateId }: { subject: string; body: string;
       setR(ok ? j : null);
     }, 400);
     return () => clearTimeout(t);
-  }, [subject, body, templateId, company, contactId]);
+  }, [subject, body, templateId, company, contactId, feedKind, supplierId]);
 
   return (
     <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "grid", gap: 8 }}>
@@ -319,6 +327,32 @@ function ImportPanel({ onClose, onDone }: { onClose: () => void; onDone: () => v
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** "Feed requests" placement: kind + global default or a supplier's folder. */
+function FeedFolderFields({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => void }) {
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { void api("/api/crm/feeds/suppliers").then(({ j }) => setSuppliers(j.suppliers ?? [])); }, []);
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div>
+        <label className="label">Feed request kind</label>
+        <select className="input" value={draft.feed_kind} onChange={(e) => setDraft({ ...draft, feed_kind: e.target.value })}>
+          <option value="">— Not a feed template —</option>
+          {FEED_KINDS.map((k) => <option key={k} value={k}>{FEED_KIND_LABEL[k]}</option>)}
+        </select>
+      </div>
+      {draft.feed_kind && (
+        <div>
+          <label className="label">Folder</label>
+          <select className="input" value={draft.supplier_company_id} onChange={(e) => setDraft({ ...draft, supplier_company_id: e.target.value })}>
+            <option value="">Global default (all suppliers)</option>
+            {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name} (override)</option>)}
+          </select>
         </div>
       )}
     </div>
