@@ -83,7 +83,10 @@ function previewNote(d: D, shown: number): string {
   const omitted = Number(d.previewOmitted) || 0;
   const capNote = omitted > 0 ? ` Showing first ${shown} of ${shown + omitted}.` : '';
   const cond = typeof d.previewCondition === 'string' && d.previewCondition ? d.previewCondition : null;
-  const label = cond
+  // previewLabel: the Builder's "Preview products" selection (hand-picked / as a vehicle) — canvas only.
+  const label = typeof d.previewLabel === 'string' && d.previewLabel
+    ? d.previewLabel.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    : cond
     ? `Preview: products that may apply to a ${cond} vehicle — the actual set varies per vehicle by your product rules.`
     : `Preview: your products — the printed set varies per vehicle by your product rules.`;
   return `<div style="font-size:8px;color:#9aa0a6;font-style:italic;text-align:center;margin-top:3px">${label}${capNote}</div>`;

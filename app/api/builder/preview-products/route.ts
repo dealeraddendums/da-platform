@@ -23,11 +23,16 @@ import { formatOptionPrice, parseOptionPriceValue, priceSetUsesDecimals } from "
 
 // Cap is a payload guard only — the canvas clips visually and shows a
 // "+N more · resize" indicator, so it can be generous.
-const CAP = 40;
+// Raised 40 → 200 (2026-10-23): the Builder's "Shown in Builder" checklist picks from this list, so it
+// must hold every product a real dealer has.
+const CAP = 200;
 
 type PreviewCondition = "New" | "Used" | "CPO";
 
 type PreviewItem = {
+  /** Stable product key — "lib:<addendum_library.id>" / "grp:<group_options.id>" — for the Builder's
+   *  hand-picked preview set (templates.preview_products, migration 194). */
+  key: string;
   name: string;
   desc: string;
   price: string;
@@ -112,6 +117,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       // inverted is_suggested — same rule as the print merge (options-engine).
       r => (typeof r.required === "boolean" ? r.required : !r.is_suggested),
       r => ({
+        key: `grp:${r.id}`,
         name: r.option_name,
         desc: r.description ?? "",
         price: formatOptionPrice(r.option_price, decimals),
@@ -152,6 +158,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Print merge order is corporate first, then dealer rows (pdf/generate) —
   // mirror it so the canvas stacks products the way the printed page does.
   type Merged = {
+    key: string;
     required: boolean;
     name: string;
     desc: string;
@@ -163,6 +170,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   };
   const merged: Merged[] = [
     ...corp.map(g => ({
+      key: `grp:${g.id}`,
       required: g.required,
       name: g.option_name,
       desc: g.description ?? "",
@@ -173,6 +181,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       conditions: rowConditions(g.applies_to, g.ad_types, (g as unknown as { ad_type?: string | null }).ad_type),
     })),
     ...((libData ?? []) as AddendumLibraryRow[]).map(r => ({
+      key: `lib:${r.id}`,
       required: r.required !== false,
       name: r.option_name,
       desc: r.description ?? "",
@@ -192,6 +201,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     merged,
     r => r.required,
     r => ({
+      key: r.key,
       name: r.name,
       desc: r.desc,
       price: formatOptionPrice(r.priceRaw, decimals),

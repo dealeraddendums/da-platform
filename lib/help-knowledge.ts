@@ -19,6 +19,10 @@ Key flows:
   disclaimers, QR code) onto the page. "Save Template" sets the default for a
   document type (addendum / infosheet / buyer's guide) and vehicle condition
   (New / Used / CPO). Position & Size spinner arrows nudge a widget one grid cell.
+  "Preview products" (next to the New / Used / CPO preview toggle) chooses which products the
+  canvas shows so you can size the product boxes: All, Shown in Builder (hand-pick a set per
+  condition, saved on the template), or As vehicle (pick a stock # to see exactly what it prints).
+  It is preview-only and never changes what prints.
 - Printing: open a vehicle, choose "Create Document", pick the type, then Print
   or download the PDF.
 - Inventory: add a vehicle by VIN (the decoder fills year/make/model/trim and
