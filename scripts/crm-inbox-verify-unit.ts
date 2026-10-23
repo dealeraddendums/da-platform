@@ -49,9 +49,29 @@ async function main() {
 
   // ── Matching ────────────────────────────────────────────────────────────
   {
-    const l = lookup({ contacts: { "gm@toyotaofx.com": [{ id: "ct-old", company_id: "c1", updated_at: "2026-01-01" }, { id: "ct-new", company_id: "c2", updated_at: "2026-09-01" }] } });
+    const l = lookup({ contacts: { "gm@toyotaofx.com": [{ id: "ct-old", company_id: "c1", updated_at: "2026-01-01" }, { id: "ct-new", company_id: "c1", updated_at: "2026-09-01" }] } });
     const m = await matchEmailParticipants(["GM@ToyotaOfX.com"], l, RULES);
-    eq("match: contact email (case-insensitive), most recent contact wins", [m.companyId, m.contactId, m.matchedBy], ["c2", "ct-new", "contact"]);
+    eq("match: contact email (case-insensitive), most recent contact at the company wins", [m.companyId, m.contactId, m.matchedBy], ["c1", "ct-new", "contact"]);
+  }
+  {
+    const l = lookup({ contacts: { "gm@toyotaofx.com": [{ id: "a", company_id: "c1", updated_at: "2026-01-01" }, { id: "b", company_id: "c2", updated_at: "2026-09-01" }] } });
+    const m = await matchEmailParticipants(["gm@toyotaofx.com"], l, RULES);
+    eq("match: contact at two companies → no link, both candidates", [m.companyId, m.candidates], [null, ["c1", "c2"]]);
+  }
+  {
+    const l = lookup({ contacts: { "gm@toyotaofx.com": [{ id: "rec", company_id: "c1", updated_at: "2026-09-01" }, { id: "usr", company_id: "c2", updated_at: "2026-01-01", user: true }] } });
+    const m = await matchEmailParticipants(["gm@toyotaofx.com"], l, RULES);
+    eq("match: a platform user outranks another contact", [m.companyId, m.contactId], ["c2", "usr"]);
+  }
+  {
+    const l = lookup({ contacts: { "rep@coatingvendor.com": [{ id: "w", company_id: "c7", updated_at: "2026-09-01", weak: true }] } });
+    const m = await matchEmailParticipants(["rep@coatingvendor.com"], l, RULES);
+    eq("match: a 'verify' record contact never links — candidate only", [m.companyId, m.contactId, m.candidates], [null, null, ["c7"]]);
+  }
+  {
+    const l = lookup({ contacts: { "rep@coatingvendor.com": [{ id: "w", company_id: "c7", updated_at: "2026-09-01", weak: true }], "gm@toyotaofx.com": [{ id: "g", company_id: "c1", updated_at: "2026-01-01" }] } });
+    const m = await matchEmailParticipants(["rep@coatingvendor.com", "gm@toyotaofx.com"], l, RULES);
+    eq("match: weak sender, real contact on cc → the real contact", [m.companyId, m.contactId], ["c1", "g"]);
   }
   {
     const l = lookup({ companyEmails: { "sales-desk@hondaofy.com": [co("c9", "vendor"), co("c3")] } });

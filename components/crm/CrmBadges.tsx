@@ -24,6 +24,16 @@ export function Tag({ tone = "neutral", children, title, style }: { tone?: Tone;
   return <span className="crm-tag" data-tone={tone} title={title} style={style}>{children}</span>;
 }
 
+const VERIFY_TITLE: Record<string, string> = {
+  domain_mismatch: "From the dealer record, but the email's domain isn't this company's — likely a vendor or agency. Email from it won't link here until verified.",
+  freemail: "From the dealer record, with a personal email address. Email from it won't link here until verified.",
+};
+
+/** Record contact flagged for checking (migration 190). */
+export function VerifyTag({ reason }: { reason: string }) {
+  return <Tag tone="warn" title={VERIFY_TITLE[reason] ?? "Check this contact"}>Verify</Tag>;
+}
+
 export function CallStateBadge({ state }: { state: string }) {
   const s = CALL_STATE[state];
   return <Tag tone={s?.tone}>{s?.label ?? state}</Tag>;

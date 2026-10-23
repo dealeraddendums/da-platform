@@ -66,7 +66,7 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
   const firstEmail = (co.emails ?? [])[0]?.address ?? null;
 
   const [contactsRes, callsRes, threadCount, openThreadCount, tasksRes, ticketsRes, items, filesRes, orderRes, membersRes] = await Promise.all([
-    admin.from("crm_contacts").select("id, company_id, first_name, last_name, email, phone, title, role_tag, user_id").eq("company_id", co.id).is("deleted_at", null).order("first_name"),
+    admin.from("crm_contacts").select("id, company_id, first_name, last_name, email, phone, phone_raw, title, role_tag, user_id, verify_reason, verified_at").eq("company_id", co.id).is("deleted_at", null).order("first_name"),
     admin.from("crm_calls").select(CALL_COLUMNS).eq("company_id", co.id).order("started_at", { ascending: false, nullsFirst: false }).limit(50),
     admin.from("crm_email_threads").select("id", { count: "exact", head: true }).eq("company_id", co.id),
     admin.from("crm_email_threads").select("id", { count: "exact", head: true }).eq("company_id", co.id).neq("status", "closed"),

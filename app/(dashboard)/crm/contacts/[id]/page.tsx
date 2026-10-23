@@ -2,7 +2,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
-import ClickToCall from "@/components/crm/ClickToCall";
 import Timeline from "@/components/crm/Timeline";
 import AddNoteForm from "@/components/crm/AddNoteForm";
 import CallsTable from "@/components/crm/CallsTable";
@@ -12,7 +11,8 @@ import EmailThreadsPanel from "@/components/crm/EmailThreadsPanel";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames, timeline } from "@/lib/crm/queries";
 import { contactName, fmtDate, ROLE_TAG_LABEL } from "@/lib/crm/format";
-import { Tag } from "@/components/crm/CrmBadges";
+import { Tag, VerifyTag } from "@/components/crm/CrmBadges";
+import ContactPhone from "@/components/crm/ContactPhone";
 import { platformUserHref } from "@/lib/crm/contact-links";
 
 export const metadata = { title: "Contact — DA-CRM" };
@@ -43,12 +43,15 @@ export default async function CrmContactPage({ params }: { params: { id: string 
         action={company ? <Link href={`/crm/companies/${company.id}`} className="btn btn-secondary" style={{ background: "#fff" }}>← {company.name}</Link> : undefined}
       />
       <div className="card" style={{ padding: 16, marginBottom: 16, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12, fontSize: 13 }}>
-        <div><p className="label">Phone</p><ClickToCall phone={c.phone} canDial={dial} /></div>
+        <div><p className="label">Phone</p><ContactPhone phone={c.phone} phoneRaw={c.phone_raw} canDial={dial} /></div>
         <div><p className="label">Email</p>{c.email ? <a href={`mailto:${c.email}`} style={{ color: "var(--blue)" }}>{c.email}</a> : "—"}</div>
         <div><p className="label">Platform user</p>{c.user_id
           ? <><Tag tone="accent">Platform user</Tag> <a href={platformUserHref(c.email)} target="_blank" rel="noreferrer" className="crm-link" style={{ marginLeft: 6 }}>Open in DA Users</a></>
           : "No"}</div>
-        <div><p className="label">Source</p>{c.source} · added {fmtDate(c.created_at)}</div>
+        <div><p className="label">Source</p>{c.source} · added {fmtDate(c.created_at)}
+          {c.verify_reason && !c.verified_at && <div style={{ marginTop: 4 }}><VerifyTag reason={c.verify_reason} /></div>}
+          {c.verified_at && <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Verified {fmtDate(c.verified_at)}</div>}
+        </div>
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
         <ContactEditForm contact={c} />

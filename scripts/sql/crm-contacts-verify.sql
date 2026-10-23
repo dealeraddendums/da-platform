@@ -105,6 +105,25 @@ begin
   n := n + 1; if (select contact_id from crm_activities where subject = 'crm-test merge') <> (select id from crm_contacts where user_id = u1)
      or (select deleted_at from crm_contacts where id = k.id) is null then fails := array_append(fails, 'merge repoints + retires the duplicate'); end if;
 
+  -- 12. verify flag (190): record contacts off the company's domains are flagged; users never are
+  delete from crm_company_domains where company_id = d2c;
+  insert into crm_company_domains (company_id, domain, source) values (d2c, 'crm-test-dealer.example', 'vdp');
+  n := n + 1; if crm_contact_verify_reason(d2c, 'rep@coating-vendor.example') is distinct from 'domain_mismatch' then fails := array_append(fails, 'verify: vendor domain flagged'); end if;
+  n := n + 1; if crm_contact_verify_reason(d2c, 'gm@crm-test-dealer.example') is not null then fails := array_append(fails, 'verify: dealer domain ok'); end if;
+  n := n + 1; if crm_contact_verify_reason(d2c, 'gm@mail.crm-test-dealer.example') is not null then fails := array_append(fails, 'verify: subdomain ok'); end if;
+  n := n + 1; if crm_contact_verify_reason(d2c, 'owner@gmail.com') is distinct from 'freemail' then fails := array_append(fails, 'verify: freemail flagged'); end if;
+  delete from crm_company_domains where company_id = d2c;
+  n := n + 1; if crm_contact_verify_reason(d2c, 'rep@coating-vendor.example') is not null then fails := array_append(fails, 'verify: no evidence → not flagged'); end if;
+  insert into crm_company_domains (company_id, domain, source) values (d2c, 'crm-test-dealer.example', 'vdp');
+  update dealers set primary_contact = 'Vic Vendor', primary_contact_email = 'vic@coating-vendor.example' where id = d2;
+  n := n + 1; if (select verify_reason from crm_contacts where company_id = d2c and email = 'vic@coating-vendor.example') is distinct from 'domain_mismatch' then fails := array_append(fails, 'verify: new record contact flagged on insert'); end if;
+
+  -- 13. phone_raw (190): an unparseable platform phone is kept as typed, a parseable one isn't
+  update profiles set phone = '4258208993 xt 4047' where id = u1;
+  n := n + 1; if (select phone_raw from crm_contacts where user_id = u1) is distinct from '4258208993 xt 4047' then fails := array_append(fails, 'phone_raw kept'); end if;
+  update profiles set phone = '(801) 555-0199' where id = u1;
+  n := n + 1; if (select phone || '|' || coalesce(phone_raw, '-') from crm_contacts where user_id = u1) <> '+18015550199|-' then fails := array_append(fails, 'phone_raw cleared once it parses'); end if;
+
   if array_length(fails, 1) is null then raise exception 'CRM_CONTACTS_TEST all passed (% checks)', n;
   else raise exception 'CRM_CONTACTS_TEST % of % failed: %', array_length(fails, 1), n, array_to_string(fails, '; '); end if;
 end $$;

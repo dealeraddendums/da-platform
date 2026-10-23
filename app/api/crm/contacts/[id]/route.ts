@@ -9,12 +9,13 @@ export const dynamic = "force-dynamic";
 
 /**
  * PATCH /api/crm/contacts/[id] — edit any of first_name, last_name, email,
- * phone, title, role_tag; { deleted: true } soft-deletes. Emits contact.updated.
+ * phone, title, role_tag; { deleted: true } soft-deletes; { verified: true } clears a record contact's
+ * "Verify" flag (migration 190) so email matching treats it as a real contact. Emits contact.updated.
  * A platform user's contact (user_id set) follows the user (migration 188): its email changes and its
  * removal happen on the platform, so both are refused here.
  */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
-  const { error } = await requireCrmStaff();
+  const { claims, error } = await requireCrmStaff();
   if (error) return error;
   const b = await req.json().catch(() => ({}));
   const admin = createAdminSupabaseClient() as any;
@@ -26,6 +27,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const patch: Record<string, unknown> = {};
   if (b?.deleted === true) patch.deleted_at = new Date().toISOString();
+  else if (b?.verified === true) Object.assign(patch, { verified_at: new Date().toISOString(), verified_by: claims.sub });
   else {
     const parsed = contactFields(b, { requireFirstName: false });
     if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
