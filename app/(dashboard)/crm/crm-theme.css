@@ -239,3 +239,31 @@ a.crm-tab { text-decoration: none; }
 .crm-stat .crm-stat-sub { font-size: 12.5px; color: var(--crm-muted); }
 a.crm-stat-link { display: block; text-decoration: none; color: inherit; transition: border-color 120ms; }
 a.crm-stat-link:hover { border-color: var(--crm-border-strong); }
+
+/* ── Email threads table (company / contact Email tab) ─────────────────── */
+/* Fixed layout so it always fits its card: Subject flexes and truncates, the rest are fixed (colgroup).
+   Narrow cards drop Mailbox, then Last from. The card never scrolls sideways. */
+.crm-threads { container-type: inline-size; overflow: hidden; }
+.crm-threads-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+.crm-threads-table th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--crm-muted); border-top: 1px solid var(--crm-border); border-bottom: 1px solid var(--crm-border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crm-threads-table td { padding: 9px 12px; border-bottom: 1px solid var(--crm-border); color: var(--crm-ink-2); vertical-align: top; overflow: hidden; }
+.crm-threads-table tbody tr { cursor: pointer; }
+.crm-threads-table tbody tr:hover, .crm-threads-table tbody tr:focus-visible { background: #fbfaf7; outline: none; }
+.crm-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+@container (max-width: 620px) { .crm-threads-table .c-mailbox { display: none; } }
+@container (max-width: 500px) { .crm-threads-table .c-from { display: none; } }
+
+/* Summary card: fixed max height — the sentences scroll inside; Next step + footer stay pinned. */
+.crm-summary-card { display: flex; flex-direction: column; max-height: 320px; overflow: hidden; flex-shrink: 0; }
+.crm-summary-card > .crm-rail-title { flex-shrink: 0; }
+.crm-summary-body { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.crm-summary-scroll { overflow-y: auto; padding-right: 6px; margin-right: -6px; scrollbar-width: thin; outline: none; }
+.crm-summary-pinned { flex-shrink: 0; border-top: 1px solid var(--crm-border); margin-top: 10px; padding-top: 10px; }
+.crm-summary-scrollwrap { position: relative; flex: 1 1 auto; min-height: 104px; display: flex; flex-direction: column; }
+.crm-summary-scrollwrap .crm-summary-scroll { flex: 1 1 auto; min-height: 0; }
+.crm-sources-pop { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; max-height: 100%; overflow-y: auto; box-shadow: 0 6px 18px rgba(27, 31, 42, 0.12); border: 1px solid var(--crm-border); z-index: 2; }
+.crm-sources-pop[data-top="true"] { top: 0; bottom: auto; }
+/* Next step stays pinned; a long one scrolls within ~4 lines so the summary keeps its room. */
+.crm-summary .crm-summary-next { margin: 0; max-height: 92px; overflow-y: auto; scrollbar-width: thin; }
+/* Fade the bottom edge of the scrolling text so it reads as "more below". */
+.crm-summary-scroll { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent); padding-bottom: 14px; }

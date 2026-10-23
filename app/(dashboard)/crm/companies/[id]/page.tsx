@@ -65,10 +65,11 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
   const staffList = Object.entries(staff).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   const firstEmail = (co.emails ?? [])[0]?.address ?? null;
 
-  const [contactsRes, callsRes, threadCount, tasksRes, ticketsRes, items, filesRes, orderRes, membersRes] = await Promise.all([
+  const [contactsRes, callsRes, threadCount, openThreadCount, tasksRes, ticketsRes, items, filesRes, orderRes, membersRes] = await Promise.all([
     admin.from("crm_contacts").select("id, company_id, first_name, last_name, email, phone, title, role_tag, user_id").eq("company_id", co.id).is("deleted_at", null).order("first_name"),
     admin.from("crm_calls").select(CALL_COLUMNS).eq("company_id", co.id).order("started_at", { ascending: false, nullsFirst: false }).limit(50),
     admin.from("crm_email_threads").select("id", { count: "exact", head: true }).eq("company_id", co.id),
+    admin.from("crm_email_threads").select("id", { count: "exact", head: true }).eq("company_id", co.id).neq("status", "closed"),
     admin.from("crm_tasks").select("id, title, description, status, due_at, assigned_staff_id, created_at, source_activity_id, kind").eq("company_id", co.id).order("created_at", { ascending: false }).limit(60),
     admin.from("crm_tickets").select("id, title, description, status, priority, assigned_staff_id, created_at").eq("company_id", co.id).order("created_at", { ascending: false }).limit(60),
     timeline({ company_id: co.id }, 150, admin),
@@ -129,7 +130,7 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
             </section>
           )}
           <CommunicationsCard companyId={co.id} meId={userId} to={firstEmail ? [{ email: firstEmail }] : []}
-            calls={await decorateCalls(callsRes.data ?? [], admin)} emailCount={threadCount.count ?? 0}
+            calls={await decorateCalls(callsRes.data ?? [], admin)} emailCounts={{ active: openThreadCount.count ?? 0, all: threadCount.count ?? 0 }}
             phone={dir.phone ?? co.phone ?? null} canDial={dial} />
           <WorkCard companyId={co.id} tasks={tasks} tickets={tickets} staff={staffList} meId={userId} />
           <ActivityCard companyId={co.id} items={items} staff={staff}

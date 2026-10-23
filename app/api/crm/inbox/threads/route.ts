@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCrmStaff } from "@/lib/crm/access";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { companyNames, staffNames } from "@/lib/crm/queries";
+import { mailboxLabel } from "@/lib/crm/thread-display";
 
 export const dynamic = "force-dynamic";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const INBOX_VIEWS = ["unassigned", "mine", "open", "waiting", "closed", "all"] as const;
+// active = not closed (open + waiting) — the company / contact Email tabs default to it.
+const INBOX_VIEWS = ["unassigned", "mine", "open", "waiting", "active", "closed", "all"] as const;
 type View = (typeof INBOX_VIEWS)[number];
 const PAGE = 50;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -17,6 +19,7 @@ function applyView(q: any, view: View, me: string): any {
     case "mine": return q.eq("assigned_staff_id", me).neq("status", "closed");
     case "open": return q.eq("status", "open");
     case "waiting": return q.eq("status", "waiting_on_dealer");
+    case "active": return q.neq("status", "closed");
     case "closed": return q.eq("status", "closed");
     default: return q;
   }
@@ -24,7 +27,7 @@ function applyView(q: any, view: View, me: string): any {
 
 /**
  * GET /api/crm/inbox/threads — the Inbox thread list.
- * ?view=unassigned|mine|open|waiting|closed|all (default open) &mailbox={id}
+ * ?view=unassigned|mine|open|waiting|active|closed|all (default open) &mailbox={id}
  * &q= (subject / participant address) &page= &company_id= &contact_id=
  * Returns threads, per-view counts (same mailbox filter), mailboxes, staff.
  */
@@ -78,15 +81,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   ]);
   const cName = Object.fromEntries(contacts.map((c: any) => [c.id, [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email]));
   const mb = Object.fromEntries((mailboxes ?? []).map((m: any) => [m.id, m.address]));
+  const mbLabel = Object.fromEntries((mailboxes ?? []).map((m: any) => [m.id, mailboxLabel(m)]));
 
   return NextResponse.json({
     view, page, pageSize: PAGE, total: count ?? 0,
     counts: Object.fromEntries(viewCounts),
-    mailboxes: mailboxes ?? [],
+    mailboxes: (mailboxes ?? []).map((m: any) => ({ ...m, label: mailboxLabel(m) })),
     staff: Object.entries(staff).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
     threads: threads.map((t) => ({
       ...t,
       mailbox: mb[t.mailbox_id] ?? null,
+      mailbox_label: mbLabel[t.mailbox_id] ?? null,
       company_name: t.company_id ? names[t.company_id] ?? null : null,
       contact_name: t.contact_id ? cName[t.contact_id] ?? null : null,
       assigned_name: t.assigned_staff_id ? staff[t.assigned_staff_id] ?? null : null,

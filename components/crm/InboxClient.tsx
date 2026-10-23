@@ -12,14 +12,15 @@ import CompanyContextRail from "./CompanyContextRail";
 import SlideOver from "./SlideOver";
 import EmailComposer from "./EmailComposer";
 import { fmtAgo } from "@/lib/crm/format";
+import { displaySubject, mailboxLabel } from "@/lib/crm/thread-display";
 
 type ThreadRow = {
-  id: string; mailbox: string | null; subject: string | null; status: string; unread: boolean; internal: boolean;
+  id: string; mailbox: string | null; mailbox_label?: string | null; subject: string | null; status: string; unread: boolean; internal: boolean;
   last_message_at: string | null; last_direction: string | null; last_from_email: string | null; last_from_name: string | null;
   last_snippet: string | null; message_count: number; company_name: string | null; contact_name: string | null; assigned_name: string | null;
   match_candidates: string[];
 };
-type Mailbox = { id: string; address: string; display_name: string; purpose: string; active: boolean; last_synced_at: string | null; last_error: string | null };
+type Mailbox = { id: string; address: string; display_name: string; purpose: string; label?: string | null; active: boolean; last_synced_at: string | null; last_error: string | null };
 type ListResp = { threads: ThreadRow[]; counts: Record<string, number>; mailboxes: Mailbox[]; total: number; page: number; pageSize: number };
 
 const VIEWS: [string, string][] = [["unassigned", "Unassigned"], ["mine", "Mine"], ["open", "Open"], ["waiting", "Waiting"], ["closed", "Closed"], ["all", "All"]];
@@ -86,7 +87,7 @@ export default function InboxClient({ meId, initial }: { meId: string; initial: 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, margin: "4px 0 20px" }}>
         <div>
           <h1 className="crm-h1">Inbox</h1>
-          <p style={{ margin: "6px 0 0", fontSize: 14, color: "var(--crm-muted)" }}>support@ and feeds@ — reply from here and it goes out from the mailbox, threaded in Outlook.</p>
+          <p style={{ margin: "6px 0 0", fontSize: 14, color: "var(--crm-muted)" }}>Support and Feeds mailboxes — reply from here and it goes out from the mailbox, threaded in Outlook.</p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => setComposeOpen(true)}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -104,7 +105,7 @@ export default function InboxClient({ meId, initial }: { meId: string; initial: 
         </div>
         <select className="input" style={{ width: 230, height: 36, marginLeft: "auto" }} value={mailbox} onChange={(e) => { setMailbox(e.target.value); setPage(0); }}>
           <option value="">All mailboxes</option>
-          {mbs.map((m) => <option key={m.id} value={m.id}>{m.address}</option>)}
+          {mbs.map((m) => <option key={m.id} value={m.id}>{m.label ?? mailboxLabel(m)}</option>)}
         </select>
         <input className="input" style={{ width: 260, height: 36 }} placeholder="Search subject or address…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
@@ -123,12 +124,12 @@ export default function InboxClient({ meId, initial }: { meId: string; initial: 
                 <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtAgo(t.last_message_at)}</span>
               </div>
               <div style={{ fontSize: 13, fontWeight: t.unread ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {t.subject || "(no subject)"}{t.message_count > 1 && <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> ({t.message_count})</span>}
+                {displaySubject(t.subject) || "(no subject)"}{t.message_count > 1 && <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> ({t.message_count})</span>}
               </div>
               <div style={{ fontSize: 12, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.last_snippet}</div>
               <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                 <Chip>{STATUS_LABEL[t.status] ?? t.status}</Chip>
-                {!mailbox && t.mailbox && <Chip>{t.mailbox.split("@")[0]}@</Chip>}
+                {!mailbox && t.mailbox_label && <Chip>{t.mailbox_label}</Chip>}
                 {!t.company_name && !t.internal && <Chip warn>{t.match_candidates?.length ? "Pick company" : "Unassigned"}</Chip>}
                 {t.internal && <Chip>Internal</Chip>}
                 {t.assigned_name && <Chip>{t.assigned_name}</Chip>}

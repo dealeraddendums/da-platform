@@ -1,4 +1,4 @@
-// DA-CRM company AI summary: 4–6 plain sentences + a "Next step", grounded
+// DA-CRM company AI summary: plain sentences (no fixed count) + a "Next step", grounded
 // only in what we store, every sentence traceable to the items it came from.
 //
 //   assembleSummaryInput  stored data → numbered items (refs) + prompt text,
@@ -129,7 +129,7 @@ export function summaryDue(
   return { due: true, reason: "new_activity" };
 }
 
-/** Model output → validated summary (unknown refs dropped, 6 sentences max). Pure. */
+/** Model output → validated summary (unknown refs dropped; no sentence cap — the card scrolls). Pure. */
 export function parseSummary(raw: string, refs: Record<string, Ref>): StoredSummary | null {
   const m = raw.match(/\{[\s\S]*\}/);
   if (!m) return null;
@@ -141,7 +141,7 @@ export function parseSummary(raw: string, refs: Record<string, Ref>): StoredSumm
     const sources = Array.isArray(x.sources) ? Array.from(new Set(x.sources.map(String).filter((k: string) => k in refs))) as string[] : [];
     return { text, sources };
   };
-  const sentences = (Array.isArray(j.sentences) ? j.sentences : []).map(clean).filter(Boolean).slice(0, 6) as SummarySentence[];
+  const sentences = (Array.isArray(j.sentences) ? j.sentences : []).map(clean).filter(Boolean) as SummarySentence[];
   if (!sentences.length) return null;
   const used = new Set([...sentences.flatMap((s) => s.sources), ...(clean(j.next_step)?.sources ?? [])]);
   return { sentences, next_step: clean(j.next_step), refs: Object.fromEntries(Object.entries(refs).filter(([k]) => used.has(k))) };
@@ -149,7 +149,7 @@ export function parseSummary(raw: string, refs: Record<string, Ref>): StoredSumm
 
 const SYSTEM = `You write the "Summary" card on a company record in DA-CRM, the internal CRM of DealerAddendums (window-sticker / addendum software for car dealers). Staff read it to get up to speed before calling or emailing.
 
-Write 4 to 6 plain-prose sentences, then one "Next step" sentence. Cover, when the data has it: who they are and where they are in the pipeline or billing; what has been happening recently (calls, emails, chats); open tickets and tasks; any feed order status; the most recent sentiment or friction. If there is earlier history ([H]), give it at most one sentence.
+Write plain-prose sentences — as many as the record needs, no padding — then one "Next step" sentence. Cover, when the data has it: who they are and where they are in the pipeline or billing; what has been happening recently (calls, emails, chats); open tickets and tasks; any feed order status; the most recent sentiment or friction. If there is earlier history ([H]), give it at most one sentence.
 
 Rules:
 - Use ONLY the items provided. Never infer facts, names, numbers, dates or feelings that aren't stated in them. If something isn't in the data, leave it out.

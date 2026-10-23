@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import EmailComposer, { type ComposerMode, type ComposerRecipient } from "./EmailComposer";
+import { displaySubject, mailboxLabel } from "@/lib/crm/thread-display";
 
 type Addr = { email: string; name: string | null };
 type Email = {
@@ -123,9 +124,9 @@ export default function ThreadView({
       <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "grid", gap: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
           <div style={{ minWidth: 0 }}>
-            <h2 style={{ margin: 0, fontSize: 17, color: "var(--navy)", wordBreak: "break-word" }}>{t.subject || "(no subject)"}</h2>
+            <h2 style={{ margin: 0, fontSize: 17, color: "var(--navy)", wordBreak: "break-word" }}>{displaySubject(t.subject) || "(no subject)"}</h2>
             <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--text-muted)" }}>
-              {t.mailbox?.address}{t.internal ? " · internal" : ""} · {d.emails.length} message{d.emails.length === 1 ? "" : "s"}
+              {mailboxLabel(t.mailbox)}{t.internal ? " · internal" : ""} · {d.emails.length} message{d.emails.length === 1 ? "" : "s"}
             </p>
           </div>
           <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>

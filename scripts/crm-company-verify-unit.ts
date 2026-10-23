@@ -9,6 +9,7 @@ import { ownerForStage } from "../lib/crm/companies";
 import { workPatch } from "../lib/crm/work-items";
 import { feedName, inventoryFreshness, isFed } from "../lib/crm/inventory-freshness";
 import { needsClamp, previewParts, shortLabel, unwrapLink } from "../lib/crm/preview-text";
+import { displaySubject, mailboxLabel } from "../lib/crm/thread-display";
 
 let fail = 0;
 function eq(name: string, got: unknown, want: unknown) {
@@ -77,7 +78,7 @@ async function main() {
   eq("parse: whitespace collapsed", p?.sentences[1].text, "Dana says the price is cut off.");
   eq("parse: only cited refs kept", Object.keys(p?.refs ?? {}).sort(), ["A1", "C", "T1"]);
   eq("parse: next step kept", p?.next_step?.text, "Call Dana back.");
-  eq("parse: at most 6 sentences", parseSummary(JSON.stringify({ sentences: Array.from({ length: 9 }, (_, i) => ({ text: `S${i}.`, sources: ["C"] })) }), refs)?.sentences.length, 6);
+  eq("parse: no sentence cap", parseSummary(JSON.stringify({ sentences: Array.from({ length: 9 }, (_, i) => ({ text: `S${i}.`, sources: ["C"] })) }), refs)?.sentences.length, 9);
   eq("parse: junk → null", parseSummary("I can't do that", refs), null);
   eq("parse: no sentences → null", parseSummary('{"sentences":[]}', refs), null);
 
@@ -135,6 +136,20 @@ async function main() {
   eq("short body not clamped", needsClamp(previewParts("Hi\nthanks")), false);
   eq("5 lines clamped", needsClamp(previewParts("a\nb\nc\nd\ne")), true);
   eq("long single line clamped", needsClamp(previewParts("x".repeat(400))), true);
+
+  // ── Thread display: mailbox labels, subjects ──────────────────────────────
+  eq("mailbox: purpose", mailboxLabel({ purpose: "support", display_name: "DealerAddendums Support", address: "support@dealeraddendums.com" }), "Support");
+  eq("mailbox: display name without brand", mailboxLabel({ purpose: null, display_name: "DealerAddendums Feeds", address: "feeds@x.com" }), "Feeds");
+  eq("mailbox: never the address", mailboxLabel({ address: "feeds@x.com" }), "Mailbox");
+  eq("subject: thread token", displaySubject("Inventory feed request [ thread::Ab12Cd34::  ]"), "Inventory feed request");
+  eq("subject: salesforce ref token", displaySubject("RE: Feed setup [ ref:!00D5f0abc.!500Vx0123:ref ]"), "Re: Feed setup");
+  eq("subject: Re: Re: RE: → one Re:", displaySubject("Re: Re: RE:  Addendum Sample"), "Re: Addendum Sample");
+  eq("subject: case number token", displaySubject("[Case #000123] Re: Re: Data access"), "Re: Data access");
+  eq("subject: #id token", displaySubject("Feed live [#48213]"), "Feed live");
+  eq("subject: plain tags stay", displaySubject("[EXTERNAL] Re: Labels"), "[EXTERNAL] Re: Labels");
+  eq("subject: Fwd keeps one inner Re", displaySubject("Fwd: Re: Re: Pricing"), "Fwd: Re: Pricing");
+  eq("subject: untouched", displaySubject("Your Dealer Addendums 5.0 Migration Has Started"), "Your Dealer Addendums 5.0 Migration Has Started");
+  eq("subject: empty", displaySubject(null), "");
 
   console.log(fail ? `\n${fail} failed` : "\nall passed");
   if (fail) process.exit(1);
