@@ -18,8 +18,8 @@ export type ThreadFilter = "active" | "closed" | "all";
 export type ThreadCounts = { filter: ThreadFilter; shown: number; active: number; closed: number; all: number };
 const FILTERS: [ThreadFilter, string][] = [["active", "Open"], ["closed", "Closed"], ["all", "All"]];
 
-export default function EmailThreadsPanel({ companyId, contactId, meId, to, filter: initialFilter = "active", onCounts, openThread }: {
-  companyId?: string | null; contactId?: string | null; meId: string; to?: { email: string; name?: string }[];
+export default function EmailThreadsPanel({ companyId, companyName, contactId, meId, to, filter: initialFilter = "active", onCounts, openThread }: {
+  companyId?: string | null; companyName?: string | null; contactId?: string | null; meId: string; to?: { email: string; name?: string | null }[];
   filter?: ThreadFilter; onCounts?: (c: ThreadCounts) => void;
   /** Open this thread in the slide-over (from the timeline); `at` re-opens the same thread on a repeat click. */
   openThread?: { id: string; at: number } | null;
@@ -100,7 +100,7 @@ export default function EmailThreadsPanel({ companyId, contactId, meId, to, filt
         {open && <ThreadView threadId={open} meId={meId} onChanged={load} />}
       </SlideOver>
       <SlideOver open={compose} title="New email" onClose={() => setCompose(false)} width={760}>
-        {compose && <ComposeNew companyId={companyId ?? null} contactId={contactId ?? null} to={to ?? []} onDone={() => { setCompose(false); void load(); }} onCancel={() => setCompose(false)} />}
+        {compose && <ComposeNew companyId={companyId ?? null} companyName={companyName ?? null} contactId={contactId ?? null} to={to ?? []} onDone={() => { setCompose(false); void load(); }} onCancel={() => setCompose(false)} />}
       </SlideOver>
     </div>
   );

@@ -10,23 +10,27 @@ export const SIGNATURE_LOGO_URL = "https://dealer-addendums.s3.us-west-1.amazona
 export const SIGNATURE_FALLBACK_PHONE = "801-415-9435";
 export const BRAND_BLUE = "#4763ae";
 
+const FONT = "font-family:Arial, Helvetica, sans-serif";
+
 /** The company template. Placeholders: {{staff.full_name}} {{staff.title}} {{staff.phone}} {{cta}} {{logo_url}}.
- *  {{cta}} is replaced by a whole table row (or nothing), so it sits between rows. */
-export const DEFAULT_SIGNATURE_TEMPLATE = `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Arial, Helvetica, sans-serif;font-size:13px;line-height:18px;color:#333333">
+ *  {{cta}} is replaced by a whole table row (or nothing), so it sits between rows.
+ *  Every cell declares its own font: Outlook doesn't inherit font-family into table cells (it falls back to
+ *  Times New Roman). The rule between logo and text is a 2px cell with a background colour, not a border. */
+export const DEFAULT_SIGNATURE_TEMPLATE = `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;${FONT};color:#333333">
 <tbody>
 <tr>
-<td valign="middle" width="88" style="padding:0 14px 0 0;vertical-align:middle;width:88px">
+<td valign="middle" width="86" style="padding:0 14px 0 0;vertical-align:middle;width:72px;${FONT}">
 <img src="{{logo_url}}" width="72" height="72" alt="DealerAddendums" style="border:0;width:72px;height:72px">
 </td>
-<td valign="middle" width="1" style="width:1px;border-left:2px solid ${BRAND_BLUE};padding:0">&nbsp;</td>
-<td valign="middle" style="padding:0 0 0 14px;vertical-align:middle">
-<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+<td valign="middle" width="2" bgcolor="${BRAND_BLUE}" style="width:2px;padding:0;background-color:${BRAND_BLUE};font-size:1px;line-height:1px;${FONT}">&nbsp;</td>
+<td valign="middle" style="padding:0 0 0 14px;vertical-align:middle;${FONT}">
+<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;${FONT}">
 <tbody>
-<tr><td style="padding:0;font-size:15px;line-height:20px;font-weight:bold;color:${BRAND_BLUE}">{{staff.full_name}}</td></tr>
-<tr><td style="padding:0;color:#55595c">{{staff.title}}</td></tr>
-<tr><td style="padding:0;line-height:10px">&nbsp;</td></tr>
-<tr><td style="padding:0;font-weight:bold;color:#333333">DealerAddendums LLC</td></tr>
-<tr><td style="padding:0;color:#333333">{{staff.phone}}</td></tr>
+<tr><td style="padding:0;${FONT};font-size:18px;line-height:24px;font-weight:bold;color:${BRAND_BLUE}">{{staff.full_name}}</td></tr>
+<tr><td style="padding:0;${FONT};font-size:14px;line-height:20px;color:#55595c">{{staff.title}}</td></tr>
+<tr><td style="padding:0;${FONT};font-size:8px;line-height:8px">&nbsp;</td></tr>
+<tr><td style="padding:0;${FONT};font-size:14px;line-height:20px;font-weight:bold;color:#333333">DealerAddendums LLC</td></tr>
+<tr><td style="padding:0;${FONT};font-size:14px;line-height:20px;color:#333333">{{staff.phone}}</td></tr>
 {{cta}}
 </tbody>
 </table>
@@ -61,8 +65,8 @@ export function signaturePhone(raw: string | null | undefined): string {
 export function renderSignature(template: string, staff: SignatureStaff, cta: SignatureCta | null, now: Date = new Date()): string {
   const a = activeCta(cta, now);
   const ctaRow = a
-    ? `<tr><td style="padding:6px 0 0 0;font-weight:bold;color:${BRAND_BLUE}">${a.url && /^https?:\/\//i.test(a.url)
-      ? `<a href="${esc(a.url)}" style="color:${BRAND_BLUE};text-decoration:underline">${esc(a.text!)}</a>`
+    ? `<tr><td style="padding:6px 0 0 0;${FONT};font-size:14px;line-height:20px;font-weight:bold;color:${BRAND_BLUE}">${a.url && /^https?:\/\//i.test(a.url)
+      ? `<a href="${esc(a.url)}" style="${FONT};color:${BRAND_BLUE};text-decoration:underline">${esc(a.text!)}</a>`
       : esc(a.text!)}</td></tr>`
     : "";
   let html = template

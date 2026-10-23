@@ -61,7 +61,7 @@ export default async function CrmContactPage({ params, searchParams }: { params:
       {verifyText && <VerifyPanel contactId={c.id} companyName={company?.name ?? "this company"} explanation={verifyText} highlight={searchParams.verify === "1"} otherCopies={otherCopies} />}
       <div className="card" style={{ padding: 16, marginBottom: 16, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12, fontSize: 13 }}>
         <div><p className="label">Phone</p><ContactPhone phone={c.phone} phoneRaw={c.phone_raw} canDial={dial} /></div>
-        <div><p className="label">Email</p>{c.email ? <a href={`mailto:${c.email}`} style={{ color: "var(--blue)" }}>{c.email}</a> : "—"}</div>
+        <div><p className="label">Email</p>{c.email ? <EmailFromTemplate link companyId={c.company_id} companyName={company?.name ?? null} contactId={c.id} to={c.email} name={contactName(c)} /> : "—"}</div>
         <div><p className="label">Platform user</p>{c.user_id
           ? <><Tag tone="accent">Platform user</Tag> <a href={platformUserHref(c.email)} target="_blank" rel="noreferrer" className="crm-link" style={{ marginLeft: 6 }}>Open in DA Users</a></>
           : "No"}</div>
@@ -72,7 +72,7 @@ export default async function CrmContactPage({ params, searchParams }: { params:
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
         <ContactEditForm contact={c} hideVerify={!!verifyText} />
-        <EmailFromTemplate companyId={c.company_id} contactId={c.id} to={c.email} />
+        <EmailFromTemplate companyId={c.company_id} companyName={company?.name ?? null} contactId={c.id} to={c.email} name={contactName(c)} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
         <ActivityCard contactId={c.id} title="Timeline" />
@@ -83,7 +83,7 @@ export default async function CrmContactPage({ params, searchParams }: { params:
       </div>
       <div className="card" style={{ marginTop: 16 }}>
         <p style={{ margin: 0, padding: "12px 16px 0", fontWeight: 600 }}>Email</p>
-        <EmailThreadsPanel contactId={c.id} meId={userId} to={c.email ? [{ email: c.email, name: contactName(c) }] : []} />
+        <EmailThreadsPanel contactId={c.id} companyId={c.company_id} companyName={company?.name ?? null} meId={userId} to={c.email ? [{ email: c.email, name: contactName(c) }] : []} />
       </div>
     </div>
   );

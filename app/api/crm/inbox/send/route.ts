@@ -11,7 +11,8 @@ export const maxDuration = 120;
 /**
  * POST /api/crm/inbox/send — multipart: `payload` (JSON) + `attachments` (files, 20 MB total).
  * payload: { mode: new|reply|replyAll|forward, email_id?, mailbox_id?, company_id?, contact_id?,
- *            to: [{email,name?}], cc?, bcc?, subject, body_html }
+ *            to: [{email,name?}], cc?, bcc?, subject, body_html,
+ *            also_add?: [email] — recipients to add as contacts of the compose company }
  * Sends through Graph as the mailbox, with the staff member's signature
  * (composeEmail), and returns { email_id, thread_id }.
  */
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       subject: typeof p.subject === "string" ? p.subject.slice(0, 500) : "",
       bodyHtml: typeof p.body_html === "string" ? p.body_html.slice(0, 500_000) : "",
       attachments,
+      alsoAdd: Array.isArray(p.also_add) ? p.also_add.slice(0, 100).map((e: any) => String(e ?? "")) : [],
     }, createAdminSupabaseClient() as any);
     return NextResponse.json({ ok: true, email_id: r.emailId, thread_id: r.threadId });
   } catch (e) {

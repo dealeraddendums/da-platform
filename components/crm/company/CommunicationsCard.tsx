@@ -15,8 +15,8 @@ import type { CallListRow } from "@/lib/crm/queries";
 
 type Tab = "email" | "chat" | "calls";
 
-export default function CommunicationsCard({ companyId, meId, to, calls, emailCounts, phone, canDial }: {
-  companyId: string; meId: string; to: { email: string; name?: string }[];
+export default function CommunicationsCard({ companyId, companyName, meId, to, calls, emailCounts, phone, canDial }: {
+  companyId: string; companyName: string; meId: string; to: { email: string; name?: string }[];
   calls: CallListRow[]; emailCounts: { active: number; all: number }; phone: string | null; canDial: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("email");
@@ -56,7 +56,7 @@ export default function CommunicationsCard({ companyId, meId, to, calls, emailCo
           </div>
         </div>
       </div>
-      {tab === "email" && <EmailThreadsPanel companyId={companyId} meId={meId} to={to} filter={email.filter} onCounts={setEmail} openThread={openThread} />}
+      {tab === "email" && <EmailThreadsPanel companyId={companyId} companyName={companyName} meId={meId} to={to} filter={email.filter} onCounts={setEmail} openThread={openThread} />}
       {tab === "chat" && (
         <div className="crm-empty">
           <strong>Chat is coming soon</strong>

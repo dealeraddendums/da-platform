@@ -175,7 +175,7 @@ export default function ThreadView({
         const r = recipientsFor(composer.mode, composer.email);
         return (
           <EmailComposer key={`${composer.mode}-${composer.email.id}`} mode={composer.mode} emailId={composer.email.id}
-            companyId={t.company_id} contactId={t.contact_id} initialTo={r.to} initialCc={r.cc}
+            companyId={t.company_id} companyName={t.company_name} contactId={t.contact_id} initialTo={r.to} initialCc={r.cc}
             initialSubject={prefix(composer.mode, composer.email.subject ?? t.subject)}
             onCancel={() => setComposer(null)}
             onSent={async () => { setComposer(null); await load(); onChanged?.(); }} />

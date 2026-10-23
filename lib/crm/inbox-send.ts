@@ -19,6 +19,8 @@ import {
 import { ingestGraphMessage, MAILBOX_COLS, relinkThreadActivities, type Mailbox } from "./inbox-ingest";
 import { normEmail } from "./inbox-match";
 import type { TemplateContext } from "./template-vars";
+import { addRecipientsAsContacts } from "./recipients";
+import { linkThreadToRecipients } from "./thread-links";
 
 export const OUTBOUND_ATTACHMENT_CAP = 20 * 1024 * 1024;
 
@@ -37,6 +39,8 @@ export type SendInput = {
   attachments?: { name: string; contentType: string; bytes: Buffer }[];
   /** Extra template variables for composeEmail (feed orders). */
   templateContext?: TemplateContext;
+  /** Recipients to add as contacts of the compose company ("Also add as contact of …"). */
+  alsoAdd?: string[];
 };
 
 export class SendError extends Error {
@@ -79,8 +83,10 @@ export async function sendInboxEmail(input: SendInput, admin: any = createAdminS
   }
   if (!mailbox || !mailbox.active) throw new SendError(400, "That mailbox isn't available");
 
-  const companyId = thread?.company_id ?? input.companyId ?? null;
+  let companyId: string | null = thread?.company_id ?? input.companyId ?? null;
   const contactId = thread?.contact_id ?? input.contactId ?? null;
+  // Composed from a contact alone: the contact's company is the compose company.
+  if (!companyId && contactId) companyId = (await admin.from("crm_contacts").select("company_id").eq("id", contactId).maybeSingle()).data?.company_id ?? null;
   const composed = await composeEmail({ subject: input.subject ?? "", bodyHtml: input.bodyHtml ?? "", companyId, contactId, staffId: input.staffId, extraContext: input.templateContext }, admin);
   if (composed.unknown.length) throw new SendError(400, `Fill in or remove: ${composed.unknown.join(", ")}`);
 
@@ -124,14 +130,28 @@ export async function sendInboxEmail(input: SendInput, admin: any = createAdminS
   const emailId = r.status === "skipped" ? null : r.emailId;
   const threadId = r.status === "skipped" ? null : r.threadId;
 
-  // A new email started from a company / contact record belongs to it.
-  if (threadId && input.mode === "new" && (input.companyId || input.contactId)) {
-    const { data: t } = await admin.from("crm_email_threads").select("company_id").eq("id", threadId).maybeSingle();
-    if (t && !t.company_id) {
-      await admin.from("crm_email_threads").update({ company_id: companyId, contact_id: contactId, matched_by: "manual", match_candidates: [] }).eq("id", threadId);
-      await relinkThreadActivities(admin, threadId, companyId, contactId);
+  // A new email started from a company / contact record belongs to it — even when the Inbox matcher
+  // picked a recipient's other company (that contact is linked below, so it shows there too).
+  if (threadId && input.mode === "new" && companyId) {
+    const { data: t } = await admin.from("crm_email_threads").select("company_id, contact_id").eq("id", threadId).maybeSingle();
+    if (t && (t.company_id !== companyId || (contactId && t.contact_id !== contactId))) {
+      const keepContact = !contactId && t.company_id === companyId ? t.contact_id : contactId;
+      await admin.from("crm_email_threads").update({ company_id: companyId, contact_id: keepContact ?? null, matched_by: "manual", match_candidates: [] }).eq("id", threadId);
+      await relinkThreadActivities(admin, threadId, companyId, keepContact ?? null);
     }
   }
-  if (threadId) await admin.from("crm_email_threads").update({ unread: false }).eq("id", threadId);
+  if (threadId) {
+    await admin.from("crm_email_threads").update({ unread: false }).eq("id", threadId);
+    // "Also add as contact of {company}", then the thread belongs to every recipient that is a contact
+    // (any company) — it shows on each of their timelines (migration 197). Never fails the send.
+    try {
+      const all = [...finalTo, ...finalCc, ...bcc];
+      const wanted = new Set((input.alsoAdd ?? []).map((e) => normEmail(e)).filter(Boolean));
+      if (companyId && wanted.size) await addRecipientsAsContacts(admin, companyId, all.filter((r) => wanted.has(r.email)));
+      await linkThreadToRecipients(admin, threadId, all.map((r) => r.email), input.staffId);
+    } catch (e) {
+      console.error(`[crm-inbox-send] link recipients ${threadId}:`, e instanceof Error ? e.message : e);
+    }
+  }
   return { emailId, threadId };
 }

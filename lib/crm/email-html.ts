@@ -13,7 +13,7 @@ import DOMPurify from "isomorphic-dompurify";
 const ALLOWED_TAGS = ["p", "br", "strong", "b", "em", "i", "u", "s", "a", "img", "span", "ul", "ol", "li",
   "h1", "h2", "h3", "blockquote", "hr", "table", "tbody", "thead", "tr", "td", "th", "div"];
 // Table attributes Outlook needs for the company signature layout (lib/crm/signature.ts).
-const ALLOWED_ATTR = ["href", "target", "rel", "src", "alt", "title", "width", "height", "style", "colspan", "rowspan", "align", "valign", "cellpadding", "cellspacing", "border"];
+const ALLOWED_ATTR = ["href", "target", "rel", "src", "alt", "title", "width", "height", "style", "colspan", "rowspan", "align", "valign", "cellpadding", "cellspacing", "border", "bgcolor"];
 // Inline style properties we keep (everything else is dropped).
 const SAFE_STYLE = /^(color|background-color|font-size|font-weight|font-style|font-family|text-decoration|text-align|line-height|width|height|border|border-collapse|border-left|border-right|border-top|border-bottom|padding|padding-left|padding-right|padding-top|padding-bottom|margin|vertical-align|white-space)$/i;
 
@@ -45,8 +45,13 @@ function safeHref(href: string): boolean {
   return /^(https?:|mailto:|tel:)/i.test(href.trim()) || /^\{\{[^}]+\}\}$/.test(href.trim());
 }
 
-/** Allowlist-sanitize, then inline Outlook-safe styles. Returns body HTML (no wrapper). */
-export function toEmailHtml(html: string): string {
+// Elements that carry text and must declare the font themselves when `font` is set (signatures): Outlook
+// doesn't inherit font-family into table cells, so a signature relying on its table's font renders serif.
+const FONT_TAGS = new Set(["table", "td", "th", "p", "div", "a", "li"]);
+
+/** Allowlist-sanitize, then inline Outlook-safe styles. Returns body HTML (no wrapper).
+ *  `font`: every text element without its own font-family gets this one inline (the signature path). */
+export function toEmailHtml(html: string, opts: { font?: string } = {}): string {
   const frag = DOMPurify.sanitize(html ?? "", {
     ALLOWED_TAGS, ALLOWED_ATTR, ALLOW_DATA_ATTR: false, RETURN_DOM_FRAGMENT: true,
   }) as unknown as DocumentFragment;
@@ -69,7 +74,8 @@ export function toEmailHtml(html: string): string {
       if (!el.getAttribute("alt")) el.setAttribute("alt", "");
     }
     const kept = cleanStyle(el.getAttribute("style"));
-    const style = `${BASE[tag] ?? ""}${kept}`;
+    const font = opts.font && FONT_TAGS.has(tag) && !/(^|;)\s*font-family\s*:/i.test(kept) ? `font-family:${opts.font};` : "";
+    const style = `${BASE[tag] ?? ""}${font}${kept}`;
     if (style) el.setAttribute("style", style); else el.removeAttribute("style");
     for (const child of Array.from(el.children)) walk(child);
   };
@@ -78,6 +84,11 @@ export function toEmailHtml(html: string): string {
   holder.appendChild(frag);
   // Editors emit <p></p> for blank lines; Outlook collapses them — keep the gap.
   return holder.innerHTML.replace(/<p([^>]*)><\/p>/g, "<p$1>&nbsp;</p>");
+}
+
+/** The signature block as sent: sanitized, every text element carrying the font inline, no <style>, no classes. */
+export function signatureEmailHtml(html: string): string {
+  return toEmailHtml(html, { font: EMAIL_FONT });
 }
 
 /** The full message body: font wrapper + body + optional signature block. */

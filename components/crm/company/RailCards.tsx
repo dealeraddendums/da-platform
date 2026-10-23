@@ -17,6 +17,7 @@ import { platformUserHref } from "@/lib/crm/contact-links";
 import { Tag, VerifyTag } from "@/components/crm/CrmBadges";
 import ContactPhone from "@/components/crm/ContactPhone";
 import CompanyFeedsPanel from "@/components/crm/CompanyFeedsPanel";
+import EmailFromTemplate from "@/components/crm/EmailFromTemplate";
 import { StagePill } from "@/components/crm/CompanyHeader";
 import type { Stage } from "@/lib/crm/format";
 
@@ -138,7 +139,7 @@ function byUserThenName(a: ContactRow, b: ContactRow): number {
   return n(a).localeCompare(n(b));
 }
 
-export function ContactsCard({ companyId, contacts, canDial, members }: { companyId: string; contacts: ContactRow[]; canDial: boolean; members?: MemberDealer[] }) {
+export function ContactsCard({ companyId, companyName, contacts, canDial, members }: { companyId: string; companyName?: string | null; contacts: ContactRow[]; canDial: boolean; members?: MemberDealer[] }) {
   const router = useRouter();
   async function remove(c: ContactRow) {
     if (!window.confirm(`Delete ${[c.first_name, c.last_name].filter(Boolean).join(" ") || c.email || "this contact"}?`)) return;
@@ -176,7 +177,7 @@ export function ContactsCard({ companyId, contacts, canDial, members }: { compan
                   )}
                 </div>
               </div>
-              {c.email && <div className="crm-detail-row" style={{ padding: "4px 0 0", fontSize: 13 }}><Icon d="M4 4h16v16H4z M22 6l-10 7L2 6" /><a className="crm-link" href={`mailto:${c.email}`} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{c.email}</a></div>}
+              {c.email && <div className="crm-detail-row" style={{ padding: "4px 0 0", fontSize: 13 }}><Icon d="M4 4h16v16H4z M22 6l-10 7L2 6" /><EmailFromTemplate link companyId={companyId} companyName={companyName} contactId={c.id} to={c.email} name={name} linkStyle={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }} /></div>}
               {(c.phone || c.phone_raw) && <div className="crm-detail-row" style={{ padding: "2px 0 0", fontSize: 13 }}><ContactPhone phone={c.phone} phoneRaw={c.phone_raw} canDial={canDial} /></div>}
             </div>
           );
