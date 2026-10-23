@@ -6,6 +6,7 @@ import * as path from "path";
 import { DEFAULT_SIGNATURE_TEMPLATE, SIGNATURE_LOGO_URL, activeCta, renderSignature, signaturePhone } from "../lib/crm/signature";
 import { signatureEmailHtml, toEmailHtml, wrapEmail } from "../lib/crm/email-html";
 import { withoutSignature } from "../lib/crm/email-compose";
+import { sanitizeProductHtml } from "../lib/product-name";
 
 let fail = 0;
 function eq(name: string, got: unknown, want: unknown) {
@@ -54,6 +55,16 @@ eq("phone 14px", cell("801-555-0142").includes("font-size:14px"), true);
 const custom = signatureEmailHtml('<table style="font-family:Georgia"><tbody><tr><td>Hi</td><td style="font-family:Courier">x</td></tr></tbody></table><style>td{}</style><p class="x">y</p>');
 eq("custom template: missing fonts filled, explicit fonts kept, <style>/class dropped",
   [/<td style="font-family:Arial, Helvetica, sans-serif;">Hi/.test(custom), /font-family:Courier/.test(custom), !/<style|class=/.test(custom)], [true, true, true]);
+
+// DOMPurify hooks are process-global: a product name sanitized earlier in the same worker used to cut every
+// later email's styles to the product-name allowlist (padding / font sizes gone on the 2nd request).
+const productFirst = sanitizeProductHtml('<span style="color:red;padding:4px;font-size:30px">Tint</span><img src="https://example.com/x.png">');
+eq("product-name sanitizer still filters its own input", [/padding/.test(productFirst), /<img/.test(productFirst)], [false, false]);
+eq("…and no longer touches the email signature afterwards",
+  signatureEmailHtml(renderSignature(DEFAULT_SIGNATURE_TEMPLATE, staff, nada, NOW)), sent);
+eq("…nor body HTML (inline image on our S3 + padding kept)",
+  /padding:0 0 0 12px/.test(toEmailHtml('<blockquote style="padding:0 0 0 12px">q</blockquote><img src="https://example.org/pic.png">'))
+  && /<img/.test(toEmailHtml('<img src="https://example.org/pic.png">')), true);
 
 // ── CTA ────────────────────────────────────────────────────────────────────
 eq("CTA shown inside its dates, linked", sent.includes('href="https://dealeraddendums.com/nada"') && sent.includes("NADA 2028"), true);

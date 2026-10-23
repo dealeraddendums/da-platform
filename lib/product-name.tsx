@@ -69,6 +69,11 @@ const DESCRIPTION_STYLE_PROPS = new Set([
 // allowlist to apply from here. DOMPurify.sanitize is synchronous, so setting
 // this immediately before a sanitize call and resetting it after is race-free.
 let activeStyleProps: Set<string> = NAME_STYLE_PROPS;
+// DOMPurify hooks are process-global: without this flag, once any product name had been sanitized in a
+// worker, every OTHER DOMPurify.sanitize in that process (DA-CRM email HTML, inbox display, Help Center)
+// had its style attributes cut to the product-name allowlist and its <img> hosts filtered — DA-CRM emails
+// lost their padding / font sizes / fonts on the second request. The hooks only act inside runSanitize.
+let inProductSanitize = false;
 
 // S3 hosts the platform writes product images to. Anything else
 // (operator pasted a logo from elsewhere, stale legacy URL) gets the
@@ -106,14 +111,14 @@ function ensureHooks() {
   if (hooksConfigured) return;
   // Style attribute filter
   DOMPurify.addHook("uponSanitizeAttribute", (_node, data) => {
-    if (data.attrName !== "style") return;
+    if (!inProductSanitize || data.attrName !== "style") return;
     data.attrValue = filterStyleAttribute(data.attrValue);
     if (!data.attrValue) data.keepAttr = false;
   });
   // <img> source allowlist — drop the node when the src isn't an
   // https URL on one of the known S3 hosts.
   DOMPurify.addHook("uponSanitizeElement", (node, data) => {
-    if (data.tagName !== "img") return;
+    if (!inProductSanitize || data.tagName !== "img") return;
     const el = node as Element;
     const src = el.getAttribute?.("src") ?? "";
     if (!isSafeImgSrc(src)) {
@@ -137,6 +142,7 @@ function isSafeImgSrc(src: string): boolean {
 function runSanitize(raw: string, tags: string[], styleProps: Set<string>): string {
   ensureHooks();
   activeStyleProps = styleProps;
+  inProductSanitize = true;
   try {
     return DOMPurify.sanitize(raw, {
       ALLOWED_TAGS: tags,
@@ -145,6 +151,7 @@ function runSanitize(raw: string, tags: string[], styleProps: Set<string>): stri
     });
   } finally {
     activeStyleProps = NAME_STYLE_PROPS;   // reset so a stray call defaults tight
+    inProductSanitize = false;
   }
 }
 
