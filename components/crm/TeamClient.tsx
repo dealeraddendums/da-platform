@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import EmailEditor from "./EmailEditor";
 import { formatPhone } from "@/lib/crm/phone";
+import { Tag } from "./CrmBadges";
 
 export type Member = {
   staff_id: string;
@@ -74,7 +75,7 @@ export default function TeamClient({
             </div>
             {m.capabilities.length > 0 && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
-                {m.capabilities.map((c) => <span key={c} style={{ background: "#e3f2fd", color: "#1565c0", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 3 }}>{CAPABILITIES[c] ?? c}</span>)}
+                {m.capabilities.map((c) => <Tag key={c} tone="accent">{CAPABILITIES[c] ?? c}</Tag>)}
               </div>
             )}
             <dl style={{ margin: "10px 0 0", fontSize: 12, color: "var(--text-secondary)", display: "grid", gap: 2 }}>

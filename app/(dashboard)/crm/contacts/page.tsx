@@ -74,7 +74,7 @@ export default async function CrmContactsPage({ searchParams }: { searchParams: 
                 <td className="px-3 py-2"><Link href={`/crm/contacts/${c.id}`} style={{ color: "var(--blue)", fontWeight: 500 }}>{contactName(c)}</Link></td>
                 <td className="px-3 py-2"><Link href={`/crm/companies/${c.company_id}`} style={{ color: "var(--blue)" }}>{dName[c.company_id] ?? "—"}</Link></td>
                 <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{[c.title, c.role_tag ? ROLE_TAG_LABEL[c.role_tag] : null].filter(Boolean).join(" · ") || "—"}</td>
-                <td className="px-3 py-2" style={{ fontSize: 12 }}>{c.email ?? "—"}</td>
+                <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{c.email ?? "—"}</td>
                 <td className="px-3 py-2"><ClickToCall phone={c.phone} canDial={dial} /></td>
                 <td className="px-3 py-2" style={{ whiteSpace: "nowrap", color: "var(--text-secondary)" }}>{fmtAgo(lastAct[c.id])}</td>
               </tr>
@@ -84,7 +84,6 @@ export default async function CrmContactsPage({ searchParams }: { searchParams: 
         </table>
       </div>
       <Pager
-        light
         page={page}
         totalPages={Math.max(1, Math.ceil((count ?? 0) / PAGE))}
         prevHref={pageHref("/crm/contacts", searchParams, page - 1)}

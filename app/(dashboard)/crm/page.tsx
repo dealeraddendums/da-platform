@@ -1,6 +1,6 @@
 // DA-CRM dashboard: calls today, trials expiring this week, unmatched calls,
 // the Inbox per mailbox (unassigned threads, open threads waiting on us for
-// 24h+), open tickets / my tasks (0 until phases 4–5 fill the stub tables).
+// 24h+), open tickets / my tasks.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
@@ -56,8 +56,8 @@ export default async function CrmDashboardPage() {
       { label: "Stalled feed orders", value: feeds.stalled, sub: "Past their expected time in step", href: "/crm/communications/feeds?view=stalled" },
       { label: "Feed IDs to confirm", value: feeds.awaiting_confirmation, sub: "Supplier sent an ID — confirm it", href: "/crm/communications/feeds?view=awaiting_confirmation" },
     ] : []),
-    { label: "Open tickets", value: openTickets ?? 0, sub: "Tickets arrive in phase 4", href: "/crm/communications/tickets", muted: true },
-    { label: "My tasks", value: myTasks ?? 0, sub: "Tasks arrive in phase 5", href: "/crm/tasks", muted: true },
+    { label: "Open tickets", value: openTickets ?? 0, sub: "Across all companies", href: "/crm/communications/tickets" },
+    { label: "My tasks", value: myTasks ?? 0, sub: "Open and assigned to you", href: "/crm/tasks" },
   ];
 
   return (
@@ -65,16 +65,16 @@ export default async function CrmDashboardPage() {
       <PageHeader title="DA-CRM" subtitle={fullName ? `Welcome back, ${fullName.split(" ")[0]}.` : "Dealer relationships, communications and follow-ups."} />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16, marginBottom: 16 }}>
         {cards.map((c) => (
-          <Link key={c.label} href={c.href} className="card" style={{ padding: 16, textDecoration: "none", color: "inherit", display: "block" }}>
-            <p className="label" style={{ marginBottom: 4 }}>{c.label}</p>
-            <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: c.muted ? "var(--text-muted)" : "var(--navy)" }}>{c.value}</p>
-            <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{c.sub}</p>
+          <Link key={c.label} href={c.href} className="crm-card crm-stat crm-stat-link">
+            <p className="crm-rail-title" style={{ margin: 0 }}>{c.label}</p>
+            <p className={`crm-stat-n${c.muted || !c.value ? " muted" : ""}`}>{c.value}</p>
+            <p className="crm-stat-sub" style={{ margin: 0 }}>{c.sub}</p>
           </Link>
         ))}
       </div>
 
       <div className="card">
-        <p style={{ margin: 0, padding: "12px 16px", fontWeight: 600 }}>Trials expiring this week</p>
+        <div className="crm-card-head" style={{ borderBottom: 0 }}><h2>Trials expiring this week</h2><Link href="/crm/trials" className="crm-link" style={{ fontSize: 13 }}>All trials</Link></div>
         {!(expiring ?? []).length ? (
           <p className="text-sm" style={{ color: "var(--text-muted)", padding: "0 16px 16px", margin: 0 }}>No trials end in the next 7 days.</p>
         ) : (
@@ -88,7 +88,7 @@ export default async function CrmDashboardPage() {
             <tbody>
               {(expiring ?? []).map((t: any) => (
                 <tr key={t.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                  <td className="px-3 py-2"><Link href={`/crm/companies/${t.id}`} style={{ color: "var(--blue)" }}>{t.name}</Link><span style={{ color: "var(--text-muted)", fontSize: 11 }}> · {t.dealer_text_id}</span></td>
+                  <td className="px-3 py-2"><Link href={`/crm/companies/${t.id}`} className="crm-link" style={{ fontWeight: 500 }}>{t.name}</Link><span style={{ color: "var(--text-muted)", fontSize: 11 }}> · {t.dealer_text_id}</span></td>
                   <td className="px-3 py-2">{t.trial_day ?? "—"}</td>
                   <td className="px-3 py-2">{fmtDate(t.trial_ends_on)}</td>
                   <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{t.owner_staff_id ? staff[t.owner_staff_id] ?? "—" : "Unassigned"}</td>

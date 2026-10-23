@@ -88,11 +88,7 @@ export default function CompanyHeaderControls({
                 {allBrands.map((b) => {
                   const on = picked.includes(b);
                   return (
-                    <button key={b} type="button" onClick={() => setPicked(on ? picked.filter((x) => x !== b) : [...picked, b])}
-                      style={{
-                        fontSize: 12, padding: "3px 8px", borderRadius: 3, cursor: "pointer", fontFamily: "inherit",
-                        border: `1px solid ${on ? "var(--blue)" : "var(--border)"}`, background: on ? "var(--blue)" : "#fff", color: on ? "#fff" : "var(--text-primary)",
-                      }}>{b}</button>
+                    <button key={b} type="button" className="crm-chip" aria-pressed={on} onClick={() => setPicked(on ? picked.filter((x) => x !== b) : [...picked, b])}>{b}</button>
                   );
                 })}
               </div>

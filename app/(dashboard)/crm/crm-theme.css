@@ -201,3 +201,41 @@
 .crm-sources { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--crm-surface-2); font-size: 12px; color: var(--crm-ink-2); }
 .crm-sources ul { margin: 4px 0 0; padding: 0; list-style: none; }
 .crm-sources li { padding: 2px 0; }
+
+/* ── Lists, tags, controls (every /crm page) ───────────────────────────── */
+
+/* Status tags: rounded, soft tint, one tone per meaning. */
+.crm-tag { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font: 600 11.5px/1 var(--crm-font); white-space: nowrap; background: var(--crm-surface-2); color: var(--crm-ink-2); }
+.crm-tag[data-tone="success"] { background: var(--crm-success-soft); color: var(--crm-success); }
+.crm-tag[data-tone="warn"]    { background: var(--crm-warn-soft); color: #8a560c; }
+.crm-tag[data-tone="danger"]  { background: var(--crm-danger-soft); color: var(--crm-danger); }
+.crm-tag[data-tone="accent"]  { background: var(--crm-accent-soft); color: var(--crm-accent); }
+.crm-tag[data-tone="info"]    { background: #e8eef6; color: #2f5687; }
+.crm-tag[data-tone="violet"]  { background: #eeeaf6; color: #54408f; }
+
+/* Link tabs (Dealers · Groups · Partners) reuse .crm-tab. */
+a.crm-tab { text-decoration: none; }
+.crm-tab[aria-current="page"] { background: var(--crm-surface); color: var(--crm-ink); box-shadow: 0 0 0 1px var(--crm-border); }
+
+/* Data tables inside a .card */
+.crm-theme .card table thead tr { background: var(--crm-surface); }
+.crm-theme .card table th { color: var(--crm-muted); font-weight: 600; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 1px solid var(--crm-border); }
+.crm-theme .card table tbody tr { border-top: 1px solid var(--crm-border); }
+.crm-theme .card table tbody tr:hover { background: #fbfaf7; }
+
+/* Native file pickers look like a secondary button. */
+.crm-theme input[type="file"] { font: 13px var(--crm-font); color: var(--crm-ink-2); }
+.crm-theme input[type="file"]::file-selector-button {
+  height: 32px; padding: 0 12px; margin-right: 10px; border: 0; border-radius: var(--crm-radius-sm);
+  background: var(--crm-surface-2); color: var(--crm-ink); font: 500 13px var(--crm-font); cursor: pointer;
+}
+.crm-theme input[type="file"]::file-selector-button:hover { background: #e9e5dc; }
+.crm-theme input[type="checkbox"], .crm-theme input[type="radio"] { accent-color: var(--crm-accent); }
+
+/* Stat tiles (Dashboard) */
+.crm-stat { padding: 16px 18px; }
+.crm-stat .crm-stat-n { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; color: var(--crm-ink); margin: 6px 0 4px; }
+.crm-stat .crm-stat-n.muted { color: var(--crm-border-strong); }
+.crm-stat .crm-stat-sub { font-size: 12.5px; color: var(--crm-muted); }
+a.crm-stat-link { display: block; text-decoration: none; color: inherit; transition: border-color 120ms; }
+a.crm-stat-link:hover { border-color: var(--crm-border-strong); }

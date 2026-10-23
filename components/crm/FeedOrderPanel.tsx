@@ -17,6 +17,7 @@ import ThreadView from "./ThreadView";
 import EmailEditor from "./EmailEditor";
 import { RenderedPreview, type RenderedEmail } from "./TemplatePicker";
 import { fmtAgo, fmtDateTime } from "@/lib/crm/format";
+import { Tag, type Tone } from "./CrmBadges";
 
 type Detail = {
   order: any; settings: any; missing: string[]; sendWithoutReview: boolean;
@@ -27,16 +28,15 @@ type Detail = {
 type Preview = { method: string; templateSource: string; subject: string; body_html: string; to: { email: string }[]; cc: { email: string }[]; problems: string[]; rendered: RenderedEmail; pdfs: { name: string; base64: string; dealership: string | null; missingFields: string[]; emptyValues: string[] }[] };
 type Kid = { id: string; dealer_company_id: string; name: string | null; status: string; status_label: string; feed_id_candidate: string | null; feed_id_confirmed: string | null; supplier_fields: Record<string, string>; pdf_s3_key: string | null; signed_pdf_s3_key: string | null };
 
-export const CHIP_COLOR: Record<string, [string, string]> = {
-  needs_info: ["#fff3e0", "#b26a00"], ready: ["#e3f2fd", "#1565c0"], request_sent: ["#e3f2fd", "#1565c0"],
-  awaiting_dealer_approval: ["#ede7f6", "#5e35b1"], awaiting_supplier: ["#ede7f6", "#5e35b1"], pending: ["#ede7f6", "#5e35b1"], feed_id_received: ["#fff8e1", "#7a5c00"],
-  assigned: ["#e8f5e9", "#2e7d32"], done: ["#e8f5e9", "#2e7d32"], cancelled: ["#f5f6f7", "#78828c"],
+export const CHIP_TONE: Record<string, Tone> = {
+  needs_info: "warn", ready: "info", request_sent: "info",
+  awaiting_dealer_approval: "violet", awaiting_supplier: "violet", pending: "violet", feed_id_received: "warn",
+  assigned: "success", done: "success", cancelled: "neutral",
 };
 export function StatusChip({ status, label }: { status: string; label: string }) {
-  const [bg, fg] = CHIP_COLOR[status] ?? ["#f5f6f7", "#55595c"];
-  return <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 3, background: bg, color: fg, whiteSpace: "nowrap" }}>{label}</span>;
+  return <Tag tone={CHIP_TONE[status] ?? "neutral"}>{label}</Tag>;
 }
-export const AGE_COLOR: Record<string, string> = { green: "var(--success)", amber: "var(--orange)", red: "var(--error)" };
+export const AGE_COLOR: Record<string, string> = { green: "var(--success)", amber: "var(--warning)", red: "var(--error)" };
 
 export default function FeedOrderPanel({ orderId, meId, onChanged }: { orderId: string; meId: string; onChanged?: () => void }) {
   const [d, setD] = useState<Detail | null>(null);

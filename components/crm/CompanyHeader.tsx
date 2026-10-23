@@ -25,10 +25,10 @@ export function KindPill({ kind }: { kind: string }) {
   return <span className="crm-pill-kind">{KIND_LABEL[kind] ?? kind}</span>;
 }
 
-export function StagePill({ stage, billing = null, label, title }: { stage: Stage; billing?: BillingState | null; label?: string; title?: string }) {
+export function StagePill({ stage, billing = null, label, title, dot }: { stage: Stage; billing?: BillingState | null; label?: string; title?: string; dot?: string }) {
   const d = stageDisplay(stage, billing);
   return (
-    <span className="crm-pill-stage" title={title} style={{ ["--crm-stage-dot" as string]: d.dot }}>
+    <span className="crm-pill-stage" title={title} style={{ ["--crm-stage-dot" as string]: dot ?? d.dot }}>
       {label ?? d.label}
     </span>
   );
