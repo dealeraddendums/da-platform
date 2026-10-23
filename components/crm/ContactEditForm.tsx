@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ROLE_TAG_LABEL } from "@/lib/crm/format";
+import { platformUserHref } from "@/lib/crm/contact-links";
 
-type C = { id: string; company_id: string; first_name: string | null; last_name: string | null; email: string | null; phone: string | null; title: string | null; role_tag: string | null };
+type C = { id: string; company_id: string; user_id?: string | null; first_name: string | null; last_name: string | null; email: string | null; phone: string | null; title: string | null; role_tag: string | null };
 
 export default function ContactEditForm({ contact }: { contact: C }) {
   const router = useRouter();
@@ -30,14 +31,20 @@ export default function ContactEditForm({ contact }: { contact: C }) {
     return <div style={{ marginBottom: 16 }}><button type="button" className="btn btn-secondary" style={{ background: "#fff" }} onClick={() => setOpen(true)}>Edit contact</button></div>;
   }
 
-  const field = (k: keyof typeof f, label: string, type = "text") => (
-    <div><label className="label">{label}</label><input className="input" type={type} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} /></div>
+  // A platform user's email (and removal) is managed in DA Users — the contact follows the user.
+  const isUser = !!contact.user_id;
+  const field = (k: keyof typeof f, label: string, type = "text", locked = false) => (
+    <div><label className="label">{label}</label>
+      <input className="input" type={type} value={f[k]} disabled={locked} title={locked ? "Platform user — edit the email in DA Users" : undefined}
+        onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+      {locked && <a href={platformUserHref(contact.email)} target="_blank" rel="noreferrer" className="crm-link" style={{ fontSize: 12 }}>Edit in DA Users</a>}
+    </div>
   );
 
   return (
     <div className="card" style={{ padding: 16, marginBottom: 16 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
-        {field("first_name", "First name")}{field("last_name", "Last name")}{field("email", "Email", "email")}
+        {field("first_name", "First name")}{field("last_name", "Last name")}{field("email", "Email", "email", isUser)}
         {field("phone", "Phone", "tel")}{field("title", "Title")}
         <div><label className="label">Role</label>
           <select className="input" value={f.role_tag} onChange={(e) => setF({ ...f, role_tag: e.target.value })}>
@@ -47,10 +54,10 @@ export default function ContactEditForm({ contact }: { contact: C }) {
         </div>
       </div>
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 12 }}>
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={async () => { if (await send({ ...f, role_tag: f.role_tag || null })) { setOpen(false); router.refresh(); } }}>Save</button>
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={async () => { if (await send(isUser ? { ...f, email: undefined, role_tag: f.role_tag || null } : { ...f, role_tag: f.role_tag || null })) { setOpen(false); router.refresh(); } }}>Save</button>
         <button type="button" className="btn btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
-        <button type="button" className="btn btn-danger" style={{ marginLeft: "auto" }} disabled={busy}
-          onClick={async () => { if (window.confirm("Remove this contact?") && await send({ deleted: true })) router.push(`/crm/companies/${contact.company_id}?tab=contacts`); }}>Remove contact</button>
+        {isUser ? <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-muted)" }}>Platform user — disable or remove in DA Users</span> : <button type="button" className="btn btn-danger" style={{ marginLeft: "auto" }} disabled={busy}
+          onClick={async () => { if (window.confirm("Remove this contact?") && await send({ deleted: true })) router.push(`/crm/companies/${contact.company_id}?tab=contacts`); }}>Remove contact</button>}
         {err && <span style={{ fontSize: 12, color: "var(--error)" }}>{err}</span>}
       </div>
     </div>
