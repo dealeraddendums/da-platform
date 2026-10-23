@@ -38,6 +38,7 @@
     "test:crm-company": "tsx scripts/crm-company-verify-unit.ts",
     "test:crm-contacts": "tsx scripts/crm-contacts-verify.ts",
     "test:rls": "tsx scripts/rls-verify.ts",
+    "test:builder-preview": "tsx scripts/builder-preview-verify-unit.ts",
     "crm:seed": "tsx scripts/crm-seed.ts",
     "crm:dialpad-replay": "tsx scripts/crm-dialpad-replay.ts",
     "crm:dialpad-setup": "tsx scripts/crm-dialpad-setup.ts",

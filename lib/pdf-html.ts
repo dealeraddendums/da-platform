@@ -97,6 +97,22 @@ export interface BuildPdfHtmlInput {
   appendElectrificationToTrim?: boolean;
 }
 
+/** One printed product row (both product widgets). Shared with the Builder's "As vehicle" preview
+ *  (app/api/builder/preview-vehicle) so the canvas shows exactly what prints. */
+export function printedOptionItem(
+  o: { option_name: string; description?: string | null; option_price: string | null | undefined; separator_above?: boolean | null; separator_below?: boolean | null; spaces?: number | null },
+  decimals: boolean,
+) {
+  return {
+    name: o.option_name,
+    desc: o.description ?? '',
+    price: formatOptionPrice(o.option_price as string, decimals),
+    separator_above: o.separator_above === true,
+    separator_below: o.separator_below === true,
+    spaces: typeof o.spaces === 'number' ? o.spaces : 0,
+  };
+}
+
 export async function buildPdfHtml({
   widgets,
   paperSize,
@@ -269,24 +285,10 @@ export async function buildPdfHtml({
     }
 
     if (options !== undefined && w.type === 'options') {
-      d.items = requiredOptions.map(o => ({
-        name: o.option_name,
-        desc: o.description ?? '',
-        price: formatOptionPrice(o.option_price, decimals),
-        separator_above: o.separator_above === true,
-        separator_below: o.separator_below === true,
-        spaces: typeof o.spaces === 'number' ? o.spaces : 0,
-      }));
+      d.items = requiredOptions.map(o => printedOptionItem(o, decimals));
     }
     if (options !== undefined && w.type === 'suggested_options') {
-      d.items = suggestedOptions.map(o => ({
-        name: o.option_name,
-        desc: o.description ?? '',
-        price: formatOptionPrice(o.option_price, decimals),
-        separator_above: o.separator_above === true,
-        separator_below: o.separator_below === true,
-        spaces: typeof o.spaces === 'number' ? o.spaces : 0,
-      }));
+      d.items = suggestedOptions.map(o => printedOptionItem(o, decimals));
     }
 
     // Infosheet description: inject the vehicle description if the widget has

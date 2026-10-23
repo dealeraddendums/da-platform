@@ -13,6 +13,8 @@ import { renderW, resolveWholesaleAskingBase } from './widgetRenderer';
 import RichTextEditor from '@/components/RichTextEditor';
 import { WATERMARK_BRANDS, watermarkUrl } from '@/lib/watermarks';
 import type { Widget, PaperSize, CustomWidgetDef, VehiclePreload, SavedTemplate, CustomSize } from './types';
+import PreviewProductsControl from './PreviewProductsControl';
+import { DEFAULT_SELECTION, parsePreviewSelection, previewBanner, selectPreviewItems, type PreviewSelection } from '@/lib/builder-preview';
 import { useBuilderBreadcrumb } from '@/contexts/BuilderBreadcrumb';
 import CustomSizesModal from '@/components/CustomSizesModal';
 import AddCustomSizeModal from './AddCustomSizeModal';
@@ -885,7 +887,7 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
   // (cap field) so a dealer with dozens keeps a usable canvas. Platform
   // starter authoring has no dealer/group scope → keeps the generic samples.
   type PreviewCondition = 'New' | 'Used' | 'CPO';
-  type PreviewProductItem = { name: string; desc: string; price: string; separator_above: boolean; separator_below: boolean; spaces: number; conditions?: PreviewCondition[] };
+  type PreviewProductItem = { key?: string; name: string; desc: string; price: string; separator_above: boolean; separator_below: boolean; spaces: number; conditions?: PreviewCondition[] };
   type PreviewProducts = { required: PreviewProductItem[]; suggested: PreviewProductItem[]; requiredTotal: number; suggestedTotal: number; cap: number };
   const [previewProducts, setPreviewProducts] = useState<PreviewProducts | null>(null);
   // Which vehicle condition the canvas preview simulates. No single vehicle is
@@ -921,12 +923,75 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, dealerId, starterMode]);
 
+  // "Preview products" (PreviewProductsControl): All · Shown in Builder (hand-picked per condition) ·
+  // As vehicle (a real stock #, resolved by the print code). Saved on the loaded template
+  // (preview_products, migration 194) through its own endpoint — never part of the template save, never
+  // read by printing.
+  const [previewSel, setPreviewSel] = useState<PreviewSelection>(DEFAULT_SELECTION);
+  const [previewVehicleItems, setPreviewVehicleItems] = useState<{ id: string; required: PreviewProductItem[]; suggested: PreviewProductItem[] } | null>(null);
+  const previewSelKind: 'dealer' | 'group' = loadedTemplateSource === 'group' ? 'group' : 'dealer';
+  useEffect(() => {
+    if (starterMode || !loadedTemplateId) { setPreviewSel(DEFAULT_SELECTION); return; }
+    let cancelled = false;
+    fetch(`/api/builder/preview-selection?template_id=${encodeURIComponent(loadedTemplateId)}&kind=${previewSelKind}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => { if (!cancelled) setPreviewSel(parsePreviewSelection(j?.selection)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [loadedTemplateId, previewSelKind, starterMode]);
+  const [previewSelNote, setPreviewSelNote] = useState<string | null>(null);
+  const changePreviewSel = (next: PreviewSelection) => {
+    setPreviewSel(next);
+    if (!loadedTemplateId) { setPreviewSelNote('Save the template to keep this selection.'); return; }
+    fetch('/api/builder/preview-selection', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ template_id: loadedTemplateId, kind: previewSelKind, selection: next }) })
+      .then(r => setPreviewSelNote(r.ok ? null : r.status === 403 ? 'Only your group admin can save this template\'s preview selection — it applies for this session only.' : 'Couldn\'t save the selection.'))
+      .catch(() => setPreviewSelNote('Couldn\'t save the selection.'));
+  };
+  const previewDealerId = (dealerId ?? vehicle?.dealer_id ?? null) as string | null;
+  useEffect(() => {
+    const v = previewSel.mode === 'vehicle' ? previewSel.vehicle : null;
+    if (!v || !previewDealerId) { setPreviewVehicleItems(null); return; }
+    if (previewVehicleItems?.id === v.id) return;
+    let cancelled = false;
+    fetch(`/api/builder/preview-vehicle?dealer_id=${encodeURIComponent(previewDealerId)}&vehicle_id=${encodeURIComponent(v.id)}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => {
+        if (cancelled || !j) return;
+        setPreviewVehicleItems({ id: v.id, required: j.required ?? [], suggested: j.suggested ?? [] });
+        if (j.condition) setPreviewCondition(j.condition);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewSel.mode, previewSel.vehicle?.id, previewDealerId]);
+
   /** Render-argument override for the two product widgets: real products when
    *  the scope has them, generic samples otherwise. Never touches w.d. */
   const byCondition = (items: PreviewProductItem[]): PreviewProductItem[] =>
     items.filter(it => (it.conditions ?? ['New', 'Used', 'CPO']).includes(previewCondition));
+  // The section's preview list under the selection: All → by condition; Shown in Builder → the picks for
+  // this condition (print order); As vehicle → exactly that vehicle's printed items.
+  const previewSection = (section: 'required' | 'suggested'): PreviewProductItem[] | null => {
+    if (previewSel.mode === 'vehicle' && previewVehicleItems) return previewVehicleItems[section];
+    if (!previewProducts) return null;
+    const list = previewProducts[section];
+    return previewSel.mode === 'picked' ? selectPreviewItems(list, previewSel, previewCondition) : byCondition(list);
+  };
+  const narrowed = previewSel.mode === 'picked' || (previewSel.mode === 'vehicle' && !!previewVehicleItems);
+  const previewTotalForCondition = previewProducts ? byCondition(previewProducts.required).length + byCondition(previewProducts.suggested).length : 0;
+  const previewShownCount = narrowed ? (previewSection('required')?.length ?? 0) + (previewSection('suggested')?.length ?? 0) : previewTotalForCondition;
+  const previewBannerText = narrowed ? previewBanner(previewShownCount, previewTotalForCondition, previewSel) : null;
+  const previewLabel = narrowed
+    ? previewSel.mode === 'vehicle' ? `Preview: what stock #${previewSel.vehicle?.stock} prints — printing is not affected.` : `Preview: ${previewShownCount} hand-picked product${previewShownCount === 1 ? '' : 's'} (${previewCondition}) — printing is not affected.`
+    : undefined;
 
   const previewRenderD = (w: Widget): Widget['d'] => {
+    if (w.type === 'options' && narrowed) {
+      return { ...w.d, items: previewSection('required') ?? [], previewBadge: true, previewCondition, previewLabel, previewOmitted: 0 };
+    }
+    if (w.type === 'suggested_options' && narrowed) {
+      return { ...w.d, items: previewSection('suggested') ?? [], previewBadge: true, previewCondition, previewLabel, previewOmitted: 0 };
+    }
     if (w.type === 'options' && previewProducts && previewProducts.required.length > 0) {
       const items = byCondition(previewProducts.required);
       if (items.length > 0) {
@@ -2174,28 +2239,52 @@ export default function BuilderPage({ vehicle, templateId, aiEnabled = false, cu
             onDragOver={e => e.preventDefault()}
             onDrop={onDropCanvas}
           >
-            {/* Product-preview condition toggle (canvas-only): no single vehicle
-                is both New and Used, so the preview simulates ONE condition. */}
-            {previewProducts && (previewProducts.required.length > 0 || previewProducts.suggested.length > 0) && (
-              <div style={{ position: 'sticky', top: 0, alignSelf: 'flex-start', zIndex: 60, marginRight: 12, background: '#2a2b3c', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Preview</span>
-                {(['New', 'Used', 'CPO'] as const).map(c => (
-                  <button
-                    key={c}
-                    onClick={() => setPreviewCondition(c)}
-                    style={{
-                      padding: '3px 10px', fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: 'pointer',
-                      border: '1px solid rgba(255,255,255,0.25)',
-                      background: previewCondition === c ? '#ffa500' : 'transparent',
-                      color: previewCondition === c ? '#2a2b3c' : 'rgba(255,255,255,0.8)',
-                    }}
-                    title={`Preview products that may apply to a ${c} vehicle`}
-                  >
-                    {c}
-                  </button>
-                ))}
+            {/* Product-preview controls (canvas-only), pinned top-left out of the flex flow so the paper
+                stays centred: the condition toggle (no single vehicle is both New and Used, so the preview
+                simulates ONE condition), the "Preview products" choice, and the filtered-preview banner. */}
+            <div style={{ position: 'absolute', left: 12, top: 12, zIndex: 60 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                {previewProducts && (previewProducts.required.length > 0 || previewProducts.suggested.length > 0) && (<>
+                  <div style={{ background: '#2a2b3c', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Preview</span>
+                    {(['New', 'Used', 'CPO'] as const).map(c => (
+                      <button
+                        key={c}
+                        onClick={() => setPreviewCondition(c)}
+                        style={{
+                          padding: '3px 10px', fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: 'pointer',
+                          border: '1px solid rgba(255,255,255,0.25)',
+                          background: previewCondition === c ? '#ffa500' : 'transparent',
+                          color: previewCondition === c ? '#2a2b3c' : 'rgba(255,255,255,0.8)',
+                        }}
+                        title={`Preview products that may apply to a ${c} vehicle`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ background: '#2a2b3c', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                    <PreviewProductsControl
+                      selection={previewSel}
+                      onChange={changePreviewSel}
+                      condition={previewCondition}
+                      dealerId={previewDealerId}
+                      saveNote={previewSelNote ?? (loadedTemplateId ? null : 'Save the template to keep this selection.')}
+                      catalog={[
+                        ...previewProducts.required.filter(p => p.key).map(p => ({ key: p.key as string, name: p.name, price: p.price, conditions: p.conditions, section: 'Required' as const })),
+                        ...previewProducts.suggested.filter(p => p.key).map(p => ({ key: p.key as string, name: p.name, price: p.price, conditions: p.conditions, section: 'Suggested' as const })),
+                      ]}
+                    />
+                  </div>
+                </>)}
+                {previewBannerText && (
+                  <div role="status" style={{ background: '#fff8e1', border: '1px solid #ffe082', color: '#7a4d0b', borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 600, width: 260 }}>
+                    {previewBannerText}
+                    {previewSelNote && <div style={{ fontWeight: 400, marginTop: 2 }}>{previewSelNote}</div>}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
             {/* Paper */}
             <div
               ref={paperRef}
