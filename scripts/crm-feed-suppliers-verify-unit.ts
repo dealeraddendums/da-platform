@@ -215,6 +215,17 @@ async function main() {
   eq("Team Velocity Feed ID from the filename", extractFeedIds("I have the file setup to go out with tonight's update.\n\nFilename: 41872.csv", tv.settings.feed_id_pattern), ["41872"]);
   eq("vAuto Feed ID", extractFeedIds("The export for Harbor Point Land Rover is enabled,  ID: MP48213.", va.settings.feed_id_pattern), ["MP48213"]);
   eq("Autosoft activation: every code, split on '/'", [extractFeedIds("Hello,\n\nDealerAddendums has been activated for CEDB17/CEDB75", as.settings.feed_id_pattern), extractFeedIds("DealerAddendums has been activated for CEDB17", as.settings.feed_id_pattern)], [["CEDB17", "CEDB75"], ["CEDB17"]]);
+  {
+    const vc = supplierProfile("Vincue")!;
+    eq("VinCue Feed ID: 'under the ID of' + the 'ID of' / 'ID:' fallbacks", [
+      extractFeedIds("I have added the EL Cerrito Honda to your export under the ID of 46393.", vc.settings.feed_id_pattern),
+      extractFeedIds("It's set up — ID of 50112", vc.settings.feed_id_pattern),
+      extractFeedIds("Export ID: 50113", vc.settings.feed_id_pattern),
+    ], [["46393"], ["50112"], ["50113"]]);
+    const vctx = { approverEmail: null, dealerDomains: [], supplierEmails: [vc.settings.request_email], supplierDomains: vc.settings.domains };
+    eq("VinCue sends from dealercue.com, signs from vincue.com — either is the supplier",
+      ["support@dealercue.com", "alec@dealercue.com", "onboarding@vincue.com", "x@vincue-fake.com"].map((a) => classifySender(a, vctx)), ["supplier", "supplier", "supplier", "other"]);
+  }
   eq("vAuto case number: reply body and notice subject", [extractCaseNumber(null, "case# 08274519 has been created", va.settings.case_number_pattern), extractCaseNumber("Your vAuto support case #08274519 has been opened", "", va.settings.case_number_pattern)], ["08274519", "08274519"]);
   eq("Team Velocity case notice subject", extractCaseNumber("Team Velocity Case Case - 00412233 Created: Inventory Feed Request for: X", "", tv.settings.case_number_pattern), "00412233");
   eq("Autosoft case reference = the Salesforce ref token", extractCaseNumber("RE: Inventory Feed Request for: Cedar Bend Motors??    [ ref:!00Df20Cce8.!500iL0FixT01:ref ]", "", as.settings.case_number_pattern), "!00Df20Cce8.!500iL0FixT01");
@@ -275,6 +286,7 @@ async function main() {
   // ── The three threads end-to-end ────────────────────────────────────────
   await runFixture("team-velocity.json");
   await runFixture("vauto.json");
+  await runFixture("vincue.json");
   const { fx: asFx, db: asDb } = await runFixture("autosoft.json");
 
   // Staff confirm each Autosoft dealership; the order is done once both are assigned.
@@ -513,7 +525,7 @@ async function main() {
   {
     const all = fs.readdirSync(FIX).filter((f) => f.endsWith(".json")).map((f) => fs.readFileSync(path.join(FIX, f), "utf8")).join("\n").toLowerCase();
     // Names, domains and IDs from the source threads (support@, Oct 2026) that must never be committed.
-    const real = ["herzog", "trimble", "heath", "kestermann", "hmvw@", "beaverton", "landrovernc", "cape fear", "ryan king", "shaneh", "morell", "wilmington", "sour lake", "truckville", "rhodes", "angie", "marlena", "claire", "sour17", "sour75", "mp12601", "33486", "08192068", "08192333", "rvafjf", "hsb8uz", "500il0gsrlp"];
+    const real = ["herzog", "trimble", "heath", "kestermann", "hmvw@", "beaverton", "landrovernc", "cape fear", "ryan king", "shaneh", "morell", "wilmington", "sour lake", "truckville", "rhodes", "angie", "marlena", "claire", "sour17", "sour75", "mp12601", "33486", "08192068", "08192333", "rvafjf", "hsb8uz", "500il0gsrlp", "cerrito", "colton", "ambrose", "46393", "mcsweeney"];
     eq("fixtures contain no real dealer / person / domain / ID from the source threads", real.filter((r) => all.includes(r)), []);
   }
 
