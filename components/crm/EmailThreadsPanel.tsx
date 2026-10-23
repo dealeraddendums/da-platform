@@ -18,9 +18,11 @@ export type ThreadFilter = "active" | "closed" | "all";
 export type ThreadCounts = { filter: ThreadFilter; shown: number; active: number; closed: number; all: number };
 const FILTERS: [ThreadFilter, string][] = [["active", "Open"], ["closed", "Closed"], ["all", "All"]];
 
-export default function EmailThreadsPanel({ companyId, contactId, meId, to, filter: initialFilter = "active", onCounts }: {
+export default function EmailThreadsPanel({ companyId, contactId, meId, to, filter: initialFilter = "active", onCounts, openThread }: {
   companyId?: string | null; contactId?: string | null; meId: string; to?: { email: string; name?: string }[];
   filter?: ThreadFilter; onCounts?: (c: ThreadCounts) => void;
+  /** Open this thread in the slide-over (from the timeline); `at` re-opens the same thread on a repeat click. */
+  openThread?: { id: string; at: number } | null;
 }) {
   const [filter, setFilter] = useState<ThreadFilter>(initialFilter);
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -40,6 +42,7 @@ export default function EmailThreadsPanel({ companyId, contactId, meId, to, filt
     onCounts?.({ filter, shown: c[filter] ?? j.total ?? 0, active: c.active ?? 0, closed: c.closed ?? 0, all: c.all ?? 0 });
   }, [companyId, contactId, filter, onCounts]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { if (openThread?.id) setOpen(openThread.id); }, [openThread]);
 
   const empty = filter === "active" ? "No open threads." : filter === "closed" ? "No closed threads." : "No email yet.";
 

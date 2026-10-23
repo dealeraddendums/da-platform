@@ -17,6 +17,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { STATUS_LABEL as FEED_STATUS_LABEL, type OrderStatus } from "./feeds/state";
 import { STAGE_LABEL, type Stage } from "./format";
 import { BILLING_STATE_LABEL, dealerBillingState, type BillingState } from "./billing-status";
+import { emailSender, emailTitle } from "./timeline-rows";
 
 export const SUMMARY_MODEL = process.env.CRM_SUMMARY_MODEL || "claude-opus-5-5";
 // $ per million tokens [input, output] — for the spend log only.
@@ -30,13 +31,14 @@ export const ITEM_BUDGET_TOKENS = 12_000;
 const BODY_CHARS = 700;
 
 export type RefKind = "activity" | "ticket" | "task" | "feed_order" | "company";
-export type Ref = { kind: RefKind; id: string; label: string; at: string | null };
+export type Ref = { kind: RefKind; id: string; label: string; at: string | null; who?: string | null };
 export type SummarySentence = { text: string; sources: string[] };
 export type StoredSummary = { sentences: SummarySentence[]; next_step: SummarySentence | null; refs: Record<string, Ref> };
 
 export type SummaryData = {
   company: { id: string; name: string; kind: string; stage: Stage | null; billing: BillingState | null; trial_day: number | null; trial_ends_on: string | null; trial_flag: string | null; owner: string | null; brands: string[]; city: string | null; state: string | null };
-  activities: { id: string; type: string; direction: string; subject: string | null; body: string | null; occurred_at: string; created_at: string; actor: string | null; contact: string | null }[];
+  /** sender: for email, who sent the message (our staff member, or the From name) — never the thread contact. */
+  activities: { id: string; type: string; direction: string; subject: string | null; body: string | null; occurred_at: string; created_at: string; actor: string | null; contact: string | null; sender?: string | null }[];
   olderActivities: { type: string; subject: string | null; occurred_at: string }[];
   olderCount: number;
   tickets: { id: string; title: string; status: string; priority: string | null; description: string | null; created_at: string; resolved_at: string | null }[];
@@ -95,8 +97,11 @@ export function assembleSummaryInput(d: SummaryData, budgetTokens = ITEM_BUDGET_
   const overflow: { type: string; subject: string | null; occurred_at: string }[] = [];
   for (const a of d.activities) {        // newest first
     const n = included + 1;
-    const who = [a.actor && `staff ${a.actor}`, a.contact && `contact ${a.contact}`].filter(Boolean).join(", ");
-    const ok = add(`A${n}`, { kind: "activity", id: a.id, label: a.subject ?? a.type, at: a.occurred_at },
+    const who = a.type === "email"
+      ? (a.sender ? `from ${a.sender}` : "")
+      : [a.actor && `staff ${a.actor}`, a.contact && `contact ${a.contact}`].filter(Boolean).join(", ");
+    const label = a.type === "email" ? emailTitle(a.subject, a.body) : a.subject ?? a.type;
+    const ok = add(`A${n}`, { kind: "activity", id: a.id, label, at: a.occurred_at, who: a.type === "email" ? a.sender ?? null : a.actor ?? a.contact ?? null },
       `[A${n}] ${day(a.occurred_at)} ${a.type} (${a.direction})${who ? ` [${who}]` : ""}: ${clip(a.subject, 200)}${a.body ? ` — ${clip(a.body, BODY_CHARS)}` : ""}`);
     if (ok) included++; else overflow.push(a);
   }
@@ -170,7 +175,7 @@ export async function loadSummaryData(admin: any, companyId: string, now = new D
   ]);
   if (!dir || !co) return null;
   const [acts, older, olderCount, tickets, tasks, orders, brands, billing] = await Promise.all([
-    admin.from("crm_activities").select("id, type, direction, subject, body, occurred_at, created_at, actor_staff_id, contact_id")
+    admin.from("crm_activities").select("id, type, direction, subject, body, metadata, occurred_at, created_at, actor_staff_id, contact_id")
       .eq("company_id", companyId).gte("occurred_at", since).order("occurred_at", { ascending: false }).limit(200),
     admin.from("crm_activities").select("type, subject, occurred_at").eq("company_id", companyId).lt("occurred_at", since).order("occurred_at", { ascending: false }).limit(25),
     admin.from("crm_activities").select("id", { count: "exact", head: true }).eq("company_id", companyId).lt("occurred_at", since),
@@ -200,7 +205,8 @@ export async function loadSummaryData(admin: any, companyId: string, now = new D
       owner: dir.owner_staff_id ? staffName[dir.owner_staff_id] ?? null : null,
       brands: (brands.data ?? []).map((b: any) => b.brand).sort(), city: dir.city ?? null, state: dir.state ?? null,
     },
-    activities: (acts.data ?? []).map((a: any) => ({ ...a, actor: a.actor_staff_id ? staffName[a.actor_staff_id] ?? null : null, contact: a.contact_id ? contactName[a.contact_id] ?? null : null })),
+    activities: (acts.data ?? []).map(({ metadata, ...a }: any) => ({ ...a, actor: a.actor_staff_id ? staffName[a.actor_staff_id] ?? null : null, contact: a.contact_id ? contactName[a.contact_id] ?? null : null,
+      sender: a.type === "email" ? emailSender({ direction: a.direction, actor_staff_id: a.actor_staff_id, metadata }, staffName) : null })),
     olderActivities: older.data ?? [],
     olderCount: olderCount.count ?? 0,
     tickets: tickets.data ?? [],

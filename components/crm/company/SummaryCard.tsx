@@ -110,13 +110,13 @@ export default function SummaryCard({ companyId }: { companyId: string }) {
 
 function SourceLink({ r }: { r: Ref }) {
   const when = r.at ? new Date(r.at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
-  const label = <>{displaySubject(r.label)}{when && <span style={{ color: "var(--crm-muted)" }}> · {when}</span>}</>;
+  // Cleaned subject · sender · date (summaries written before 2026-10-23 have no sender).
+  const title = displaySubject(r.label) || r.label;
+  const label = <>{title}{(r.who || when) && <span style={{ color: "var(--crm-muted)" }}>{r.who ? ` · ${r.who}` : ""}{when ? ` · ${when}` : ""}</span>}</>;
   if (r.kind === "activity" && r.id !== "older") {
-    return <button type="button" className="crm-textlink" style={{ textAlign: "left" }} onClick={() => {
-      const el = document.getElementById(`act-${r.id}`);
-      if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.animate([{ background: "var(--crm-accent-soft)" }, { background: "transparent" }], { duration: 1600 }); }
-      else window.dispatchEvent(new CustomEvent("crm:activity-show-all", { detail: { id: r.id } }));
-    }}>{label}</button>;
+    // The timeline finds the row (threads collapse, older pages load on demand) and scrolls to it.
+    return <button type="button" className="crm-textlink" style={{ textAlign: "left" }}
+      onClick={() => window.dispatchEvent(new CustomEvent("crm:activity-focus", { detail: { id: r.id } }))}>{label}</button>;
   }
   if (r.kind === "task" || r.kind === "ticket") {
     return <button type="button" className="crm-textlink" style={{ textAlign: "left" }} onClick={() => window.dispatchEvent(new CustomEvent("crm:work-open", { detail: { kind: r.kind, id: r.id } }))}>{label}</button>;

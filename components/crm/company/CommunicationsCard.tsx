@@ -5,7 +5,7 @@
 // Chat: Steven conversations — the Chat module isn't merged yet, so a stub.
 // Calls: playback, AI recap and transcript per call (CallsTable), click-to-call in the tab header.
 // Other cards switch tabs with window event "crm:comms" { tab } (e.g. a task's
-// "Open chat to reply").
+// "Open chat to reply"; the timeline's thread titles pass { tab: "email", thread }).
 
 import { useEffect, useRef, useState } from "react";
 import EmailThreadsPanel, { type ThreadCounts } from "@/components/crm/EmailThreadsPanel";
@@ -23,11 +23,15 @@ export default function CommunicationsCard({ companyId, meId, to, calls, emailCo
   // The Email tab counts what the panel's filter shows (Open by default); the total is in the tooltip.
   const [email, setEmail] = useState<ThreadCounts>({ shown: emailCounts.active, filter: "active", active: emailCounts.active, closed: emailCounts.all - emailCounts.active, all: emailCounts.all });
   const ref = useRef<HTMLElement>(null);
+  // A thread the timeline asked to open (crm:comms { tab: "email", thread }); the panel opens it.
+  const [openThread, setOpenThread] = useState<{ id: string; at: number } | null>(null);
 
   useEffect(() => {
     const on = (e: Event) => {
       const t = (e as CustomEvent).detail?.tab as Tab | undefined;
       if (t === "email" || t === "chat" || t === "calls") { setTab(t); ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+      const th = (e as CustomEvent).detail?.thread as string | undefined;
+      if (t === "email" && th) setOpenThread({ id: th, at: Date.now() });
     };
     window.addEventListener("crm:comms", on);
     return () => window.removeEventListener("crm:comms", on);
@@ -52,7 +56,7 @@ export default function CommunicationsCard({ companyId, meId, to, calls, emailCo
           </div>
         </div>
       </div>
-      {tab === "email" && <EmailThreadsPanel companyId={companyId} meId={meId} to={to} filter={email.filter} onCounts={setEmail} />}
+      {tab === "email" && <EmailThreadsPanel companyId={companyId} meId={meId} to={to} filter={email.filter} onCounts={setEmail} openThread={openThread} />}
       {tab === "chat" && (
         <div className="crm-empty">
           <strong>Chat is coming soon</strong>
