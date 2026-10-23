@@ -29,6 +29,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     (e) => console.error("[feed-health] digest failed:", e instanceof Error ? e.message : e),
   );
 
+  // Piggyback: the nightly product-description check (lib/description-check.ts)
+  // rides this daily schedule the same way. Read-only, isolated, run-locked.
+  void import("@/lib/description-check").then(({ runDescriptionCheck }) => runDescriptionCheck()).then(
+    (r) => console.log("[description-check] (via harvest-vin-trims):", JSON.stringify(r)),
+    (e) => console.error("[description-check] failed:", e instanceof Error ? e.message : e),
+  );
+
   const sinceHours = Math.max(1, parseInt(req.nextUrl.searchParams.get("hours") ?? "25", 10));
   const since = new Date(Date.now() - sinceHours * 3600_000).toISOString();
 

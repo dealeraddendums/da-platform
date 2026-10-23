@@ -5,9 +5,10 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
-import { Mark, Extension, Node } from "@tiptap/core";
-import { useEffect, useState } from "react";
+import { Mark, Extension, Node, type Editor } from "@tiptap/core";
+import { useEffect, useRef, useState } from "react";
 import { normalizeProductHtmlSource } from "@/lib/product-name";
+import { cleanProductDescription, type DescriptionFlag } from "@/lib/product-description-clean";
 
 const LINE_HEIGHT_TYPES = ["paragraph", "heading", "listItem"] as const;
 const LINE_HEIGHT_MIN = 0.8;
@@ -86,6 +87,29 @@ function looksLikeHtml(s: string): boolean {
   return /<[a-z][^>]*>/i.test(s);
 }
 
+// Paste goes through the same converter as the 2026-10-23 description cleanup
+// (lib/product-description-clean.ts), so pasted Word / web / 4.0 HTML lands in
+// the editor's own format instead of carrying styles, <div>s or entity-escaped
+// tag source the printer can't use. Flags that mean something the person can
+// see was dropped trigger the "Formatting removed" note.
+const VISIBLE_LOSS: DescriptionFlag[] = [
+  "style-trimmed", "dropped-blocks", "table", "heading", "link", "image-dropped",
+  "script-or-style", "unknown-tag", "escaped-markup", "double-encoded", "nbsp",
+];
+// Clipboard wrappers every browser / Office adds — not the person's formatting.
+function stripClipboardWrapper(html: string): string {
+  return html
+    .replace(/<head[\s\S]*?<\/head>/gi, "")
+    .replace(/<!--(?:StartFragment|EndFragment)-->/gi, "")
+    .replace(/<\/?(?:html|body|meta|xml)\b[^>]*>/gi, "");
+}
+function cleanPaste(html: string): { html: string; lossy: boolean } {
+  const r = cleanProductDescription(stripClipboardWrapper(html));
+  return { html: r.html, lossy: r.flags.some((f) => VISIBLE_LOSS.includes(f)) };
+}
+// Plain-text paste that is really HTML source ("<li>Paint</li>", "&lt;b&gt;…").
+const HTML_SOURCE = /<\/?(?:p|br|b|strong|i|em|u|span|div|ul|ol|li|font|h[1-6])\b[^>]*>|&lt;\/?(?:p|br|b|strong|i|em|u|span|div|ul|ol|li)\b/i;
+
 function toEditorContent(value: string): string {
   if (!value) return "";
   // Load the NORMALIZED value: a stored description whose markup is entity-
@@ -154,6 +178,16 @@ export default function RichTextEditor({
   toolbarOpen?: boolean;
 }) {
   const [colorOpen, setColorOpen] = useState(false);
+  const [pasteNote, setPasteNote] = useState(false);
+  const pasteNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flagPasteLoss = () => {
+    setPasteNote(true);
+    if (pasteNoteTimer.current) clearTimeout(pasteNoteTimer.current);
+    pasteNoteTimer.current = setTimeout(() => setPasteNote(false), 3000);
+  };
+  useEffect(() => () => { if (pasteNoteTimer.current) clearTimeout(pasteNoteTimer.current); }, []);
+  // handlePaste is configured before useEditor returns the instance.
+  const editorRef = useRef<Editor | null>(null);
 
   const editor = useEditor({
     extensions: [
@@ -168,12 +202,34 @@ export default function RichTextEditor({
     content: toEditorContent(value),
     editable: !disabled,
     immediatelyRender: false,
+    editorProps: {
+      transformPastedHTML: (html) => {
+        // Copy/paste inside a TipTap editor is already editor HTML, and its
+        // data-pm-slice marker is what keeps a partial-line paste inline.
+        if (/data-pm-slice/.test(html)) return html;
+        const r = cleanPaste(html);
+        if (r.lossy) flagPasteLoss();
+        return r.html;
+      },
+      handlePaste: (_view, event) => {
+        const dt = event.clipboardData;
+        if (!dt || dt.types.includes("text/html")) return false;   // HTML goes through transformPastedHTML
+        const text = dt.getData("text/plain");
+        if (!text || !HTML_SOURCE.test(text)) return false;          // ordinary text: default paste
+        const r = cleanPaste(text);
+        if (r.lossy) flagPasteLoss();
+        editorRef.current?.chain().focus().insertContent(r.html).run();
+        return true;
+      },
+    },
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
       // Tiptap returns "<p></p>" for an empty doc — normalize to "" so saves stay clean.
       onChange(html === "<p></p>" ? "" : html);
     },
   });
+
+  editorRef.current = editor;
 
   // Keep external value updates (e.g. AI Generate) in sync without remounting.
   useEffect(() => {
@@ -320,6 +376,11 @@ export default function RichTextEditor({
       >
         <EditorContent editor={editor} />
       </div>
+      {pasteNote && (
+        <div role="status" style={{ marginTop: 4, fontSize: 11, color: "#78828c" }}>
+          Formatting removed — pasted text was converted to plain description formatting.
+        </div>
+      )}
 
       <style jsx global>{`
         .rte-area .ProseMirror { outline: none; min-height: ${minHeight - 18}px; }
