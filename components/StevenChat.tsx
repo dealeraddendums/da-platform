@@ -54,7 +54,14 @@ function load(): { conversationId: string | null; messages: Msg[]; live: boolean
 }
 
 /** The person's first name from the session — only used in the greeting. */
-export default function StevenChat({ firstName }: { firstName?: string | null } = {}) {
+// Not on DA-CRM: staff use the CRM's own Inbox / Chat there.
+export default function StevenChat(props: { firstName?: string | null } = {}) {
+  const pathname = usePathname();
+  if (pathname === "/crm" || pathname?.startsWith("/crm/")) return null;
+  return <StevenChatLauncher {...props} />;
+}
+
+function StevenChatLauncher({ firstName }: { firstName?: string | null } = {}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"chat" | "tickets">("chat");

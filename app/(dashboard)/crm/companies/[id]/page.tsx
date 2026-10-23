@@ -19,7 +19,8 @@ import { ContactsCard, DetailsCard, EditCompanyButton, LinksCard, OwnerCard, typ
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames, timeline } from "@/lib/crm/queries";
 import { contactName, type Stage } from "@/lib/crm/format";
-import { dealerBillingState, type BillingRead } from "@/lib/crm/billing-status";
+import { billingPayer, dealerBillingState, type BillingRead } from "@/lib/crm/billing-status";
+import { feedName, inventoryFreshness, isFed } from "@/lib/crm/inventory-freshness";
 import { OPEN_STATUSES, STATUS_LABEL as FEED_STATUS_LABEL, type OrderStatus } from "@/lib/crm/feeds/state";
 import { OWNED_STAGES } from "@/lib/crm/companies";
 
@@ -45,12 +46,21 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
     canDial(userId, admin),
     isDealer ? admin.from("crm_company_brands").select("brand").eq("company_id", co.id) : Promise.resolve({ data: [] }),
     isDealer ? admin.from("crm_brands").select("brand").order("sort") : Promise.resolve({ data: [] }),
-    isDealer ? admin.from("dealers").select("dealer_id, name, address, city, state, zip, website_url, inventory_provider, inventory_provider_is_dms, inventory_dealer_id, group_id").eq("id", co.dealer_id).maybeSingle().then((r: any) => r.data)
-      : isGroup ? admin.from("groups").select("name, address, city, state, zip").eq("id", co.group_id).maybeSingle().then((r: any) => r.data)
+    isDealer ? admin.from("dealers").select("dealer_id, name, address, city, state, zip, website_url, inventory_provider, inventory_provider_is_dms, inventory_dealer_id, feed_source, group_id").eq("id", co.dealer_id).maybeSingle().then((r: any) => r.data)
+      : isGroup ? admin.from("groups").select("name, address, city, state, zip, billing_customer_id").eq("id", co.group_id).maybeSingle().then((r: any) => r.data)
       : Promise.resolve(null),
     dir.parent_group_id ? admin.from("crm_companies").select("id, group_id, grp:groups(name)").eq("group_id", dir.parent_group_id).maybeSingle() : Promise.resolve({ data: null }),
     isDealer && stage === "paying" ? dealerBillingState(admin, co.dealer_id) : Promise.resolve(null as BillingRead | null),
   ]);
+  const feed = isDealer ? feedName(source?.inventory_provider, source?.feed_source) : null;
+  const [newestVehicle, payer] = await Promise.all([
+    isDealer && source?.dealer_id
+      ? admin.from("dealer_vehicles").select("date_added").eq("dealer_id", source.dealer_id).not("date_added", "is", null).order("date_added", { ascending: false }).limit(1).maybeSingle().then((r: any) => (r.data?.date_added as string | undefined) ?? null)
+      : Promise.resolve(null),
+    isDealer && !billing ? billingPayer(admin, co.dealer_id) : Promise.resolve(null),
+  ]);
+  // DA-Billing deep link: /?customer={UUID} opens that customer (da-billing reads it after login).
+  const billingCustomerId = isDealer ? billing?.customerId ?? payer?.customerId ?? null : isGroup ? source?.billing_customer_id ?? null : null;
   const brands = (brandsRes.data ?? []).map((b: any) => b.brand).sort();
   const staffList = Object.entries(staff).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   const firstEmail = (co.emails ?? [])[0]?.address ?? null;
@@ -141,7 +151,8 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
           <DetailsCard canDial={dial}
             d={{
               address, website: (isDealer ? source?.website_url : null) ?? co.website ?? null, phone: dir.phone ?? co.phone ?? null, emails: co.emails ?? [],
-              dms: isDealer ? !!source?.inventory_provider_is_dms : null, feedProvider: isDealer ? source?.inventory_provider ?? null : null, feedId: isDealer ? source?.inventory_dealer_id ?? null : null,
+              dms: isDealer ? !!source?.inventory_provider_is_dms : null, feedProvider: feed, feedId: isDealer ? source?.inventory_dealer_id ?? null : null,
+              inventory: isDealer ? inventoryFreshness(newestVehicle, isFed(feed, source?.inventory_dealer_id), new Date()) : null,
               group: groupCompany ? { href: `/crm/companies/${groupCompany.id}`, name: groupCompany.grp?.name ?? "Group" } : null,
               feedOrder: order ? { label: FEED_STATUS_LABEL[order.status] ?? order.status, open: (OPEN_STATUSES as readonly string[]).includes(order.status) } : null,
             }}
@@ -151,7 +162,7 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
           <LinksCard l={{
             crmGroup: groupCompany ? `/crm/companies/${groupCompany.id}` : null,
             crmUsers: isDealer || isGroup ? `/crm/contacts?company=${co.id}&users=1` : null,
-            billing: isDealer || isGroup ? BILLING_APP : null,
+            billing: isDealer || isGroup ? (billingCustomerId ? `${BILLING_APP}?customer=${billingCustomerId}` : BILLING_APP) : null,
             daGroup: isGroup ? `/groups/${co.group_id}` : groupCompany ? `/groups/${groupCompany.group_id}` : null,
             daDealer: isDealer ? `/dealers/${co.dealer_id}` : null,
             login: isDealer && source?.dealer_id ? { dealerUuid: co.dealer_id, dealerTextId: source.dealer_id, name: dir.name ?? source.name ?? source.dealer_id } : null,

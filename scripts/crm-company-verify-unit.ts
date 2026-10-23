@@ -1,11 +1,13 @@
 /* npm run test:crm-company — DA-CRM company page pure logic: the AI summary's
    data assembly, debounce and output parsing; billing state from DA-Billing's
-   reads; owner auto-clear on conversion; task / ticket validation. No database
+   reads; owner auto-clear on conversion; task / ticket validation; feed name and
+   inventory freshness. No database
    or network. */
 import { assembleSummaryInput, hasAnyActivity, latestChange, parseSummary, summaryDue, DEBOUNCE_MS, type SummaryData } from "../lib/crm/company-summary";
 import { deriveBillingState } from "../lib/crm/billing-status";
 import { ownerForStage } from "../lib/crm/companies";
 import { workPatch } from "../lib/crm/work-items";
+import { feedName, inventoryFreshness, isFed } from "../lib/crm/inventory-freshness";
 
 let fail = 0;
 function eq(name: string, got: unknown, want: unknown) {
@@ -103,6 +105,18 @@ async function main() {
   eq("ticket resolved stamps resolved_at", typeof (workPatch("ticket", { status: "resolved" }, false) as any).patch.resolved_at, "string");
   eq("ticket pending is still open (no resolved_at)", (workPatch("ticket", { status: "pending" }, false) as any).patch.resolved_at, null);
   eq("bad due date refused", workPatch("task", { title: "x", due_at: "soon" }, true), { error: "Bad due date" });
+
+  // ── Feed name + inventory freshness ───────────────────────────────────────
+  eq("feed name prefers inventory_provider", feedName("CDK", "Vauto"), "CDK");
+  eq("feed name falls back to feed_source", feedName(null, " Homenet "), "Homenet");
+  eq("no feed name", feedName("", ""), null);
+  eq("manual dealer isn't fed", isFed("Manual", null), false);
+  eq("feed id alone counts as fed", isFed(null, "ss_123"), true);
+  eq("added today", inventoryFreshness(iso(60), true, NOW), { newest: iso(60), days: 0, stale: false, label: "Today" });
+  eq("2 days: not stale", inventoryFreshness(iso(60 * 24 * 2 + 5), true, NOW).stale, false);
+  eq("3 days: stale (red)", inventoryFreshness(iso(60 * 24 * 3), true, NOW), { newest: iso(60 * 24 * 3), days: 3, stale: true, label: "3 days ago" });
+  eq("manual dealer never red", inventoryFreshness(iso(60 * 24 * 30), false, NOW).stale, false);
+  eq("fed dealer with no vehicles is red", inventoryFreshness(null, true, NOW), { newest: null, days: null, stale: true, label: "No vehicles yet" });
 
   console.log(fail ? `\n${fail} failed` : "\nall passed");
   if (fail) process.exit(1);

@@ -12,6 +12,7 @@ import AddContactForm from "@/components/crm/AddContactForm";
 import ContactEditForm from "@/components/crm/ContactEditForm";
 import CompanyDetailsForm from "@/components/crm/CompanyDetailsForm";
 import CompanyHeaderControls from "@/components/crm/CompanyHeaderControls";
+import { STALE_DAYS, type Freshness } from "@/lib/crm/inventory-freshness";
 import CompanyFeedsPanel from "@/components/crm/CompanyFeedsPanel";
 import { StagePill } from "@/components/crm/CompanyHeader";
 import type { Stage } from "@/lib/crm/format";
@@ -63,6 +64,7 @@ export function OwnerCard({ companyId, ownerId, staff, canChange, meId, trial }:
 export type DetailsData = {
   address: string | null; website: string | null; phone: string | null; emails: { address: string; label: string | null }[];
   dms: boolean | null; feedProvider: string | null; feedId: string | null;
+  inventory: Freshness | null;
   group: { href: string; name: string } | null;
   feedOrder: { label: string; open: boolean } | null;
 };
@@ -80,9 +82,15 @@ export function DetailsCard({ d, canDial, feeds }: { d: DetailsData; canDial: bo
         <div key={e.address} className="crm-detail-row"><Icon d="M4 4h16v16H4z M22 6l-10 7L2 6" /><span><a className="crm-link" href={`mailto:${e.address}`}>{e.address}</a>{e.label && <span style={{ color: "var(--crm-muted)" }}> · {e.label}</span>}</span></div>
       ))}
       {(d.feedProvider || d.feedId || d.dms != null) && <div style={{ borderTop: "1px solid var(--crm-border)", margin: "8px 0 4px" }} />}
-      {d.feedProvider && <div className="crm-detail-row"><span className="k">Feed provider</span><span>{d.feedProvider}{d.dms ? " (DMS)" : ""}</span></div>}
+      {d.feedProvider && <div className="crm-detail-row"><span className="k">{d.dms ? "DMS" : "Feed"}</span><span>{d.feedProvider}</span></div>}
+      {!d.feedProvider && d.dms != null && <div className="crm-detail-row"><span className="k">Feed</span><span style={{ color: "var(--crm-muted)" }}>Not set</span></div>}
       {d.feedId && <div className="crm-detail-row"><span className="k">Feed ID</span><span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13 }}>{d.feedId}</span></div>}
-      {!d.feedProvider && d.dms != null && <div className="crm-detail-row"><span className="k">Feed provider</span><span style={{ color: "var(--crm-muted)" }}>Not set</span></div>}
+      {d.inventory && (
+        <div className="crm-detail-row"><span className="k">Newest vehicle</span>
+          <span className={d.inventory.stale ? "crm-overdue" : undefined}
+            title={d.inventory.newest ? `Added ${new Date(d.inventory.newest).toLocaleString()}${d.inventory.stale ? ` — nothing new in ${STALE_DAYS}+ days; check the feed` : ""}` : undefined}>
+            {d.inventory.label}</span></div>
+      )}
       {d.group && <div className="crm-detail-row"><span className="k">Group</span><Link className="crm-link" href={d.group.href}>{d.group.name}</Link></div>}
       {feeds && (
         <div className="crm-detail-row"><span className="k">Feed order</span>
