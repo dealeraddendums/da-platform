@@ -9,7 +9,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createAdminSupabaseClient } from "@/lib/db";
 import { renderTemplate, type TemplateContext } from "./template-vars";
-import { toEmailHtml, wrapEmail, htmlToText } from "./email-html";
+import { toEmailHtml, wrapEmail, htmlToText, signatureEmailHtml } from "./email-html";
 import { trialStatus } from "./trial";
 import { formatPhone } from "./phone";
 import { DEFAULT_SIGNATURE_TEMPLATE, renderSignature, type SignatureCta } from "./signature";
@@ -142,7 +142,7 @@ export async function composeEmail(
   const subject = renderTemplate(input.subject ?? "", ctx, { html: false });
   const body = renderTemplate(input.bodyHtml ?? "", ctx, { html: true });
   const sigRaw = input.signature === false ? null : (await senderSignature(admin, input.staffId)).html;
-  const sig = sigRaw ? toEmailHtml(sigRaw) : null;
+  const sig = sigRaw ? signatureEmailHtml(sigRaw) : null;
   // Appended exactly once: a copy already in the body (pasted, or carried in a draft) is removed first.
   // Outlook's quoted history sits below our HTML (inbox-send PATCHes above the quote), so prior
   // messages' signatures stay in the quote, never in our part.

@@ -232,7 +232,7 @@ export default function CompanyContextRail({
 
       {/* ── Slide-overs ─────────────────────────────────────────────────── */}
       <SlideOver open={panel?.kind === "compose"} title={`Email ${co?.name ?? ""}`} onClose={() => setPanel(null)} width={760}>
-        {panel?.kind === "compose" && <ComposeNew companyId={co?.id ?? null} contactId={ct?.id ?? null} to={emailTo} onDone={() => { setPanel(null); setMsg({ ok: true, text: "Email sent." }); void load(); }} onCancel={() => setPanel(null)} />}
+        {panel?.kind === "compose" && <ComposeNew companyId={co?.id ?? null} companyName={co?.name ?? null} contactId={ct?.id ?? null} to={emailTo} onDone={() => { setPanel(null); setMsg({ ok: true, text: "Email sent." }); void load(); }} onCancel={() => setPanel(null)} />}
       </SlideOver>
       <SlideOver open={panel?.kind === "thread"} title="Email thread" onClose={() => setPanel(null)} width={820}>
         {panel?.kind === "thread" && <ThreadView threadId={panel.id} meId={meId} onChanged={load} />}
@@ -256,12 +256,12 @@ export default function CompanyContextRail({
 }
 
 /** New email from a company / contact: loads the mailboxes, then the composer. */
-export function ComposeNew({ companyId, contactId, to, onDone, onCancel }: { companyId: string | null; contactId: string | null; to: { email: string; name?: string }[]; onDone: () => void; onCancel: () => void }) {
+export function ComposeNew({ companyId, companyName, contactId, to, onDone, onCancel }: { companyId: string | null; companyName?: string | null; contactId: string | null; to: { email: string; name?: string | null }[]; onDone: () => void; onCancel: () => void }) {
   const [mbs, setMbs] = useState<{ id: string; address: string; display_name: string; purpose: string; active: boolean }[] | null>(null);
   useEffect(() => { fetch("/api/crm/inbox/threads?view=all&page=0").then((r) => r.json()).then((j) => setMbs((j.mailboxes ?? []).filter((m: { active: boolean }) => m.active))).catch(() => setMbs([])); }, []);
   if (!mbs) return <p style={{ padding: 16, color: "var(--text-muted)" }}>Loading…</p>;
   const def = mbs.find((m) => m.purpose === "support") ?? mbs[0];
-  return <EmailComposer mode="new" mailboxes={mbs} defaultMailboxId={def?.id} companyId={companyId} contactId={contactId} initialTo={to} onSent={onDone} onCancel={onCancel} />;
+  return <EmailComposer mode="new" mailboxes={mbs} defaultMailboxId={def?.id} companyId={companyId} companyName={companyName} contactId={contactId} initialTo={to} onSent={onDone} onCancel={onCancel} />;
 }
 
 function Act({ children, onClick, disabled, title }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean; title?: string }) {

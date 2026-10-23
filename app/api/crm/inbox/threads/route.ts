@@ -3,6 +3,7 @@ import { requireCrmStaff } from "@/lib/crm/access";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { companyNames, staffNames } from "@/lib/crm/queries";
 import { mailboxLabel } from "@/lib/crm/thread-display";
+import { linkedThreadIds, threadOwnerFilter } from "@/lib/crm/thread-links";
 
 export const dynamic = "force-dynamic";
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -48,11 +49,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const { data: hits } = await admin.from("crm_email_participants").select("thread_id").ilike("address", `%${term}%`).limit(300);
     ids = Array.from(new Set((hits ?? []).map((h: any) => h.thread_id)));
   }
+  // A company / contact also sees threads sent to its contacts (crm_email_thread_contacts, migration 197).
+  const linked = contactId || companyId ? await linkedThreadIds(admin, { companyId, contactId }) : [];
+  const owner = contactId ? threadOwnerFilter("contact_id", contactId, linked) : companyId ? threadOwnerFilter("company_id", companyId, linked) : null;
+  const search = term.length >= 2 ? (ids!.length ? `subject.ilike.%${term}%,id.in.(${ids!.join(",")})` : `subject.ilike.%${term}%`) : null;
   const scoped = (q: any) => {
     if (mailbox) q = q.eq("mailbox_id", mailbox);
-    if (companyId) q = q.eq("company_id", companyId);
-    if (contactId) q = q.eq("contact_id", contactId);
-    if (term.length >= 2) q = ids!.length ? q.or(`subject.ilike.%${term}%,id.in.(${ids!.join(",")})`) : q.ilike("subject", `%${term}%`);
+    // Both are OR lists; one or= param holding and(or(…),or(…)) keeps them ANDed.
+    if (owner && search) q = q.or(`and(or(${owner}),or(${search}))`);
+    else if (owner) q = q.or(owner);
+    else if (search) q = q.or(search);
     return q;
   };
 

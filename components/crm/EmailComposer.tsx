@@ -4,12 +4,14 @@
 // POST /api/crm/inbox/send (Microsoft Graph, as the mailbox; the server runs
 // composeEmail(), which fills variables, makes it Outlook-safe and appends the
 // sender's signature, shown read-only under the body). Templates come from the shared TemplatePicker
-// (body only — the signature is added at send).
+// (body only — the signature is added at send). TO / CC / BCC are chip fields (RecipientField): CRM
+// contacts are suggested, and addresses at another company / not in the CRM can be added as contacts.
 
 import { useMemo, useRef, useState } from "react";
 import EmailEditor from "./EmailEditor";
 import TemplatePicker from "./TemplatePicker";
 import SignatureBlock from "./SignatureBlock";
+import RecipientField, { type RecipientChip } from "./RecipientField";
 
 export type ComposerMode = "new" | "reply" | "replyAll" | "forward";
 export type ComposerRecipient = { email: string; name?: string | null };
@@ -18,31 +20,17 @@ export type MailboxOption = { id: string; address: string; display_name: string 
 const CAP = 20 * 1024 * 1024;
 const LABEL: Record<ComposerMode, string> = { new: "New email", reply: "Reply", replyAll: "Reply all", forward: "Forward" };
 
-export function formatRecipients(list: ComposerRecipient[] | undefined): string {
-  return (list ?? []).map((r) => (r.name ? `${r.name} <${r.email}>` : r.email)).join(", ");
-}
-
-/** "Jane Doe <jane@x.com>, bob@y.com" → recipients (invalid entries returned separately). */
-export function parseRecipients(text: string): { list: ComposerRecipient[]; bad: string[] } {
-  const list: ComposerRecipient[] = [], bad: string[] = [];
-  for (const part of text.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean)) {
-    const m = /^(.*?)<\s*([^<>\s]+@[^<>\s]+)\s*>$/.exec(part);
-    const email = (m ? m[2] : part).trim().toLowerCase();
-    const name = m ? m[1].trim().replace(/^"|"$/g, "") || null : null;
-    if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { if (!list.some((r) => r.email === email)) list.push({ email, name }); }
-    else bad.push(part);
-  }
-  return { list, bad };
-}
+const plain = (r: RecipientChip): ComposerRecipient => ({ email: r.email, name: r.name ?? null });
 
 export default function EmailComposer({
-  mode, emailId, mailboxes, defaultMailboxId, companyId, contactId, initialTo, initialCc, initialSubject, onSent, onCancel,
+  mode, emailId, mailboxes, defaultMailboxId, companyId, companyName, contactId, initialTo, initialCc, initialSubject, onSent, onCancel,
 }: {
   mode: ComposerMode;
   emailId?: string | null;              // message being answered
   mailboxes?: MailboxOption[];          // new compose: pick the mailbox
   defaultMailboxId?: string | null;
   companyId?: string | null;
+  companyName?: string | null;          // "Add as contact of {company}" in the recipient fields
   contactId?: string | null;
   initialTo?: ComposerRecipient[];
   initialCc?: ComposerRecipient[];
@@ -51,10 +39,12 @@ export default function EmailComposer({
   onCancel: () => void;
 }) {
   const [mailboxId, setMailboxId] = useState(defaultMailboxId ?? mailboxes?.[0]?.id ?? "");
-  const [to, setTo] = useState(formatRecipients(initialTo));
-  const [cc, setCc] = useState(formatRecipients(initialCc));
-  const [bcc, setBcc] = useState("");
+  const chips = (l?: ComposerRecipient[]): RecipientChip[] => (l ?? []).map((r) => ({ email: r.email.trim().toLowerCase(), name: r.name ?? null }));
+  const [to, setTo] = useState<RecipientChip[]>(() => chips(initialTo));
+  const [cc, setCc] = useState<RecipientChip[]>(() => chips(initialCc));
+  const [bcc, setBcc] = useState<RecipientChip[]>([]);
   const [showBcc, setShowBcc] = useState(false);
+  const company = useMemo(() => (companyId ? { id: companyId, name: companyName || "this company" } : null), [companyId, companyName]);
   const [subject, setSubject] = useState(initialSubject ?? "");
   const [body, setBody] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -64,10 +54,7 @@ export default function EmailComposer({
   const total = useMemo(() => files.reduce((n, f) => n + f.size, 0), [files]);
 
   async function send() {
-    const pTo = parseRecipients(to), pCc = parseRecipients(cc), pBcc = parseRecipients(bcc);
-    const bad = [...pTo.bad, ...pCc.bad, ...pBcc.bad];
-    if (bad.length) { setErr(`Not an email address: ${bad.join(", ")}`); return; }
-    if (!pTo.list.length) { setErr("Add at least one recipient"); return; }
+    if (!to.length) { setErr("Add at least one recipient"); return; }
     if (!body.trim()) { setErr("Write a message (or pick a template)"); return; }
     if (total > CAP) { setErr("Attachments are over 20 MB"); return; }
     setBusy(true);
@@ -76,7 +63,8 @@ export default function EmailComposer({
     form.append("payload", JSON.stringify({
       mode, email_id: emailId ?? null, mailbox_id: mode === "new" ? mailboxId || null : null,
       company_id: companyId ?? null, contact_id: contactId ?? null,
-      to: pTo.list, cc: pCc.list, bcc: pBcc.list, subject, body_html: body,
+      to: to.map(plain), cc: cc.map(plain), bcc: bcc.map(plain), subject, body_html: body,
+      also_add: [...to, ...cc, ...bcc].filter((r) => r.alsoAdd && r.info?.status === "elsewhere").map((r) => r.email),
     }));
     files.forEach((f) => form.append("attachments", f, f.name));
     const res = await fetch("/api/crm/inbox/send", { method: "POST", body: form });
@@ -102,23 +90,11 @@ export default function EmailComposer({
           </select>
         </div>
       )}
-      <div style={row}>
-        <span className="label" style={{ margin: 0 }}>To</span>
-        <input className="input" value={to} onChange={(e) => setTo(e.target.value)} placeholder="name@dealer.com, Jane Doe <jane@dealer.com>" />
-      </div>
-      <div style={row}>
-        <span className="label" style={{ margin: 0 }}>Cc</span>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input className="input" value={cc} onChange={(e) => setCc(e.target.value)} />
-          {!showBcc && <button type="button" onClick={() => setShowBcc(true)} style={{ background: "none", border: "none", color: "var(--blue)", cursor: "pointer", fontSize: 12 }}>Bcc</button>}
-        </div>
-      </div>
-      {showBcc && (
-        <div style={row}>
-          <span className="label" style={{ margin: 0 }}>Bcc</span>
-          <input className="input" value={bcc} onChange={(e) => setBcc(e.target.value)} />
-        </div>
-      )}
+      <RecipientField label="To" value={to} onChange={setTo} company={company} autoFocus={mode === "new" && !to.length} />
+      <RecipientField label="Cc" value={cc} onChange={setCc} company={company} />
+      {showBcc
+        ? <RecipientField label="Bcc" value={bcc} onChange={setBcc} company={company} />
+        : <div style={{ marginTop: -6, paddingLeft: 72 }}><button type="button" onClick={() => setShowBcc(true)} style={{ background: "none", border: "none", color: "var(--blue)", cursor: "pointer", fontSize: 12, padding: 0 }}>Add Bcc</button></div>}
       <div style={row}>
         <span className="label" style={{ margin: 0 }}>Subject</span>
         <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />

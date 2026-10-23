@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCrmStaff } from "@/lib/crm/access";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { CALL_COLUMNS, canDial, decorateCalls, staffNames } from "@/lib/crm/queries";
+import { linkedThreadIds, threadOwnerFilter } from "@/lib/crm/thread-links";
 import { decorateOrders, parentsOf } from "@/lib/crm/feeds/queue";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     admin.from("crm_tickets").select("id, title, status, assigned_staff_id, created_at").eq("company_id", companyId).in("status", ["open", "pending"]).order("created_at", { ascending: false }).limit(10),
     admin.from("crm_tasks").select("id, title, status, assigned_staff_id, created_at").eq("company_id", companyId).eq("status", "open").order("created_at", { ascending: false }).limit(10),
     admin.from("crm_calls").select(CALL_COLUMNS).eq("company_id", companyId).order("started_at", { ascending: false, nullsFirst: false }).limit(5),
-    admin.from("crm_email_threads").select("id, subject, status, last_message_at, last_direction, unread").eq("company_id", companyId).order("last_message_at", { ascending: false }).limit(5),
+    linkedThreadIds(admin, { companyId }).then((linked) => admin.from("crm_email_threads").select("id, subject, status, last_message_at, last_direction, unread").or(threadOwnerFilter("company_id", companyId, linked)).order("last_message_at", { ascending: false }).limit(5)),
     staffNames(admin),
     // The company's orders, and group orders one of its dealerships is on (child rows → their parent).
     admin.from("crm_feed_orders").select("*").eq("dealer_company_id", companyId).order("created_at", { ascending: false }).limit(10),

@@ -11,6 +11,7 @@ import { notFound } from "next/navigation";
 import CompanyHeader, { stageDisplay } from "@/components/crm/CompanyHeader";
 import CompanyFilesPanel from "@/components/crm/CompanyFilesPanel";
 import FeedSupplierSettings from "@/components/crm/FeedSupplierSettings";
+import { linkedThreadIds, threadOwnerFilter } from "@/lib/crm/thread-links";
 import CommunicationsCard from "@/components/crm/company/CommunicationsCard";
 import WorkCard, { type WorkTask, type WorkTicket } from "@/components/crm/company/WorkCard";
 import ActivityCard from "@/components/crm/company/ActivityCard";
@@ -65,13 +66,14 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
   const billingCustomerId = isDealer ? billing?.customerId ?? payer?.customerId ?? null : isGroup ? source?.billing_customer_id ?? null : null;
   const brands = (brandsRes.data ?? []).map((b: any) => b.brand).sort();
   const staffList = Object.entries(staff).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  const firstEmail = (co.emails ?? [])[0]?.address ?? null;
+  // Email tab counts include threads sent to this company's contacts (migration 197).
+  const ownedThreads = threadOwnerFilter("company_id", co.id, await linkedThreadIds(admin, { companyId: co.id }));
 
   const [contactsRes, callsRes, threadCount, openThreadCount, tasksRes, ticketsRes, filesRes, orderRes, membersRes] = await Promise.all([
     admin.from("crm_contacts").select("id, company_id, first_name, last_name, email, phone, phone_raw, title, role_tag, user_id, verify_reason, verified_at").eq("company_id", co.id).is("deleted_at", null).order("first_name"),
     admin.from("crm_calls").select(CALL_COLUMNS).eq("company_id", co.id).order("started_at", { ascending: false, nullsFirst: false }).limit(50),
-    admin.from("crm_email_threads").select("id", { count: "exact", head: true }).eq("company_id", co.id),
-    admin.from("crm_email_threads").select("id", { count: "exact", head: true }).eq("company_id", co.id).neq("status", "closed"),
+    admin.from("crm_email_threads").select("id", { count: "exact", head: true }).or(ownedThreads),
+    admin.from("crm_email_threads").select("id", { count: "exact", head: true }).or(ownedThreads).neq("status", "closed"),
     admin.from("crm_tasks").select("id, title, description, status, due_at, assigned_staff_id, created_at, source_activity_id, kind").eq("company_id", co.id).order("created_at", { ascending: false }).limit(60),
     admin.from("crm_tickets").select("id, title, description, status, priority, assigned_staff_id, created_at").eq("company_id", co.id).order("created_at", { ascending: false }).limit(60),
     admin.from("crm_company_files").select("id, filename, label, size, created_at, uploaded_by").eq("company_id", co.id).is("deleted_at", null).order("created_at", { ascending: false }),
@@ -139,7 +141,7 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
               <FeedSupplierSettings supplierId={co.id} supplierName={dir.name ?? "Supplier"} canEdit={perms.crmAdmin} />
             </section>
           )}
-          <CommunicationsCard companyId={co.id} meId={userId} to={firstEmail ? [{ email: firstEmail }] : []}
+          <CommunicationsCard companyId={co.id} companyName={dir.name ?? "this company"} meId={userId} to={[]}
             calls={await decorateCalls(callsRes.data ?? [], admin)} emailCounts={{ active: openThreadCount.count ?? 0, all: threadCount.count ?? 0 }}
             phone={dir.phone ?? co.phone ?? null} canDial={dial} />
           <WorkCard companyId={co.id} tasks={tasks} tickets={tickets} staff={staffList} meId={userId} />
@@ -169,7 +171,7 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
             }}
             feeds={isDealer || isGroup ? { companyId: co.id, companyName: dir.name ?? "Dealer", kind: isGroup ? "group" : "dealer", meId: userId } : null} />
           <SummaryCard companyId={co.id} />
-          <ContactsCard companyId={co.id} contacts={contactsRes.data ?? []} canDial={dial} members={members} />
+          <ContactsCard companyId={co.id} companyName={dir.name ?? null} contacts={contactsRes.data ?? []} canDial={dial} members={members} />
           <LinksCard l={{
             crmGroup: groupCompany ? `/crm/companies/${groupCompany.id}` : null,
             crmUsers: isDealer || isGroup ? `/crm/contacts?company=${co.id}&users=1` : null,
