@@ -294,3 +294,16 @@ button.crm-tl-toggle:hover { background: var(--crm-surface-2); color: var(--crm-
 .crm-tl-body p { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 .crm-tl-quoted { margin: 6px 0; padding: 8px 10px; background: var(--crm-surface-2); border-radius: 8px; font: 12px/1.45 var(--crm-font); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--crm-ink-2); max-height: 320px; overflow-y: auto; }
 @container (max-width: 560px) { .crm-tl-who { display: none; } }
+
+/* Sortable column headers (Contacts) */
+.crm-theme .crm-sort { color: var(--crm-muted); font-weight: 600; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; text-decoration: none; white-space: nowrap; }
+.crm-theme .crm-sort:hover { color: var(--crm-ink); }
+.crm-theme .crm-sort[data-active="true"] { color: var(--crm-ink); }
+.crm-theme .crm-sort span { color: var(--crm-border-strong); }
+.crm-theme .crm-sort[data-active="true"] span { color: var(--crm-accent); }
+/* "N companies" — expands to the list */
+.crm-cos summary { cursor: pointer; color: var(--crm-accent); list-style: none; }
+.crm-cos summary::-webkit-details-marker { display: none; }
+.crm-cos summary::after { content: " ▸"; color: var(--crm-muted); font-size: 11px; }
+.crm-cos[open] summary::after { content: " ▾"; }
+.crm-cos ul { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }

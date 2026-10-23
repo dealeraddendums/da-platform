@@ -7,7 +7,7 @@ import { platformUserHref } from "@/lib/crm/contact-links";
 
 type C = { id: string; company_id: string; user_id?: string | null; verify_reason?: string | null; verified_at?: string | null; first_name: string | null; last_name: string | null; email: string | null; phone: string | null; title: string | null; role_tag: string | null };
 
-export default function ContactEditForm({ contact }: { contact: C }) {
+export default function ContactEditForm({ contact, hideVerify = false }: { contact: C; hideVerify?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({
@@ -27,7 +27,7 @@ export default function ContactEditForm({ contact }: { contact: C }) {
     return true;
   }
 
-  const needsVerify = !!contact.verify_reason && !contact.verified_at;
+  const needsVerify = !hideVerify && !!contact.verify_reason && !contact.verified_at;
   if (!open) {
     return (
       <div style={{ marginBottom: 16, display: "flex", gap: 6 }}>

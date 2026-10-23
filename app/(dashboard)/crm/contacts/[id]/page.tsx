@@ -8,16 +8,17 @@ import ContactEditForm from "@/components/crm/ContactEditForm";
 import EmailFromTemplate from "@/components/crm/EmailFromTemplate";
 import EmailThreadsPanel from "@/components/crm/EmailThreadsPanel";
 import { requireCrmPage } from "@/lib/crm/page-guard";
-import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls } from "@/lib/crm/queries";
+import { CALL_COLUMNS, canDial, companyNames, crmAdmin, decorateCalls } from "@/lib/crm/queries";
 import { contactName, fmtDate, ROLE_TAG_LABEL } from "@/lib/crm/format";
 import { Tag, VerifyTag } from "@/components/crm/CrmBadges";
 import ContactPhone from "@/components/crm/ContactPhone";
 import { platformUserHref } from "@/lib/crm/contact-links";
+import VerifyPanel from "@/components/crm/VerifyPanel";
 
 export const metadata = { title: "Contact — DA-CRM" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export default async function CrmContactPage({ params }: { params: { id: string } }) {
+export default async function CrmContactPage({ params, searchParams }: { params: { id: string }; searchParams: { verify?: string } }) {
   if (!UUID.test(params.id)) notFound();
   const { userId } = await requireCrmPage(`/crm/contacts/${params.id}`);
   const admin = crmAdmin();
@@ -32,6 +33,24 @@ export default async function CrmContactPage({ params }: { params: { id: string 
   ]);
   const calls = await decorateCalls(callsRes.data ?? [], admin);
 
+  // "Verify" explanation: the email's domain vs the company's own (crm_company_domains, migration 190).
+  let verifyText: string | null = null;
+  let otherCopies: string[] = [];
+  if (c.verify_reason && !c.verified_at) {
+    const { data: doms } = await admin.from("crm_company_domains").select("domain, source").eq("company_id", c.company_id);
+    const rank: Record<string, number> = { website: 0, vdp: 1, users: 2, group: 3, members: 4 };
+    const own = (doms ?? []).sort((a: any, b: any) => (rank[a.source] ?? 9) - (rank[b.source] ?? 9) || a.domain.localeCompare(b.domain)).map((d: any) => d.domain);
+    const shown = own.slice(0, 3).join(", ") + (own.length > 3 ? ` and ${own.length - 3} more` : "");
+    const edom = String(c.email ?? "").split("@")[1] ?? "";
+    const { data: copies } = await admin.from("crm_contacts").select("company_id").eq("email", c.email ?? "").is("deleted_at", null)
+      .is("user_id", null).neq("id", c.id).not("verify_reason", "is", null).is("verified_at", null);
+    const names = await companyNames((copies ?? []).map((x: any) => x.company_id), admin);
+    otherCopies = (copies ?? []).map((x: any) => names[x.company_id] ?? "another company");
+    verifyText = c.verify_reason === "freemail"
+      ? `Email ${c.email} is a personal address, not ${shown || "the dealership's domain"}.`
+      : `Email domain ${edom} doesn't match ${shown || "the dealership's domain"}.`;
+  }
+
   return (
     <div>
       <PageHeader
@@ -39,6 +58,7 @@ export default async function CrmContactPage({ params }: { params: { id: string 
         subtitle={[c.title, c.role_tag ? ROLE_TAG_LABEL[c.role_tag] : null, company?.name].filter(Boolean).join(" · ")}
         action={company ? <Link href={`/crm/companies/${company.id}`} className="btn btn-secondary" style={{ background: "#fff" }}>← {company.name}</Link> : undefined}
       />
+      {verifyText && <VerifyPanel contactId={c.id} companyName={company?.name ?? "this company"} explanation={verifyText} highlight={searchParams.verify === "1"} otherCopies={otherCopies} />}
       <div className="card" style={{ padding: 16, marginBottom: 16, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12, fontSize: 13 }}>
         <div><p className="label">Phone</p><ContactPhone phone={c.phone} phoneRaw={c.phone_raw} canDial={dial} /></div>
         <div><p className="label">Email</p>{c.email ? <a href={`mailto:${c.email}`} style={{ color: "var(--blue)" }}>{c.email}</a> : "—"}</div>
@@ -51,7 +71,7 @@ export default async function CrmContactPage({ params }: { params: { id: string 
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <ContactEditForm contact={c} />
+        <ContactEditForm contact={c} hideVerify={!!verifyText} />
         <EmailFromTemplate companyId={c.company_id} contactId={c.id} to={c.email} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>

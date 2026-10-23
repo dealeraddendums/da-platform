@@ -161,7 +161,7 @@ export function ContactsCard({ companyId, contacts, canDial, members }: { compan
                   {(c.title || c.user_id || (c.verify_reason && !c.verified_at)) && (
                     <div style={{ fontSize: 12, color: "var(--crm-muted)", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 2 }}>
                       {c.user_id && <Tag tone="accent">Platform user</Tag>}
-                      {c.verify_reason && !c.verified_at && <VerifyTag reason={c.verify_reason} />}
+                      {c.verify_reason && !c.verified_at && <Link href={`/crm/contacts/${c.id}?verify=1`} style={{ textDecoration: "none" }}><VerifyTag reason={c.verify_reason} /></Link>}
                       {c.title && <span>{c.title}</span>}
                       {c.user_id && <a className="crm-link" href={platformUserHref(c.email)} target="_blank" rel="noreferrer">DA Users</a>}
                     </div>
