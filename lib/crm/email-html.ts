@@ -12,9 +12,10 @@ import DOMPurify from "isomorphic-dompurify";
 
 const ALLOWED_TAGS = ["p", "br", "strong", "b", "em", "i", "u", "s", "a", "img", "span", "ul", "ol", "li",
   "h1", "h2", "h3", "blockquote", "hr", "table", "tbody", "thead", "tr", "td", "th", "div"];
-const ALLOWED_ATTR = ["href", "target", "rel", "src", "alt", "title", "width", "height", "style", "colspan", "rowspan", "align"];
+// Table attributes Outlook needs for the company signature layout (lib/crm/signature.ts).
+const ALLOWED_ATTR = ["href", "target", "rel", "src", "alt", "title", "width", "height", "style", "colspan", "rowspan", "align", "valign", "cellpadding", "cellspacing", "border"];
 // Inline style properties we keep (everything else is dropped).
-const SAFE_STYLE = /^(color|background-color|font-size|font-weight|font-style|font-family|text-decoration|text-align|line-height|width|height|border|border-collapse|padding|margin|vertical-align)$/i;
+const SAFE_STYLE = /^(color|background-color|font-size|font-weight|font-style|font-family|text-decoration|text-align|line-height|width|height|border|border-collapse|border-left|border-right|border-top|border-bottom|padding|padding-left|padding-right|padding-top|padding-bottom|margin|vertical-align|white-space)$/i;
 
 export const EMAIL_FONT = "Arial, Helvetica, sans-serif";
 const BASE: Record<string, string> = {

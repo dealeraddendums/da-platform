@@ -42,6 +42,7 @@
     "crm:seed": "tsx scripts/crm-seed.ts",
     "crm:dialpad-replay": "tsx scripts/crm-dialpad-replay.ts",
     "crm:dialpad-setup": "tsx scripts/crm-dialpad-setup.ts",
+    "test:crm-signature": "tsx scripts/crm-signature-verify-unit.ts",
     "test:crm-templates": "tsx scripts/crm-templates-verify-unit.ts",
     "test:crm-inbox": "tsx scripts/crm-inbox-verify-unit.ts",
     "test:crm-feeds": "tsx scripts/crm-feeds-verify-unit.ts",

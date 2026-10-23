@@ -3,12 +3,13 @@
 // DA-CRM email composer — new email, reply, reply all, forward. Sends through
 // POST /api/crm/inbox/send (Microsoft Graph, as the mailbox; the server runs
 // composeEmail(), which fills variables, makes it Outlook-safe and appends the
-// sender's signature). Templates come from the shared TemplatePicker (body
-// only — the signature is added at send).
+// sender's signature, shown read-only under the body). Templates come from the shared TemplatePicker
+// (body only — the signature is added at send).
 
 import { useMemo, useRef, useState } from "react";
 import EmailEditor from "./EmailEditor";
 import TemplatePicker from "./TemplatePicker";
+import SignatureBlock from "./SignatureBlock";
 
 export type ComposerMode = "new" | "reply" | "replyAll" | "forward";
 export type ComposerRecipient = { email: string; name?: string | null };
@@ -123,6 +124,8 @@ export default function EmailComposer({
         <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
       </div>
       <EmailEditor value={body} onChange={setBody} minHeight={200} />
+      {/* Exactly what composeEmail appends (once) — the company template filled for the sender. */}
+      <SignatureBlock />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
         {files.map((f, i) => (
           <span key={`${f.name}-${i}`} style={{ fontSize: 12, background: "#fff", border: "1px solid var(--border)", borderRadius: 4, padding: "2px 8px" }}>
@@ -138,7 +141,6 @@ export default function EmailComposer({
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <button type="button" className="btn btn-primary" onClick={send} disabled={busy}>{busy ? "Sending…" : "Send"}</button>
         <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>Discard</button>
-        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Your signature is added when it&apos;s sent.</span>
         {err && <span style={{ fontSize: 12, color: "var(--error)" }}>{err}</span>}
       </div>
     </div>

@@ -2,7 +2,9 @@
 // preview now; Phase 2 Inbox compose / reply / send later):
 //   1. fill {{variables}} from the company / contact / sending staff member
 //   2. sanitize to Outlook-safe inline-styled HTML (lib/crm/email-html.ts)
-//   3. append the sender's crm_staff_profiles.email_signature_html
+//   3. append the sender's signature ONCE: the company template (crm_settings, lib/crm/signature.ts)
+//      filled with their staff-profile name / title / phone + the active CTA; until that template is
+//      published, the legacy per-person crm_staff_profiles.email_signature_html
 // so no email can go out without the signature or with unsanitized markup.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createAdminSupabaseClient } from "@/lib/db";
@@ -10,6 +12,7 @@ import { renderTemplate, type TemplateContext } from "./template-vars";
 import { toEmailHtml, wrapEmail, htmlToText } from "./email-html";
 import { trialStatus } from "./trial";
 import { formatPhone } from "./phone";
+import { DEFAULT_SIGNATURE_TEMPLATE, renderSignature, type SignatureCta } from "./signature";
 
 const firstName = (full: string | null | undefined) => (full ?? "").trim().split(/\s+/)[0] || null;
 const longDate = (d: Date | string) =>
@@ -72,22 +75,49 @@ export async function buildTemplateContext(
   const me = await staffIdentity(admin, ids.staffId);
   Object.assign(ctx, {
     "staff.full_name": me.fullName, "staff.first_name": firstName(me.fullName),
-    "staff.email": me.email, "staff.phone": me.phone ? formatPhone(me.phone) : null,
+    "staff.email": me.email, "staff.phone": me.phone ? formatPhone(me.phone) : null, "staff.title": me.title,
   });
   return ctx;
 }
 
-async function staffIdentity(admin: any, staffId: string): Promise<{ fullName: string | null; email: string | null; phone: string | null; signature: string | null }> {
-  const [{ data: p }, { data: sp }] = await Promise.all([
+/** The sender as the signature shows them. Name / title / phone come from the staff profile (what staff
+ *  edit themselves); phone falls back to their Dialpad line, then (in the signature) the main number. */
+export async function staffIdentity(admin: any, staffId: string): Promise<{ fullName: string | null; email: string | null; phone: string | null; title: string | null; signature: string | null }> {
+  const [{ data: p }, { data: sp }, { data: st }] = await Promise.all([
     admin.from("profiles").select("full_name, email").eq("id", staffId).maybeSingle(),
     admin.from("crm_staff_profiles").select("full_name, dialpad_number, email_signature_html").eq("staff_id", staffId).maybeSingle(),
+    admin.from("staff_profiles").select("full_name, title, phone").eq("user_id", staffId).maybeSingle(),
   ]);
   return {
-    fullName: sp?.full_name || p?.full_name || null,
+    fullName: st?.full_name || sp?.full_name || p?.full_name || null,
     email: p?.email ?? null,
-    phone: sp?.dialpad_number ?? null,
+    phone: st?.phone || sp?.dialpad_number || null,
+    title: st?.title || null,
     signature: sp?.email_signature_html ?? null,
   };
+}
+
+/** The signature block for this sender, or null. Published company template wins; before publishing,
+ *  the legacy per-person HTML. Raw — composeEmail sanitizes it (toEmailHtml). */
+export async function senderSignature(admin: any, staffId: string, now = new Date()): Promise<{ html: string | null; source: "template" | "personal" | null }> {
+  const [me, { data: s }] = await Promise.all([
+    staffIdentity(admin, staffId),
+    admin.from("crm_settings").select("signature_template_html, signature_published_at, signature_cta").eq("id", true).maybeSingle(),
+  ]);
+  if (s?.signature_published_at) {
+    return {
+      html: renderSignature(s.signature_template_html || DEFAULT_SIGNATURE_TEMPLATE,
+        { full_name: me.fullName, title: me.title, phone: me.phone }, (s.signature_cta ?? null) as SignatureCta | null, now),
+      source: "template",
+    };
+  }
+  return me.signature ? { html: me.signature, source: "personal" } : { html: null, source: null };
+}
+
+/** Body minus any copy of the signature (exact sanitized markup), so it can't stack. Pure. */
+export function withoutSignature(bodyHtml: string, sigHtml: string | null): string {
+  if (!sigHtml) return bodyHtml;
+  return bodyHtml.split(sigHtml).join("").replace(/(<p[^>]*>&nbsp;<\/p>\s*)+$/, "");
 }
 
 export type ComposedEmail = {
@@ -111,9 +141,12 @@ export async function composeEmail(
   const ctx = { ...(await buildTemplateContext(input, admin)), ...(input.extraContext ?? {}) };
   const subject = renderTemplate(input.subject ?? "", ctx, { html: false });
   const body = renderTemplate(input.bodyHtml ?? "", ctx, { html: true });
-  const sigRaw = input.signature === false ? null : (await staffIdentity(admin, input.staffId)).signature;
+  const sigRaw = input.signature === false ? null : (await senderSignature(admin, input.staffId)).html;
   const sig = sigRaw ? toEmailHtml(sigRaw) : null;
-  const html = wrapEmail(toEmailHtml(body.text), sig);
+  // Appended exactly once: a copy already in the body (pasted, or carried in a draft) is removed first.
+  // Outlook's quoted history sits below our HTML (inbox-send PATCHes above the quote), so prior
+  // messages' signatures stay in the quote, never in our part.
+  const html = wrapEmail(withoutSignature(toEmailHtml(body.text), sig), sig);
   return {
     subject: subject.text.replace(/\s+/g, " ").trim(),
     html,
