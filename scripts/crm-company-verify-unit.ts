@@ -8,6 +8,7 @@ import { deriveBillingState } from "../lib/crm/billing-status";
 import { ownerForStage } from "../lib/crm/companies";
 import { workPatch } from "../lib/crm/work-items";
 import { feedName, inventoryFreshness, isFed } from "../lib/crm/inventory-freshness";
+import { needsClamp, previewParts, shortLabel, unwrapLink } from "../lib/crm/preview-text";
 
 let fail = 0;
 function eq(name: string, got: unknown, want: unknown) {
@@ -117,6 +118,23 @@ async function main() {
   eq("3 days: stale (red)", inventoryFreshness(iso(60 * 24 * 3), true, NOW), { newest: iso(60 * 24 * 3), days: 3, stale: true, label: "3 days ago" });
   eq("manual dealer never red", inventoryFreshness(iso(60 * 24 * 30), false, NOW).stale, false);
   eq("fed dealer with no vehicles is red", inventoryFreshness(null, true, NOW), { newest: null, days: null, stale: true, label: "No vehicles yet" });
+
+  // ── Timeline previews: Safe Links ─────────────────────────────────────────
+  const real = "https://www.tvtoyota.com/new-inventory?utm=x";
+  const safe = `https://nam11.safelinks.protection.outlook.com/?url=${encodeURIComponent(real)}&data=05%7C02%7Csupport%40x.com&sdata=abc&reserved=0`;
+  eq("safelinks unwrapped", unwrapLink(safe), real);
+  eq("barracuda inside safelinks unwrapped", unwrapLink(`https://nam11.safelinks.protection.outlook.com/?url=${encodeURIComponent(`https://linkprotect.cudasvc.com/url?a=${encodeURIComponent(real)}&c=E,1`)}&data=1`), real);
+  eq("non-http target is not unwrapped", unwrapLink("https://nam11.safelinks.protection.outlook.com/?url=javascript%3Aalert(1)"), "https://nam11.safelinks.protection.outlook.com/?url=javascript%3Aalert(1)");
+  eq("plain URL untouched", unwrapLink("https://example.com/a"), "https://example.com/a");
+  eq("short label: host + path, no www", shortLabel(real), "tvtoyota.com/new-inventory");
+  eq("short label capped", shortLabel("https://example.com/" + "a".repeat(80)).length, 40);
+  const pp = previewParts(`Thanks! Site: ${real} (${safe}). Bye`);
+  eq("parts: text, link, text, link, text", pp.map((x) => ("text" in x ? "t" : "l")).join(""), "tltlt");
+  eq("parts: safelink shows the real host", (pp[3] as any).label, "tvtoyota.com/new-inventory");
+  eq("parts: trailing period stays text", (pp[4] as any).text, "). Bye");
+  eq("short body not clamped", needsClamp(previewParts("Hi\nthanks")), false);
+  eq("5 lines clamped", needsClamp(previewParts("a\nb\nc\nd\ne")), true);
+  eq("long single line clamped", needsClamp(previewParts("x".repeat(400))), true);
 
   console.log(fail ? `\n${fail} failed` : "\nall passed");
   if (fail) process.exit(1);

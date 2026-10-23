@@ -56,7 +56,12 @@ const KNOWN: Seed[] = [
 
 async function main() {
   const admin: any = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
-  const names = Array.from(new Set([...DMS_PROVIDERS, ...OTHER_PROVIDERS, ...KNOWN.map((k) => k.name)])).sort((a, b) => a.localeCompare(b));
+  // Case-insensitive: "Vinsolutions" (provider list) and "VinSolutions" (seen in mail) are one supplier;
+  // the KNOWN spelling wins.
+  const byKey = new Map<string, string>();
+  for (const n of [...DMS_PROVIDERS, ...OTHER_PROVIDERS]) if (!byKey.has(n.toLowerCase())) byKey.set(n.toLowerCase(), n);
+  for (const k of KNOWN) byKey.set(k.name.toLowerCase(), k.name);
+  const names = Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
   const { data: existing } = await admin.from("crm_companies").select("id, name").eq("kind", "feed_supplier");
   const byName = new Map<string, string>((existing ?? []).map((c: any) => [String(c.name).toLowerCase(), c.id]));
   const { data: settingsRows } = await admin.from("crm_feed_supplier_settings").select("*");

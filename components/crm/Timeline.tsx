@@ -4,6 +4,7 @@
 import Link from "next/link";
 import type { TimelineItem } from "@/lib/crm/queries";
 import { ActivityTypeBadge, CallStateBadge } from "./CrmBadges";
+import ActivityBody from "./ActivityBody";
 import { fmtDateTime } from "@/lib/crm/format";
 
 export default function Timeline({
@@ -40,9 +41,7 @@ export default function Timeline({
               <span> · <Link href={`/crm/communications/calls?call=${a.metadata.call_id}`} style={{ color: "var(--blue)" }}>Call details</Link></span>
             )}
           </div>
-          {a.body && (
-            <p style={{ margin: "6px 0 0", fontSize: 13, whiteSpace: "pre-wrap", color: "var(--text-primary)" }}>{a.body}</p>
-          )}
+          {a.body && <ActivityBody body={a.body} />}
         </li>
       ))}
     </ul>
