@@ -856,6 +856,12 @@ export default function UsersPageClient({ viewerRole, viewerDealerId, viewerGrou
     });
   }, []);
 
+  // ?q=… (DA-CRM contact → "Edit in DA Users") pre-fills the search.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) { setSearchInput(q); setSearch(q); }
+  }, []);
+
   // For super_admin: tab drives the role filter; for others: use the dropdown
   const effectiveRoleFilter = viewerRole === "super_admin" && superAdminTab !== "all" && superAdminTab !== "staff"
     ? superAdminTab
