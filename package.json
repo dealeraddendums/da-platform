@@ -33,6 +33,8 @@
     "test:bg-profile": "tsx scripts/buyers-guide-profile-verify-unit.ts",
     "test:rw-asking": "tsx scripts/retail-wholesale-asking-verify-unit.ts",
     "test:crm": "tsx scripts/crm-verify-unit.ts",
+    "test:vehicle-archive": "tsx scripts/vehicle-archive-verify-unit.ts",
+    "test:backup-report": "tsx scripts/backup-report-verify-unit.ts",
     "test:crm-company": "tsx scripts/crm-company-verify-unit.ts",
     "crm:seed": "tsx scripts/crm-seed.ts",
     "crm:dialpad-replay": "tsx scripts/crm-dialpad-replay.ts",
