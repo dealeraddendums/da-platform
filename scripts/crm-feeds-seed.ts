@@ -22,6 +22,8 @@
  *   npm run crm:feeds-seed            dry run
  *   npm run crm:feeds-seed -- --apply
  *   npm run crm:feeds-seed -- --apply --reupload   (re-upload the profiles' PDF templates)
+ *   npm run crm:feeds-seed -- --only=Vincue [--apply]   (one supplier profile; nothing else touched —
+ *     the profiles are authoritative, so a full run would also reset edits made on the others' Settings tabs)
  */
 import { createClient } from "@supabase/supabase-js";
 import { DMS_PROVIDERS, OTHER_PROVIDERS } from "../lib/inventory-providers";
@@ -37,6 +39,7 @@ import { loadScriptEnv } from "./crm-env";
 loadScriptEnv();
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const APPLY = process.argv.includes("--apply");
+const ONLY = (process.argv.find((a) => a.startsWith("--only=")) ?? "").slice("--only=".length).trim().toLowerCase() || null;
 const log = (...a: unknown[]) => console.log(APPLY ? "" : "[dry-run]", ...a);
 
 type Seed = { name: string; request_email?: string; cc?: string[]; method?: "email" | "pdf" | "api"; pattern?: string; ready?: boolean; note?: string };
@@ -69,7 +72,7 @@ async function main() {
 
   console.log("── feed suppliers ──");
   let created = 0, filled = 0;
-  for (const name of names) {
+  for (const name of ONLY ? names.filter((n) => n.toLowerCase() === ONLY) : names) {
     const k = KNOWN.find((x) => x.name.toLowerCase() === name.toLowerCase());
     const prof = supplierProfile(name);
     let id = byName.get(name.toLowerCase());
@@ -108,9 +111,10 @@ async function main() {
   }
   console.log(`${created} supplier(s) to add, ${filled} to fill in`);
 
-  console.log("── supplier profiles (Team Velocity, Vauto, Autosoft — authoritative) ──");
+  console.log("── supplier profiles (lib/crm/feeds/suppliers.ts — authoritative) ──");
   const { data: profTpls } = await admin.from("crm_email_templates").select("id, name, subject, body_html, feed_kind, supplier_company_id, archived").not("supplier_company_id", "is", null).eq("archived", false);
-  for (const prof of SUPPLIER_PROFILES) {
+  if (ONLY && !SUPPLIER_PROFILES.some((p) => p.name.toLowerCase() === ONLY)) throw new Error(`--only=${ONLY}: no supplier profile by that name`);
+  for (const prof of SUPPLIER_PROFILES.filter((p) => !ONLY || p.name.toLowerCase() === ONLY)) {
     const id = byName.get(prof.name.toLowerCase());
     if (!id) { log(`${prof.name}: supplier not created yet (dry run) — settings + ${Object.keys(prof.templates).length} templates would follow`); continue; }
     const cur = settings.get(id) ?? null;
@@ -149,7 +153,7 @@ async function main() {
 
   console.log("── Feed requests templates (global defaults) ──");
   const { data: tpls } = await admin.from("crm_email_templates").select("feed_kind, supplier_company_id, archived").not("feed_kind", "is", null);
-  for (const kind of FEED_KINDS) {
+  for (const kind of ONLY ? [] : FEED_KINDS) {
     if ((tpls ?? []).some((t: any) => t.feed_kind === kind && !t.supplier_company_id && !t.archived)) { log(`${kind}: already has a global template`); continue; }
     const t = DEFAULT_FEED_TEMPLATES[kind];
     const body = sanitizeTemplateHtml(t.body_html);
