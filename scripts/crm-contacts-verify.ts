@@ -1,26 +1,14 @@
 /* npm run test:crm-contacts — runs scripts/sql/crm-contacts-verify.sql against the database through the
    Supabase Management API. The SQL always aborts at the end, so its fixtures roll back.
-   Token: SUPABASE_ACCESS_TOKEN, else (macOS) the Supabase CLI's keychain entry. Never printed.
+   Token: see scripts/sql-test.ts.
    --unit runs only the TypeScript checks (no database).
    --with-migration prepends supabase/migrations/188_crm_contacts_from_users.sql (test before applying it). */
-import * as fs from "fs";
-import * as path from "path";
-import { execSync } from "child_process";
 import { loadScriptEnv } from "./crm-env";
+import { runSqlTest } from "./sql-test";
 import { orderedAddresses, pickByAddresses, pickContact } from "../lib/crm/contact-rematch";
 import { driftOf } from "../lib/crm/contacts-sync";
 
 loadScriptEnv();
-const PROJECT = process.env.SUPABASE_PROJECT_REF ?? "byouefbebqgffhtfdggu";
-
-function token(): string {
-  if (process.env.SUPABASE_ACCESS_TOKEN) return process.env.SUPABASE_ACCESS_TOKEN;
-  if (process.platform === "darwin") {
-    const raw = execSync('security find-generic-password -s "Supabase CLI" -a supabase -w', { encoding: "utf8" }).trim();
-    return raw.startsWith("go-keyring-base64:") ? Buffer.from(raw.slice(18), "base64").toString("utf8") : raw;
-  }
-  throw new Error("Set SUPABASE_ACCESS_TOKEN");
-}
 
 let fail = 0;
 function eq(name: string, got: unknown, want: unknown) {
@@ -50,18 +38,9 @@ async function main() {
   unit();
   if (fail) { console.log(`\n${fail} unit check(s) failed`); process.exit(1); }
   if (process.argv.includes("--unit")) return;
-  const root = path.resolve(__dirname, "..");
-  let sql = fs.readFileSync(path.join(root, "scripts/sql/crm-contacts-verify.sql"), "utf8");
-  if (process.argv.includes("--with-migration")) sql = fs.readFileSync(path.join(root, "supabase/migrations/188_crm_contacts_from_users.sql"), "utf8") + "\n" + sql;
-  const res = await fetch(`https://api.supabase.com/v1/projects/${PROJECT}/database/query`, {
-    method: "POST", headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ query: `begin;\n${sql}` }),
-  });
-  const body = await res.text();
-  const m = body.match(/CRM_CONTACTS_TEST ([^"\\]*)/);
-  if (!m) { console.error(`Unexpected response (${res.status}): ${body.slice(0, 500)}`); process.exit(1); }
-  console.log(m[1]);
-  if (!m[1].startsWith("all passed")) process.exit(1);
+  const ok = await runSqlTest("scripts/sql/crm-contacts-verify.sql", "CRM_CONTACTS_TEST",
+    process.argv.includes("--with-migration") ? ["supabase/migrations/188_crm_contacts_from_users.sql"] : []);
+  if (!ok) process.exit(1);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

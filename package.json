@@ -37,6 +37,7 @@
     "test:backup-report": "tsx scripts/backup-report-verify-unit.ts",
     "test:crm-company": "tsx scripts/crm-company-verify-unit.ts",
     "test:crm-contacts": "tsx scripts/crm-contacts-verify.ts",
+    "test:rls": "tsx scripts/rls-verify.ts",
     "crm:seed": "tsx scripts/crm-seed.ts",
     "crm:dialpad-replay": "tsx scripts/crm-dialpad-replay.ts",
     "crm:dialpad-setup": "tsx scripts/crm-dialpad-setup.ts",
