@@ -36,6 +36,7 @@ export const TEMPLATE_VARIABLES: VarGroup[] = [
     { key: "staff.first_name", label: "First name", example: "Marlena" },
     { key: "staff.email", label: "Email", example: "support@dealeraddendums.com" },
     { key: "staff.phone", label: "Direct line", example: "(801) 415-9435" },
+    { key: "staff.title", label: "Title", example: "Customer Support" },
   ] },
   { group: "owner", label: "Company owner", vars: [
     { key: "owner.full_name", label: "Full name", example: "Alex Smith" },

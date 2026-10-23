@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import EmailEditor from "./EmailEditor";
 import { formatPhone } from "@/lib/crm/phone";
 import { Tag } from "./CrmBadges";
+import SignatureSettings from "./SignatureSettings";
 
 export type Member = {
   staff_id: string;
@@ -92,6 +92,7 @@ export default function TeamClient({
         ))}
       </div>
       {editing && <MemberEditor key={editing} m={members.find((m) => m.staff_id === editing)!} isAdmin={isAdmin} self={editing === currentUserId} onDone={() => setEditing(null)} />}
+      {isAdmin && <SignatureSettings members={members.map((x) => ({ id: x.staff_id, name: x.full_name ?? "Team member" }))} meId={currentUserId} />}
       {isAdmin && <Settings settings={settings} />}
       {isAdmin && <Webhooks />}
     </div>
@@ -116,7 +117,6 @@ function MemberEditor({ m, isAdmin, self, onDone }: { m: Member; isAdmin: boolea
     active: m.active, is_admin: m.is_admin,
   });
   const [hours, setHours] = useState(m.work_hours);
-  const [sig, setSig] = useState(m.email_signature_html ?? "");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -124,7 +124,7 @@ function MemberEditor({ m, isAdmin, self, onDone }: { m: Member; isAdmin: boolea
     setBusy(true);
     setMsg(null);
     const body: Record<string, unknown> = {
-      full_name: f.full_name, time_zone: f.time_zone, cell_phone: f.cell_phone || null, work_hours: hours, email_signature_html: sig,
+      full_name: f.full_name, time_zone: f.time_zone, cell_phone: f.cell_phone || null, work_hours: hours,
       ...(isAdmin ? {
         team: f.team, capabilities: f.capabilities, dialpad_user_id: f.dialpad_user_id || null, dialpad_number: f.dialpad_number || null,
         ...(self ? {} : { active: f.active }), ...(f.is_admin !== m.is_admin ? { admin: f.is_admin } : {}),
@@ -218,11 +218,10 @@ function MemberEditor({ m, isAdmin, self, onDone }: { m: Member; isAdmin: boolea
         </div>
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        <label className="label">Email signature</label>
-        <EmailEditor value={sig} onChange={setSig} minHeight={110} variables={false} />
-        <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>Added to the end of every email you send from DA-CRM.</p>
-      </div>
+      <p style={{ margin: "16px 0 0", fontSize: 12, color: "var(--text-muted)" }}>
+        Email signature: one company template (Team → Signature) filled with the name, title and phone on
+        your <a href="/staff-profile" className="crm-link">staff profile</a>.
+      </p>
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 16 }}>
         <button type="button" className="btn btn-primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
