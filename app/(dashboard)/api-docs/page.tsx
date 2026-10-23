@@ -452,6 +452,7 @@ const NEW_PLATFORM_SECTIONS: Section[] = [
       { method: "POST",  path: "/api/migration/assign",            description: "Assign dealers to a migrator", role: "super_admin" },
       { method: "POST",  path: "/api/migration/stage-dealer",      description: "Stage a dealer for migration (legacy — Sync is the normal path)", role: "super_admin" },
       { method: "POST",  path: "/api/migration/sync",              description: "Manual Aurora → 5.0 sync for specific dealers (dealer record, settings, products, logo); sets pending + last_synced_at", role: "super_admin" },
+      { method: "POST",  path: "/api/migration/resync",            description: "Re-pull 4.0 print status, installed products, and missing prices into a MIGRATED dealer — preview then apply (one transaction, logged); never touches 5.0 settings, library, logo, saved options, or existing prices", role: "super_admin" },
       { method: "GET",   path: "/api/migration/group-admins",      description: "Group-admin candidates for a group (profiles + sign-in status + contact-on-file suggestion)", role: "super_admin" },
       { method: "POST",  path: "/api/migration/group-admins",      description: "Send scanner-proof 5.0 setup invites to group admins (migration-flavored email)", role: "super_admin" },
       { method: "POST",  path: "/api/migration/migrate-group",     description: "Migrate a whole group: gates (admin signed in + members synced/billing/template), per-dealer migrate writes, optional da-billing go-Live, FreshBooks stop queued", role: "super_admin" },

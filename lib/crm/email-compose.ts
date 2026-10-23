@@ -15,6 +15,8 @@ const firstName = (full: string | null | undefined) => (full ?? "").trim().split
 const longDate = (d: Date | string) =>
   new Date(typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00Z` : d)
     .toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "long", day: "numeric", year: "numeric" });
+/** 10/21/2026 — what paper forms (the Autosoft authorization) expect. */
+const shortDate = (d: Date) => d.toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "2-digit", day: "2-digit", year: "numeric" });
 
 /** Variable values for this company / contact / sender. Unknown ids → those groups stay empty. */
 export async function buildTemplateContext(
@@ -22,7 +24,7 @@ export async function buildTemplateContext(
   admin: any = createAdminSupabaseClient(),
   now = new Date(),
 ): Promise<TemplateContext> {
-  const ctx: TemplateContext = { today: longDate(now) };
+  const ctx: TemplateContext = { today: longDate(now), "today.short": shortDate(now) };
 
   let companyId = ids.companyId ?? null;
   if (ids.contactId) {
@@ -51,6 +53,10 @@ export async function buildTemplateContext(
         "company.name": d.name, "company.dealer_id": d.dealer_text_id, "company.city": d.city, "company.state": d.state,
         "company.address": src?.address ?? null, "company.zip": src?.zip ?? null,
         "company.phone": d.phone ? formatPhone(d.phone) : null, "company.website": co?.website ?? null,
+        // A feed order covering several dealerships overrides these (lib/crm/feeds/orders.ts orderTemplateContext).
+        "order.dealerships": d.name, "order.dealership_count": 1,
+        "order.dealership_list": `Dealership: ${d.name}${d.city || d.state ? `\nLocation: ${[d.city, d.state].filter(Boolean).join(", ")}` : ""}`,
+        "order.live_dealerships": d.name,
       });
       if (d.pipeline_stage === "trial" && d.trial_started_at) {
         const s = trialStatus(d.trial_started_at, now, src?.trial_ends_at ?? null);
@@ -95,10 +101,14 @@ export type ComposedEmail = {
 
 /** Render + sanitize + sign. `signature: false` only for previews of the body alone. */
 export async function composeEmail(
-  input: { subject: string; bodyHtml: string; companyId?: string | null; contactId?: string | null; staffId: string; signature?: boolean },
+  input: {
+    subject: string; bodyHtml: string; companyId?: string | null; contactId?: string | null; staffId: string; signature?: boolean;
+    /** Extra variable values (feed orders: supplier.*, approver.*, order.*); they win over the defaults. */
+    extraContext?: TemplateContext;
+  },
   admin: any = createAdminSupabaseClient(),
 ): Promise<ComposedEmail> {
-  const ctx = await buildTemplateContext(input, admin);
+  const ctx = { ...(await buildTemplateContext(input, admin)), ...(input.extraContext ?? {}) };
   const subject = renderTemplate(input.subject ?? "", ctx, { html: false });
   const body = renderTemplate(input.bodyHtml ?? "", ctx, { html: true });
   const sigRaw = input.signature === false ? null : (await staffIdentity(admin, input.staffId)).signature;

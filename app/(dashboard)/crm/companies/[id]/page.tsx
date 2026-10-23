@@ -1,28 +1,34 @@
 // DA-CRM company record (dealer, group, vendor or feed supplier).
-// Header: kind, brands, pipeline stage, owner, trial day, open ticket / task
-// counts. Tabs: Timeline · Contacts · Calls · Files · Notes (+ Dealers on a group).
+// Three columns: the CRM sidebar | main | right column (sticky).
+//   Header   name, stage pill (paying dealers: Current / Past Due / Suspended
+//            from DA-Billing), brands; kind pill for partners only; Edit.
+//   Main     Communications (Email | Chat | Calls) · Tasks & Tickets · Activity · Documents
+//   Right    Owner (Trial / Setup & training only) · Details · Summary (AI) ·
+//            Contacts (+ member dealers on a group) · Links
+// A feed supplier's settings open with ?panel=settings.
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { PageHeader } from "@/components/PageHeader";
-import ClickToCall from "@/components/crm/ClickToCall";
-import Timeline from "@/components/crm/Timeline";
-import AddNoteForm from "@/components/crm/AddNoteForm";
-import AddContactForm from "@/components/crm/AddContactForm";
-import CallsTable from "@/components/crm/CallsTable";
-import CompanyHeaderControls from "@/components/crm/CompanyHeaderControls";
+import CompanyHeader, { stageDisplay } from "@/components/crm/CompanyHeader";
 import CompanyFilesPanel from "@/components/crm/CompanyFilesPanel";
-import CompanyDetailsForm from "@/components/crm/CompanyDetailsForm";
-import EmailFromTemplate from "@/components/crm/EmailFromTemplate";
+import FeedSupplierSettings from "@/components/crm/FeedSupplierSettings";
+import CommunicationsCard from "@/components/crm/company/CommunicationsCard";
+import WorkCard, { type WorkTask, type WorkTicket } from "@/components/crm/company/WorkCard";
+import ActivityCard from "@/components/crm/company/ActivityCard";
+import SummaryCard from "@/components/crm/company/SummaryCard";
+import { ContactsCard, DetailsCard, EditCompanyButton, LinksCard, OwnerCard, type MemberDealer } from "@/components/crm/company/RailCards";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames, timeline } from "@/lib/crm/queries";
-import { KIND_LABEL, STAGE_LABEL, contactName, fmtAgo, fmtDate, ROLE_TAG_LABEL, type Stage } from "@/lib/crm/format";
+import { contactName, type Stage } from "@/lib/crm/format";
+import { billingPayer, dealerBillingState, type BillingRead } from "@/lib/crm/billing-status";
+import { feedName, inventoryFreshness, isFed } from "@/lib/crm/inventory-freshness";
+import { OPEN_STATUSES, STATUS_LABEL as FEED_STATUS_LABEL, type OrderStatus } from "@/lib/crm/feeds/state";
+import { OWNED_STAGES } from "@/lib/crm/companies";
 
 export const metadata = { title: "Company — DA-CRM" };
-const TH: React.CSSProperties = { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", fontWeight: 600 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BILLING_APP = "https://billing.dealeraddendums.com/";
 
-export default async function CrmCompanyPage({ params, searchParams }: { params: { id: string }; searchParams: { tab?: string } }) {
+export default async function CrmCompanyPage({ params, searchParams }: { params: { id: string }; searchParams: { panel?: string } }) {
   if (!UUID.test(params.id)) notFound();
   const { userId, perms } = await requireCrmPage(`/crm/companies/${params.id}`);
   const admin = crmAdmin();
@@ -33,212 +39,136 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
   ]);
   if (!dir || !co) notFound();
   const isDealer = co.kind === "dealer", isGroup = co.kind === "group", isPartner = !isDealer && !isGroup;
+  const stage: Stage | null = isDealer ? (dir.pipeline_stage as Stage | null) : null;
 
-  const tabs = [
-    { key: "timeline", label: "Timeline" },
-    ...(isGroup ? [{ key: "dealers", label: "Dealers" }] : []),
-    { key: "contacts", label: `Contacts (${dir.contact_count})` },
-    { key: "calls", label: "Calls" },
-    { key: "files", label: "Files" },
-    { key: "notes", label: "Notes" },
-  ];
-  const tab = tabs.find((t) => t.key === searchParams.tab)?.key ?? "timeline";
-
-  const [staff, dial, brandsRes, allBrandsRes, source, parentRes] = await Promise.all([
+  const [staff, dial, brandsRes, allBrandsRes, source, parentRes, billing] = await Promise.all([
     staffNames(admin),
     canDial(userId, admin),
     isDealer ? admin.from("crm_company_brands").select("brand").eq("company_id", co.id) : Promise.resolve({ data: [] }),
     isDealer ? admin.from("crm_brands").select("brand").order("sort") : Promise.resolve({ data: [] }),
-    isDealer ? admin.from("dealers").select("address, city, state, zip, primary_contact, primary_contact_email, account_type").eq("id", co.dealer_id).maybeSingle().then((r: any) => r.data)
-      : isGroup ? admin.from("groups").select("address, city, state, zip, primary_contact, primary_contact_email").eq("id", co.group_id).maybeSingle().then((r: any) => r.data)
+    isDealer ? admin.from("dealers").select("dealer_id, name, address, city, state, zip, website_url, inventory_provider, inventory_provider_is_dms, inventory_dealer_id, feed_source, group_id").eq("id", co.dealer_id).maybeSingle().then((r: any) => r.data)
+      : isGroup ? admin.from("groups").select("name, address, city, state, zip, billing_customer_id").eq("id", co.group_id).maybeSingle().then((r: any) => r.data)
       : Promise.resolve(null),
-    dir.parent_group_id ? admin.from("crm_companies").select("id, grp:groups(name)").eq("group_id", dir.parent_group_id).maybeSingle() : Promise.resolve({ data: null }),
+    dir.parent_group_id ? admin.from("crm_companies").select("id, group_id, grp:groups(name)").eq("group_id", dir.parent_group_id).maybeSingle() : Promise.resolve({ data: null }),
+    isDealer && stage === "paying" ? dealerBillingState(admin, co.dealer_id) : Promise.resolve(null as BillingRead | null),
   ]);
+  const feed = isDealer ? feedName(source?.inventory_provider, source?.feed_source) : null;
+  const [newestVehicle, payer] = await Promise.all([
+    isDealer && source?.dealer_id
+      ? admin.from("dealer_vehicles").select("date_added").eq("dealer_id", source.dealer_id).not("date_added", "is", null).order("date_added", { ascending: false }).limit(1).maybeSingle().then((r: any) => (r.data?.date_added as string | undefined) ?? null)
+      : Promise.resolve(null),
+    isDealer && !billing ? billingPayer(admin, co.dealer_id) : Promise.resolve(null),
+  ]);
+  // DA-Billing deep link: /?customer={UUID} opens that customer (da-billing reads it after login).
+  const billingCustomerId = isDealer ? billing?.customerId ?? payer?.customerId ?? null : isGroup ? source?.billing_customer_id ?? null : null;
   const brands = (brandsRes.data ?? []).map((b: any) => b.brand).sort();
   const staffList = Object.entries(staff).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  const portal = process.env.HUBSPOT_PORTAL_ID || "23896347";
+  const firstEmail = (co.emails ?? [])[0]?.address ?? null;
 
-  const subtitle = [KIND_LABEL[co.kind], dir.dealer_text_id, dir.account_type, dir.active ? null : "Inactive"].filter(Boolean).join(" · ");
+  const [contactsRes, callsRes, threadCount, tasksRes, ticketsRes, items, filesRes, orderRes, membersRes] = await Promise.all([
+    admin.from("crm_contacts").select("id, company_id, first_name, last_name, email, phone, title, role_tag, user_id").eq("company_id", co.id).is("deleted_at", null).order("first_name"),
+    admin.from("crm_calls").select(CALL_COLUMNS).eq("company_id", co.id).order("started_at", { ascending: false, nullsFirst: false }).limit(50),
+    admin.from("crm_email_threads").select("id", { count: "exact", head: true }).eq("company_id", co.id),
+    admin.from("crm_tasks").select("id, title, description, status, due_at, assigned_staff_id, created_at, source_activity_id, kind").eq("company_id", co.id).order("created_at", { ascending: false }).limit(60),
+    admin.from("crm_tickets").select("id, title, description, status, priority, assigned_staff_id, created_at").eq("company_id", co.id).order("created_at", { ascending: false }).limit(60),
+    timeline({ company_id: co.id }, 150, admin),
+    admin.from("crm_company_files").select("id, filename, label, size, created_at, uploaded_by").eq("company_id", co.id).is("deleted_at", null).order("created_at", { ascending: false }),
+    isDealer || isGroup ? admin.from("crm_feed_orders").select("id, status").eq("dealer_company_id", co.id).order("created_at", { ascending: false }).limit(1).maybeSingle() : Promise.resolve({ data: null }),
+    isGroup ? admin.from("crm_company_directory").select("id, name, dealer_id, dealer_text_id, pipeline_stage").eq("kind", "dealer").eq("parent_group_id", co.group_id).order("name").limit(200) : Promise.resolve({ data: null }),
+  ]);
+
+  // Tasks that came from a chat get "Open chat to reply".
+  const sourceIds = Array.from(new Set((tasksRes.data ?? []).map((t: any) => t.source_activity_id).filter(Boolean)));
+  const { data: chatSources } = sourceIds.length ? await admin.from("crm_activities").select("id").in("id", sourceIds).eq("type", "chat") : { data: [] };
+  const chatIds = new Set((chatSources ?? []).map((a: any) => a.id));
+  const tasks: WorkTask[] = (tasksRes.data ?? []).map((t: any) => ({ ...t, from_chat: chatIds.has(t.source_activity_id) }));
+  const tickets: WorkTicket[] = ticketsRes.data ?? [];
+
+  const contactIds = Array.from(new Set(items.map((i) => i.contact_id).filter(Boolean))) as string[];
+  const { data: cs } = contactIds.length ? await admin.from("crm_contacts").select("id, first_name, last_name, email").in("id", contactIds) : { data: [] };
+
+  // A group's member dealers, with their stage (paying ones read from DA-Billing; a
+  // group-billed rooftop shares the group's customer, so this is mostly one cached read).
+  let members: MemberDealer[] | undefined;
+  if (isGroup) {
+    const rows: any[] = membersRes.data ?? [];
+    const reads = await Promise.all(rows.map((m) => (m.pipeline_stage === "paying" ? dealerBillingState(admin, m.dealer_id) : Promise.resolve(null))));
+    members = rows.map((m, i) => ({
+      id: m.id, name: m.name, text_id: m.dealer_text_id, stage: m.pipeline_stage ?? null,
+      stageLabel: m.pipeline_stage ? stageDisplay(m.pipeline_stage, reads[i]?.state ?? null).label : null,
+    }));
+  }
+
+  const address = source ? [source.address, source.city, [source.state, source.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ") || null : null;
+  const order = orderRes.data as { id: string; status: OrderStatus } | null;
+  const groupCompany = parentRes.data as { id: string; group_id: string; grp?: { name?: string } } | null;
+  const showOwner = isDealer && !!stage && (OWNED_STAGES as readonly string[]).includes(stage);
+  const billingNote = billing && !billing.state ? `Billing status unavailable — ${billing.error ?? "no DA-Billing read"}` : billing?.billedBy === "group" ? "Billed through the group (DA-Billing)" : billing ? "From DA-Billing" : null;
+  const backTab = isDealer ? "dealers" : isGroup ? "groups" : "partners";
 
   return (
     <div>
-      <PageHeader title={dir.name ?? "Company"} subtitle={subtitle}
-        action={<Link href={`/crm/dealers?tab=${isDealer ? "dealers" : isGroup ? "groups" : "partners"}`} className="btn btn-secondary" style={{ background: "#fff" }}>← Back</Link>} />
-
-      <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 14, fontSize: 13 }}>
-          <Stat label="Open tickets" value={dir.open_tickets} />
-          <Stat label="Open tasks" value={dir.open_tasks} />
-          {isDealer && dir.pipeline_stage === "trial" && (
-            <Stat label="Trial day" value={dir.trial_day ?? "—"} note={dir.trial_flag === "expired" ? "Expired" : dir.trial_flag === "expiring" ? `Ends ${fmtDate(dir.trial_ends_on)}` : dir.trial_ends_on ? `Ends ${fmtDate(dir.trial_ends_on)}` : undefined} warn={!!dir.trial_flag} />
-          )}
-          {isDealer && dir.pipeline_stage && dir.pipeline_stage !== "trial" && <Stat label="Stage since" value={fmtDate(dir.stage_changed_at)} />}
-          <Stat label="Last activity" value={fmtAgo(dir.last_activity_at)} />
-          <div>
-            <p className="label">Phone</p>
-            {dir.phone ? <ClickToCall phone={dir.phone} canDial={dial} /> : <span style={{ color: "var(--text-muted)" }}>—</span>}
-          </div>
-          {parentRes.data && (
-            <div><p className="label">Group</p><Link href={`/crm/companies/${parentRes.data.id}`} style={{ color: "var(--blue)" }}>{parentRes.data.grp?.name ?? "Group"}</Link></div>
-          )}
-          <div>
-            <p className="label">Links</p>
-            {isDealer && <Link href={`/dealers/${co.dealer_id}`} style={{ color: "var(--blue)" }}>Platform record</Link>}
-            {isGroup && <Link href={`/groups/${co.group_id}`} style={{ color: "var(--blue)" }}>Platform record</Link>}
-            {dir.hubspot_company_id && <>{isPartner ? "" : " · "}<a href={`https://app.hubspot.com/contacts/${portal}/record/0-2/${dir.hubspot_company_id}`} target="_blank" rel="noreferrer" style={{ color: "var(--blue)" }}>HubSpot</a></>}
-            {isPartner && !dir.hubspot_company_id && "—"}
-          </div>
-        </div>
-        <CompanyHeaderControls
-          companyId={co.id} kind={co.kind} stage={dir.pipeline_stage} ownerId={dir.owner_staff_id}
-          staff={staffList} canChangeOwner={perms.crmAdmin} brands={brands}
-          allBrands={(allBrandsRes.data ?? []).map((b: any) => b.brand)} currentUserId={userId}
-        />
-        {!perms.crmAdmin && <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--text-muted)" }}>A DA-CRM admin assigns company owners.</p>}
-        <div style={{ marginTop: 12 }}>
-          <EmailFromTemplate companyId={co.id} to={(co.emails ?? [])[0]?.address ?? null} />
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 4 }}>
-        {tabs.map((t) => (
-          <Link key={t.key} href={`/crm/companies/${co.id}?tab=${t.key}`}
-            style={{
-              padding: "8px 16px", borderRadius: "6px 6px 0 0", fontWeight: 600, fontSize: 13, textDecoration: "none",
-              background: t.key === tab ? "#fff" : "rgba(255,255,255,0.12)", color: t.key === tab ? "var(--navy)" : "#fff",
-              borderBottom: t.key === tab ? "2px solid var(--orange)" : "2px solid transparent",
-            }}>{t.label}</Link>
-        ))}
-      </div>
-      <div className="card" style={{ borderTopLeftRadius: 0 }}>
-        {tab === "timeline" && <TimelineTab companyId={co.id} staff={staff} admin={admin} />}
-        {tab === "dealers" && isGroup && <GroupDealersTab groupId={co.group_id} admin={admin} staff={staff} />}
-        {tab === "contacts" && <ContactsTab companyId={co.id} dial={dial} admin={admin} />}
-        {tab === "calls" && <CallsTab companyId={co.id} admin={admin} />}
-        {tab === "files" && <FilesTab companyId={co.id} admin={admin} staff={staff} />}
-        {tab === "notes" && (
+      <CompanyHeader
+        name={dir.name ?? "Company"} kind={co.kind} stage={stage} billing={billing?.state ?? null} billingNote={billingNote} brands={brands}
+        backHref={`/crm/dealers?tab=${backTab}`} backLabel={isDealer ? "Dealers" : isGroup ? "Groups" : "Partners"}
+        meta={[dir.dealer_text_id, dir.active === false ? "Inactive" : null].filter(Boolean).join(" · ") || null}
+        actions={
           <>
-            <CompanyDetailsForm companyId={co.id} isPartner={isPartner}
+            {co.kind === "feed_supplier" && <a href={`/crm/companies/${co.id}?panel=settings`} className="btn btn-ghost" style={{ textDecoration: "none" }}>Settings</a>}
+            <EditCompanyButton companyId={co.id} kind={co.kind} isPartner={isPartner} stage={stage} brands={brands}
+              allBrands={(allBrandsRes.data ?? []).map((b: any) => b.brand)} staff={staffList} meId={userId}
               initial={{ name: co.name ?? dir.name ?? "", notes: co.notes, emails: co.emails ?? [], phone: co.phone, website: co.website }} />
-            {source && (
-              <div style={{ padding: "0 16px 16px", fontSize: 13, color: "var(--text-secondary)" }}>
-                <p className="label">From the platform record</p>
-                {[source.address, source.city, [source.state, source.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "No address"}
-                {source.primary_contact && <> · {source.primary_contact}</>}{source.primary_contact_email && <> · {source.primary_contact_email}</>}
-              </div>
-            )}
-            <NotesTimeline companyId={co.id} staff={staff} admin={admin} />
           </>
-        )}
+        } />
+
+      <div className="crm-company-grid">
+        <div className="crm-company-main">
+          {co.kind === "feed_supplier" && searchParams.panel === "settings" && (
+            <section className="crm-card"><div className="crm-card-head"><h2>Supplier settings</h2><a href={`/crm/companies/${co.id}`} className="crm-textlink" style={{ fontSize: 13 }}>Close</a></div>
+              <FeedSupplierSettings supplierId={co.id} supplierName={dir.name ?? "Supplier"} canEdit={perms.crmAdmin} />
+            </section>
+          )}
+          <CommunicationsCard companyId={co.id} meId={userId} to={firstEmail ? [{ email: firstEmail }] : []}
+            calls={await decorateCalls(callsRes.data ?? [], admin)} emailCount={threadCount.count ?? 0}
+            phone={dir.phone ?? co.phone ?? null} canDial={dial} />
+          <WorkCard companyId={co.id} tasks={tasks} tickets={tickets} staff={staffList} meId={userId} />
+          <ActivityCard companyId={co.id} items={items} staff={staff}
+            contactNames={Object.fromEntries((cs ?? []).map((c: any) => [c.id, contactName(c)]))} />
+          <section className="crm-card">
+            <div className="crm-card-head"><h2>Documents</h2></div>
+            <CompanyFilesPanel companyId={co.id} files={(filesRes.data ?? []).map((f: any) => ({ ...f, uploaded_by_name: f.uploaded_by ? staff[f.uploaded_by] ?? null : null }))} />
+          </section>
+        </div>
+
+        <aside className="crm-company-rail" aria-label="Company details">
+          {showOwner && (
+            <OwnerCard companyId={co.id} ownerId={dir.owner_staff_id ?? null} staff={staffList} canChange={perms.crmAdmin} meId={userId}
+              trial={stage === "trial" ? { day: dir.trial_day ?? null, endsOn: dir.trial_ends_on ?? null, flag: dir.trial_flag ?? null } : null} />
+          )}
+          {isDealer && stage === "paying" && (
+            <p style={{ margin: 0, padding: "0 4px", fontSize: 13, color: "var(--crm-muted)" }}>Current customer — no owner.</p>
+          )}
+          <DetailsCard canDial={dial}
+            d={{
+              address, website: (isDealer ? source?.website_url : null) ?? co.website ?? null, phone: dir.phone ?? co.phone ?? null, emails: co.emails ?? [],
+              dms: isDealer ? !!source?.inventory_provider_is_dms : null, feedProvider: feed, feedId: isDealer ? source?.inventory_dealer_id ?? null : null,
+              inventory: isDealer ? inventoryFreshness(newestVehicle, isFed(feed, source?.inventory_dealer_id), new Date()) : null,
+              group: groupCompany ? { href: `/crm/companies/${groupCompany.id}`, name: groupCompany.grp?.name ?? "Group" } : null,
+              feedOrder: order ? { label: FEED_STATUS_LABEL[order.status] ?? order.status, open: (OPEN_STATUSES as readonly string[]).includes(order.status) } : null,
+            }}
+            feeds={isDealer || isGroup ? { companyId: co.id, companyName: dir.name ?? "Dealer", kind: isGroup ? "group" : "dealer", meId: userId } : null} />
+          <SummaryCard companyId={co.id} />
+          <ContactsCard companyId={co.id} contacts={contactsRes.data ?? []} canDial={dial} members={members} />
+          <LinksCard l={{
+            crmGroup: groupCompany ? `/crm/companies/${groupCompany.id}` : null,
+            crmUsers: isDealer || isGroup ? `/crm/contacts?company=${co.id}&users=1` : null,
+            billing: isDealer || isGroup ? (billingCustomerId ? `${BILLING_APP}?customer=${billingCustomerId}` : BILLING_APP) : null,
+            daGroup: isGroup ? `/groups/${co.group_id}` : groupCompany ? `/groups/${groupCompany.group_id}` : null,
+            daDealer: isDealer ? `/dealers/${co.dealer_id}` : null,
+            login: isDealer && source?.dealer_id ? { dealerUuid: co.dealer_id, dealerTextId: source.dealer_id, name: dir.name ?? source.name ?? source.dealer_id } : null,
+          }} />
+        </aside>
       </div>
     </div>
-  );
-}
-
-function Stat({ label, value, note, warn }: { label: string; value: React.ReactNode; note?: string; warn?: boolean }) {
-  return (
-    <div>
-      <p className="label">{label}</p>
-      <p style={{ margin: 0, fontSize: 18, fontWeight: 700, color: warn ? "var(--error)" : "var(--navy)" }}>{value}</p>
-      {note && <p style={{ margin: 0, fontSize: 11, color: warn ? "var(--error)" : "var(--text-muted)" }}>{note}</p>}
-    </div>
-  );
-}
-
-async function TimelineTab({ companyId, staff, admin }: { companyId: string; staff: Record<string, string>; admin: any }) {
-  const items = await timeline({ company_id: companyId }, 150, admin);
-  const ids = Array.from(new Set(items.map((i) => i.contact_id).filter(Boolean))) as string[];
-  const { data: cs } = ids.length ? await admin.from("crm_contacts").select("id, first_name, last_name, email").in("id", ids) : { data: [] };
-  return (
-    <>
-      <AddNoteForm companyId={companyId} />
-      <Timeline items={items} staff={staff} contactNames={Object.fromEntries((cs ?? []).map((c: any) => [c.id, contactName(c)]))} />
-    </>
-  );
-}
-
-async function NotesTimeline({ companyId, staff, admin }: { companyId: string; staff: Record<string, string>; admin: any }) {
-  const items = await timeline({ company_id: companyId, types: ["note"] }, 100, admin);
-  return (
-    <div style={{ borderTop: "1px solid var(--border)" }}>
-      <p style={{ margin: 0, padding: "12px 16px 0", fontWeight: 600 }}>Notes on the timeline</p>
-      <AddNoteForm companyId={companyId} />
-      <Timeline items={items} staff={staff} />
-    </div>
-  );
-}
-
-async function ContactsTab({ companyId, dial, admin }: { companyId: string; dial: boolean; admin: any }) {
-  const { data } = await admin.from("crm_contacts").select("id, first_name, last_name, email, phone, title, role_tag, user_id")
-    .eq("company_id", companyId).is("deleted_at", null).order("first_name");
-  const contacts: any[] = data ?? [];
-  return (
-    <>
-      <div style={{ padding: "12px 16px", display: "flex", justifyContent: "flex-end" }}><AddContactForm companyId={companyId} /></div>
-      {!contacts.length ? <p className="text-sm" style={{ color: "var(--text-muted)", padding: "0 16px 16px", margin: 0 }}>No contacts yet.</p> : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)", textAlign: "left" }}>
-              <th className="px-3 py-2" style={TH}>Name</th><th className="px-3 py-2" style={TH}>Title / role</th>
-              <th className="px-3 py-2" style={TH}>Email</th><th className="px-3 py-2" style={TH}>Phone</th>
-            </tr>
-          </thead>
-          <tbody>
-            {contacts.map((c) => (
-              <tr key={c.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                <td className="px-3 py-2">
-                  <Link href={`/crm/contacts/${c.id}`} style={{ color: "var(--blue)" }}>{contactName(c)}</Link>
-                  {c.user_id && <span style={{ color: "var(--text-muted)", fontSize: 11 }}> · platform user</span>}
-                </td>
-                <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{[c.title, c.role_tag ? ROLE_TAG_LABEL[c.role_tag] : null].filter(Boolean).join(" · ") || "—"}</td>
-                <td className="px-3 py-2" style={{ fontSize: 12 }}>{c.email ? <a href={`mailto:${c.email}`} style={{ color: "var(--blue)" }}>{c.email}</a> : "—"}</td>
-                <td className="px-3 py-2"><ClickToCall phone={c.phone} canDial={dial} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </>
-  );
-}
-
-async function CallsTab({ companyId, admin }: { companyId: string; admin: any }) {
-  const { data } = await admin.from("crm_calls").select(CALL_COLUMNS).eq("company_id", companyId).order("started_at", { ascending: false, nullsFirst: false }).limit(50);
-  return <CallsTable rows={await decorateCalls(data ?? [], admin)} showCompany={false} />;
-}
-
-async function FilesTab({ companyId, admin, staff }: { companyId: string; admin: any; staff: Record<string, string> }) {
-  const { data } = await admin.from("crm_company_files").select("id, filename, label, size, created_at, uploaded_by")
-    .eq("company_id", companyId).is("deleted_at", null).order("created_at", { ascending: false });
-  return <CompanyFilesPanel companyId={companyId} files={(data ?? []).map((f: any) => ({ ...f, uploaded_by_name: f.uploaded_by ? staff[f.uploaded_by] ?? null : null }))} />;
-}
-
-async function GroupDealersTab({ groupId, admin, staff }: { groupId: string; admin: any; staff: Record<string, string> }) {
-  const { data } = await admin.from("crm_company_directory")
-    .select("id, name, dealer_text_id, active, city, state, pipeline_stage, owner_staff_id, last_activity_at")
-    .eq("kind", "dealer").eq("parent_group_id", groupId).order("name");
-  const rows: any[] = data ?? [];
-  if (!rows.length) return <p className="text-sm" style={{ color: "var(--text-muted)", padding: 16, margin: 0 }}>No member dealers.</p>;
-  return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}>
-          <th className="px-3 py-2" style={TH}>Dealer</th><th className="px-3 py-2" style={TH}>Location</th>
-          <th className="px-3 py-2" style={TH}>Stage</th><th className="px-3 py-2" style={TH}>Owner</th><th className="px-3 py-2" style={TH}>Last activity</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((d) => (
-          <tr key={d.id} style={{ borderBottom: "1px solid var(--border)" }}>
-            <td className="px-3 py-2"><Link href={`/crm/companies/${d.id}`} style={{ color: "var(--blue)" }}>{d.name}</Link>
-              <span style={{ color: "var(--text-muted)", fontSize: 11 }}> · {d.dealer_text_id}{d.active ? "" : " · inactive"}</span></td>
-            <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{[d.city, d.state].filter(Boolean).join(", ") || "—"}</td>
-            <td className="px-3 py-2">{d.pipeline_stage ? STAGE_LABEL[d.pipeline_stage as Stage] : "—"}</td>
-            <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{d.owner_staff_id ? staff[d.owner_staff_id] ?? "—" : "—"}</td>
-            <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{fmtAgo(d.last_activity_at)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }

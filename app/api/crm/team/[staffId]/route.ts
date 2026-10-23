@@ -37,6 +37,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { staffId: s
       const dup = upErr.code === "23505";
       return NextResponse.json({ error: dup ? "That Dialpad user is already mapped to someone else" : upErr.message }, { status: dup ? 409 : 500 });
     }
+    // Calls that came in before this mapping existed are theirs too.
+    if (parsed.patch.dialpad_user_id) {
+      const { data: calls } = await admin.from("crm_calls").update({ staff_id: params.staffId })
+        .eq("dialpad_user_id", parsed.patch.dialpad_user_id).is("staff_id", null).select("activity_id");
+      const ids = (calls ?? []).map((c: any) => c.activity_id).filter(Boolean);
+      if (ids.length) await admin.from("crm_activities").update({ actor_staff_id: params.staffId }).in("id", ids).is("actor_staff_id", null);
+    }
   }
   // Deactivating someone also removes their DA-CRM access.
   if (parsed.patch.active === false && !self) {

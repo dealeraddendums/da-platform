@@ -136,6 +136,7 @@ export default function MigrationConsole() {
   // Group-level migration modals (2026-07-17): invite group admins + migrate group.
   const [inviteAdminsGroup, setInviteAdminsGroup] = useState<{ id: string; name: string } | null>(null);
   const [migrateGroup, setMigrateGroup] = useState<{ id: string; name: string } | null>(null);
+  const [resyncRow, setResyncRow] = useState<Row | null>(null);
 
   const me = data?.currentUserId ?? "";
   const operators = data?.operators ?? [];
@@ -665,6 +666,11 @@ export default function MigrationConsole() {
         {/* FreshBooks tracking is a 4.0->5.0 migration concept — natives never had FreshBooks. */}
         {r.inviteStatus === "migrated" && !r.isNative && (
           <div style={{ fontSize: 11, marginTop: 4 }}>
+            <button type="button" onClick={() => setResyncRow(r)}
+              title="Re-pull print status, installed products, and missing prices from Platform 4.0 — previews first, never overwrites 5.0 settings, products library, logo, or saved options"
+              style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline", display: "block", marginBottom: 2 }}>
+              re-sync from 4.0…
+            </button>
             {r.freshbooksStoppedAt
               ? <span style={{ color: "#2e7d32" }} title={`stopped ${new Date(r.freshbooksStoppedAt).toLocaleString()}`}>FreshBooks stopped ✓ <button type="button" onClick={() => void markFbStopped(r, false)} style={{ fontSize: 10, color: "#9aa0a6", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>undo</button></span>
               : <span style={{ color: "#b06a00" }}>FreshBooks stop pending <button type="button" onClick={() => void markFbStopped(r, true)} style={{ fontSize: 11, color: "#1976d2", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>mark stopped</button></span>}
@@ -1051,6 +1057,9 @@ export default function MigrationConsole() {
       )}
       {inviteAdminsGroup && (
         <InviteAdminsModal group={inviteAdminsGroup} onClose={() => setInviteAdminsGroup(null)} />
+      )}
+      {resyncRow && (
+        <MigratedResyncModal dealer={resyncRow} onClose={() => setResyncRow(null)} />
       )}
       {migrateGroup && (
         <MigrateGroupModal
@@ -1470,6 +1479,145 @@ function MigrateGroupModal({ group, memberRows, onClose, onMigrated }: {
             <div style={{ fontSize: 12, color: "#b06a00", marginTop: 6 }}>⚠ FreshBooks recurring-stop is queued as a manual operator task (FB stop pending).</div>
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
               <button type="button" onClick={onMigrated} style={{ padding: "8px 16px", border: "none", borderRadius: 6, background: "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Done</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Re-sync a migrated dealer from 4.0 ───────────────────────────────────────
+// Migrated dealers can still be printing on 4.0. Sync refuses them (it would
+// overwrite 5.0 config), so this re-pulls only the safe, 4.0-owned parts —
+// see app/api/migration/resync/route.ts for what it may and may never touch.
+// Preview is read-only; Apply re-checks the counts and writes in one
+// transaction. super_admin only (the route enforces it).
+type ResyncPart = "print_status" | "products" | "missing_prices";
+const RESYNC_OPTIONS: Array<{ part: ResyncPart; label: string; help: string }> = [
+  { part: "print_status", label: "Print status", help: "Marks vehicles printed on 4.0 as printed. Never un-prints, and a 5.0 Clear Print History stays cleared unless 4.0 printed again later." },
+  { part: "products", label: "Installed products", help: "The per-vehicle items 4.0 recorded: adds missing ones, drops ones 4.0 deleted, fixes 4.0 edits. Products saved in 5.0 are untouched." },
+  { part: "missing_prices", label: "Missing prices", help: "Fills MSRP / internet price only on active vehicles that have none in 5.0. Never replaces a price 5.0 already has." },
+];
+interface ResyncCounts {
+  print_status?: { mark_printed: number; already_printed: number; kept_cleared: number; aurora_printed: number };
+  products?: { add: number; add_vehicles: number; remove: number; change: number; skipped_no_vehicle: number };
+  missing_prices?: { msrp: number; internet_price: number; vehicles: number };
+}
+interface ResyncPreview { counts: ResyncCounts; samples: Record<string, Array<Record<string, unknown>>> }
+
+function MigratedResyncModal({ dealer, onClose }: { dealer: Row; onClose: () => void }) {
+  const [parts, setParts] = useState<Set<ResyncPart>>(new Set<ResyncPart>(["print_status", "products"]));
+  const [preview, setPreview] = useState<ResyncPreview | null>(null);
+  const [applied, setApplied] = useState<Record<string, number> | null>(null);
+  const [busy, setBusy] = useState<"" | "preview" | "apply">("");
+  const [err, setErr] = useState("");
+
+  function toggle(p: ResyncPart) {
+    setParts((prev) => { const n = new Set(prev); if (n.has(p)) n.delete(p); else n.add(p); return n; });
+    setPreview(null); // a preview only covers the parts it was run for
+  }
+
+  async function call(mode: "preview" | "apply") {
+    setBusy(mode); setErr("");
+    try {
+      const res = await fetch("/api/migration/resync", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dealer_id: dealer.id, parts: RESYNC_OPTIONS.map((o) => o.part).filter((p) => parts.has(p)), mode, expected: mode === "apply" ? preview?.counts : undefined }),
+      });
+      let j: Record<string, unknown> | null = null;
+      try { j = await res.json(); } catch { /* non-JSON gateway error */ }
+      if (!res.ok || !j) {
+        setErr((j?.error as string) ?? `Re-sync failed (HTTP ${res.status})`);
+        if (res.status === 409 && mode === "apply") setPreview(null);
+        return;
+      }
+      if (mode === "preview") setPreview(j as unknown as ResyncPreview);
+      else setApplied(j.applied as Record<string, number>);
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(""); }
+  }
+
+  const c = preview?.counts;
+  const total = c ? (c.print_status?.mark_printed ?? 0) + (c.products ? c.products.add + c.products.remove + c.products.change : 0) + (c.missing_prices?.vehicles ?? 0) : 0;
+  const line = (label: string, n: number, extra?: string) => (
+    <div style={{ fontSize: 13, padding: "4px 0", borderBottom: "1px solid #f0f0f0" }}>
+      <strong>{n}</strong> {label}{extra ? <span style={{ color: "#78828c" }}> — {extra}</span> : null}
+    </div>
+  );
+  const sampleList = (key: string, title: string) => {
+    const rows = preview?.samples[key] ?? [];
+    if (!rows.length) return null;
+    return (
+      <div style={{ fontSize: 11, color: "#55595c", margin: "4px 0 8px 12px" }}>
+        <div style={{ fontWeight: 600 }}>{title}</div>
+        {rows.map((r, i) => <div key={i} style={{ fontFamily: "monospace" }}>{Object.values(r).map((v) => typeof v === "object" && v ? JSON.stringify(v) : String(v ?? "—")).join(" · ")}</div>)}
+      </div>
+    );
+  };
+
+  return (
+    <div style={modalOverlay}>
+      <div style={modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: NAVY, marginBottom: 4 }}>Re-sync from 4.0 — {dealer.name}</div>
+        {!applied && (
+          <>
+            <p style={{ fontSize: 12, color: "#78828c", margin: "0 0 12px" }}>
+              For a migrated dealer that is still printing on 4.0. Only the parts below can be re-pulled — this never
+              touches their 5.0 settings, products library, logo, saved options, or billing. Preview first; nothing is
+              written until you apply.
+            </p>
+            {RESYNC_OPTIONS.map((o) => (
+              <label key={o.part} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, marginBottom: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={parts.has(o.part)} onChange={() => toggle(o.part)} disabled={!!busy} style={{ marginTop: 3 }} />
+                <span><strong>{o.label}</strong><br /><span style={{ fontSize: 12, color: "#78828c" }}>{o.help}</span></span>
+              </label>
+            ))}
+            {c && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#55595c", marginBottom: 4 }}>Preview</div>
+                {c.print_status && (<>
+                  {line("vehicles would be marked printed", c.print_status.mark_printed,
+                    `${c.print_status.aurora_printed} printed on 4.0 · ${c.print_status.already_printed} already printed in 5.0 · ${c.print_status.kept_cleared} kept cleared`)}
+                  {sampleList("print_status", "Sample")}
+                </>)}
+                {c.products && (<>
+                  {line("products to add", c.products.add, `on ${c.products.add_vehicles} vehicles · ${c.products.skipped_no_vehicle} skipped (vehicle not in 5.0)`)}
+                  {sampleList("products_add", "Sample adds")}
+                  {line("products to remove (deleted on 4.0)", c.products.remove)}
+                  {sampleList("products_remove", "Sample removals")}
+                  {line("products to change (edited on 4.0)", c.products.change)}
+                  {sampleList("products_change", "Sample changes")}
+                </>)}
+                {c.missing_prices && (<>
+                  {line("vehicles get a missing price", c.missing_prices.vehicles, `${c.missing_prices.msrp} MSRP · ${c.missing_prices.internet_price} internet price`)}
+                  {sampleList("missing_prices", "Sample")}
+                </>)}
+              </div>
+            )}
+            {err && <div style={{ color: "#c62828", fontSize: 12, marginTop: 10 }}>{err}</div>}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
+              <button type="button" onClick={onClose} disabled={!!busy} style={{ padding: "8px 16px", border: "1px solid #cccccc", borderRadius: 6, background: "#fff", fontSize: 13, cursor: "pointer" }}>Cancel</button>
+              <button type="button" onClick={() => void call("preview")} disabled={!!busy || parts.size === 0}
+                style={{ padding: "8px 16px", border: "1px solid #1976d2", borderRadius: 6, background: "#fff", color: "#1976d2", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: parts.size === 0 ? 0.5 : 1 }}>
+                {busy === "preview" ? "Previewing…" : preview ? "Preview again" : "Preview"}
+              </button>
+              <button type="button" onClick={() => void call("apply")} disabled={!!busy || !preview || total === 0}
+                style={{ padding: "8px 16px", border: "none", borderRadius: 6, background: "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: preview && total > 0 ? "pointer" : "default", opacity: preview && total > 0 ? 1 : 0.5 }}>
+                {busy === "apply" ? "Applying…" : preview && total === 0 ? "Nothing to apply" : "Apply"}
+              </button>
+            </div>
+          </>
+        )}
+        {applied && (
+          <>
+            <div style={{ fontSize: 13, color: "#2e7d32", fontWeight: 600, margin: "8px 0" }}>✓ Re-sync applied and logged to the dealer&apos;s migration log and CRM timeline.</div>
+            <div style={{ fontSize: 13, color: "#55595c" }}>
+              {applied.print_status_marked > 0 && <div>{applied.print_status_marked} vehicles marked printed</div>}
+              {(applied.products_added > 0 || applied.products_removed > 0 || applied.products_changed > 0) && <div>Products: {applied.products_added} added · {applied.products_removed} removed · {applied.products_changed} changed</div>}
+              {(applied.msrp_filled > 0 || applied.internet_price_filled > 0) && <div>Prices filled: {applied.msrp_filled} MSRP · {applied.internet_price_filled} internet price</div>}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <button type="button" onClick={onClose} style={{ padding: "8px 16px", border: "none", borderRadius: 6, background: "#1976d2", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Done</button>
             </div>
           </>
         )}

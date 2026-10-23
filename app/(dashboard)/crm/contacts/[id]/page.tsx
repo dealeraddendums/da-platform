@@ -8,6 +8,7 @@ import AddNoteForm from "@/components/crm/AddNoteForm";
 import CallsTable from "@/components/crm/CallsTable";
 import ContactEditForm from "@/components/crm/ContactEditForm";
 import EmailFromTemplate from "@/components/crm/EmailFromTemplate";
+import EmailThreadsPanel from "@/components/crm/EmailThreadsPanel";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames, timeline } from "@/lib/crm/queries";
 import { contactName, fmtDate, ROLE_TAG_LABEL } from "@/lib/crm/format";
@@ -59,6 +60,10 @@ export default async function CrmContactPage({ params }: { params: { id: string 
           <p style={{ margin: 0, padding: "12px 16px", fontWeight: 600 }}>Calls</p>
           <CallsTable rows={calls} showCompany={false} />
         </div>
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <p style={{ margin: 0, padding: "12px 16px 0", fontWeight: 600 }}>Email</p>
+        <EmailThreadsPanel contactId={c.id} meId={userId} to={c.email ? [{ email: c.email, name: contactName(c) }] : []} />
       </div>
     </div>
   );

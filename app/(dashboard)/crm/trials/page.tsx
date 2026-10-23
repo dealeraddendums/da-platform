@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { crmAdmin, staffNames } from "@/lib/crm/queries";
 import { STAGE_LABEL, daysSince, fmtAgo, fmtDate, type Stage } from "@/lib/crm/format";
+import { Tag } from "@/components/crm/CrmBadges";
 
 export const metadata = { title: "Trials — DA-CRM" };
 const TH: React.CSSProperties = { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", fontWeight: 600 };
@@ -67,7 +68,7 @@ export default async function CrmTrialsPage({ searchParams }: { searchParams: { 
                           <span style={{ color: "var(--text-muted)", fontSize: 11 }}> · {r.dealer_text_id}{r.city ? ` · ${r.city}, ${r.state ?? ""}` : ""}</span></td>
                         <td className="px-3 py-2" style={{ whiteSpace: "nowrap" }}>
                           {stage === "trial" ? (r.trial_day ?? "—") : fmtDate(r.stage_changed_at)}
-                          {r.trial_flag && <span style={{ marginLeft: 6, background: r.trial_flag === "expired" ? "#ffebee" : "#fff8e1", color: r.trial_flag === "expired" ? "#b71c1c" : "#7a5c00", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 3 }}>{r.trial_flag === "expired" ? "Expired" : "Expiring"}</span>}
+                          {r.trial_flag && <Tag tone={r.trial_flag === "expired" ? "danger" : "warn"} style={{ marginLeft: 6 }}>{r.trial_flag === "expired" ? "Expired" : "Expiring"}</Tag>}
                         </td>
                         {stage === "trial" && <td className="px-3 py-2" style={{ whiteSpace: "nowrap" }}>{fmtDate(r.trial_ends_on)}</td>}
                         <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{r.owner_staff_id ? staff[r.owner_staff_id] ?? "—" : "Unassigned"}</td>

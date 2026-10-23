@@ -18,11 +18,14 @@ type NavItem = {
   exact?: boolean;
   /** Extra path prefixes that also mark this item active. */
   alsoActive?: string[];
+  /** Count bubble (DA-CRM unread Inbox threads). */
+  badge?: number;
 };
 
 type NavSection = {
   section: string;
   roles: UserRole[];
+  badge?: number;
 };
 
 type NavEntry = NavItem | NavSection;
@@ -583,24 +586,40 @@ const nav: NavEntry[] = [
 // On /crm routes the sidebar swaps to the CRM nav (the layout only passes
 // `crm` to users holding the 'crm' staff permission; /crm pages enforce it
 // again). Never shown to dealer or group roles.
-export type CrmNavContext = { enabled: boolean; admin: boolean; name: string; hasLogo: boolean };
+export type CrmNavContext = { enabled: boolean; admin: boolean; name: string; hasLogo: boolean; unread?: number };
 
 const icon = (d: React.ReactNode) => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">{d}</svg>
 );
 const CRM_ICON = icon(<><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><line x1="8" y1="9" x2="16" y2="9" /><line x1="8" y1="13" x2="13" y2="13" /></>);
 
-function crmNav(admin: boolean): NavEntry[] {
+function NavBadge({ n }: { n: number }) {
+  return (
+    <span aria-label={`${n} unread`} style={{ marginLeft: "auto", minWidth: 18, height: 18, padding: "0 5px", borderRadius: 9, background: "var(--orange)", color: "var(--text-on-orange)", fontSize: 10, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", letterSpacing: 0 }}>
+      {n > 99 ? "99+" : n}
+    </span>
+  );
+}
+
+/** "DA-CRM" → DA<span>-CRM</span>; any other configured name as-is. */
+function crmWordmark(name?: string): React.ReactNode {
+  const n = name || "DA-CRM";
+  const m = n.match(/^(.*?)(-CRM)$/i);
+  return m ? <>{m[1]}<span>{m[2]}</span></> : n;
+}
+
+function crmNav(admin: boolean, unread = 0): NavEntry[] {
   const r: UserRole[] = ["super_admin"];
   const sub: React.CSSProperties = { paddingLeft: 40, height: 38, fontSize: 13 };
   const items: NavEntry[] = [
     { label: "Dashboard", href: "/crm", exact: true, roles: r, icon: icon(<><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>) },
     { label: "Dealers", href: "/crm/dealers", alsoActive: ["/crm/companies"], roles: r, icon: icon(<><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></>) },
     { label: "Contacts", href: "/crm/contacts", roles: r, icon: icon(<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>) },
-    { section: "Communications", roles: r },
+    { section: "Communications", roles: r, badge: unread },
     { label: "Calls", href: "/crm/communications/calls", roles: r, itemStyle: sub, icon: icon(<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />) },
-    { label: "Inbox", href: "/crm/communications/inbox", roles: r, itemStyle: sub, icon: icon(<><path d="M4 4h16v16H4z" /><polyline points="4 13 9 13 10 16 14 16 15 13 20 13" /></>) },
+    { label: "Inbox", href: "/crm/communications/inbox", roles: r, itemStyle: sub, badge: unread, icon: icon(<><path d="M4 4h16v16H4z" /><polyline points="4 13 9 13 10 16 14 16 15 13 20 13" /></>) },
     { label: "Chat", href: "/crm/communications/chat", roles: r, itemStyle: sub, icon: CRM_ICON },
+    { label: "Feeds", href: "/crm/communications/feeds", roles: r, itemStyle: sub, icon: icon(<><path d="M4 11a9 9 0 0 1 9 9" /><path d="M4 4a16 16 0 0 1 16 16" /><circle cx="5" cy="19" r="1" /></>) },
     { label: "Tickets", href: "/crm/communications/tickets", roles: r, itemStyle: sub, icon: icon(<><path d="M3 7h18v4a2 2 0 0 0 0 4v4H3v-4a2 2 0 0 0 0-4z" /></>) },
     { label: "Templates", href: "/crm/communications/templates", roles: r, itemStyle: sub, icon: icon(<><rect x="3" y="5" width="18" height="14" rx="2" /><polyline points="3 7 12 13 21 7" /></>) },
     { section: "", roles: r },
@@ -609,12 +628,11 @@ function crmNav(admin: boolean): NavEntry[] {
     { label: "Workflows", href: "/crm/workflows", roles: r, icon: icon(<><circle cx="6" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M6 9v3a3 3 0 0 0 3 3h6" /></>) },
   ];
   if (admin) items.push({ label: "Team", href: "/crm/team", roles: r, icon: icon(<><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>) });
-  items.push(
-    { section: "", roles: r },
-    { label: "DA Platform", href: "/dashboard", exact: true, roles: r, icon: icon(<><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></>) },
-  );
   return items;
 }
+
+// Pinned under the CRM nav (never scrolls away): back to the dealer platform.
+const CRM_BACK_ICON = icon(<><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></>);
 
 export default function Sidebar({ role = "dealer_user", hideBuilder = false, showUpgrade = false, showImageBuilder = false, crm }: { role?: UserRole | "group_user"; hideBuilder?: boolean; showUpgrade?: boolean; showImageBuilder?: boolean; crm?: CrmNavContext }) {
   const pathname = usePathname();
@@ -629,7 +647,7 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
       || (showImageBuilder && "href" in entry && entry.href === "/admin/image-builder"))
     .filter((entry) => !(hideBuilder && "href" in entry && (entry.href === "/builder" || entry.href === "/image-builder")));
   const inCrm = !!crm?.enabled && role === "super_admin" && (pathname === "/crm" || pathname.startsWith("/crm/"));
-  const visibleNav: NavEntry[] = inCrm ? crmNav(crm!.admin)
+  const visibleNav: NavEntry[] = inCrm ? crmNav(crm!.admin, crm!.unread ?? 0)
     : DEALER_NAV_ROLES.has(role) ? dealerOrdered(roleNav)
     : role === "super_admin" ? superAdminOrdered(crm?.enabled ? withCrmEntry(roleNav) : roleNav)
     : roleNav;
@@ -747,7 +765,7 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
 
   return (
     <aside
-      className="flex-shrink-0 flex flex-col h-full"
+      className={`flex-shrink-0 flex flex-col h-full${inCrm ? " crm-sidebar" : ""}`}
       style={{ width: 220, background: "var(--navy)" }}
     >
       {/* Logo — host-resolved brand (reseller logo + name on a branded host). */}
@@ -755,19 +773,29 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
         className="flex items-center gap-2 px-4 h-14 flex-shrink-0"
         style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
       >
-        <img
-          src={inCrm && crm?.hasLogo ? "/api/crm/settings/logo" : brand.logoUrl}
-          alt={inCrm ? crm?.name : brand.displayName}
-          width={36}
-          height={36}
-          style={{ borderRadius: "50%", flexShrink: 0, objectFit: "contain", background: "rgba(255,255,255,0.06)" }}
-        />
-        <span
-          className="font-semibold text-sm truncate"
-          style={{ color: "var(--text-inverse)" }}
-        >
-          {inCrm ? crm?.name || "DA-CRM" : brand.displayName}
-        </span>
+        {inCrm ? (
+          <>
+            {/* DA-CRM wordmark (a custom logo from CRM settings sits beside it). */}
+            {crm?.hasLogo && <img src="/api/crm/settings/logo" alt="" width={28} height={28} style={{ borderRadius: 6, flexShrink: 0, objectFit: "contain" }} />}
+            <span className="crm-wordmark truncate">{crmWordmark(crm?.name)}</span>
+          </>
+        ) : (
+          <>
+            <img
+              src={brand.logoUrl}
+              alt={brand.displayName}
+              width={36}
+              height={36}
+              style={{ borderRadius: "50%", flexShrink: 0, objectFit: "contain", background: "rgba(255,255,255,0.06)" }}
+            />
+            <span
+              className="font-semibold text-sm truncate"
+              style={{ color: "var(--text-inverse)" }}
+            >
+              {brand.displayName}
+            </span>
+          </>
+        )}
       </div>
 
       {/* Navigation */}
@@ -838,7 +866,7 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
                   fontFamily: "inherit",
                 }}
               >
-                <span>{entry.section}</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{entry.section}{!!entry.badge && <NavBadge n={entry.badge} />}</span>
                 <svg
                   width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
                   aria-hidden="true"
@@ -868,10 +896,17 @@ export default function Sidebar({ role = "dealer_user", hideBuilder = false, sho
             >
               {item.icon}
               <span>{item.label}</span>
+              {!!item.badge && <NavBadge n={item.badge} />}
             </Link>
           );
         }); })()}
       </nav>
+
+      {inCrm && (
+        <div className="crm-back flex-shrink-0">
+          <Link href="/dashboard" className="nav-item">{CRM_BACK_ICON}<span>DA Platform</span></Link>
+        </div>
+      )}
 
       {/* Space reserved for the fixed Steven launcher + "Get Instant Support"
           arrow (components/StevenChat.tsx .steven-dock) so it never sits on nav items. */}

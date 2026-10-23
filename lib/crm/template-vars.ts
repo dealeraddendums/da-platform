@@ -3,7 +3,8 @@
 // the server compose path share it).
 //
 // Syntax: {{group.field}} with an optional fallback: {{contact.first_name | "there"}}.
-// Values are HTML-escaped when rendering a body. A token that isn't in the
+// Values are HTML-escaped when rendering a body (a line break in a value becomes
+// <br> — order.dealership_list). A token that isn't in the
 // catalogue is left untouched and reported as `unknown`; a known variable with
 // no value (and no fallback) renders empty and is reported as `missing`.
 
@@ -27,6 +28,7 @@ export const TEMPLATE_VARIABLES: VarGroup[] = [
     { key: "company.state", label: "State", example: "WA" },
     { key: "company.zip", label: "ZIP", example: "98682" },
     { key: "company.phone", label: "Phone", example: "(360) 555-0199" },
+    { key: "company.fax", label: "Fax", example: "(360) 555-0198" },
     { key: "company.website", label: "Website", example: "https://battlegroundkia.com" },
   ] },
   { group: "staff", label: "Me (sender)", vars: [
@@ -44,12 +46,50 @@ export const TEMPLATE_VARIABLES: VarGroup[] = [
     { key: "trial.days_left", label: "Days left", example: "18" },
     { key: "trial.ends_on", label: "Ends on", example: "November 9, 2026" },
   ] },
+  // Feed orders (Phase 2b) — filled only when a feed-request email is composed for an order.
+  { group: "supplier", label: "Feed supplier", vars: [
+    { key: "supplier.name", label: "Name", example: "vAuto" },
+    { key: "supplier.request_email", label: "Request email", example: "vat.support@coxautoinc.com" },
+  ] },
+  { group: "approver", label: "Feed approver", vars: [
+    { key: "approver.name", label: "Name", example: "Bill Meier" },
+    { key: "approver.first_name", label: "First name", example: "Bill" },
+    { key: "approver.email", label: "Email", example: "bill@herzogmeier.com" },
+    { key: "approver.title", label: "Title", example: "General Manager" },
+  ] },
+  { group: "dealer", label: "Dealer feed", vars: [
+    { key: "dealer.dms", label: "DMS / feed provider", example: "Reynolds" },
+  ] },
+  { group: "order", label: "Feed order", vars: [
+    { key: "order.id", label: "Order number", example: "FO-1A2B3C" },
+    { key: "order.sent_on", label: "Request sent on", example: "October 21, 2026" },
+    { key: "order.feed_id", label: "Feed ID", example: "MP12601" },
+    { key: "order.case_number", label: "Supplier case number", example: "08192068" },
+    // Several dealerships on one request (a group's rooftops); one dealership = its name / location.
+    { key: "order.dealerships", label: "Dealership name(s)", example: "Sour Lake Motors and Sour Lake Ford" },
+    { key: "order.dealership_count", label: "Number of dealerships", example: "2" },
+    { key: "order.dealership_list", label: "Dealership / Location lines", example: "Dealership: Sour Lake Motors\nLocation: Sour Lake, TX" },
+    // The "feed is set up" emails: the dealerships live so far (with their Feed IDs) and the ones still pending.
+    { key: "order.live_dealerships", label: "Live dealership name(s)", example: "Sour Lake Motors" },
+    { key: "order.feed_id_list", label: "Live dealership / Feed ID lines", example: "Sour Lake Motors — feed ID SOUR17" },
+    { key: "order.pending_dealerships", label: "Pending dealership name(s)", example: "Sour Lake Ford" },
+    // One per supplier question (crm_feed_supplier_settings.extra_fields); any
+    // order.supplier_fields.<key>[.<option>] is accepted — see isKnownVariable.
+    { key: "order.supplier_fields.autosoft_account", label: "Supplier field (e.g. Autosoft account)", example: "ABCD17" },
+  ] },
   { group: "date", label: "Date", vars: [
     { key: "today", label: "Today", example: "October 21, 2026" },
+    { key: "today.short", label: "Today (MM/DD/YYYY)", example: "10/21/2026" },
   ] },
 ];
 
 export const VARIABLE_KEYS = new Set(TEMPLATE_VARIABLES.flatMap((g) => g.vars.map((v) => v.key)));
+
+// Supplier questions are per supplier, so their keys can't all be in the catalogue.
+const SUPPLIER_FIELD_KEY = /^order\.supplier_fields\.[a-z][a-z0-9_]*(\.[A-Za-z0-9][A-Za-z0-9_]*)?$/;
+
+/** A variable DA-CRM can fill: the catalogue, plus order.supplier_fields.<key>[.<option>]. */
+export const isKnownVariable = (key: string) => VARIABLE_KEYS.has(key) || SUPPLIER_FIELD_KEY.test(key);
 
 export type TemplateContext = Record<string, string | number | null | undefined>;
 
@@ -68,11 +108,11 @@ export function renderTemplate(text: string, ctx: TemplateContext, opts: { html:
   const unknown = new Set<string>();
   const out = text.replace(TOKEN, (whole, rawKey: string, fbDq?: string, fbSq?: string) => {
     const key = rawKey.trim();
-    if (!VARIABLE_KEYS.has(key)) { unknown.add(key); return whole; }
+    if (!isKnownVariable(key)) { unknown.add(key); return whole; }
     const v = ctx[key];
     const value = v == null || String(v).trim() === "" ? (fbDq ?? fbSq ?? null) : String(v);
     if (value == null) { missing.add(key); return ""; }
-    return opts.html ? escapeHtml(value) : value;
+    return opts.html ? escapeHtml(value).replace(/\r?\n/g, "<br>") : value;
   });
   return { text: out, missing: Array.from(missing), unknown: Array.from(unknown) };
 }
@@ -80,7 +120,7 @@ export function renderTemplate(text: string, ctx: TemplateContext, opts: { html:
 /** Catalogue variables a template uses (for the cached `variables` column). */
 export function findVariables(...texts: string[]): string[] {
   const found = new Set<string>();
-  for (const t of texts) for (const m of Array.from(t.matchAll(TOKEN))) if (VARIABLE_KEYS.has(m[1].trim())) found.add(m[1].trim());
+  for (const t of texts) for (const m of Array.from(t.matchAll(TOKEN))) if (isKnownVariable(m[1].trim())) found.add(m[1].trim());
   return Array.from(found).sort();
 }
 
@@ -89,7 +129,7 @@ export function findUnknownTokens(...texts: string[]): string[] {
   const found = new Set<string>();
   for (const t of texts) for (const m of Array.from(t.matchAll(/\{\{\s*([^{}]+?)\s*\}\}|\{%\s*([^%]+?)\s*%\}/g))) {
     const key = (m[1] ?? m[2]).split("|")[0].trim();
-    if (!VARIABLE_KEYS.has(key)) found.add(m[0]);
+    if (!isKnownVariable(key)) found.add(m[0]);
   }
   return Array.from(found);
 }

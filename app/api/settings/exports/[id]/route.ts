@@ -66,7 +66,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     admin_user_id: ctx.userId,
     action: "dealer_export_updated",
     target_dealer_id: ctx.dealer.dealer_id,
-    metadata: { feed_id: feed.id, password_changed: input.ftp_password !== undefined, role: ctx.role },
+    metadata: { feed_id: feed.id, password_changed: input.ftp_password !== undefined, role: ctx.role, ...(ctx.ghost ?? {}) },
   }), "admin_audit");
 
   return NextResponse.json({ export: serializeExport(saved, input.feed_dealer_id) });
@@ -85,7 +85,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     admin_user_id: ctx.userId,
     action: "dealer_export_deleted",
     target_dealer_id: ctx.dealer.dealer_id,
-    metadata: { feed_id: feed.id, name: feed.name, role: ctx.role },
+    metadata: { feed_id: feed.id, name: feed.name, role: ctx.role, ...(ctx.ghost ?? {}) },
   }), "admin_audit");
   return NextResponse.json({ ok: true });
 }

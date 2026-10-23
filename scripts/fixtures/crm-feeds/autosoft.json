@@ -1,0 +1,56 @@
+{
+  "supplier": "Autosoft",
+  "source": "Real thread, support@ mailbox, 2026-10-19 → 2026-10-21: ONE request for both of a group's stores (Autosoft answered them together, and staff had to ask \"which ID is for which store?\"). Anonymized: dealers, group, people, domains, phone numbers, Autosoft account numbers (format kept) and the Salesforce ref token. Our side is shown as feeds@. Messages marked reconstructed=true follow the new PDF flow (we send the pre-filled forms; the dealer replies to feeds@) where the real thread predates it. as-4 arrives the way Autosoft's Salesforce sends it: from noreply@salesforce.com, sender dcsconnect@autosoftdms.com.",
+  "approver": { "name": "Wade Collins", "email": "wade@cedarbendtrucks.example", "title": "General Manager" },
+  "supplier_fields": { "go_dealer": "N" },
+  "messages": [
+    {
+      "id": "as-0", "direction": "outbound", "thread": "T0", "receivedAt": "2026-10-19T15:58:00Z", "reconstructed": true,
+      "from": "feeds@dealeraddendums.com", "fromName": "DealerAddendums Feeds",
+      "to": ["wade@cedarbendtrucks.example"], "cc": [],
+      "subject": "Inventory Feed Request for: Cedar Bend Motors and Cedar Bend Ford​​",
+      "bodyHtml": "<p>Hello Wade,</p><p>Autosoft needs a signed <strong>Data Transfer Authorization</strong> before it can send Cedar Bend Motors and Cedar Bend Ford’s inventory to Dealer Addendums. The form is attached, already filled in with the dealership details and Autosoft account CEDB17/CEDB75.</p><p>Please check the details, <strong>sign and date</strong> it at the bottom, and <strong>Reply All</strong> to this email with the signed form attached. We’ll forward it to Autosoft for activation — you don’t need to send it to them yourself.</p>",
+      "attachments": [{ "filename": "Feed authorization FO-FIXT01 - Cedar Bend Motors.pdf", "contentType": "application/pdf" }, { "filename": "Feed authorization FO-FIXT01 - Cedar Bend Ford.pdf", "contentType": "application/pdf" }]
+    },
+    {
+      "id": "as-1", "direction": "inbound", "thread": "T0", "receivedAt": "2026-10-20T20:55:00Z",
+      "from": "wade@cedarbendtrucks.example", "fromName": "Wade Collins",
+      "to": ["feeds@dealeraddendums.com"], "cc": [],
+      "subject": "Re: Inventory Feed Request for: Cedar Bend Motors and Cedar Bend Ford​​",
+      "bodyHtml": "<div class=\"elementToProof\" style=\"font-family:Aptos,Aptos_EmbeddedFont,Aptos_MSFontService,Calibri,Helvetica,sans-serif;font-size:11pt;color:rgb(0,0,0)\">please see authorization forms attached for Cedar Bend Ford and Cedar Bend Motor Co</div><div class=\"elementToProof\" id=\"Signature\"><div> </div><div><b>Wade Collins</b></div><div>General Manager</div><div>Cedar Bend Motor Co / Cedar Bend Ford</div><div>O: 409-555-0136 ext 132</div><div>F:  409-555-0129</div><div>E:  wade@cedarbendtrucks.example</div></div><div id=\"appendonsend\"> </div><hr style=\"display:inline-block;width:98%\" /><div id=\"divRplyFwdMsg\"><b>From:</b> DealerAddendums Feeds &lt;feeds@dealeraddendums.com&gt;<br /><b>Sent:</b> Monday, October 19, 2026 11:58 AM<br /><b>To:</b> Wade Collins &lt;wade@cedarbendtrucks.example&gt;<br /><b>Subject:</b> Inventory Feed Request for: Cedar Bend Motors and Cedar Bend Ford​​ <div> </div></div><div><p>Please check the details, sign and date it at the bottom, and Reply All to this email with the signed form attached.</p></div>",
+      "attachments": [{ "filename": "DEALER ADDENDUMS-AUTOSOFT DATA TRANSFER CEDAR BEND MOTOR CO.pdf", "contentType": "application/pdf" }, { "filename": "DealerAddendums - Autosoft Data Transfer Form CEDAR BEND FORD.pdf", "contentType": "application/pdf" }, { "filename": "image.png", "contentType": "image/jpeg", "isInline": true}],
+      "expect": { "result": "signed_pdf", "status": "awaiting_supplier", "signedPdfs": { "motors": "DEALER ADDENDUMS-AUTOSOFT DATA TRANSFER CEDAR BEND MOTOR CO.pdf", "ford": "DealerAddendums - Autosoft Data Transfer Form CEDAR BEND FORD.pdf" }, "openTasks": ["feed_forward_signed_pdf"], "mailsSent": 0}
+    },
+    {
+      "id": "as-2", "direction": "inbound", "thread": "T5", "receivedAt": "2026-10-21T12:27:28Z",
+      "from": "dcsconnect@autosoftdms.com", "fromName": null,
+      "to": ["wade@cedarbendtrucks.example", "feeds@dealeraddendums.com"], "cc": ["tk@autosoftdms.com", "tc@autosoftdms.com"],
+      "subject": "FW: Re: Activation Rqst - Dealer Addendums - Inventory Feed Request for: Cedar Bend Motors?? and Cedar Bend Ford    [ ref:!00Df20Cce8.!500iL0FixT01:ref ]",
+      "bodyHtml": "\r\nWade,<br /><br />Hello. Unfortunately, the Data Authorization form indicate that you allow Autosoft to share \"GoBatch\" data with Dealer Addendums. Your dealership is not a \"GO\" Dealer so \"GoBatch\" data is not the appropriate data feed selection. Please submit a form from each dealership with the proper integration indicated. <br /><br />Dealer Addendums typically requests the \"ASIS_VehInv2\" which pulls data from the dealers Accounting Platform. Please indicate on the form the data feed that you would like to shared with Dealer Addendums and resubmit to us.<br /><br />We thank you for your understanding.  <br /><br /><br />Thank you,<br />Terri Moss <br /><br /><br />--------------- Forwarded Message ---------------<br /><b>From:</b> Wade Collins [wade@cedarbendtrucks.example]<br /><b>Sent:</b> 10/20/2026 3:55 PM<br /><b>To:</b> dcsconnect@autosoftdms.com; feeds@dealeraddendums.com<br /><b>Subject:</b> Re: Activation Rqst - Dealer Addendums - Inventory Feed Request for: Cedar Bend Motors?? and Cedar Bend Ford [ ref:!00Df20Cce8.!500iL0FixT01:ref ]<br /><br />please see authorization forms attached for Cedar Bend Ford and Cedar Bend Motor Co<br /><br />ref:!00Df20Cce8.!500iL0FixT01:ref<br />",
+      "expect": { "result": "review_supplier_reply", "status": "awaiting_supplier", "caseNumber": "!00Df20Cce8.!500iL0FixT01", "openTasks": ["feed_review_supplier_reply"], "mailsSent": 1}
+    },
+    {
+      "id": "as-3", "direction": "inbound", "thread": "T0", "receivedAt": "2026-10-21T13:40:00Z", "reconstructed": true,
+      "from": "wade@cedarbendtrucks.example", "fromName": "Wade Collins",
+      "to": ["feeds@dealeraddendums.com"], "cc": [],
+      "subject": "RE: Inventory Feed Request for: Cedar Bend Motors and Cedar Bend Ford​​",
+      "bodyHtml": "<div>corrected forms attached with ASIS_VehInv2</div><div><b>Wade Collins</b></div><div>General Manager</div><hr /><div id=\"divRplyFwdMsg\"><b>From:</b> DealerAddendums Feeds &lt;feeds@dealeraddendums.com&gt;<br /><b>Subject:</b> Inventory Feed Request for: Cedar Bend Motors and Cedar Bend Ford</div>",
+      "attachments": [{ "filename": "DealerAddendums - Autosoft Data Transfer Form CEDAR BEND FORD-2.pdf", "contentType": "application/pdf" }, { "filename": "DealerAddendums - Autosoft Data Transfer Form CEDAR BEND MOTORS-2.pdf", "contentType": "application/pdf" }],
+      "expect": { "result": "signed_pdf", "status": "awaiting_supplier", "signedPdfs": { "motors": "DealerAddendums - Autosoft Data Transfer Form CEDAR BEND MOTORS-2.pdf", "ford": "DealerAddendums - Autosoft Data Transfer Form CEDAR BEND FORD-2.pdf" }, "openTasks": ["feed_review_supplier_reply", "feed_forward_signed_pdf"], "mailsSent": 1}
+    },
+    {
+      "id": "as-4", "direction": "inbound", "thread": "T6", "receivedAt": "2026-10-21T14:36:41Z",
+      "from": "noreply@salesforce.com", "fromName": null, "sender": "dcsconnect@autosoftdms.com",
+      "to": ["feeds@dealeraddendums.com"], "cc": ["wade@cedarbendtrucks.example"],
+      "subject": "RE: Inventory Feed Request for: Cedar Bend Motors??    [ ref:!00Df20Cce8.!500iL0FixT01:ref ]",
+      "bodyHtml": "\r\nHello,<br /><br />DealerAddendums has been activated for CEDB17/CEDB75<br /><br /><br />--------------- Original Message ---------------<br /><b>From:</b> DealerAddendums Feeds [feeds@dealeraddendums.com]<br /><b>Sent:</b> 10/19/2026 11:58 AM<br /><b>To:</b> dcsconnect@autosoftdms.com; wade@cedarbendtrucks.example<br /><b>Subject:</b> Inventory Feed Request for: Cedar Bend Motors??<br /><br /><div><p style=\"margin:0\">Hello Autosoft Support and Wade,</p><p style=\"margin:0\">Please add Cedar Bend Motors to the Dealer Addendums inventory feed file and provide the store’s <strong>unique Dealer ID</strong> once completed.</p></div><br /><br />ref:!00Df20Cce8.!500iL0FixT01:ref ",
+      "expect": { "result": "feed_id", "status": "feed_id_received", "dealerships": { "motors": ["feed_id_received", "CEDB17"], "ford": ["feed_id_received", "CEDB75"] }, "openTasks": ["feed_review_supplier_reply", "feed_confirm_id", "feed_confirm_id"], "confirmTitles": ["Confirm Feed ID CEDB17 for Cedar Bend Motors", "Confirm Feed ID CEDB75 for Cedar Bend Ford"], "mailsSent": 2}
+    }
+  ],
+  "forwardAfter": ["as-1", "as-3"],
+  "group": { "name": "Cedar Bend Auto Group", "city": "Cedar Bend", "state": "TX" },
+  "dealerships": [
+    { "key": "motors", "name": "Cedar Bend Motors", "city": "Cedar Bend", "state": "TX", "website": "https://www.cedarbendtrucks.example", "address": "100 Fixture Way", "zip": "77659", "account": "cedb17" },
+    { "key": "ford", "name": "Cedar Bend Ford", "city": "Cedar Bend", "state": "TX", "website": "https://www.cedarbendford.example", "address": "200 Fixture Way", "zip": "77659", "account": "CEDB75" }
+  ]
+}

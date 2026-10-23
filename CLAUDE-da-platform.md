@@ -71,7 +71,7 @@
 - No gradients. No border-radius > 6px (pills at 20px OK). No animations > 150ms.
 
 ## DA-CRM (staff-only module, `/crm`)
-Schema, phase plan, Dialpad, trial job, da-billing webhook contract and env vars: see `../CLAUDE.md` → **DA-CRM**. Migration `179_crm_foundation.sql`; code in `lib/crm/`, `app/(dashboard)/crm/`, `app/api/crm/`.
+Schema, phase plan, Dialpad, trial job, da-billing webhook contract and env vars: see `../CLAUDE.md` → **DA-CRM**. Migrations `179`–`182`; Inbox / Microsoft 365 runbook: `docs/DA-CRM-Inbox.md`; code in `lib/crm/`, `app/(dashboard)/crm/`, `app/api/crm/`.
 
 ## Sidebar Navigation
 
@@ -935,6 +935,9 @@ Existing app (screenshots captured) — use as UX reference, not codebase. The n
 | `0 9 5 * *` | `/api/cron/chromedata-usage-report` | ✅ |
 | `0 10 * * *` | `/api/cron/sync-xps-tracking` | ✅ |
 | `0 10 * * *` | `/api/migration/send-follow-ups` | ✅ — migration invite drip (Days 3/10/30/60/90 after invited_at) |
+| `*/10 * * * *` | `/api/cron/crm-graph-sync` | DA-CRM Inbox delta fallback (docs/DA-CRM-Inbox.md) |
+| `0 */12 * * *` | `/api/cron/crm-graph-subscriptions` | DA-CRM Inbox Graph subscription renewal |
+| `0 7 * * *` (PT) | `/api/cron/crm-feed-stalls` | DA-CRM feed-order stalls (skips weekends / US holidays) |
 
 ## Environment Variables
 

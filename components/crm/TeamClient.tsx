@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import EmailEditor from "./EmailEditor";
 import { formatPhone } from "@/lib/crm/phone";
+import { Tag } from "./CrmBadges";
 
 export type Member = {
   staff_id: string;
@@ -25,7 +26,7 @@ export type Member = {
 
 // Mirrors lib/crm/team.ts (server-only because of DOMPurify).
 const TEAMS: Record<string, string> = { customer_support: "Customer Support", management: "Management" };
-const CAPABILITIES: Record<string, string> = { tier1: "Tier 1", tier2: "Tier 2", feed_support: "Feed support", ar_ap: "AR/AP" };
+const CAPABILITIES: Record<string, string> = { tier1: "Tier 1", tier2: "Tier 2", feed_support: "Feed support", ar_ap: "AR/AP", label_shipping: "Label shipping" };
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 const DAY_LABEL: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
 const ZONES = ["America/Los_Angeles", "America/Denver", "America/Phoenix", "America/Chicago", "America/New_York", "Pacific/Honolulu", "America/Anchorage"];
@@ -74,7 +75,7 @@ export default function TeamClient({
             </div>
             {m.capabilities.length > 0 && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
-                {m.capabilities.map((c) => <span key={c} style={{ background: "#e3f2fd", color: "#1565c0", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 3 }}>{CAPABILITIES[c] ?? c}</span>)}
+                {m.capabilities.map((c) => <Tag key={c} tone="accent">{CAPABILITIES[c] ?? c}</Tag>)}
               </div>
             )}
             <dl style={{ margin: "10px 0 0", fontSize: 12, color: "var(--text-secondary)", display: "grid", gap: 2 }}>

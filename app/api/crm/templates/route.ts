@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCrmStaff } from "@/lib/crm/access";
 import { createAdminSupabaseClient } from "@/lib/db";
-import { TEMPLATE_COLUMNS, derived, templateFields } from "@/lib/crm/templates";
+import { duplicateMessage, feedFolderFields, TEMPLATE_COLUMNS, derived, templateFields } from "@/lib/crm/templates";
 
 export const dynamic = "force-dynamic";
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -26,11 +26,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { claims, error } = await requireCrmStaff({ admin: true });
   if (error) return error;
-  const parsed = templateFields(await req.json().catch(() => ({})), { create: true });
+  const body = await req.json().catch(() => ({}));
+  const parsed = templateFields(body, { create: true });
   if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const f = parsed.fields as { subject: string; body_html: string };
   const d = derived(f.subject, f.body_html);
   const admin = createAdminSupabaseClient() as any;
+  const feed = await feedFolderFields(admin, body);
+  if ("error" in feed) return NextResponse.json({ error: feed.error }, { status: 400 });
+  Object.assign(parsed.fields, feed.fields);
   const { data, error: e } = await admin.from("crm_email_templates").insert({
     ...parsed.fields, variables: d.variables, needs_review: d.needs_review,
     import_report: d.unknown.length ? { unmapped: d.unknown.map((t) => ({ from: t, count: 1 })) } : null,
@@ -38,7 +42,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }).select(TEMPLATE_COLUMNS).single();
   if (e) {
     const dup = e.code === "23505";
-    return NextResponse.json({ error: dup ? "A template with that name already exists" : e.message }, { status: dup ? 409 : 500 });
+    return NextResponse.json({ error: dup ? duplicateMessage(e) : e.message }, { status: dup ? 409 : 500 });
   }
   return NextResponse.json({ ok: true, template: data });
 }

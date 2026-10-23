@@ -7,7 +7,7 @@ import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CallListRow } from "@/lib/crm/queries";
-import { CallStateBadge, DirectionLabel } from "./CrmBadges";
+import { CallStateBadge, DirectionLabel, Tag } from "./CrmBadges";
 import { KIND_LABEL, fmtDateTime, formatDuration } from "@/lib/crm/format";
 import { formatPhone } from "@/lib/crm/phone";
 
@@ -52,7 +52,7 @@ export default function CallsTable({ rows, openId = null, showCompany = true }: 
                           {r.contact_id && <span style={{ color: "var(--text-muted)" }}> · <Link href={`/crm/contacts/${r.contact_id}`} onClick={(e) => e.stopPropagation()} style={{ color: "var(--blue)" }}>{r.contact_name ?? "Contact"}</Link></span>}
                         </>
                       ) : (
-                        <span style={{ background: "#fff3e0", color: "#8a5300", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 3 }}>Unmatched</span>
+                        <Tag tone="warn">Unmatched</Tag>
                       )}
                     </td>
                   )}
@@ -79,7 +79,7 @@ function CallDetail({ row }: { row: CallListRow }) {
     <div style={{ display: "grid", gap: 12 }}>
       {!row.company_id && <AssignPanel callId={row.id} />}
       {row.has_recording ? (
-        <audio controls preload="none" src={`/api/crm/calls/${row.id}/recording`} style={{ width: "100%", maxWidth: 520 }} />
+        <audio controls preload="metadata" src={`/api/crm/calls/${row.id}/recording`} style={{ width: "100%", maxWidth: 520 }} />
       ) : (
         <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>No recording.</p>
       )}

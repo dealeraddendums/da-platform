@@ -84,3 +84,25 @@ export function parseEmails(v: unknown): { address: string; label: string | null
   }
   return out;
 }
+
+/** Stages a dealer can have an owner in. Converting to a billing state ('paying') clears it. */
+export const OWNED_STAGES = ["trial", "setup_training"] as const;
+
+/**
+ * The owner change a PATCH implies. Pure (unit-tested); the same rule is
+ * enforced by the crm_companies trigger (migration 187) for every other path.
+ *   → { owner } to write (null = clear), {} for no change, or { error }.
+ */
+export function ownerForStage(
+  nextStage: string | null,
+  currentOwner: string | null,
+  requested: { owner: string | null } | undefined,
+): { owner?: string | null; error?: string } {
+  const owned = nextStage == null || (OWNED_STAGES as readonly string[]).includes(nextStage);
+  if (!owned && nextStage === "paying") {
+    if (requested?.owner) return { error: "Current customers have no owner" };
+    return currentOwner ? { owner: null } : {};
+  }
+  if (requested && requested.owner !== currentOwner) return { owner: requested.owner };
+  return {};
+}

@@ -20,6 +20,7 @@ import { fireDealerReliable } from "@/lib/sync-hubspot";
 import { fireConversionWebhook } from "@/lib/marketing-webhook";
 import { fireDealerBillingEmailBackfill } from "@/lib/dealer-billing-contact";
 import { sendMandrillEmail } from "@/lib/mandrill";
+import { fireSelfServeFeedOrder } from "@/lib/crm/feeds/self-serve";
 
 const SUPPORT_EMAIL = process.env.SUPPORT_NOTIFICATION_EMAIL ?? "support@dealeraddendums.com";
 
@@ -160,26 +161,20 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   // auto: the feed setup starts here). A plan SWAP by an operator/group admin
   // isn't blocked on them — the feed usually already exists or is handled by
   // the console sync (relaxed 2026-08-25 for the group-admin plan controls).
-  // Contacts made OPTIONAL 2026-08-27 (Allan): only the provider is required —
-  // the authorized name/email can be added later on the dealer profile.
+  // Contacts made OPTIONAL 2026-08-27 (Allan); the provider too since
+  // 2026-10-21 (DA-CRM Phase 2b) — missing details become a DA-CRM feed order.
   const isAutoTier = descriptor.key === "sub-auto-web" || descriptor.key === "sub-auto-dms";
   let feedProvider = feedProviderIn;
   if (!wasPayingEarly && isAutoTier && !feedProvider) {
-    // A dealership that is ALREADY fed (migration case) has its provider on
-    // file; requiring it to be re-picked blocks a plan change for no gain.
-    // Only the live-feed check unlocks the fallback — a feed-less dealer still
-    // has to name its provider, because that is a real new feed setup.
+    // A dealership that is ALREADY fed (migration case) keeps the provider on
+    // file (the live-feed check decides); otherwise the provider stays unset.
     const { getDealerFeedStatus } = await import("@/lib/dealer-feed-status");
     const status = await getDealerFeedStatus(admin, dealerTextId, dealer.inventory_dealer_id);
     const onFile = dealer.inventory_provider?.trim() || null;
-    if (status.hasLiveFeed && onFile) {
-      feedProvider = onFile;
-    } else {
-      return NextResponse.json(
-        { error: "Feed provider is required for Automatic subscriptions." },
-        { status: 400 },
-      );
-    }
+    // Never block the upgrade on a missing provider (DA-CRM Phase 2b, 2026-10-21):
+    // the conversion goes through, and the feed order that opens in DA-CRM
+    // (lib/crm/feeds/self-serve.ts) has staff call the GM for the details.
+    if (status.hasLiveFeed && onFile) feedProvider = onFile;
   }
 
   // Restyler-group stores never get per-store subscriptions — the group bills
@@ -264,6 +259,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     }), "admin_audit subscription_changed");
 
     fireDealerReliable(dealer.id, wasPaying ? "group-member plan swap" : "group-member plan conversion (lifecycle)");
+    fireSelfServeFeedOrder({ dealerUuid: dealer.id, previousAccountType: dealer.account_type, newAccountType, provider: feedProvider, approverName: feedAuthorizedName, approverEmail: feedAuthorizedEmail, feedExisting });
     return NextResponse.json({
       ok: true,
       tier: descriptor.key,
@@ -421,6 +417,8 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (admin as any).from("dealers").update({ account_type: newAccountType }).eq("id", dealer.id);
       fireDealerReliable(dealer.id, "plan swap (account_type)");
+      // Manual → Automatic on a paying dealer is a new feed setup too.
+      fireSelfServeFeedOrder({ dealerUuid: dealer.id, previousAccountType: dealer.account_type, newAccountType, provider: feedProvider, approverName: feedAuthorizedName, approverEmail: feedAuthorizedEmail, feedExisting });
     }
   }
   if (!wasPaying) {
@@ -448,6 +446,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       }).eq("id", dealer.id);
     }
     fireDealerReliable(dealer.id, "trial→paid conversion (lifecycle)");
+    fireSelfServeFeedOrder({ dealerUuid: dealer.id, previousAccountType: dealer.account_type, newAccountType: ACCOUNT_TYPE_FOR_TIER[descriptor.key], provider: feedProvider, approverName: feedAuthorizedName, approverEmail: feedAuthorizedEmail, feedExisting });
     // Notify Marketing OS so its funnel's Converted stage lights up in real
     // time. dealerTextId (ss_*) is the marketing_leads.da_dealer_id join key.
     // Fire-and-forget — never blocks/breaks the upgrade.

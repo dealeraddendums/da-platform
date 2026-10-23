@@ -1,0 +1,57 @@
+{
+  "supplier": "Vauto",
+  "source": "Real thread, support@ mailbox, 2026-10-15 → 2026-10-21 (case notices from salesforcesfxnotifications@coxautoinc.com included). Anonymized: dealer, people, domains, phone numbers, case number and Feed ID values (formats kept). Our side is shown as feeds@.",
+  "dealer": { "name": "Harbor Point Land Rover", "city": "Southport", "state": "NC", "website": "https://www.harborpointlr.example" },
+  "approver": { "name": "Evan Brooks", "email": "evan@harborpointlr.example" },
+  "supplier_fields": {},
+  "messages": [
+    {
+      "id": "va-0", "direction": "outbound", "thread": "T0", "receivedAt": "2026-10-15T22:13:00Z",
+      "from": "feeds@dealeraddendums.com", "fromName": "DealerAddendums Feeds",
+      "to": ["vat.support@coxautoinc.com", "evan@harborpointlr.example"], "cc": ["casey@dealeraddendums.com"],
+      "subject": "Inventory Feed Request for: Harbor Point Land Rover​​",
+      "bodyHtml": "<p>Hello vAuto Support and Evan,</p><p>We’re requesting an inventory feed for:</p><p>Dealership: Harbor Point Land Rover</p><p>Location: Southport, NC</p><p>vAuto Support:</p><p>Please add Harbor Point Land Rover to the Dealer Addendums inventory feed file and provide the store’s unique Dealer ID once completed.</p><p>Evan:</p><p>Please Reply All to this email confirming that you approve this inventory feed request.</p><p>Once we have your approval and the Dealer ID from vAuto, we can complete the setup on our end.</p><p>Please let us know if you have any questions. Thank you!</p><p>Casey Lane</p>"
+    },
+    {
+      "id": "va-1", "direction": "inbound", "thread": "T2", "receivedAt": "2026-10-15T20:15:25Z",
+      "from": "salesforcesfxnotifications@coxautoinc.com", "fromName": "CRM Administrator",
+      "to": ["feeds@dealeraddendums.com"], "cc": [],
+      "subject": "Your vAuto support case #08274519 has been opened",
+      "bodyHtml": "Hi Dealer Addendums,<br /><br />Thanks for contacting vAuto Client Care! Here are your support case details:<br /><br />Case Number: 08274519<br />Account: vAuto PM<br />Subject: Inventory Feed Request for: Harbor Point Land Rover​​<br /><br />To check the status of your case, visit the Help Center and select My Cases.<br /><br />Thank you,<br />vAuto Client Care",
+      "expect": { "result": "acknowledgement", "status": "awaiting_dealer_approval", "caseNumber": "08274519", "openTasks": [], "mailsSent": 0 }
+    },
+    {
+      "id": "va-2", "direction": "inbound", "thread": "T3", "receivedAt": "2026-10-21T17:42:43Z",
+      "from": "vat.support@coxautoinc.com", "fromName": "vAuto Support",
+      "to": ["marcus@harborpointlr.example"], "cc": ["evan@harborpointlr.example", "casey@dealeraddendums.com", "feeds@dealeraddendums.com"],
+      "subject": "RE: Inventory Feed Request for: Harbor Point Land Rover?? [ thread::Zml4dHVyZVZBdGhyZWFkMDE:: ]",
+      "bodyHtml": "\r\nHello Marcus,<br /> <br /> Thank you for your request, case# 08274519 has been created to address this. To proceed with this request, vAuto requires dealer/ Admin approval for feed to export.<br /><br />Kindly reply to this email with 'I approve' and I will be happy to process this request.<br /> <br /> <br /> <br />Please note if approval is not received within 3 Business days, this case will be closed. You may submit a new request once approval is available.<br /><br /><br />Thank you and Be Well,<br /><br />Rina Patel<br /><br />Technical Customer Care Specialist II<br />vAuto<br /><br />Live Market View | Cox Automotive Retail Solutions<br />1901 S Meyers Rd, Suite 200<br />Oakbrook Terrace, IL 60181<br /><br />Phone: 877.828.8614 opt 2<br /><br /><br />--------------- Original Message ---------------<br />From: DealerAddendums Feeds [<a href=\"mailto:feeds@dealeraddendums.com\">feeds@dealeraddendums.com</a>]<br />Sent: 10/15/2026, 3:13 PM<br />To: <a href=\"mailto:vat.support@coxautoinc.com\">vat.support@coxautoinc.com</a>; <a href=\"mailto:evan@harborpointlr.example\">evan@harborpointlr.example</a><br />Subject: Inventory Feed Request for: Harbor Point Land Rover??<br /><br />Hello vAuto Support and Evan, We’re requesting an inventory feed for: Dealership: Harbor Point Land Rover Location: Southport, NC vAuto Support: Please add Harbor Point Land Rover to the Dealer Addendums inventory feed file and provide the store’s<br />ZjQcmQRYFpfptBannerStart<br />This Message Is From an External Sender<br />Please use caution clicking links or opening attachments unless you recognize the sender and are confident the content is safe.<br /><br />ZjQcmQRYFpfptBannerEnd<br /><br />Hello vAuto Support and Evan,<br /><br />Evan:<br /><br />Please Reply All to this email confirming that you approve this inventory feed request.<br /><br />thread::Zml4dHVyZVZBdGhyZWFkMDE:: ",
+      "expect": { "result": "approval_request", "status": "awaiting_dealer_approval", "caseNumber": "08274519", "openTasks": ["feed_supplier_deadline"], "mailsSent": 1, "lastMail": { "mode": "replyAll", "replyToMessage": "va-2", "to": ["evan@harborpointlr.example"], "bodyIncludes": "I approve" }, "cancellationIncludes": "if approval is not received within 3 Business days, this case will be closed" }
+    },
+    {
+      "id": "va-3", "direction": "inbound", "thread": "T3", "receivedAt": "2026-10-21T18:19:00Z",
+      "from": "marcus@harborpointlr.example", "fromName": "Marcus Hale",
+      "to": ["vat.support@coxautoinc.com"], "cc": ["evan@harborpointlr.example", "casey@dealeraddendums.com", "feeds@dealeraddendums.com"],
+      "subject": "Re: Inventory Feed Request for: Harbor Point Land Rover?? [ thread::Zml4dHVyZVZBdGhyZWFkMDE:: ]",
+      "bodyHtml": "I approve. Marcus Hale, Finance and Insurance Manager Harbor Point Jaguar Land Rover 910.?555.?0142 marcus@?harborpointlr.?example Harborpointlr.?example Jaguar.?com Harbor Point Jaguar Land Rover, 20 Old Harbor Rd, Southport,<br />ZjQcmQRYFpfptBannerStart<br />This Message Is From an External Sender<br />Please use caution clicking links or opening attachments unless you recognize the sender and are confident the content is safe.<br /><br />ZjQcmQRYFpfptBannerEnd<br />I approve.<br /><br /><br />Marcus Hale, Finance and Insurance Manager<br />Harbor Point Jaguar Land Rover<br />910.555.0142<br /><a href=\"mailto:marcus@harborpointlr.example\">marcus@harborpointlr.example</a>&lt;mailto:<a href=\"mailto:marcus@harborpointlr.example\">marcus@harborpointlr.example</a>&gt;<br /><a href=\"https://nam11.safelinks.protection.outlook.com/?url=https%3A%2F%2Flinkprotect.cudasvc.com%2Furl%3Fa%3Dhttps%253a%252f%252fHarborpointlr.example%26c%3DE%2C1%2CZml4dHVyZQ%26typo%3D1&amp;data=05%7C02%7Cfeeds%40dealeraddendums.com%7C0000%7C0%7C0%7C639282043117723802%7CUnknown&amp;sdata=Zml4dHVyZQ%3D&amp;reserved=0\" target=\"_blank\">Harborpointlr.example</a><br /><br />Harbor Point Jaguar Land Rover, 20 Old Harbor Rd, Southport, NC 28461<br /><br />CONFIDENTIALITY NOTICE: This e-mail message including attachments is intended only for the person to whom it is addressed<br />&amp; may contain confidential information. Any unauthorized review: use, disclosure or distribution is prohibited.<br /><br />On Wed, Oct 21, 2026, 1:42?PM vAuto Support &lt;<a href=\"mailto:vat.support@coxautoinc.com\">vat.support@coxautoinc.com</a>&gt; wrote:<br />Hello Marcus,<br /><br />Thank you for your request, case# 08274519 has been created to address this. To proceed with this request, vAuto requires dealer/ Admin approval for feed to export.<br /><br />Kindly reply to this email with 'I approve' and I will be happy to process this request.<br /><br />Please note if approval is not received within 3 Business days, this case will be closed.<br /><br />1901 S Meyers Rd, Suite 200&lt;<a href=\"https://nam11.safelinks.protection.outlook.com/?url=https%3A%2F%2Furldefense.com%2Fv3%2F__https%3A%2F%2Fwww.google.com%2Fmaps%2Fsearch%2F1901*S*Meyers*Rd__%3BKys!!Zml4!Zml4dHVyZQ&amp;data=05%7C02%7Cfeeds%40dealeraddendums.com&amp;reserved=0\" target=\"_blank\">https://urldefense.com/v3/__https://www.google.com/maps/search/1901*S*Meyers*Rd__;Kys!!Zml4!Zml4dHVyZQ</a>$&gt;<br /><br />thread::Zml4dHVyZVZBdGhyZWFkMDE:: ",
+      "expect": { "result": "dealer_approved", "status": "awaiting_supplier", "openTasks": [], "mailsSent": 1, "latestStartsWith": "I approve." }
+    },
+    {
+      "id": "va-4", "direction": "inbound", "thread": "T3", "receivedAt": "2026-10-21T18:31:51Z",
+      "from": "vat.support@coxautoinc.com", "fromName": "vAuto Support",
+      "to": ["feeds@dealeraddendums.com", "casey@dealeraddendums.com"], "cc": ["marcus@harborpointlr.example"],
+      "subject": "Re: Inventory Feed Request for: Harbor Point Land Rover?? [ thread::Zml4dHVyZVZBdGhyZWFkMDE:: ]",
+      "bodyHtml": "\r\nHello,<br /><br />  The export for Harbor Point Land Rover is enabled,  ID: MP48213.<br /><br /> The feed will be included in the next scheduled export.<br /> <br /> <br />**Please note that this case is now closed, please reply back if there are any issues however, if additional requests are needed, please send a new email to vat.support@coxautoinc.com so that a new case can be generated.**<br /><br /><br />Thank you and Be Well,<br /><br />Rina Patel<br /><br />Technical Customer Care Specialist II<br />vAuto<br /><br />Phone: 877.828.8614 opt 2<br /><br /><br />--------------- Original Message ---------------<br />From: Marcus Hale [<a href=\"mailto:marcus@harborpointlr.example\">marcus@harborpointlr.example</a>]<br />Sent: 10/21/2026, 1:19 PM<br />To: <a href=\"mailto:vat.support@coxautoinc.com\">vat.support@coxautoinc.com</a><br />Subject: Re: Inventory Feed Request for: Harbor Point Land Rover?? [ thread::Zml4dHVyZVZBdGhyZWFkMDE:: ]<br /><br />I approve.<br /><br />thread::Zml4dHVyZVZBdGhyZWFkMDE:: ",
+      "expect": { "result": "feed_id", "status": "feed_id_received", "feedId": "MP48213", "caseNumber": "08274519", "openTasks": ["feed_confirm_id"], "mailsSent": 2 }
+    },
+    {
+      "id": "va-5", "direction": "inbound", "thread": "T4", "receivedAt": "2026-10-21T18:32:20Z",
+      "from": "salesforcesfxnotifications@coxautoinc.com", "fromName": "CRM Administrator",
+      "to": ["feeds@dealeraddendums.com"], "cc": [],
+      "subject": "Your vAuto support case #08274519 has been closed",
+      "bodyHtml": "Hi Dealer Addendums,<br /><br />Your case opened on 10/15/2026 is now resolved. To view the details of your case, visit the Help Center and select My Cases.<br /><br />Case Number: 08274519<br />Account: HARBOR POINT LAND ROVER<br />Subject: Inventory Feed Request for: Harbor Point Land Rover​​",
+      "expect": { "result": "acknowledgement", "status": "feed_id_received", "openTasks": ["feed_confirm_id"], "mailsSent": 2 }
+    }
+  ],
+  "supplierFollowupAfter": "va-3"
+}

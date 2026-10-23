@@ -35,10 +35,17 @@
     "test:crm": "tsx scripts/crm-verify-unit.ts",
     "test:vehicle-archive": "tsx scripts/vehicle-archive-verify-unit.ts",
     "test:backup-report": "tsx scripts/backup-report-verify-unit.ts",
+    "test:crm-company": "tsx scripts/crm-company-verify-unit.ts",
     "crm:seed": "tsx scripts/crm-seed.ts",
     "crm:dialpad-replay": "tsx scripts/crm-dialpad-replay.ts",
     "crm:dialpad-setup": "tsx scripts/crm-dialpad-setup.ts",
-    "test:crm-templates": "tsx scripts/crm-templates-verify-unit.ts"
+    "test:crm-templates": "tsx scripts/crm-templates-verify-unit.ts",
+    "test:crm-inbox": "tsx scripts/crm-inbox-verify-unit.ts",
+    "test:crm-feeds": "tsx scripts/crm-feeds-verify-unit.ts",
+    "test:crm-feed-suppliers": "tsx scripts/crm-feed-suppliers-verify-unit.ts",
+    "crm:feeds-seed": "tsx scripts/crm-feeds-seed.ts",
+    "crm:graph-setup": "tsx scripts/crm-graph-setup.ts",
+    "crm:graph-backfill": "tsx scripts/crm-graph-backfill.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

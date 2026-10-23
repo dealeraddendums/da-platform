@@ -7,7 +7,8 @@
  *   npm run crm:dialpad-setup -- --map          match Dialpad users → DA-CRM team by email
  *                                               (writes crm_staff_profiles.dialpad_user_id / _number)
  *   npm run crm:dialpad-setup -- --register     create the webhook (with our secret) + a
- *                                               company-wide call-event subscription
+ *                                               company-wide call-event subscription, or add
+ *                                               any missing call states to the existing one
  *   … add --apply to write. --url overrides the webhook URL.
  */
 import { createClient } from "@supabase/supabase-js";
@@ -25,6 +26,9 @@ const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i +
 const APPLY = has("--apply");
 const WEBHOOK_URL = opt("--url") ?? "https://app.dealeraddendums.com/api/crm/dialpad/webhook";
 // Every state DA-CRM handles (lib/crm/dialpad-ingest.ts eventCallState + follow-ups).
+// Not admin_recording: Dialpad refuses it for our key ("Access denied to create
+// subscription to state 'admin_recording'"), and the hangup event already
+// carries the auto-recording in recording_details.
 const CALL_STATES = [
   "calling", "ringing", "connected", "hold", "voicemail", "voicemail_uploaded", "missed", "hangup",
   "recording", "transcription", "call_transcription", "recap_summary", "recap_outcome", "recap_action_items",
@@ -80,6 +84,23 @@ async function register() {
   const hook = (existing.items ?? []).find((w: any) => w.hook_url === WEBHOOK_URL);
   if (hook) console.log(`webhook already registered: ${WEBHOOK_URL} (id ${hook.id})`);
   else console.log(`${APPLY ? "creating" : "[dry-run] would create"} webhook ${WEBHOOK_URL} (HS256-signed)`);
+  if (hook) {
+    const subs: any = await dialpadFetch("/api/v2/subscriptions/call");
+    const sub = (subs.items ?? []).find((s: any) => String(s.webhook?.id) === String(hook.id));
+    if (sub) {
+      const missing = CALL_STATES.filter((s) => !(sub.call_states ?? []).includes(s));
+      console.log(`call subscription already exists: ${sub.id} (${(sub.call_states ?? []).length} states, ${sub.enabled ? "enabled" : "DISABLED"})${missing.length ? ` — missing: ${missing.join(", ")}` : ""}`);
+      if (!missing.length && sub.enabled) return;
+      if (!APPLY) { console.log(`[dry-run] would update subscription ${sub.id}: add ${missing.join(", ") || "nothing"}${sub.enabled ? "" : ", enable"}`); return; }
+      const states = Array.from(new Set([...(sub.call_states ?? []), ...CALL_STATES]));
+      await dialpadFetch(`/api/v2/subscriptions/call/${String(sub.id).replace(/\D/g, "")}`, {
+        method: "PATCH",
+        body: `{"call_states":${JSON.stringify(states)},"enabled":true}`,
+      });
+      console.log(`subscription ${sub.id} updated: ${states.length} states, enabled`);
+      return;
+    }
+  }
   if (!APPLY) { console.log(`[dry-run] would subscribe call states: ${CALL_STATES.join(", ")}`); return; }
   const webhookId = hook?.id ?? (await dialpadFetch<any>("/api/v2/webhooks", { method: "POST", body: JSON.stringify({ hook_url: WEBHOOK_URL, secret }) })).id;
   // No target_type / target_id = every call in the company.

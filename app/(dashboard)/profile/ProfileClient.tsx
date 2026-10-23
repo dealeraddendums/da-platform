@@ -20,6 +20,8 @@ type Props = {
   dealer?: DealerRow | null;
   /** Edit access to InfoTab + ShippingTab (dealer_admin only). */
   canEdit: boolean;
+  /** Website Integrations editable without general edit rights (a ghosted super_admin). */
+  canEditWebsite?: boolean;
   /** Place label orders (dealer_admin OR dealer_user). Distinct from
    *  `canEdit` so dealer_user can buy labels without gaining edit on the
    *  dealer profile / shipping address. */
@@ -2021,13 +2023,15 @@ function BillingTab({ openChangePlan = false, viewOnly = false }: { openChangePl
                         </p>
                         {isAuto && (
                           <>
-                            <label style={feedLabelStyle}>{tier.key === "auto-dms" ? "DMS Provider" : "Inventory Provider"}</label>
+                            <label style={feedLabelStyle}>{tier.key === "auto-dms" ? "DMS Provider" : "Inventory Provider"} <span style={{ fontWeight: 400, color: "#78828c" }}>(optional)</span></label>
                             <select value={feedProvider} onChange={e => setFeedProvider(e.target.value)} style={feedInputStyle}>
                               <option value="">{tier.key === "auto-dms" ? "— select your DMS —" : "— select your provider —"}</option>
                               {(tier.key === "auto-dms" ? [...DMS_PROVIDERS, "Other"] : [...OTHER_PROVIDERS, "Other"]).map(p => (
                                 <option key={p} value={p}>{p}</option>
                               ))}
                             </select>
+                            {/* Never blocks the upgrade: missing details open a DA-CRM feed order and the team calls. */}
+                            <div style={{ fontSize: 12, color: "#55595c", marginTop: 6 }}>Don&rsquo;t know? No problem — leave it blank and we&rsquo;ll reach out.</div>
                             {/* The Authorized Contact authorizes a NEW feed
                                 connection. A dealership already receiving
                                 inventory has nothing left to authorize, so the
@@ -2050,9 +2054,9 @@ function BillingTab({ openChangePlan = false, viewOnly = false }: { openChangePl
                               </div>
                             ) : (
                               <>
-                                <label style={feedLabelStyle}>Authorized Contact Name</label>
+                                <label style={feedLabelStyle}>Authorized Contact Name <span style={{ fontWeight: 400, color: "#78828c" }}>(optional)</span></label>
                                 <input type="text" value={feedAuthName} onChange={e => setFeedAuthName(e.target.value)} placeholder="Full name of person approving feed access" style={feedInputStyle} />
-                                <label style={feedLabelStyle}>Authorized Contact Email</label>
+                                <label style={feedLabelStyle}>Authorized Contact Email <span style={{ fontWeight: 400, color: "#78828c" }}>(optional)</span></label>
                                 <input type="email" value={feedAuthEmail} onChange={e => setFeedAuthEmail(e.target.value)} placeholder="email@dealership.com" style={feedInputStyle} />
                               </>
                             )}
@@ -2063,12 +2067,9 @@ function BillingTab({ openChangePlan = false, viewOnly = false }: { openChangePl
                           <button
                             onClick={async () => {
                               setFeedFormError(null);
-                              if (isAuto) {
-                                if (!feedProvider) { setFeedFormError("Please select a provider."); return; }
-                                if (!feedSkipAuth) {
-                                  if (!feedAuthName.trim()) { setFeedFormError("Authorized contact name is required."); return; }
-                                  if (!feedAuthEmail.trim() || !feedAuthEmail.includes("@")) { setFeedFormError("A valid authorized contact email is required."); return; }
-                                }
+                              // Provider and contact are optional — we follow up on anything missing.
+                              if (isAuto && !feedSkipAuth && feedAuthEmail.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(feedAuthEmail.trim())) {
+                                setFeedFormError("That email doesn't look right — fix it or leave it blank."); return;
                               }
                               await changeTier(tier, isAuto ? {
                                 provider: feedProvider,
@@ -2567,14 +2568,16 @@ const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean; staffOnly?: bool
   { id: "security", label: "Security" },
 ];
 
-export default function ProfileClient({ dealer, canEdit, canOrderLabels, recommendedPaperSizes, userEmail, userName, userRole, memberSince, labelProducts }: Props) {
+export default function ProfileClient({ dealer, canEdit, canEditWebsite, canOrderLabels, recommendedPaperSizes, userEmail, userName, userRole, memberSince, labelProducts }: Props) {
   const searchParams = useSearchParams();
   const hasDealer = !!dealer;
   const isStaff = userRole === "super_admin";
+  // Website Integrations: dealer editors, plus a ghosted super_admin (canEditWebsite).
+  const websiteEditable = canEdit || !!canEditWebsite;
   const visibleTabs = ALL_TABS.filter(t => {
     if (t.dealerOnly && !hasDealer) return false;
     if (t.staffOnly && !isStaff) return false;
-    if (t.editOnly && !canEdit) return false;
+    if (t.editOnly && !(t.id === "website" ? websiteEditable : canEdit)) return false;
     return true;
   });
 
@@ -2596,12 +2599,12 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, recomme
     if (searchParams.get("upgrade") === "1") setOpenChangePlan(true);
     if (t === "security") { setTab("security"); return; }
     if (!hasDealer) return;
-    if (t === "labels" || t === "info" || t === "shipping" || t === "billing" || t === "orders" || (t === "website" && canEdit)) {
+    if (t === "labels" || t === "info" || t === "shipping" || t === "billing" || t === "orders" || (t === "website" && websiteEditable)) {
       setTab(t as Tab);
     } else if (t === "hubspot" && isStaff) {
       setTab("hubspot");
     }
-  }, [searchParams, hasDealer, isStaff]);
+  }, [searchParams, hasDealer, isStaff, websiteEditable]);
 
   const title = "My Profile";
 

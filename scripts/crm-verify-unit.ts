@@ -5,10 +5,10 @@ import { createHmac } from "crypto";
 import { normalizePhone, formatPhone } from "../lib/crm/phone";
 import { matchPhone, type MatchLookup } from "../lib/crm/matching";
 import { trialStatus, dueMilestones, pacificDate } from "../lib/crm/trial";
-import { signDialpadJwt, verifyDialpadJwt, parseDialpadJson, formatTranscript } from "../lib/crm/dialpad";
+import { signDialpadJwt, verifyDialpadJwt, parseDialpadJson, formatTranscript, adminRecordingId, isDialpadScopeError } from "../lib/crm/dialpad";
 import { signCrmWebhook, nextAttemptDelayMs } from "../lib/crm/outbound";
 import { parseEnvFile } from "../lib/crm/env";
-import { buildCallPatch, eventCallState, mergeState, msToIso, pickRecordingUrl, buildSummary, callSubject } from "../lib/crm/dialpad-ingest";
+import { buildCallPatch, eventCallState, mergeState, msToIso, pickRecordingUrl, buildSummary, callSubject, mergedRecap } from "../lib/crm/dialpad-ingest";
 
 let fail = 0;
 function eq(name: string, got: unknown, want: unknown) {
@@ -132,6 +132,16 @@ async function main() {
   }), "https://rec");
   eq("legacy recording_url list", pickRecordingUrl({ recording_url: ["https://a"] }), "https://a");
   eq("recap summary", buildSummary({ recap_summary: "Feed reset.", recap_action_items: ["Check tomorrow"] }), "Feed reset.\n\nAction items:\n- Check tomorrow");
+  eq("admin_recording_urls fallback", pickRecordingUrl({ admin_recording_urls: ["https://dialpad.com/blob/adminrecording/52.mp3"] }), "https://dialpad.com/blob/adminrecording/52.mp3");
+  eq("admin recording id", adminRecordingId("https://dialpad.com/blob/adminrecording/5225818665820160.mp3"), "5225818665820160");
+  eq("user recording is not an admin recording", adminRecordingId("https://dialpad.com/r/5225818665820160"), null);
+  eq("scope error detected", isDialpadScopeError(new Error("Dialpad GET /api/v2/call/1/ai_recap → 403: {\n \"message\": \"Missing required scope(s): ['ai_recap']\"}")), true);
+  eq("other 403 is not a scope error", isDialpadScopeError(new Error("Dialpad GET /x → 403: forbidden")), false);
+  // recap_outcome arriving after recap_summary keeps the summary.
+  const afterSummary = buildCallPatch(null, { call_id: 1, state: "recap_summary", recap_summary: "Feed reset." });
+  const afterOutcome = buildCallPatch(afterSummary, { call_id: 1, state: "recap_outcome", recap_outcome: "Resolved" });
+  eq("recap parts merge across events", afterOutcome.summary, "Feed reset.\n\nOutcome: Resolved");
+  eq("API recap merges with events", buildSummary(mergedRecap({ ai_recap: { recap_summary: "S", recap_action_items: ["A"] } }, {})), "S\n\nAction items:\n- A");
 
   const ringing = { call_id: 1, state: "ringing", direction: "inbound", external_number: "8015550100", internal_number: "+18014159435", date_started: 1700000000000, event_timestamp: 1700000000500 };
   const p1 = buildCallPatch(null, ringing);
