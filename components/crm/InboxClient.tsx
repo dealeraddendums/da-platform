@@ -73,34 +73,40 @@ export default function InboxClient({ meId, initial }: { meId: string; initial: 
   return (
     <div>
       {neverSynced && (
-        <div className="card" style={{ padding: "10px 14px", marginBottom: 12, fontSize: 13, background: "#fff8e1", border: "1px solid #ffe082", color: "#7a5c00" }}>
+        <div className="crm-notice" style={{ marginBottom: 12 }}>
           The mailboxes haven&apos;t synced yet. Microsoft 365 needs the Azure app registration and access policy (CLAUDE.md → DA-CRM → Azure app registration runbook), then the first backfill.
         </div>
       )}
       {!neverSynced && errors.length > 0 && (
-        <div className="card" style={{ padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "var(--error)" }}>
+        <div className="crm-notice danger" style={{ marginBottom: 12, wordBreak: "break-word" }}>
           {errors.map((m) => <div key={m.id}>{m.address}: {m.last_error}</div>)}
         </div>
       )}
 
-      <div className="card" style={{ padding: "10px 12px", marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, margin: "4px 0 20px" }}>
+        <div>
+          <h1 className="crm-h1">Inbox</h1>
+          <p style={{ margin: "6px 0 0", fontSize: 14, color: "var(--crm-muted)" }}>support@ and feeds@ — reply from here and it goes out from the mailbox, threaded in Outlook.</p>
+        </div>
+        <button type="button" className="btn btn-primary" onClick={() => setComposeOpen(true)}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+          New email
+        </button>
+      </div>
+
+      <div style={{ marginBottom: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <div className="crm-tabs" role="tablist" aria-label="Inbox views">
           {VIEWS.map(([k, label]) => (
-            <button key={k} type="button" onClick={() => { setView(k); setPage(0); }}
-              style={{
-                height: 30, padding: "0 12px", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-                border: `1px solid ${view === k ? "var(--blue)" : "var(--border)"}`, background: view === k ? "var(--blue)" : "#fff", color: view === k ? "#fff" : "var(--text-primary)",
-              }}>
-              {label}{data?.counts?.[k] != null && <span style={{ opacity: 0.75, marginLeft: 6 }}>{data.counts[k]}</span>}
+            <button key={k} type="button" role="tab" aria-selected={view === k} className="crm-tab" onClick={() => { setView(k); setPage(0); }}>
+              {label}{data?.counts?.[k] != null && <span className="crm-count">{data.counts[k]}</span>}
             </button>
           ))}
         </div>
-        <select className="input" style={{ width: 230, height: 30 }} value={mailbox} onChange={(e) => { setMailbox(e.target.value); setPage(0); }}>
+        <select className="input" style={{ width: 230, height: 36, marginLeft: "auto" }} value={mailbox} onChange={(e) => { setMailbox(e.target.value); setPage(0); }}>
           <option value="">All mailboxes</option>
           {mbs.map((m) => <option key={m.id} value={m.id}>{m.address}</option>)}
         </select>
-        <input className="input" style={{ width: 240, height: 30 }} placeholder="Search subject or address…" value={q} onChange={(e) => setQ(e.target.value)} />
-        <button type="button" className="btn btn-primary" style={{ marginLeft: "auto", height: 30 }} onClick={() => setComposeOpen(true)}>New email</button>
+        <input className="input" style={{ width: 260, height: 36 }} placeholder="Search subject or address…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
       <div className="crm-inbox-grid">
@@ -109,12 +115,9 @@ export default function InboxClient({ meId, initial }: { meId: string; initial: 
           {data && !data.threads.length && <p style={{ padding: 16, margin: 0, color: "var(--text-muted)", fontSize: 13 }}>Nothing here.</p>}
           {data?.threads.map((t) => (
             <button key={t.id} type="button" onClick={() => setSelected(t.id)}
-              style={{
-                display: "block", width: "100%", textAlign: "left", border: "none", borderBottom: "1px solid var(--border)", padding: "10px 12px", cursor: "pointer", fontFamily: "inherit",
-                background: selected === t.id ? "#e3f2fd" : "#fff", borderLeft: `3px solid ${selected === t.id ? "var(--blue)" : t.unread ? "var(--orange)" : "transparent"}`,
-              }}>
+              className={`crm-row${t.unread ? " unread" : ""}`} aria-current={selected === t.id}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: t.unread ? 700 : 600, color: "var(--navy)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span style={{ fontSize: 13.5, fontWeight: t.unread ? 700 : 600, color: "var(--crm-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {t.company_name ?? t.last_from_name ?? t.last_from_email ?? "Unknown"}
                 </span>
                 <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtAgo(t.last_message_at)}</span>
@@ -123,7 +126,7 @@ export default function InboxClient({ meId, initial }: { meId: string; initial: 
                 {t.subject || "(no subject)"}{t.message_count > 1 && <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> ({t.message_count})</span>}
               </div>
               <div style={{ fontSize: 12, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.last_snippet}</div>
-              <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                 <Chip>{STATUS_LABEL[t.status] ?? t.status}</Chip>
                 {!mailbox && t.mailbox && <Chip>{t.mailbox.split("@")[0]}@</Chip>}
                 {!t.company_name && !t.internal && <Chip warn>{t.match_candidates?.length ? "Pick company" : "Unassigned"}</Chip>}
@@ -165,8 +168,8 @@ export default function InboxClient({ meId, initial }: { meId: string; initial: 
       </SlideOver>
 
       <style>{`
-        .crm-inbox-grid { display: grid; grid-template-columns: 340px minmax(0, 1fr) 300px; gap: 12px; align-items: start; }
-        .crm-inbox-pane { height: calc(100vh - 230px); min-height: 480px; overflow-y: auto; }
+        .crm-inbox-grid { display: grid; grid-template-columns: 340px minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+        .crm-inbox-pane { height: calc(100vh - 250px); min-height: 480px; overflow-y: auto; }
         @media (max-width: 1280px) { .crm-inbox-grid { grid-template-columns: 300px minmax(0, 1fr); } .crm-inbox-rail { grid-column: 1 / -1; height: auto; } }
         @media (max-width: 860px) { .crm-inbox-grid { grid-template-columns: 1fr; } .crm-inbox-pane { height: auto; max-height: none; } }
       `}</style>
@@ -176,6 +179,6 @@ export default function InboxClient({ meId, initial }: { meId: string; initial: 
 
 function Chip({ children, warn }: { children: React.ReactNode; warn?: boolean }) {
   return (
-    <span style={{ fontSize: 11, fontWeight: 600, padding: "1px 6px", borderRadius: 3, background: warn ? "#fff3e0" : "var(--bg-subtle)", color: warn ? "#b26a00" : "var(--text-secondary)" }}>{children}</span>
+    <span style={{ fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 999, background: warn ? "var(--crm-warn-soft)" : "var(--crm-surface-2)", color: warn ? "#8a5a10" : "var(--crm-ink-2)" }}>{children}</span>
   );
 }

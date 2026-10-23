@@ -266,7 +266,7 @@ export function ComposeNew({ companyId, contactId, to, onDone, onCancel }: { com
 function Act({ children, onClick, disabled, title }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean; title?: string }) {
   return (
     <button type="button" className="btn btn-secondary" onClick={onClick} disabled={disabled} title={title}
-      style={{ height: 30, fontSize: 12, padding: "0 8px", justifyContent: "center", background: "#fff" }}>{children}</button>
+      style={{ height: 30, fontSize: 12, padding: "0 8px", justifyContent: "center" }}>{children}</button>
   );
 }
 

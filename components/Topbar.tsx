@@ -181,6 +181,21 @@ export default function Topbar({ user }: Props) {
   const isGroupAdminInDealerContext = isGroupContextRole && !!user.activeDealerName;
   const showDealerNameBar = (isDealerRole && !!user.dealerName) || isGroupAdminInDealerContext;
 
+  // DA-CRM (/crm, staff only): a light bar with just the user chip — the
+  // signup badge links into the platform, so it stays off CRM pages.
+  if (pathname === "/crm" || pathname.startsWith("/crm/")) {
+    return (
+      <header className="crm-topbar flex items-center justify-end gap-3 px-6 flex-shrink-0" style={{ height: 56 }}>
+        <span className="crm-role">{roleLabel}</span>
+        <span className="crm-user-chip">
+          <span className="crm-avatar">{displayName.charAt(0).toUpperCase()}</span>
+          <span className="max-w-[180px] truncate">{displayName}</span>
+        </span>
+        <button type="button" onClick={handleLogout} className="crm-signout">Sign out</button>
+      </header>
+    );
+  }
+
   return (
     <>
       <header

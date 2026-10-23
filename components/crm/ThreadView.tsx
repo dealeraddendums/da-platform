@@ -159,8 +159,8 @@ export default function ThreadView({
 
       <div style={{ flex: 1 }}>
         {items.map((it) => it.kind === "note" ? (
-          <div key={it.n.id} style={{ margin: "10px 16px", padding: "8px 12px", background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 4, fontSize: 13 }}>
-            <div style={{ fontSize: 11, color: "#7a5c00", marginBottom: 2 }}>Internal note · {it.n.author ?? "Staff"} · {when(it.n.occurred_at)}</div>
+          <div key={it.n.id} style={{ margin: "10px 16px", padding: "10px 14px", background: "var(--crm-warn-soft, #fff8e1)", border: "1px solid #f1dfbf", borderRadius: 10, fontSize: 13 }}>
+            <div style={{ fontSize: 11, color: "#7a4d0b", marginBottom: 2 }}>Internal note · {it.n.author ?? "Staff"} · {when(it.n.occurred_at)}</div>
             <div style={{ whiteSpace: "pre-wrap" }}>{it.n.body}</div>
           </div>
         ) : (
@@ -199,7 +199,7 @@ export default function ThreadView({
 
 function MessageCard({ e, expanded, onToggle, onAction }: { e: Email; expanded: boolean; onToggle: () => void; onAction: (m: ComposerMode) => void }) {
   return (
-    <div style={{ margin: "10px 16px", border: "1px solid var(--border)", borderRadius: 6, background: "#fff", borderLeft: `3px solid ${e.direction === "outbound" ? "var(--blue)" : "var(--orange)"}` }}>
+    <div style={{ margin: "10px 16px", border: "1px solid var(--border)", borderRadius: 10, background: "#fff", borderLeft: `3px solid ${e.direction === "outbound" ? "var(--crm-accent, var(--blue))" : "var(--crm-border-strong, var(--orange))"}` }}>
       <button type="button" onClick={onToggle}
         style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: "8px 12px", cursor: "pointer", fontFamily: "inherit", display: "flex", justifyContent: "space-between", gap: 8 }}>
         <span style={{ minWidth: 0, overflow: "hidden" }}>

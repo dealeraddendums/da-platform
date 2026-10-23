@@ -5,13 +5,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { PageHeader } from "@/components/PageHeader";
 import ClickToCall from "@/components/crm/ClickToCall";
 import Timeline from "@/components/crm/Timeline";
 import AddNoteForm from "@/components/crm/AddNoteForm";
 import AddContactForm from "@/components/crm/AddContactForm";
 import CallsTable from "@/components/crm/CallsTable";
 import CompanyHeaderControls from "@/components/crm/CompanyHeaderControls";
+import CompanyHeader from "@/components/crm/CompanyHeader";
 import CompanyFilesPanel from "@/components/crm/CompanyFilesPanel";
 import CompanyDetailsForm from "@/components/crm/CompanyDetailsForm";
 import EmailFromTemplate from "@/components/crm/EmailFromTemplate";
@@ -20,7 +20,7 @@ import CompanyFeedsPanel from "@/components/crm/CompanyFeedsPanel";
 import FeedSupplierSettings from "@/components/crm/FeedSupplierSettings";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames, timeline } from "@/lib/crm/queries";
-import { KIND_LABEL, STAGE_LABEL, contactName, fmtAgo, fmtDate, ROLE_TAG_LABEL, type Stage } from "@/lib/crm/format";
+import { STAGE_LABEL, contactName, fmtAgo, fmtDate, ROLE_TAG_LABEL, type Stage } from "@/lib/crm/format";
 
 export const metadata = { title: "Company — DA-CRM" };
 const TH: React.CSSProperties = { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", fontWeight: 600 };
@@ -65,12 +65,13 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
   const staffList = Object.entries(staff).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   const portal = process.env.HUBSPOT_PORTAL_ID || "23896347";
 
-  const subtitle = [KIND_LABEL[co.kind], dir.dealer_text_id, dir.account_type, dir.active ? null : "Inactive"].filter(Boolean).join(" · ");
-
   return (
     <div>
-      <PageHeader title={dir.name ?? "Company"} subtitle={subtitle}
-        action={<Link href={`/crm/dealers?tab=${isDealer ? "dealers" : isGroup ? "groups" : "partners"}`} className="btn btn-secondary" style={{ background: "#fff" }}>← Back</Link>} />
+      <CompanyHeader name={dir.name ?? "Company"} kind={co.kind} stage={isDealer ? (dir.pipeline_stage as Stage | null) : null} brands={brands}
+        backHref={`/crm/dealers?tab=${isDealer ? "dealers" : isGroup ? "groups" : "partners"}`}
+        backLabel={isDealer ? "Dealers" : isGroup ? "Groups" : "Partners"}
+        editHref={`/crm/companies/${co.id}?tab=notes`} deletable={isPartner}
+        meta={[dir.dealer_text_id, dir.account_type, dir.active ? null : "Inactive"].filter(Boolean).join(" · ") || null} />
 
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 14, fontSize: 13 }}>
@@ -107,17 +108,12 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 4 }}>
+      <div className="crm-tabs" role="tablist" style={{ marginBottom: 12 }}>
         {tabs.map((t) => (
-          <Link key={t.key} href={`/crm/companies/${co.id}?tab=${t.key}`}
-            style={{
-              padding: "8px 16px", borderRadius: "6px 6px 0 0", fontWeight: 600, fontSize: 13, textDecoration: "none",
-              background: t.key === tab ? "#fff" : "rgba(255,255,255,0.12)", color: t.key === tab ? "var(--navy)" : "#fff",
-              borderBottom: t.key === tab ? "2px solid var(--orange)" : "2px solid transparent",
-            }}>{t.label}</Link>
+          <Link key={t.key} href={`/crm/companies/${co.id}?tab=${t.key}`} role="tab" aria-selected={t.key === tab} className="crm-tab" style={{ textDecoration: "none" }}>{t.label}</Link>
         ))}
       </div>
-      <div className="card" style={{ borderTopLeftRadius: 0 }}>
+      <div className="card">
         {tab === "timeline" && <TimelineTab companyId={co.id} staff={staff} admin={admin} />}
         {tab === "dealers" && isGroup && <GroupDealersTab groupId={co.group_id} admin={admin} staff={staff} />}
         {tab === "contacts" && <ContactsTab companyId={co.id} dial={dial} admin={admin} />}
