@@ -161,3 +161,43 @@
 .crm-topbar .crm-role { font-size: 11px; font-weight: 600; color: var(--crm-muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .crm-topbar .crm-signout { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--crm-border-strong); background: transparent; color: var(--crm-ink-2); font: 500 12px var(--crm-font); cursor: pointer; }
 .crm-topbar .crm-signout:hover { background: var(--crm-surface-2); color: var(--crm-ink); }
+
+/* ── Company page: main | right column ─────────────────────────────────── */
+.crm-company-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 24px; align-items: start; }
+.crm-company-main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.crm-company-rail { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 0; max-height: calc(100vh - 56px - 48px); overflow-y: auto; padding-bottom: 8px; scrollbar-width: thin; }
+@media (max-width: 1100px) {
+  .crm-company-grid { grid-template-columns: 1fr; }
+  .crm-company-rail { position: static; max-height: none; overflow: visible; order: -1; }
+}
+
+.crm-card { background: var(--crm-surface); border: 1px solid var(--crm-border); border-radius: var(--crm-radius); }
+.crm-card-pad { padding: 18px 20px; }
+.crm-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--crm-border); }
+.crm-card-head h2 { font-size: 15px; font-weight: 600; margin: 0; color: var(--crm-ink); display: inline-flex; align-items: center; gap: 8px; }
+.crm-card-head .crm-count-pill { font-size: 11px; font-weight: 600; color: var(--crm-ink-2); background: var(--crm-surface-2); border-radius: 999px; padding: 2px 8px; }
+.crm-rail-card { background: var(--crm-surface); border: 1px solid var(--crm-border); border-radius: var(--crm-radius); padding: 16px 18px; }
+.crm-rail-card > .crm-rail-title { display: flex; align-items: center; justify-content: space-between; }
+.crm-empty { padding: 28px 20px; text-align: center; color: var(--crm-muted); font-size: 13px; }
+.crm-empty strong { display: block; color: var(--crm-ink); font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.crm-list > * + * { border-top: 1px solid var(--crm-border); }
+.crm-item { padding: 12px 20px; display: flex; gap: 12px; align-items: flex-start; }
+.crm-item-btn { width: 100%; text-align: left; background: none; border: 0; cursor: pointer; font: inherit; color: inherit; }
+.crm-item-btn:hover { background: #fbfaf7; }
+.crm-meta { font-size: 12px; color: var(--crm-muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.crm-detail-row { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; color: var(--crm-ink); padding: 5px 0; line-height: 1.4; word-break: break-word; }
+.crm-detail-row svg { flex-shrink: 0; margin-top: 2px; color: var(--crm-muted); }
+.crm-detail-row .k { color: var(--crm-muted); min-width: 92px; font-size: 12.5px; }
+.crm-chip { height: 28px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--crm-border-strong); background: var(--crm-surface); color: var(--crm-ink-2); font: 500 12px var(--crm-font); cursor: pointer; }
+.crm-chip[aria-pressed="true"] { background: var(--crm-ink); border-color: var(--crm-ink); color: #fff; }
+.crm-overdue { color: var(--crm-danger); font-weight: 600; }
+.crm-textlink { background: none; border: 0; padding: 0; font: inherit; color: var(--crm-accent); cursor: pointer; text-decoration: none; }
+.crm-textlink:hover { text-decoration: underline; }
+
+/* AI summary: hover a sentence for its sources. */
+.crm-summary p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--crm-ink); }
+.crm-summary .s { border-radius: 4px; cursor: help; transition: background 120ms; }
+.crm-summary .s:hover, .crm-summary .s[data-open="true"] { background: var(--crm-accent-soft); }
+.crm-sources { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--crm-surface-2); font-size: 12px; color: var(--crm-ink-2); }
+.crm-sources ul { margin: 4px 0 0; padding: 0; list-style: none; }
+.crm-sources li { padding: 2px 0; }

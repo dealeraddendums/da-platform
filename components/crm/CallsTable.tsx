@@ -79,7 +79,7 @@ function CallDetail({ row }: { row: CallListRow }) {
     <div style={{ display: "grid", gap: 12 }}>
       {!row.company_id && <AssignPanel callId={row.id} />}
       {row.has_recording ? (
-        <audio controls preload="none" src={`/api/crm/calls/${row.id}/recording`} style={{ width: "100%", maxWidth: 520 }} />
+        <audio controls preload="metadata" src={`/api/crm/calls/${row.id}/recording`} style={{ width: "100%", maxWidth: 520 }} />
       ) : (
         <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>No recording.</p>
       )}

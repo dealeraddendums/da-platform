@@ -1,4 +1,5 @@
-// DA-CRM contacts list — search name / email / phone.
+// DA-CRM contacts list — search name / email / phone. ?company=<id> narrows to
+// one company and ?users=1 to its platform users (the company page's CRM Users link).
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
@@ -14,7 +15,7 @@ export const metadata = { title: "Contacts — DA-CRM" };
 const PAGE = 50;
 const TH: React.CSSProperties = { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", fontWeight: 600 };
 
-export default async function CrmContactsPage({ searchParams }: { searchParams: { q?: string; page?: string } }) {
+export default async function CrmContactsPage({ searchParams }: { searchParams: { q?: string; page?: string; company?: string; users?: string } }) {
   const { userId } = await requireCrmPage("/crm/contacts");
   const admin = crmAdmin();
   const q = (searchParams.q ?? "").trim().replace(/[%_,()\\]/g, " ").slice(0, 80);
@@ -25,6 +26,9 @@ export default async function CrmContactsPage({ searchParams }: { searchParams: 
     .is("deleted_at", null)
     .order("updated_at", { ascending: false })
     .range((page - 1) * PAGE, page * PAGE - 1);
+  const company = /^[0-9a-f-]{36}$/i.test(searchParams.company ?? "") ? searchParams.company! : null;
+  if (company) query = query.eq("company_id", company);
+  if (company && searchParams.users === "1") query = query.not("user_id", "is", null);
   if (q) {
     const ors = [`first_name.ilike.%${q}%`, `last_name.ilike.%${q}%`, `email.ilike.%${q}%`];
     const phone = normalizePhone(q);
@@ -48,6 +52,8 @@ export default async function CrmContactsPage({ searchParams }: { searchParams: 
       <PageHeader title="Contacts" subtitle="People at dealerships, groups and partners — decision makers, GMs, F&I, admins." />
       <form className="card" style={{ padding: 12, marginBottom: 16, display: "flex", gap: 10 }}>
         <input className="input" name="q" defaultValue={searchParams.q ?? ""} placeholder="Search name, email or phone…" style={{ maxWidth: 360 }} />
+        {company && <input type="hidden" name="company" value={company} />}
+        {company && searchParams.users === "1" && <input type="hidden" name="users" value="1" />}
         <button className="btn btn-primary" type="submit">Search</button>
       </form>
       <div className="card">

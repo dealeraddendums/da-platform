@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCrmStaff } from "@/lib/crm/access";
 import { createAdminSupabaseClient } from "@/lib/db";
 import { normalizePhone } from "@/lib/crm/phone";
-import { STAGES, onOwnerChanged, onStageChanged, parseEmails } from "@/lib/crm/companies";
+import { STAGES, onOwnerChanged, onStageChanged, ownerForStage, parseEmails } from "@/lib/crm/companies";
 
 export const dynamic = "force-dynamic";
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
  *   pipeline_stage (dealers)   → status_change activity + company.stage_changed
  *   owner_staff_id (crm_admin) → status_change activity + company.owner_changed
  *   brands: string[] (dealers), emails, phone, website, notes, name (partners)
- * Moving a dealer back into 'trial' restarts the trial clock today.
+ * Moving a dealer back into 'trial' restarts the trial clock today. Owners are
+ * for Trial / Setup & training only: converting to paying (Current) clears it.
  */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
   const { claims, perms, error } = await requireCrmStaff();
@@ -34,6 +35,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       else { patch.trial_day = null; patch.trial_flag = null; patch.trial_ends_on = null; }
     }
   }
+  let requestedOwner: { owner: string | null } | undefined;
   if ("owner_staff_id" in b) {
     if (!perms.crmAdmin) return NextResponse.json({ error: "Changing the owner needs crm_admin" }, { status: 403 });
     const owner = b.owner_staff_id || null;
@@ -41,7 +43,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const { data: sp } = await admin.from("staff_permissions").select("user_id").eq("user_id", owner).in("permission", ["crm", "crm_admin"]).limit(1);
       if (!sp?.length) return NextResponse.json({ error: "Owner must be a DA-CRM team member" }, { status: 400 });
     }
-    if (owner !== c.owner_staff_id) patch.owner_staff_id = owner;
+    requestedOwner = { owner };
+  }
+  if (isDealer) {
+    const o = ownerForStage((patch.pipeline_stage as string | undefined) ?? c.pipeline_stage, c.owner_staff_id, requestedOwner);
+    if (o.error) return NextResponse.json({ error: o.error }, { status: 400 });
+    if ("owner" in o) patch.owner_staff_id = o.owner;
+  } else if (requestedOwner && requestedOwner.owner !== c.owner_staff_id) {
+    patch.owner_staff_id = requestedOwner.owner;
   }
   if ("phone" in b) {
     const phone = b.phone ? normalizePhone(b.phone) : null;
