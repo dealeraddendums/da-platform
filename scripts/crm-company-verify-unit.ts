@@ -10,6 +10,7 @@ import { workPatch } from "../lib/crm/work-items";
 import { feedName, inventoryFreshness, isFed } from "../lib/crm/inventory-freshness";
 import { needsClamp, previewParts, shortLabel, unwrapLink } from "../lib/crm/preview-text";
 import { displaySubject, mailboxLabel } from "../lib/crm/thread-display";
+import { buildRow, dayLabel, emailTitle, oneLine } from "../lib/crm/timeline-rows";
 
 let fail = 0;
 function eq(name: string, got: unknown, want: unknown) {
@@ -148,10 +149,27 @@ async function main() {
   eq("subject: Re: Re: RE: → one Re:", displaySubject("Re: Re: RE:  Addendum Sample"), "Re: Addendum Sample");
   eq("subject: case number token", displaySubject("[Case #000123] Re: Re: Data access"), "Re: Data access");
   eq("subject: #id token", displaySubject("Feed live [#48213]"), "Feed live");
-  eq("subject: plain tags stay", displaySubject("[EXTERNAL] Re: Labels"), "[EXTERNAL] Re: Labels");
+  eq("subject: a lone [EXTERNAL] tag before Re: folds into the Re:", displaySubject("[EXTERNAL] Re: Labels"), "Re: Labels");
+  eq("subject: tags elsewhere stay", displaySubject("Labels [EXTERNAL] update"), "Labels [EXTERNAL] update");
+  eq("subject: Re: [EXTERNAL]Re: chain → one Re:", displaySubject("Re: [EXTERNAL]Re: [EXTERNAL]Re: [EXTERNAL]Re: VIN DECODER"), "Re: VIN DECODER");
   eq("subject: Fwd keeps one inner Re", displaySubject("Fwd: Re: Re: Pricing"), "Fwd: Re: Pricing");
   eq("subject: untouched", displaySubject("Your Dealer Addendums 5.0 Migration Has Started"), "Your Dealer Addendums 5.0 Migration Has Started");
   eq("subject: empty", displaySubject(null), "");
+
+  // ── Timeline rows ─────────────────────────────────────────────────────────
+  const act = (o: Record<string, unknown>) => ({ id: "a1", type: "email", direction: "inbound", subject: "Re: Re: Labels [ thread::x:: ]", body: "Thanks, that fixed it!\n\nOn Tue, Oct 21, 2026 at 9:00 AM Dana wrote:\n> old text", metadata: { from_name: "Pat Lee", from_email: "pat@dealer.com" }, occurred_at: "2026-10-23T15:00:00Z", actor_staff_id: null, contact_id: "k1", ...o }) as any;
+  const r1 = buildRow(act({}), { s1: "Allan Tone" }, { k1: "Dana Ruiz" });
+  eq("email row: cleaned subject", r1.title, "Re: Labels");
+  eq("email row: who = sender, not the thread contact", r1.who, "Pat Lee");
+  eq("email row: preview = new text only", r1.preview, "Thanks, that fixed it!");
+  eq("email row: outbound we sent → staff name", buildRow(act({ direction: "outbound", actor_staff_id: "s1", metadata: { from_name: "DealerAddendums Support", from_email: "support@dealeraddendums.com" } }), { s1: "Allan Tone" }, {}).who, "Allan Tone");
+  eq("email title: empty subject → first words of new text", emailTitle("RE:", "Can you resend the W9 for our records please today thanks"), "Can you resend the W9 for our records…");
+  eq("email row: thread", buildRow(act({}), {}, {}, { id: "t1", count: 6, activityIds: ["a1", "a0"] }).thread, { id: "t1", count: 6 });
+  eq("call row: direction · number · outcome · duration; who = staff", (() => { const r = buildRow(act({ type: "call", direction: "outbound", subject: "Outbound call to (615) 236-3200 — completed (2m 0s)", metadata: { to: "+16152363200", from: "+18019921540", state: "completed", duration_sec: 120 }, actor_staff_id: "s1" }), { s1: "Virginia Rodriguez" }, {}); return [r.title, r.who]; })(), ["Outbound · (615) 236-3200 · completed · 2m 0s", "Virginia Rodriguez"]);
+  eq("status row: who = System", buildRow(act({ type: "status_change", subject: "Trial reached day 7 — 24 days left", body: null }), {}, {}).who, "System");
+  eq("note row: one line", buildRow(act({ type: "note", subject: null, body: "Called GM.\nWill follow up Friday." }), {}, {}).title, "Called GM. Will follow up Friday.");
+  eq("oneLine caps with ellipsis", oneLine("x".repeat(200), 10), "xxxxxxxxx…");
+  eq("day label: today / yesterday / date", [dayLabel("2026-10-23T15:00:00Z", new Date("2026-10-23T20:00:00Z"), "UTC"), dayLabel("2026-10-22T15:00:00Z", new Date("2026-10-23T20:00:00Z"), "UTC"), dayLabel("2026-10-21T15:00:00Z", new Date("2026-10-23T20:00:00Z"), "UTC"), dayLabel("2025-12-30T15:00:00Z", new Date("2026-10-23T20:00:00Z"), "UTC")], ["Today", "Yesterday", "Oct 21", "Dec 30, 2025"]);
 
   console.log(fail ? `\n${fail} failed` : "\nall passed");
   if (fail) process.exit(1);

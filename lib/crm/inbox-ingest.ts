@@ -135,7 +135,10 @@ export async function ingestGraphMessage(
   const { data: act, error: actErr } = await admin.from("crm_activities").upsert({
     company_id: companyId, contact_id: contactId, type: "email", direction: e.direction,
     subject: e.subject || "(no subject)", body: snippet(e.bodyText, 2000),
-    metadata: { thread_id: thread.id, email_id: emailId, mailbox: mailbox.address, from: e.from?.email ?? null, to: e.to.map((a) => a.email), cc: e.cc.map((a) => a.email), reply_all: replyAll },
+    // Timeline "who" = the message's sender (from / on-behalf-of sender), never the thread contact.
+    metadata: { thread_id: thread.id, email_id: emailId, mailbox: mailbox.address, from: e.from?.email ?? null,
+      from_name: e.from?.name ?? null, from_email: e.from?.email?.toLowerCase() ?? null, sender_email: e.sender?.email?.toLowerCase() ?? null,
+      to: e.to.map((a) => a.email), cc: e.cc.map((a) => a.email), reply_all: replyAll },
     external_id: `graph:${mailbox.address}:${e.internetMessageId ?? e.graphMessageId}`,
     occurred_at: e.receivedAt, actor_staff_id: opts.sentByStaffId ?? null,
   }, { onConflict: "type,external_id" }).select("id").single();

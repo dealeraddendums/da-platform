@@ -2,14 +2,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
-import Timeline from "@/components/crm/Timeline";
-import AddNoteForm from "@/components/crm/AddNoteForm";
+import ActivityCard from "@/components/crm/company/ActivityCard";
 import CallsTable from "@/components/crm/CallsTable";
 import ContactEditForm from "@/components/crm/ContactEditForm";
 import EmailFromTemplate from "@/components/crm/EmailFromTemplate";
 import EmailThreadsPanel from "@/components/crm/EmailThreadsPanel";
 import { requireCrmPage } from "@/lib/crm/page-guard";
-import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames, timeline } from "@/lib/crm/queries";
+import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls } from "@/lib/crm/queries";
 import { contactName, fmtDate, ROLE_TAG_LABEL } from "@/lib/crm/format";
 import { Tag, VerifyTag } from "@/components/crm/CrmBadges";
 import ContactPhone from "@/components/crm/ContactPhone";
@@ -26,10 +25,8 @@ export default async function CrmContactPage({ params }: { params: { id: string 
   const { data: c } = await admin.from("crm_contacts").select("*").eq("id", params.id).is("deleted_at", null).maybeSingle();
   if (!c) notFound();
 
-  const [{ data: company }, items, staff, dial, callsRes] = await Promise.all([
+  const [{ data: company }, dial, callsRes] = await Promise.all([
     admin.from("crm_company_directory").select("id, name, kind").eq("id", c.company_id).maybeSingle(),
-    timeline({ contact_id: c.id }, 100, admin),
-    staffNames(admin),
     canDial(userId, admin),
     admin.from("crm_calls").select(CALL_COLUMNS).eq("contact_id", c.id).order("started_at", { ascending: false, nullsFirst: false }).limit(25),
   ]);
@@ -58,11 +55,7 @@ export default async function CrmContactPage({ params }: { params: { id: string 
         <EmailFromTemplate companyId={c.company_id} contactId={c.id} to={c.email} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-        <div className="card">
-          <p style={{ margin: 0, padding: "12px 16px", fontWeight: 600 }}>Timeline</p>
-          <AddNoteForm contactId={c.id} />
-          <Timeline items={items} staff={staff} showContact={false} />
-        </div>
+        <ActivityCard contactId={c.id} title="Timeline" />
         <div className="card">
           <p style={{ margin: 0, padding: "12px 16px", fontWeight: 600 }}>Calls</p>
           <CallsTable rows={calls} showCompany={false} />

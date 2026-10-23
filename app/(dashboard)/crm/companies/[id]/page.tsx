@@ -17,8 +17,8 @@ import ActivityCard from "@/components/crm/company/ActivityCard";
 import SummaryCard from "@/components/crm/company/SummaryCard";
 import { ContactsCard, DetailsCard, EditCompanyButton, LinksCard, OwnerCard, type MemberDealer } from "@/components/crm/company/RailCards";
 import { requireCrmPage } from "@/lib/crm/page-guard";
-import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames, timeline } from "@/lib/crm/queries";
-import { contactName, type Stage } from "@/lib/crm/format";
+import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames } from "@/lib/crm/queries";
+import { type Stage } from "@/lib/crm/format";
 import { billingPayer, billingSummary, dealerBillingState, dealersBillingStates, groupBillingState, type BillingRead } from "@/lib/crm/billing-status";
 import { BILLING_STATE_LABEL } from "@/lib/crm/billing-labels";
 import { feedName, inventoryFreshness, isFed } from "@/lib/crm/inventory-freshness";
@@ -67,14 +67,13 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
   const staffList = Object.entries(staff).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   const firstEmail = (co.emails ?? [])[0]?.address ?? null;
 
-  const [contactsRes, callsRes, threadCount, openThreadCount, tasksRes, ticketsRes, items, filesRes, orderRes, membersRes] = await Promise.all([
+  const [contactsRes, callsRes, threadCount, openThreadCount, tasksRes, ticketsRes, filesRes, orderRes, membersRes] = await Promise.all([
     admin.from("crm_contacts").select("id, company_id, first_name, last_name, email, phone, phone_raw, title, role_tag, user_id, verify_reason, verified_at").eq("company_id", co.id).is("deleted_at", null).order("first_name"),
     admin.from("crm_calls").select(CALL_COLUMNS).eq("company_id", co.id).order("started_at", { ascending: false, nullsFirst: false }).limit(50),
     admin.from("crm_email_threads").select("id", { count: "exact", head: true }).eq("company_id", co.id),
     admin.from("crm_email_threads").select("id", { count: "exact", head: true }).eq("company_id", co.id).neq("status", "closed"),
     admin.from("crm_tasks").select("id, title, description, status, due_at, assigned_staff_id, created_at, source_activity_id, kind").eq("company_id", co.id).order("created_at", { ascending: false }).limit(60),
     admin.from("crm_tickets").select("id, title, description, status, priority, assigned_staff_id, created_at").eq("company_id", co.id).order("created_at", { ascending: false }).limit(60),
-    timeline({ company_id: co.id }, 150, admin),
     admin.from("crm_company_files").select("id, filename, label, size, created_at, uploaded_by").eq("company_id", co.id).is("deleted_at", null).order("created_at", { ascending: false }),
     isDealer || isGroup ? admin.from("crm_feed_orders").select("id, status").eq("dealer_company_id", co.id).order("created_at", { ascending: false }).limit(1).maybeSingle() : Promise.resolve({ data: null }),
     isGroup ? admin.from("crm_company_directory").select("id, name, dealer_id, dealer_text_id, pipeline_stage").eq("kind", "dealer").eq("parent_group_id", co.group_id).order("name").limit(200) : Promise.resolve({ data: null }),
@@ -87,8 +86,6 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
   const tasks: WorkTask[] = (tasksRes.data ?? []).map((t: any) => ({ ...t, from_chat: chatIds.has(t.source_activity_id) }));
   const tickets: WorkTicket[] = ticketsRes.data ?? [];
 
-  const contactIds = Array.from(new Set(items.map((i) => i.contact_id).filter(Boolean))) as string[];
-  const { data: cs } = contactIds.length ? await admin.from("crm_contacts").select("id, first_name, last_name, email").in("id", contactIds) : { data: [] };
 
   // A group's member dealers, with their stage (paying ones read from DA-Billing; a
   // group-billed rooftop shares the group's customer, so this is mostly one cached read).
@@ -146,8 +143,7 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
             calls={await decorateCalls(callsRes.data ?? [], admin)} emailCounts={{ active: openThreadCount.count ?? 0, all: threadCount.count ?? 0 }}
             phone={dir.phone ?? co.phone ?? null} canDial={dial} />
           <WorkCard companyId={co.id} tasks={tasks} tickets={tickets} staff={staffList} meId={userId} />
-          <ActivityCard companyId={co.id} items={items} staff={staff}
-            contactNames={Object.fromEntries((cs ?? []).map((c: any) => [c.id, contactName(c)]))} />
+          <ActivityCard companyId={co.id} />
           <section className="crm-card">
             <div className="crm-card-head"><h2>Documents</h2></div>
             <CompanyFilesPanel companyId={co.id} files={(filesRes.data ?? []).map((f: any) => ({ ...f, uploaded_by_name: f.uploaded_by ? staff[f.uploaded_by] ?? null : null }))} />

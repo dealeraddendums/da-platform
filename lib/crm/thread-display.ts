@@ -17,16 +17,18 @@ export function mailboxLabel(m: MailboxLike | null | undefined): string | null {
 // Bracketed tokens vendors' ticket systems add: "[ thread::abc:: ]", "[ ref:!00D…:ref ]", "[#12345]",
 // "[Case #000123]", "[Ticket#4411]", "[ThreadID:…]". Plain tags like "[EXTERNAL]" stay.
 const TOKEN = /\[\s*(?:[^\]]*::[^\]]*|ref:[^\]]*|#\s*\d[\w-]*|(?:case|ticket|request|incident)\s*#?\s*:?\s*\d[\w-]*|thread\s*id\s*:[^\]]*)\s*\]/gi;
-const PREFIX = /^(?:\s*(?:re|aw|sv)\s*(?:\[\d+\])?\s*:\s*)+/i;
+// "Re:" chains, including the [EXTERNAL] tags mail gateways insert between them ("Re: [EXTERNAL]Re: …").
+const TAG = String.raw`(?:\[\s*(?:external|ext|external email)\s*\]\s*)`;
+const PREFIX = new RegExp(String.raw`^(?:\s*${TAG}?(?:re|aw|sv)\s*(?:\[\d+\])?\s*:\s*${TAG}?)+`, "i");
 
 /** Subject for display: tokens stripped, "Re: RE: re:" → one "Re:", whitespace collapsed. */
 export function displaySubject(raw: string | null | undefined): string {
-  let s = (raw ?? "").replace(TOKEN, " ");
+  let s = (raw ?? "").replace(/[\u200B-\u200D\uFEFF]/g, "").replace(TOKEN, " ");
   s = s.replace(/\s+/g, " ").trim();
   const reply = PREFIX.test(s);
   s = s.replace(PREFIX, "").trim();
   // Re: inside a forward ("Fwd: Re: Re: x") collapses too.
-  s = s.replace(/((?:re|aw|sv)\s*:\s*)(?:(?:re|aw|sv)\s*:\s*)+/gi, "Re: ");
+  s = s.replace(new RegExp(String.raw`((?:re|aw|sv)\s*:\s*${TAG}?)(?:(?:re|aw|sv)\s*:\s*${TAG}?)+`, "gi"), "Re: ");
   s = s.replace(/\s*[-–|:]\s*$/, "").trim();
   return reply ? (s ? `Re: ${s}` : "Re:") : s;
 }
