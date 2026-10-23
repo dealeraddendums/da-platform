@@ -12,6 +12,7 @@ import FeedOrderPanel, { AGE_COLOR, StatusChip } from "./FeedOrderPanel";
 import FeedOrderActions from "./FeedOrderActions";
 import ThreadView from "./ThreadView";
 import { fmtAgo } from "@/lib/crm/format";
+import { displaySubject } from "@/lib/crm/thread-display";
 
 type Row = {
   id: string; number: string; status: string; status_label: string; age_days: number; age_color: string;
@@ -158,7 +159,7 @@ function UnmatchedRow({ u, onOpen, onDone }: { u: Unmatched; onOpen: () => void;
     <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "grid", gap: 6, fontSize: 13 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
         <button type="button" onClick={onOpen} style={{ background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
-          <strong>{u.email?.from_name ?? u.email?.from_email ?? "Unknown"}</strong> <span style={{ color: "var(--text-muted)" }}>· {u.email?.subject ?? "(no subject)"}</span>
+          <strong>{u.email?.from_name ?? u.email?.from_email ?? "Unknown"}</strong> <span style={{ color: "var(--text-muted)" }}>· {displaySubject(u.email?.subject) || "(no subject)"}</span>
         </button>
         <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtAgo(u.created_at)}</span>
       </div>

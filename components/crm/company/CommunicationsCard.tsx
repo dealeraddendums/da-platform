@@ -8,18 +8,20 @@
 // "Open chat to reply").
 
 import { useEffect, useRef, useState } from "react";
-import EmailThreadsPanel from "@/components/crm/EmailThreadsPanel";
+import EmailThreadsPanel, { type ThreadCounts } from "@/components/crm/EmailThreadsPanel";
 import CallsTable from "@/components/crm/CallsTable";
 import ClickToCall from "@/components/crm/ClickToCall";
 import type { CallListRow } from "@/lib/crm/queries";
 
 type Tab = "email" | "chat" | "calls";
 
-export default function CommunicationsCard({ companyId, meId, to, calls, emailCount, phone, canDial }: {
+export default function CommunicationsCard({ companyId, meId, to, calls, emailCounts, phone, canDial }: {
   companyId: string; meId: string; to: { email: string; name?: string }[];
-  calls: CallListRow[]; emailCount: number; phone: string | null; canDial: boolean;
+  calls: CallListRow[]; emailCounts: { active: number; all: number }; phone: string | null; canDial: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("email");
+  // The Email tab counts what the panel's filter shows (Open by default); the total is in the tooltip.
+  const [email, setEmail] = useState<ThreadCounts>({ shown: emailCounts.active, filter: "active", active: emailCounts.active, closed: emailCounts.all - emailCounts.active, all: emailCounts.all });
   const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -31,7 +33,9 @@ export default function CommunicationsCard({ companyId, meId, to, calls, emailCo
     return () => window.removeEventListener("crm:comms", on);
   }, []);
 
-  const tabs: [Tab, string, number | null][] = [["email", "Email", emailCount], ["chat", "Chat", null], ["calls", "Calls", calls.length]];
+  const tabs: [Tab, string, number | null, string?][] = [
+    ["email", "Email", email.shown, `${email.active} open · ${email.closed} closed · ${email.all} total`],
+    ["chat", "Chat", null], ["calls", "Calls", calls.length]];
 
   return (
     <section ref={ref} className="crm-card" id="communications" style={{ scrollMarginTop: 12 }}>
@@ -40,15 +44,15 @@ export default function CommunicationsCard({ companyId, meId, to, calls, emailCo
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {tab === "calls" && phone && <ClickToCall phone={phone} canDial={canDial} />}
           <div className="crm-tabs" role="tablist" aria-label="Communications">
-            {tabs.map(([k, label, n]) => (
-              <button key={k} type="button" role="tab" aria-selected={tab === k} className="crm-tab" onClick={() => setTab(k)}>
+            {tabs.map(([k, label, n, tip]) => (
+              <button key={k} type="button" role="tab" aria-selected={tab === k} className="crm-tab" title={tip} onClick={() => setTab(k)}>
                 {label}{n != null && <span className="crm-count">{n}</span>}
               </button>
             ))}
           </div>
         </div>
       </div>
-      {tab === "email" && <EmailThreadsPanel companyId={companyId} meId={meId} to={to} />}
+      {tab === "email" && <EmailThreadsPanel companyId={companyId} meId={meId} to={to} filter={email.filter} onCounts={setEmail} />}
       {tab === "chat" && (
         <div className="crm-empty">
           <strong>Chat is coming soon</strong>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { TimelineItem } from "@/lib/crm/queries";
 import { ActivityTypeBadge, CallStateBadge } from "./CrmBadges";
 import ActivityBody from "./ActivityBody";
+import { displaySubject } from "@/lib/crm/thread-display";
 import { fmtDateTime } from "@/lib/crm/format";
 
 export default function Timeline({
@@ -27,7 +28,7 @@ export default function Timeline({
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <ActivityTypeBadge type={a.type} />
             {a.type === "call" && a.metadata?.state && <CallStateBadge state={a.metadata.state} />}
-            <strong style={{ fontSize: 13 }}>{a.subject ?? a.type}</strong>
+            <strong style={{ fontSize: 13 }}>{(a.type === "email" ? displaySubject(a.subject) : a.subject) || a.type}</strong>
             <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtDateTime(a.occurred_at)}</span>
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>

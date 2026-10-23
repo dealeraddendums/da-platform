@@ -16,6 +16,7 @@ import ThreadView from "./ThreadView";
 import FeedOrderForm from "./FeedOrderForm";
 import FeedOrderPanel, { AGE_COLOR, StatusChip } from "./FeedOrderPanel";
 import { KIND_LABEL, STAGES, STAGE_LABEL, fmtAgo, fmtDate, formatDuration, type Stage } from "@/lib/crm/format";
+import { displaySubject } from "@/lib/crm/thread-display";
 
 type Rail = {
   company: null | {
@@ -213,7 +214,7 @@ export default function CompanyContextRail({
           <ListSection title="Recent emails" empty="No email threads.">
             {(d.threads ?? []).map((t) => (
               <Row key={t.id} onClick={() => (onOpenThread ? onOpenThread(t.id) : setPanel({ kind: "thread", id: t.id }))}
-                main={<>{t.unread && <span style={{ color: "var(--orange)" }}>● </span>}{t.subject || "(no subject)"}</>} sub={`${fmtAgo(t.last_message_at)} · ${t.status.replace(/_/g, " ")}`} />
+                main={<>{t.unread && <span style={{ color: "var(--orange)" }}>● </span>}{displaySubject(t.subject) || "(no subject)"}</>} sub={`${fmtAgo(t.last_message_at)} · ${t.status.replace(/_/g, " ")}`} />
             ))}
           </ListSection>
           {(d.contacts ?? []).length > 0 && (
