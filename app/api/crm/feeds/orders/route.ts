@@ -31,7 +31,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 /**
  * POST /api/crm/feeds/orders — Start feed order (rail, thread, chat, company page).
- * { dealer_company_id (a dealer, or a group), supplier_company_id?, approver_name?, approver_email?, approver_phone?, approver_title?,
+ * { dealer_company_id (a dealer, or a group), supplier_company_id?, approver_contact_id? (a contact of the dealer or its group),
+ *   approver_name?, approver_email?, approver_phone?, approver_title? (typed in → saved as a contact of the dealer, deduped on email),
  *   supplier_fields?: { …the supplier's extra_fields answers }, notes?, source?: call|chat|email, email_thread_id?,
  *   dealership_company_ids?: [] (group: the rooftops ticked), dealership_fields?: { [dealerCompanyId]: { …per-rooftop answers } },
  *   pdf_mode?: per_dealership|combined }
@@ -48,7 +49,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const r = await createFeedOrder(createAdminSupabaseClient() as any, {
       dealerCompanyId: b.dealer_company_id, supplierCompanyId: UUID.test(b.supplier_company_id ?? "") ? b.supplier_company_id : null,
       source, initiatedBy: claims.sub, approverName: str(b.approver_name, 200), approverEmail: str(b.approver_email, 200),
-      approverPhone: str(b.approver_phone, 40), approverTitle: str(b.approver_title, 120), notes: str(b.notes, 4000), emailThreadId: UUID.test(b.email_thread_id ?? "") ? b.email_thread_id : null,
+      approverPhone: str(b.approver_phone, 40), approverTitle: str(b.approver_title, 120),
+      approverContactId: UUID.test(b.approver_contact_id ?? "") ? b.approver_contact_id : null, notes: str(b.notes, 4000), emailThreadId: UUID.test(b.email_thread_id ?? "") ? b.email_thread_id : null,
       supplierFields: obj(b.supplier_fields),
       dealershipCompanyIds: Array.isArray(b.dealership_company_ids) ? b.dealership_company_ids.filter((x: unknown) => typeof x === "string" && UUID.test(x)).slice(0, 50) : null,
       dealershipFields: obj(b.dealership_fields) as Record<string, Record<string, unknown>> | null,

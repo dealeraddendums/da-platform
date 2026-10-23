@@ -125,7 +125,7 @@ export function DetailsCard({ d, canDial, feeds }: { d: DetailsData; canDial: bo
 
 // ── Contacts (+ a group's member dealers) ───────────────────────────────────
 
-export type ContactRow = { id: string; company_id: string; first_name: string | null; last_name: string | null; email: string | null; phone: string | null; title: string | null; role_tag: string | null; user_id: string | null;
+export type ContactRow = { id: string; company_id: string; first_name: string | null; last_name: string | null; email: string | null; phone: string | null; title: string | null; role_tag: string | null; user_id: string | null; approver_at?: string | null;
   phone_raw?: string | null; verify_reason?: string | null; verified_at?: string | null };
 export type MemberDealer = { id: string; name: string; text_id: string | null; stage: Stage | null; stageLabel: string | null };
 
@@ -159,9 +159,10 @@ export function ContactsCard({ companyId, companyName, contacts, canDial, member
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
                 <div style={{ minWidth: 0 }}>
                   <Link href={`/crm/contacts/${c.id}`} style={{ fontSize: 14, fontWeight: 600, color: "var(--crm-ink)", textDecoration: "none" }}>{name}</Link>
-                  {(c.title || c.user_id || (c.verify_reason && !c.verified_at)) && (
+                  {(c.title || c.user_id || (c.verify_reason && !c.verified_at) || c.approver_at || c.role_tag === "approver") && (
                     <div style={{ fontSize: 12, color: "var(--crm-muted)", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 2 }}>
                       {c.user_id && <Tag tone="accent">Platform user</Tag>}
+                      {(c.approver_at || c.role_tag === "approver") && <Tag tone="accent">Approver</Tag>}
                       {c.verify_reason && !c.verified_at && <Link href={`/crm/contacts/${c.id}?verify=1`} style={{ textDecoration: "none" }}><VerifyTag reason={c.verify_reason} /></Link>}
                       {c.title && <span>{c.title}</span>}
                       {c.user_id && <a className="crm-link" href={platformUserHref(c.email)} target="_blank" rel="noreferrer">DA Users</a>}

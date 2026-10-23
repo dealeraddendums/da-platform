@@ -30,7 +30,7 @@ export function contactName(c: { first_name?: string | null; last_name?: string 
 }
 
 export const ROLE_TAG_LABEL: Record<string, string> = {
-  decision_maker: "Decision maker", fi: "F&I", gm: "GM", admin: "Admin", other: "Other",
+  decision_maker: "Decision maker", fi: "F&I", gm: "GM", admin: "Admin", other: "Other", approver: "Approver",
 };
 
 /** Start of "today" in Pacific time, as an ISO instant. */
@@ -53,7 +53,7 @@ export const STAGE_LABEL: Record<Stage, string> = {
   trial: "Trial", setup_training: "Account setup & training", paying: "Paying", cancelled: "Cancelled", lost: "Lost",
 };
 export const KIND_LABEL: Record<string, string> = { dealer: "Dealer", group: "Group", vendor: "Vendor", feed_supplier: "Feed supplier" };
-export const ROLE_TAGS = ["decision_maker", "fi", "gm", "admin", "other"] as const;
+export const ROLE_TAGS = ["decision_maker", "fi", "gm", "admin", "other", "approver"] as const;
 
 /** Whole days between an instant and now (for "days since last contact"). */
 export function daysSince(iso: string | null | undefined, now = Date.now()): number | null {

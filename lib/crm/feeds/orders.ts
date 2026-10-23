@@ -30,6 +30,7 @@ import { sendInboxEmail } from "../inbox-send";
 import { relinkThreadActivities } from "../inbox-ingest";
 import { putCrmObject } from "../recordings";
 import { normEmail } from "../inbox-match";
+import { resolveApproverContact } from "./approver";
 import type { TemplateContext } from "../template-vars";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 
@@ -237,6 +238,8 @@ export type CreateInput = {
   dealerCompanyId: string; supplierCompanyId?: string | null; source: "call" | "chat" | "email" | "self_serve";
   initiatedBy?: string | null; ownerId?: string | null; approverName?: string | null; approverEmail?: string | null; approverPhone?: string | null;
   approverTitle?: string | null; notes?: string | null; emailThreadId?: string | null;
+  /** The approver picked from the company's (or its group's) contacts. Typed-in approvers become contacts (lib/crm/feeds/approver.ts). */
+  approverContactId?: string | null;
   /** Answers to the supplier's extra_fields (Autosoft: go_dealer, transfer_row; a one-dealership order may put autosoft_account here too). */
   supplierFields?: Record<string, unknown> | null;
   /** Group orders: the rooftops (dealer company ids) the request covers. */
@@ -296,6 +299,8 @@ export async function createFeedOrder(admin: Admin, input: CreateInput): Promise
 
   const owner = await resolveOwner(admin, input.dealerCompanyId, input.ownerId ?? input.initiatedBy ?? null);
   const settings = await supplierSettings(admin, input.supplierCompanyId ?? null);
+  const approver = await approverContactFor(admin, input);
+  if (approver) input = withApproverFields(input, approver.contact);
   const defs = settings?.extra_fields ?? [];
   const { data: dir } = await admin.from("crm_company_directory").select("id, name").in("id", rooftops);
   const nameOf = (id: string) => (dir ?? []).find((d: any) => d.id === id)?.name ?? "Dealership";
@@ -313,6 +318,7 @@ export async function createFeedOrder(admin: Admin, input: CreateInput): Promise
     ...base, ...adv.patch, dealer_company_id: input.dealerCompanyId, source: input.source,
     initiated_by_staff_id: input.initiatedBy ?? null, owner_staff_id: owner, approver_phone: input.approverPhone?.trim() || null,
     approver_title: input.approverTitle?.trim() || null, pdf_mode: input.pdfMode === "combined" ? "combined" : "per_dealership",
+    approver_contact_id: approver?.id ?? null,
     notes: input.notes?.trim() || null, email_thread_id: input.emailThreadId ?? null,
   }).select("*").single();
   if (error) throw new FeedOrderError(500, error.message);
@@ -355,8 +361,42 @@ export async function createFeedOrder(admin: Admin, input: CreateInput): Promise
   return { order, existed: false };
 }
 
+/** The approver as a contact: linked when picked, created / deduped when typed. A lookup failure never blocks the order. */
+async function approverContactFor(admin: Admin, input: CreateInput): Promise<{ id: string; contact: any } | null> {
+  try {
+    return await resolveApproverContact(admin, input.dealerCompanyId, {
+      contactId: input.approverContactId ?? null, name: input.approverName, email: input.approverEmail, phone: input.approverPhone, title: input.approverTitle,
+    });
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    if (m === "not_allowed" || m === "not_found") throw new FeedOrderError(400, "That approver isn't a contact of this dealer or its group");
+    console.error("[crm-feeds] approver contact:", m);
+    return null;
+  }
+}
+
+/** Blank approver fields on the input take the linked contact's values. Pure. */
+export function withApproverFields(input: CreateInput, c: any): CreateInput {
+  const name = [c?.first_name, c?.last_name].filter(Boolean).join(" ");
+  return {
+    ...input,
+    approverName: input.approverName?.trim() || name || null,
+    approverEmail: input.approverEmail?.trim() || c?.email || null,
+    approverPhone: input.approverPhone?.trim() || c?.phone || c?.phone_raw || null,
+    approverTitle: input.approverTitle?.trim() || c?.title || null,
+  };
+}
+
 /** A second "Start feed order" for the same single dealership: fill gaps (never overwrite what staff already have). */
 async function fillGaps(admin: Admin, existing: any, input: CreateInput): Promise<any> {
+  if (!existing.approver_contact_id && (input.approverContactId || input.approverName || input.approverEmail)) {
+    const approver = await approverContactFor(admin, input);
+    if (approver) {
+      input = withApproverFields(input, approver.contact);
+      await admin.from("crm_feed_orders").update({ approver_contact_id: approver.id }).eq("id", existing.id);
+      existing = { ...existing, approver_contact_id: approver.id };
+    }
+  }
   const fill: Record<string, unknown> = {};
   if (!existing.supplier_company_id && input.supplierCompanyId) fill.supplier_company_id = input.supplierCompanyId;
   if (!existing.approver_email && input.approverEmail) fill.approver_email = normEmail(input.approverEmail);

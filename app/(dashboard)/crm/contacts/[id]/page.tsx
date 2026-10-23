@@ -67,6 +67,7 @@ export default async function CrmContactPage({ params, searchParams }: { params:
           : "No"}</div>
         <div><p className="label">Source</p>{c.source} · added {fmtDate(c.created_at)}
           {c.verify_reason && !c.verified_at && <div style={{ marginTop: 4 }}><VerifyTag reason={c.verify_reason} /></div>}
+          {(c.approver_at || c.role_tag === "approver") && <div style={{ marginTop: 4 }}><Tag tone="accent">Approver</Tag>{c.approver_at && <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 6 }}>last on a feed order {fmtDate(c.approver_at)}</span>}</div>}
           {c.verified_at && <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Verified {fmtDate(c.verified_at)}</div>}
         </div>
       </div>
