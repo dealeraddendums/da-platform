@@ -103,6 +103,16 @@ async function main() {
   }
   console.log(`${APPLY ? "APPLY" : "DRY RUN"} — ${plan.size} owners`, counts);
 
+  // Backup before any write: every planned row with its current value (the
+  // description_original column holds the same, this file survives a revert of 195).
+  if (APPLY) {
+    const backup = OUT.replace(/\.json$/, "") + "-backup.json";
+    const rows = Array.from(plan.entries()).flatMap(([owner, p]) =>
+      (Object.keys(p) as Table[]).flatMap((t) => p[t]!.map((r) => ({ table: t, owner, id: r.id, description: r.old }))));
+    fs.writeFileSync(backup, JSON.stringify(rows));
+    console.log(`backup of ${rows.length} rows → ${backup}`);
+  }
+
   const log: { owner: string; planned: Record<string, number>; written?: Record<string, number>; error?: string }[] = [];
   for (const [owner, p] of Array.from(plan.entries())) {
     const planned = Object.fromEntries(Object.entries(p).map(([t, xs]) => [t, xs!.length]));
