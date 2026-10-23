@@ -1,0 +1,32 @@
+{
+  "supplier": "Vincue",
+  "source": "Shape of a real VinCue Feed ID reply (support@dealercue.com, display \"{name} from VINCUE Support Services\", Oct 2026): \"I have added the {dealership} to your export under the ID of {number}.\" — the dealership written in the reply's own capitalisation. Our request is support@'s HubSpot feed-request wording. Anonymized: dealer, people, domains, Feed ID value (format kept). Our side is shown as feeds@. VinCue's reply arrives on its own thread (not ours), so it is matched by the dealership named in the sentence before the ID.",
+  "dealer": { "name": "Harbor Hills Honda", "city": "Bayport", "state": "CA", "website": "https://www.harborhillshonda.example" },
+  "approver": { "name": "Rosa Delgado", "email": "rosa@harborhillshonda.example" },
+  "supplier_fields": {},
+  "messages": [
+    {
+      "id": "vc-0", "direction": "outbound", "thread": "T0", "receivedAt": "2026-10-23T16:00:00Z",
+      "from": "feeds@dealeraddendums.com", "fromName": "DealerAddendums Feeds",
+      "to": ["support@dealercue.com", "rosa@harborhillshonda.example"], "cc": [],
+      "subject": "Inventory Feed Request for: Harbor Hills Honda",
+      "bodyHtml": "<p>Hello VinCue Support and Rosa,</p><p>We’re requesting an inventory feed for:</p><p>Dealership: Harbor Hills Honda</p><p>Location: Bayport, CA</p><p><strong>VinCue Support:</strong></p><p>Please add Harbor Hills Honda to the Dealer Addendums inventory feed file and provide the store’s unique Dealer ID once completed.</p><p><strong>Rosa:</strong></p><p>Please Reply All to this email confirming that you approve this inventory feed request.</p><p>Once we have your approval and the Dealer ID from VinCue, we can complete the setup on our end.</p><p>Please let us know if you have any questions. Thank you!</p><p>Casey Lane</p>"
+    },
+    {
+      "id": "vc-1", "direction": "inbound", "thread": "T0", "receivedAt": "2026-10-23T17:10:00Z",
+      "from": "rosa@harborhillshonda.example", "fromName": "Rosa Delgado",
+      "to": ["feeds@dealeraddendums.com", "support@dealercue.com"], "cc": [],
+      "subject": "RE: Inventory Feed Request for: Harbor Hills Honda",
+      "bodyHtml": "<p>Approved</p><p>Rosa Delgado<br>Internet Manager</p><p>From: DealerAddendums Feeds &lt;feeds@dealeraddendums.com&gt;<br>Sent: Thursday, October 23, 2026 9:00 AM<br>Subject: Inventory Feed Request for: Harbor Hills Honda</p><p>Please Reply All to this email confirming that you approve this inventory feed request.</p>",
+      "expect": { "result": "dealer_approved", "status": "awaiting_supplier", "openTasks": [], "mailsSent": 0, "latestStartsWith": "Approved" }
+    },
+    {
+      "id": "vc-2", "direction": "inbound", "thread": "T1", "receivedAt": "2026-10-23T21:42:00Z",
+      "from": "support@dealercue.com", "fromName": "Casey Ward from VINCUE Support Services",
+      "to": ["feeds@dealeraddendums.com"], "cc": [],
+      "subject": "Your VINCUE support request has been updated",
+      "bodyHtml": "<p>Hello,</p><p>I have added the HARBOR Hills Honda to your export under the ID of 46871.</p><p>Thank you,</p><p>Casey Ward<br>VINCUE Support Services<br>www.vincue.example</p>",
+      "expect": { "result": "feed_id", "status": "feed_id_received", "feedId": "46871", "openTasks": ["feed_confirm_id"], "mailsSent": 0 }
+    }
+  ]
+}

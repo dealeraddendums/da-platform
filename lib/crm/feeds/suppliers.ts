@@ -1,6 +1,6 @@
 // The feed suppliers we have real threads for (support@, Oct 2026) — their
 // settings and per-supplier "Feed requests" templates, as data. Seeded by
-// scripts/crm-feeds-seed.ts (authoritative for these three: re-running the
+// scripts/crm-feeds-seed.ts (authoritative for these four: re-running the
 // seed resets them to what's here) and exercised end-to-end against the
 // anonymized threads in scripts/fixtures/crm-feeds/ (test:crm-feed-suppliers).
 //
@@ -222,5 +222,42 @@ const AUTOSOFT: SupplierProfile = {
   },
 };
 
-export const SUPPLIER_PROFILES: SupplierProfile[] = [TEAM_VELOCITY, VAUTO, AUTOSOFT];
+// ── VinCue ───────────────────────────────────────────────────────────────────
+// Request = support@'s HubSpot "VinCue feed request" template as sent (the same wording every HubSpot
+// feed request uses — e.g. vAuto's to Honda of Sarasota, 2026-10-22), minus the template's red
+// instruction line, which never went out. Feed ID reply (support@dealercue.com, "… from VINCUE Support
+// Services"): "I have added the {dealership} to your export under the ID of 46393." — the dealership
+// is named in that sentence, which is how a reply off the order thread finds its order.
+const VINCUE: SupplierProfile = {
+  name: "Vincue",
+  settings: {
+    request_method: "email", request_email: "support@dealercue.com", cc_emails: [],
+    // dealercue.com sends; vincue.com is their web / signature domain (onboarding@, project managers).
+    domains: ["dealercue.com", "vincue.com"],
+    // "under the ID of 46393" · "ID of 46393" · "ID: 46393" — one capture group for all three.
+    feed_id_pattern: "\\bID(?:\\s+of|\\s*:)\\s*(\\d+)", feed_id_manual: false,
+    case_number_pattern: null, approval_phrases: [], cancellation_patterns: [], followup_new_thread: false,
+    // Same day to 2 days after the dealer approves.
+    typical_turnaround_days: 2, platform_provider: "Vincue", is_dms: false,
+    pdf_field_map: {}, extra_fields: [],
+    notes: "VinCue Support (support@dealercue.com, display \"{name} from VINCUE Support Services\") adds the store to our export and replies \"I have added the {dealership} to your export under the ID of 46393.\" — same day to 2 days after approval. Their project managers (@dealercue.com / @vincue.com) also start feeds themselves: \"Inventory Source Change - Dealer Addendums // {group}\", listing each rooftop with its Feed ID and asking the dealer to Reply All approved (McSweeney Auto Group, Oct 2026) — those arrive in support@, not as orders.",
+  },
+  templates: {
+    request: {
+      name: "VinCue — feed request",
+      subject: SUBJECT,
+      body_html: `<p>Hello VinCue Support and {{approver.first_name | "there"}},</p>
+<p>We’re requesting an inventory feed for:</p>
+<p>{{order.dealership_list}}</p>
+<p><strong>VinCue Support:</strong></p>
+<p>Please add {{order.dealerships}} to the Dealer Addendums inventory feed file and provide the store’s unique Dealer ID once completed.</p>
+<p><strong>{{approver.first_name | "Approver"}}:</strong></p>
+<p>Please Reply All to this email confirming that you approve this inventory feed request.</p>
+<p>Once we have your approval and the Dealer ID from VinCue, we can complete the setup on our end.</p>
+<p>Please let us know if you have any questions. Thank you!</p>`,
+    },
+  },
+};
+
+export const SUPPLIER_PROFILES: SupplierProfile[] = [TEAM_VELOCITY, VAUTO, AUTOSOFT, VINCUE];
 export const supplierProfile = (name: string) => SUPPLIER_PROFILES.find((p) => p.name.toLowerCase() === name.toLowerCase()) ?? null;
