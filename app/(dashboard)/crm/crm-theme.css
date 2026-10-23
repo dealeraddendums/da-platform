@@ -194,13 +194,16 @@
 .crm-textlink { background: none; border: 0; padding: 0; font: inherit; color: var(--crm-accent); cursor: pointer; text-decoration: none; }
 .crm-textlink:hover { text-decoration: underline; }
 
-/* AI summary: hover a sentence for its sources. */
+/* AI summary card. */
 .crm-summary p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--crm-ink); }
-.crm-summary .s { border-radius: 4px; cursor: help; transition: background 120ms; }
-.crm-summary .s:hover, .crm-summary .s[data-open="true"] { background: var(--crm-accent-soft); }
-.crm-sources { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--crm-surface-2); font-size: 12px; color: var(--crm-ink-2); }
-.crm-sources ul { margin: 4px 0 0; padding: 0; list-style: none; }
-.crm-sources li { padding: 2px 0; }
+/* Numbered source markers + the inline Sources list (no popover, no hover). */
+.crm-summary-marker { border: 0; background: none; padding: 0 1px; font: inherit; font-size: 10px; line-height: 1; color: var(--crm-accent); cursor: pointer; border-radius: 3px; }
+.crm-summary-marker[data-picked="true"] { background: var(--crm-accent-soft); }
+.crm-sources { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--crm-surface-2); font-size: 12px; color: var(--crm-ink-2); list-style: none; }
+.crm-sources li { padding: 3px 4px; border-radius: 4px; }
+.crm-sources li[data-picked="true"] { background: var(--crm-accent-soft); }
+.crm-sources-n { font-weight: 600; color: var(--crm-ink); }
+.crm-summary-sources-row { display: block; border: 0; background: none; padding: 0 0 8px; font: inherit; font-size: 12px; font-weight: 500; color: var(--crm-ink-2); cursor: pointer; }
 
 /* ── Lists, tags, controls (every /crm page) ───────────────────────────── */
 
@@ -259,10 +262,7 @@ a.crm-stat-link:hover { border-color: var(--crm-border-strong); }
 .crm-summary-body { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
 .crm-summary-scroll { overflow-y: auto; padding-right: 6px; margin-right: -6px; scrollbar-width: thin; outline: none; }
 .crm-summary-pinned { flex-shrink: 0; border-top: 1px solid var(--crm-border); margin-top: 10px; padding-top: 10px; }
-.crm-summary-scrollwrap { position: relative; flex: 1 1 auto; min-height: 104px; display: flex; flex-direction: column; }
-.crm-summary-scrollwrap .crm-summary-scroll { flex: 1 1 auto; min-height: 0; }
-.crm-sources-pop { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; max-height: 100%; overflow-y: auto; box-shadow: 0 6px 18px rgba(27, 31, 42, 0.12); border: 1px solid var(--crm-border); z-index: 2; }
-.crm-sources-pop[data-top="true"] { top: 0; bottom: auto; }
+.crm-summary-body > .crm-summary-scroll { flex: 1 1 auto; min-height: 104px; }
 /* Next step stays pinned; a long one scrolls within ~4 lines so the summary keeps its room. */
 .crm-summary .crm-summary-next { margin: 0; max-height: 92px; overflow-y: auto; scrollbar-width: thin; }
 /* Fade the bottom edge of the scrolling text so it reads as "more below". */

@@ -2,31 +2,35 @@
 
 // Company page → Summary (AI). Shows the cached summary at once, then asks the
 // server to regenerate when it's due (new activity + an hour since the last
-// run — lib/crm/company-summary.ts). Hover or tap a sentence to see the items
-// it was built from; clicking an activity scrolls the timeline to it, a task
-// or ticket opens it in the Tasks & Tickets card.
+// run — lib/crm/company-summary.ts). Each sentence carries numbered markers for
+// the items it was built from; the "Sources" row (or any marker) expands an
+// inline list under the text — nothing floats over the summary and nothing
+// reacts to hover. A source opens its item: an activity scrolls the timeline to
+// it, a task or ticket opens it in the Tasks & Tickets card.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StoredSummary, Ref } from "@/lib/crm/company-summary";
 import { fmtAgo } from "@/lib/crm/format";
 import { displaySubject } from "@/lib/crm/thread-display";
 
 type State = { summary: StoredSummary | null; generated_at: string | null; has_activity: boolean; due: boolean; reason: string; error?: string };
 
+/** Source keys numbered by first use — sentences in order, then Next step. */
+export function numberSources(summary: StoredSummary): string[] {
+  const order: string[] = [];
+  for (const x of [...summary.sentences, ...(summary.next_step ? [summary.next_step] : [])]) {
+    for (const k of x.sources) if (summary.refs[k] && !order.includes(k)) order.push(k);
+  }
+  return order;
+}
+
 export default function SummaryCard({ companyId }: { companyId: string }) {
   const [s, setS] = useState<State | null>(null);
   const [busy, setBusy] = useState(false);
-  const [open, setOpen] = useState<number | "next" | null>(null);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [picked, setPicked] = useState<string | null>(null);   // source key highlighted from a marker
   const [err, setErr] = useState<string | null>(null);
-  // Sources pop over the text: at the bottom, or at the top when the hovered sentence is in the lower half.
-  const wrap = useRef<HTMLDivElement>(null);
-  const [popTop, setPopTop] = useState(false);
-  const show = (i: number | "next", el?: HTMLElement) => {
-    const w = wrap.current?.getBoundingClientRect();
-    const r = el?.getBoundingClientRect();
-    setPopTop(!!(w && r && i !== "next" && r.top - w.top > w.height / 2));
-    setOpen(i);
-  };
+  const scroller = useRef<HTMLDivElement>(null);
 
   const generate = useCallback(async (manual: boolean) => {
     setBusy(true);
@@ -51,7 +55,29 @@ export default function SummaryCard({ companyId }: { companyId: string }) {
   }, [companyId, generate]);
 
   const refs = s?.summary?.refs ?? {};
-  const sentenceSources = open === null || !s?.summary ? [] : open === "next" ? s.summary.next_step?.sources ?? [] : s.summary.sentences[open]?.sources ?? [];
+  const order = useMemo(() => (s?.summary ? numberSources(s.summary) : []), [s?.summary]);
+  const num = (k: string) => order.indexOf(k) + 1;
+
+  // A marker opens the list, highlights its row and scrolls the summary box
+  // (only that box — never the page) so the row is in view.
+  const pick = (k: string) => {
+    setSourcesOpen(true);
+    setPicked(k);
+    requestAnimationFrame(() => {
+      const box = scroller.current;
+      const row = box?.querySelector<HTMLElement>(`[data-source="${CSS.escape(k)}"]`);
+      if (!box || !row) return;
+      const top = row.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+      if (top < box.scrollTop || top + row.offsetHeight > box.scrollTop + box.clientHeight) {
+        box.scrollTo({ top: Math.max(0, top - box.clientHeight + row.offsetHeight + 8), behavior: "smooth" });
+      }
+    });
+  };
+  const markers = (keys: string[]) => keys.filter((k) => refs[k]).map((k) => (
+    <sup key={k}>
+      <button type="button" className="crm-summary-marker" data-picked={picked === k} aria-label={`Source ${num(k)}`} onClick={() => pick(k)}>[{num(k)}]</button>
+    </sup>
+  ));
 
   return (
     <section className="crm-rail-card crm-summary-card">
@@ -68,37 +94,38 @@ export default function SummaryCard({ companyId }: { companyId: string }) {
         : !s.summary ? <p style={{ margin: 0, fontSize: 13, color: "var(--crm-muted)" }}>{busy ? "Writing the summary…" : err ? `Couldn't write a summary: ${err}` : "No summary yet."}</p>
         : (
           <div className="crm-summary crm-summary-body">
-            {/* The sentences scroll; Next step and the footer stay pinned below. */}
-            <div className="crm-summary-scrollwrap" ref={wrap}>
-              <div className="crm-summary-scroll" tabIndex={0} aria-label="Summary">
-                <p>
-                  {s.summary.sentences.map((x, i) => (
-                    <span key={i}>
-                      <span className="s" data-open={open === i} tabIndex={0} onMouseEnter={(e) => show(i, e.currentTarget)} onFocus={(e) => show(i, e.currentTarget)} onClick={(e) => (open === i ? setOpen(null) : show(i, e.currentTarget))}>{x.text}</span>{" "}
-                    </span>
+            {/* The sentences and the expanded Sources list scroll together; the
+                Sources row, Next step and the footer stay pinned below. */}
+            <div className="crm-summary-scroll" ref={scroller} tabIndex={0} aria-label="Summary">
+              <p>
+                {s.summary.sentences.map((x, i) => (
+                  <span key={i}>{x.text}{markers(x.sources)}{" "}</span>
+                ))}
+              </p>
+              {sourcesOpen && order.length > 0 && (
+                <ol className="crm-sources" aria-label="Sources">
+                  {order.map((k) => (
+                    <li key={k} data-source={k} data-picked={picked === k}>
+                      <span className="crm-sources-n">{num(k)}</span> · <SourceLink r={refs[k]} />
+                    </li>
                   ))}
-                </p>
-              </div>
-              {/* Sources float over the text so they never push Next step out of the card. */}
-              {open !== null && (
-                <div className="crm-sources crm-sources-pop" data-top={popTop} onMouseLeave={() => setOpen(null)}>
-                  <strong style={{ fontWeight: 600 }}>Based on</strong>
-                  {sentenceSources.length ? (
-                    <ul>{sentenceSources.map((k) => refs[k] && <li key={k}><SourceLink r={refs[k]} /></li>)}</ul>
-                  ) : <div>No specific items.</div>}
-                </div>
+                </ol>
               )}
             </div>
             <div className="crm-summary-pinned">
+              {order.length > 0 && (
+                <button type="button" className="crm-summary-sources-row" aria-expanded={sourcesOpen}
+                  onClick={() => { setSourcesOpen(!sourcesOpen); setPicked(null); }}>
+                  <span aria-hidden>{sourcesOpen ? "▾" : "▸"}</span> Sources ({order.length})
+                </button>
+              )}
               {s.summary.next_step && (
                 <p className="crm-summary-next">
-                  <strong>Next step: </strong>
-                  <span className="s" data-open={open === "next"} tabIndex={0} onMouseEnter={() => show("next")} onFocus={() => show("next")} onClick={() => setOpen(open === "next" ? null : "next")}>{s.summary.next_step.text}</span>
+                  <strong>Next step: </strong>{s.summary.next_step.text}{markers(s.summary.next_step.sources)}
                 </p>
               )}
-              <p className="crm-ellipsis" style={{ marginTop: 8, fontSize: 11.5, color: "var(--crm-muted)" }}
-                title="AI-written from this record only; hover a sentence for its sources.">
-                Updated {fmtAgo(s.generated_at)}{busy ? " · updating…" : ""} · AI · hover a sentence for sources
+              <p className="crm-ellipsis" style={{ marginTop: 8, fontSize: 11.5, color: "var(--crm-muted)" }}>
+                Updated {fmtAgo(s.generated_at)}{busy ? " · updating…" : ""} · AI · click a marker for sources
               </p>
               {err && <p style={{ marginTop: 4, fontSize: 11.5, color: "var(--crm-danger)" }}>Refresh failed: {err}</p>}
             </div>
@@ -121,5 +148,9 @@ function SourceLink({ r }: { r: Ref }) {
   if (r.kind === "task" || r.kind === "ticket") {
     return <button type="button" className="crm-textlink" style={{ textAlign: "left" }} onClick={() => window.dispatchEvent(new CustomEvent("crm:work-open", { detail: { kind: r.kind, id: r.id } }))}>{label}</button>;
   }
+  if (r.kind === "feed_order") {
+    return <a className="crm-textlink" href={`/crm/communications/feeds?view=all&order=${encodeURIComponent(r.id)}`}>{label}</a>;
+  }
+  // The company record itself and the folded "earlier items" have nothing to open.
   return <span>{label}</span>;
 }
