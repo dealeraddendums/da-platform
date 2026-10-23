@@ -21,6 +21,14 @@
 // refreshed in the last 3 days AND the newest feed-added vehicle is more than
 // 7 days old (or there is none).
 //
+// CDK stores are judged differently (2026-10-21): ETL2's upsert leaves
+// updated_at alone on an unchanged car, so a quiet CDK store looked untouched
+// while its pulls were succeeding. For a store on the CDK roster (and not on
+// Fortellis/Tekion) STALE = its cdk_dealers.LAST_DELTA is more than
+// CDK_STALE_HOURS old (LAST_DELTA advances only on a successful pull) OR the
+// latest ETL2 run reported its pull failed (admin_settings etl2_cdk_run_status,
+// written by ETL2 after every delta and every 22:00 refresh).
+//
 // FROZEN (2026-10-10, fleet scan + digest only): the feed IS refreshing rows
 // (so `health` stays "updating") but has added no NEW vehicle in more than
 // FROZEN_NEWEST_DAYS — a provider resending the same file forever (the Job 21
@@ -36,32 +44,129 @@ import { providerLabel } from "@/lib/inventory-providers";
 export const FRESH_DAYS = 3;
 export const STALE_NEWEST_DAYS = 7;
 export const FROZEN_NEWEST_DAYS = 21;
+export const CDK_STALE_HOURS = 36;
+export const CDK_RUN_STATUS_KEY = "etl2_cdk_run_status";
+/** A run older than this is not "the latest run" any more — its failures are not trusted. */
+const CDK_RUN_MAX_AGE_H = { delta: 6, refresh: 30 } as const;
 export const LIVE_FEED_OR = "created_by.like.FORTELLIS_*,created_by.like.CDK_*,created_by.like.automatic*";
 
 export type FeedHealth = "updating" | "stale" | "feed_no_vehicles" | "no_live_feed";
 
 export const FEED_HEALTH_MEANING: Record<FeedHealth, string> = {
   updating: `the feed is refreshing this store's vehicles`,
-  stale: `the feed hasn't refreshed any of this store's vehicles in over ${FRESH_DAYS} days and hasn't added a new one in over ${STALE_NEWEST_DAYS} days — it may be disconnected; contact support`,
+  stale: "the feed has stopped refreshing this store's vehicles — it may be disconnected; contact support",
   feed_no_vehicles: "a feed is configured but none of the current vehicles came from it — contact support",
   no_live_feed: "no automatic feed delivers inventory; vehicles are added by hand (VIN decoder or spreadsheet)",
 };
 
 type Admin = any;
 
-export interface Rosters { fortellis: Set<string>; cdk: Set<string>; tekion: Set<string> }
+export interface Rosters { fortellis: Set<string>; cdk: Set<string>; tekion: Set<string>; cdkStatus: Map<string, CdkFeedStatus> }
+
+/** One CDK roster row's pull health (ETL2 jobs 9/10 + the 22:00 refresh). */
+export interface CdkFeedStatus {
+  rosterId: number | null;             // cdk_dealers.id — DEALER_ID is NOT unique (3PA0003717 = Rick Case Mazda + Kia Duluth)
+  cdkId: string;
+  name: string | null;
+  mode: string | null;                 // cdk_dealers.NEW: "No" = hourly delta, "Yes" = waiting for its first bulk
+  lastDelta: string | null;            // ISO; advances only after a successful pull
+  hoursSinceDelta: number | null;
+  failing: boolean;                    // the latest delta or refresh run reported this dealer's pull failed
+  error: string | null;                // e.g. "HTTP 401: Dealer 3PA… is not subscribed to …"
+  lastRunAt: string | null;            // when ETL2 last reported on this dealer
+  retired: number | null;              // sold cars retired by the latest refresh
+  keptPrinted: number | null;          // absent from CDK but printed, so kept active
+  stale: boolean;
+  reason: string | null;               // why stale, in plain words
+  /** Other roster rows with the same DEALER_ID (the map holds the healthiest one). */
+  duplicates: CdkFeedStatus[];
+}
+
+const hoursSince = (iso: string | null) => iso && !Number.isNaN(Date.parse(iso)) ? (Date.now() - Date.parse(iso)) / 3_600_000 : null;
+
+/**
+ * Every live (NEW <> 'Off') cdk_dealers row with its pull health, keyed by
+ * DEALER_ID. Rows come from cdk_dealers itself, so a roster entry with no 5.0
+ * store still appears. When several rows share a DEALER_ID the store is judged by
+ * the healthiest one; the rest ride along in `duplicates` (still reported).
+ */
+export async function loadCdkFeedStatus(admin: Admin, roster?: any[]): Promise<Map<string, CdkFeedStatus>> {
+  const out = new Map<string, CdkFeedStatus>();
+  for (const c of await cdkRosterStatuses(admin, roster)) {
+    const cur = out.get(c.cdkId);
+    if (!cur) { out.set(c.cdkId, c); continue; }
+    const [keep, other] = cur.stale && !c.stale ? [c, cur] : [cur, c];
+    keep.duplicates = [...cur.duplicates, ...c.duplicates, other].filter((x) => x !== keep).map((x) => ({ ...x, duplicates: [] }));
+    out.set(c.cdkId, keep);
+  }
+  return out;
+}
+
+/** One status per cdk_dealers row (NEW <> 'Off'). */
+export async function cdkRosterStatuses(admin: Admin, roster?: any[]): Promise<CdkFeedStatus[]> {
+  const [rows, st] = await Promise.all([
+    roster ? Promise.resolve({ data: roster, error: null }) : admin.from("cdk_dealers").select("id, DEALER_ID, DEALER_NAME, NEW, LAST_DELTA"),
+    admin.from("admin_settings").select("value").eq("key", CDK_RUN_STATUS_KEY).maybeSingle(),
+  ]);
+  if (rows.error) throw new Error(rows.error.message);
+  let runs: any = {};
+  try { runs = st.data?.value ? JSON.parse(st.data.value) : {}; } catch { runs = {}; }
+  const current = (kind: "delta" | "refresh") => {
+    const run = runs?.[kind];
+    const age = hoursSince(run?.at ?? null);
+    return age != null && age <= CDK_RUN_MAX_AGE_H[kind] ? run : null;
+  };
+  const delta = current("delta");
+  const refresh = current("refresh");
+  const out: CdkFeedStatus[] = [];
+  for (const r of (rows.data ?? []) as any[]) {
+    const mode = r.NEW == null ? null : String(r.NEW).trim();
+    if ((mode ?? "").toLowerCase() === "off") continue;
+    const cdkId = String(r.DEALER_ID);
+    const lastDelta = r.LAST_DELTA && !Number.isNaN(Date.parse(r.LAST_DELTA)) ? new Date(Date.parse(r.LAST_DELTA)).toISOString() : null;
+    const h = hoursSince(lastDelta);
+    const d = delta?.dealers?.[cdkId];
+    const f = refresh?.dealers?.[cdkId];
+    const failed = [d, f].find((x) => x && x.ok === false) ?? null;
+    const failing = !!failed;
+    const old = h == null || h > CDK_STALE_HOURS;
+    const waiting = (mode ?? "").toLowerCase() === "yes";
+    out.push({
+      rosterId: r.id ?? null,
+      cdkId,
+      name: r.DEALER_NAME ?? null,
+      mode,
+      lastDelta,
+      hoursSinceDelta: h == null ? null : Math.round(h),
+      failing,
+      error: failed?.error ?? null,
+      lastRunAt: (d ? delta?.at : f ? refresh?.at : null) ?? null,
+      retired: typeof f?.retired === "number" ? f.retired : null,
+      keptPrinted: typeof f?.kept_printed === "number" ? f.kept_printed : null,
+      stale: failing || old,
+      reason: failing ? `CDK pull failing: ${failed?.error ?? "error"}`
+        : old ? (h == null ? (waiting ? "waiting for its first CDK bulk — none has succeeded" : "never had a successful CDK pull") : `no successful CDK pull in ${Math.round(h)}h`)
+        : null,
+      duplicates: [],
+    });
+  }
+  return out;
+}
 
 /** All three ingest rosters in one go (the fleet scan reuses this per dealer). */
 export async function loadRosters(admin: Admin): Promise<Rosters> {
   const [f, c, t] = await Promise.all([
     admin.from("fortellis_dealers").select("dealer_id").eq("enabled", true),
-    admin.from("cdk_dealers").select("DEALER_ID, NEW"),
+    admin.from("cdk_dealers").select("id, DEALER_ID, DEALER_NAME, NEW, LAST_DELTA"),
     admin.from("tekion_dealers").select("dealer_id"),
   ]);
+  if (c.error) throw new Error(c.error.message);
+  const cdkStatus = await loadCdkFeedStatus(admin, c.data ?? []);
   return {
     fortellis: new Set(((f.data ?? []) as any[]).map((r) => String(r.dealer_id))),
-    cdk: new Set(((c.data ?? []) as any[]).filter((r) => String(r.NEW ?? "").trim().toLowerCase() !== "off").map((r) => String(r.DEALER_ID))),
+    cdk: new Set(cdkStatus.keys()),
     tekion: new Set(((t.data ?? []) as any[]).map((r) => String(r.dealer_id))),
+    cdkStatus,
   };
 }
 
@@ -78,6 +183,10 @@ export interface DealerFeedHealth {
   newestFeedAdded: string | null;     // YYYY-MM-DD
   daysSinceNewestFeedAdded: number | null;
   health: FeedHealth;
+  /** Why `health` is "stale", when known (CDK stores). */
+  staleReason: string | null;
+  /** CDK roster pull health, for a store judged by its CDK pulls. */
+  cdk: CdkFeedStatus | null;
   /** Refreshing but no new vehicle in > FROZEN_NEWEST_DAYS (scan/digest only — not in `health`). */
   frozen: boolean;
   lastPrintDate: string | null;       // any document, 5.0 or synced 4.0 print
@@ -141,9 +250,12 @@ export async function dealerFeedHealth(
     : null; // an ETL2 job number is not a brand — don't guess one
 
   const configured = roster.fortellis || roster.cdk || roster.tekion;
-  const health: FeedHealth = feedVehicles === 0
-    ? (configured ? "feed_no_vehicles" : "no_live_feed")
-    : feedRefreshedLast3d === 0 && (daysSince == null || daysSince > STALE_NEWEST_DAYS) ? "stale" : "updating";
+  const cdk = roster.cdk && !roster.fortellis && !roster.tekion ? ros.cdkStatus.get(id) ?? null : null;
+  const health: FeedHealth = cdk
+    ? (cdk.stale ? "stale" : feedVehicles === 0 ? "feed_no_vehicles" : "updating")
+    : feedVehicles === 0
+      ? (configured ? "feed_no_vehicles" : "no_live_feed")
+      : feedRefreshedLast3d === 0 && (daysSince == null || daysSince > STALE_NEWEST_DAYS) ? "stale" : "updating";
 
   let handAddedOlderThan180d = 0;
   const handAddedActive = Math.max(0, activeVehicles - feedVehicles);
@@ -168,6 +280,8 @@ export async function dealerFeedHealth(
     newestFeedAdded: newest ? String(newest).slice(0, 10) : null,
     daysSinceNewestFeedAdded: daysSince,
     health,
+    staleReason: health === "stale" ? (cdk?.reason ?? null) : null,
+    cdk,
     frozen: health === "updating" && daysSince != null && daysSince > FROZEN_NEWEST_DAYS,
     lastPrintDate: lastPrint.data?.[0]?.print_date ? String(lastPrint.data[0].print_date).slice(0, 10) : null,
     printedLast14d: printed14.count ?? 0,

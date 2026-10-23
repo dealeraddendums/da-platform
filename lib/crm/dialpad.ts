@@ -152,3 +152,57 @@ export async function fetchDialpadMedia(url: string): Promise<Response> {
     cache: "no-store",
   });
 }
+
+/** Recording id of an admin (company auto-record) URL, e.g. …/blob/adminrecording/{id}.mp3. */
+export function adminRecordingId(url: string): string | null {
+  const m = url.match(/^https:\/\/([a-z0-9-]+\.)*dialpad\.com\/blob\/adminrecording\/(\d+)(\.mp3)?(\?|$)/i);
+  return m ? m[2] : null;
+}
+
+/**
+ * Download a recording or voicemail. Admin recordings are browser-only — with
+ * the API key the blob URL returns an HTML login page — so for those we mint a
+ * recording share link (privacy "owner") and download through it
+ * (developers.dialpad.com → Downloading call recordings).
+ */
+export async function fetchDialpadRecording(url: string): Promise<Response> {
+  const recId = adminRecordingId(url);
+  if (!recId) return fetchDialpadMedia(url);
+  const link = await dialpadFetch<{ id?: string }>("/api/v2/recordingsharelink", {
+    method: "POST",
+    body: `{"recording_id":${recId},"recording_type":"admincallrecording"}`,
+  });
+  if (!link.id) throw new Error(`Dialpad share link for recording ${recId}: no id`);
+  return fetchDialpadMedia(`${dialpadApiBase()}/recording/admincallrecording/${encodeURIComponent(link.id)}`);
+}
+
+/** GET /api/v2/call/{id} — one call's full record (recording_details etc.). 10/min. */
+export async function getDialpadCall(dialpadCallId: string): Promise<Record<string, unknown>> {
+  return dialpadFetch(`/api/v2/call/${encodeURIComponent(dialpadCallId)}`);
+}
+
+/** True when Dialpad refused because the API key lacks a scope (e.g. ai_recap, calls:list). */
+export function isDialpadScopeError(e: unknown): boolean {
+  return e instanceof Error && /→ 403: [\s\S]*Missing required scope/.test(e.message);
+}
+
+type RecapPart = { content?: string | null; null_summary?: boolean | null };
+
+/**
+ * AI recap as the same fields the recap_* webhook events carry (so
+ * buildSummary formats both alike), or null when Dialpad has none.
+ * GET /api/v2/call/{id}/ai_recap needs the `ai_recap` scope; 12/min.
+ */
+export async function fetchDialpadAiRecap(dialpadCallId: string): Promise<{ recap_summary?: string; recap_outcome?: string; recap_action_items?: string[] } | null> {
+  const r = await dialpadFetch<{ summary?: RecapPart | null; disposition?: RecapPart | null; action_items?: RecapPart[] | null }>(
+    `/api/v2/call/${encodeURIComponent(dialpadCallId)}/ai_recap`);
+  const summary = r.summary && !r.summary.null_summary ? r.summary.content?.trim() : "";
+  const outcome = r.disposition?.content?.trim() ?? "";
+  const items = (r.action_items ?? []).map((a) => a.content?.trim() ?? "").filter(Boolean);
+  if (!summary && !outcome && !items.length) return null;
+  return {
+    ...(summary ? { recap_summary: summary } : {}),
+    ...(outcome ? { recap_outcome: outcome } : {}),
+    ...(items.length ? { recap_action_items: items } : {}),
+  };
+}

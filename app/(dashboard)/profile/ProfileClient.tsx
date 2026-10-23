@@ -20,6 +20,8 @@ type Props = {
   dealer?: DealerRow | null;
   /** Edit access to InfoTab + ShippingTab (dealer_admin only). */
   canEdit: boolean;
+  /** Website Integrations editable without general edit rights (a ghosted super_admin). */
+  canEditWebsite?: boolean;
   /** Place label orders (dealer_admin OR dealer_user). Distinct from
    *  `canEdit` so dealer_user can buy labels without gaining edit on the
    *  dealer profile / shipping address. */
@@ -2566,14 +2568,16 @@ const ALL_TABS: { id: Tab; label: string; dealerOnly?: boolean; staffOnly?: bool
   { id: "security", label: "Security" },
 ];
 
-export default function ProfileClient({ dealer, canEdit, canOrderLabels, recommendedPaperSizes, userEmail, userName, userRole, memberSince, labelProducts }: Props) {
+export default function ProfileClient({ dealer, canEdit, canEditWebsite, canOrderLabels, recommendedPaperSizes, userEmail, userName, userRole, memberSince, labelProducts }: Props) {
   const searchParams = useSearchParams();
   const hasDealer = !!dealer;
   const isStaff = userRole === "super_admin";
+  // Website Integrations: dealer editors, plus a ghosted super_admin (canEditWebsite).
+  const websiteEditable = canEdit || !!canEditWebsite;
   const visibleTabs = ALL_TABS.filter(t => {
     if (t.dealerOnly && !hasDealer) return false;
     if (t.staffOnly && !isStaff) return false;
-    if (t.editOnly && !canEdit) return false;
+    if (t.editOnly && !(t.id === "website" ? websiteEditable : canEdit)) return false;
     return true;
   });
 
@@ -2595,12 +2599,12 @@ export default function ProfileClient({ dealer, canEdit, canOrderLabels, recomme
     if (searchParams.get("upgrade") === "1") setOpenChangePlan(true);
     if (t === "security") { setTab("security"); return; }
     if (!hasDealer) return;
-    if (t === "labels" || t === "info" || t === "shipping" || t === "billing" || t === "orders" || (t === "website" && canEdit)) {
+    if (t === "labels" || t === "info" || t === "shipping" || t === "billing" || t === "orders" || (t === "website" && websiteEditable)) {
       setTab(t as Tab);
     } else if (t === "hubspot" && isStaff) {
       setTab("hubspot");
     }
-  }, [searchParams, hasDealer, isStaff]);
+  }, [searchParams, hasDealer, isStaff, websiteEditable]);
 
   const title = "My Profile";
 

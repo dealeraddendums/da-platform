@@ -6,8 +6,14 @@
 //
 // Digest de-dup: admin_settings `feed_health_alert_state` remembers which
 // stores were stale at the last run. An email goes out only when a store
-// BECOMES stale or RECOVERS; the still-stale list rides along in that email.
-// A second run on the same day with no change sends nothing.
+// BECOMES stale, RECOVERS, or has been stopped for STALE_REMIND_DAYS (one
+// reminder per stretch, 2026-10-21); the still-stale list rides along in that
+// email. A second run on the same day with no change sends nothing.
+//
+// CDK roster entries are judged by their pulls (lib/feed-health.ts), and one
+// whose pull is failing appears even when no 5.0 store carries its id (e.g.
+// 3PA89913 Platinum Hyundai of Tracy, 401 not subscribed) — as "<name> (no
+// active 5.0 store)".
 //
 // Two kinds of broken feed, tracked separately (2026-10-10):
 //   stale  — "feed stopped": nothing refreshed in 3 days (feed-health `health`)
@@ -20,7 +26,7 @@
 
 import { createAdminSupabaseClient } from "@/lib/db";
 import { sendMandrillEmail } from "@/lib/mandrill";
-import { dealerFeedHealth, loadRosters, FROZEN_NEWEST_DAYS, type DealerFeedHealth } from "@/lib/feed-health";
+import { dealerFeedHealth, loadRosters, CDK_STALE_HOURS, FROZEN_NEWEST_DAYS, type CdkFeedStatus, type DealerFeedHealth } from "@/lib/feed-health";
 import { scanUnattachedFeeds, checkFeedAliases, UNATTACHED_LABEL, MATCH_LABEL, type UnattachedFeed, type AliasProblem, type FeedAliases } from "@/lib/feed-unattached";
 
 export interface ScanRow extends DealerFeedHealth {
@@ -33,6 +39,29 @@ const STATE_KEY = "feed_health_alert_state";
 const LOCK_KEY = "feed_health_running";
 const LOCK_MS = 30 * 60_000;
 const CONCURRENCY = 6;
+const STALE_REMIND_DAYS = 7;
+const ALERT_TO = [
+  { email: "support@dealeraddendums.com", name: "Support", type: "to" as const },
+  { email: "allan@dealeraddendums.com", name: "Allan Tone", type: "to" as const },
+  { email: "alex@dealeraddendums.com", name: "Alex Friedrich", type: "to" as const },
+];
+
+/**
+ * A stale CDK roster row the per-store scan can't show: no active 5.0 store
+ * carries its id, or it shares its DEALER_ID with a healthier row. Keyed by
+ * roster row so the alert state tracks each one.
+ */
+function cdkRosterRow(c: CdkFeedStatus, why: string): ScanRow {
+  return {
+    dealerId: c.rosterId != null ? `${c.cdkId}#${c.rosterId}` : c.cdkId, name: `${c.name ?? c.cdkId} (${why})`, onV5: false,
+    provider: "CDK", providerSource: "inferred", feedSource: "CDK", feedDealerId: c.cdkId,
+    roster: { fortellis: false, cdk: true, tekion: false },
+    activeVehicles: 0, feedVehicles: 0, feedRefreshedLast3d: 0, refreshedPct: null,
+    newestFeedAdded: null, daysSinceNewestFeedAdded: null,
+    health: "stale", staleReason: c.reason, cdk: c, frozen: false,
+    lastPrintDate: null, printedLast14d: 0, handAddedActive: 0, handAddedOlderThan180d: 0,
+  };
+}
 
 export async function scanFleet(): Promise<{ rows: ScanRow[]; errors: { dealerId: string; error: string }[] }> {
   const admin = createAdminSupabaseClient() as any;
@@ -61,6 +90,11 @@ export async function scanFleet(): Promise<{ rows: ScanRow[]; errors: { dealerId
     }
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  const seen = new Set(dealers.map((d) => String(d.dealer_id)));
+  for (const c of Array.from(rosters.cdkStatus.values())) {
+    if (c.stale && !seen.has(c.cdkId)) rows.push(cdkRosterRow(c, "no active 5.0 store"));
+    for (const d of c.duplicates) if (d.stale) rows.push(cdkRosterRow(d, `CDK roster row sharing id ${d.cdkId}`));
+  }
   return { rows, errors };
 }
 
@@ -80,15 +114,23 @@ export function frozenWorstFirst(rows: ScanRow[]): ScanRow[] {
     || b.activeVehicles - a.activeVehicles);
 }
 
-type AlertMap = Record<string, { since: string }>;
+type AlertMap = Record<string, { since: string; reminded?: string }>;
 
-/** Diff one category against the previous run's map. */
-function diffAlerts(current: ScanRow[], prev: AlertMap, byId: Map<string, ScanRow>) {
+/** Diff one category against the previous run's map. `remindDays` = send one reminder after that long. */
+function diffAlerts(current: ScanRow[], prev: AlertMap, byId: Map<string, ScanRow>, remindDays?: number) {
   const now = new Date().toISOString();
   const next: AlertMap = {};
-  for (const r of current) next[r.dealerId] = { since: prev[r.dealerId]?.since ?? now };
+  const reminder: ScanRow[] = [];
+  for (const r of current) {
+    const p = prev[r.dealerId];
+    const since = p?.since ?? now;
+    const due = !!remindDays && !!p && !p.reminded && Date.now() - Date.parse(since) >= remindDays * 86_400_000;
+    if (due) reminder.push(r);
+    next[r.dealerId] = { since, ...(p?.reminded || due ? { reminded: p?.reminded ?? now } : {}) };
+  }
   return {
     next,
+    reminder,
     newly: current.filter((r) => !prev[r.dealerId]),
     still: current.filter((r) => prev[r.dealerId]),
     recovered: Object.keys(prev).filter((id) => !next[id]).map((id) => byId.get(id)).filter((r): r is ScanRow => !!r),
@@ -103,7 +145,7 @@ const unattachedLabel = (u: UnattachedFeed) =>
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 function rowHtml(r: ScanRow): string {
-  return `<tr><td>${esc(r.name)}</td><td>${esc(r.dealerId)}</td><td>${esc(r.provider ?? "unknown")}${r.feedSource ? ` <span style="color:#78828c">(${esc(r.feedSource)})</span>` : ""}</td>`
+  return `<tr><td>${esc(r.name)}${r.staleReason ? `<br><span style="color:#c62828;font-size:12px">${esc(r.staleReason)}</span>` : ""}</td><td>${esc(r.dealerId)}</td><td>${esc(r.provider ?? "unknown")}${r.feedSource ? ` <span style="color:#78828c">(${esc(r.feedSource)})</span>` : ""}</td>`
     + `<td>${esc(r.newestFeedAdded ?? "—")}${r.daysSinceNewestFeedAdded != null ? ` (${r.daysSinceNewestFeedAdded}d)` : ""}</td>`
     + `<td style="text-align:right">${r.feedVehicles}/${r.activeVehicles}</td><td>${r.onV5 ? "5.0" : "4.0"}</td>`
     + `<td>${r.printedLast14d > 0 ? `<strong>yes — ${r.printedLast14d} in 14d</strong>` : "no"}</td></tr>`;
@@ -148,7 +190,7 @@ function unattachedSection(rows: UnattachedFeed[]): string {
 }
 
 export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promise<{
-  skipped?: string; stale: number; newly: number; recovered: number;
+  skipped?: string; stale: number; newly: number; recovered: number; reminded?: number;
   frozen: number; frozenNewly: number; frozenRecovered: number;
   unattached: number; unattachedNewly: number; unattachedGone: number; unattachedError?: string; aliasProblems?: number;
   emailed: boolean; errors: number;
@@ -175,7 +217,7 @@ export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promis
 
     const now = new Date().toISOString();
     const byId = new Map(rows.map((r) => [r.dealerId, r]));
-    const s = diffAlerts(stale, prevState.stale ?? {}, byId);
+    const s = diffAlerts(stale, prevState.stale ?? {}, byId, STALE_REMIND_DAYS);
     const f = diffAlerts(frozen, prevState.frozen ?? {}, byId);
     const { newly, still, recovered } = s;
 
@@ -200,28 +242,28 @@ export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promis
     const frozenNews = !frozenBaseline && (f.newly.length > 0 || f.recovered.length > 0);
     const uaBaseline = firstRun || !prevState.unattached;
     const uaNews = !uaBaseline && !ua.error && (uaNewly.length > 0 || uaGone.length > 0);
-    if (opts.send !== false && !firstRun && (newly.length || recovered.length || frozenNews || uaNews)) {
+    if (opts.send !== false && !firstRun && (newly.length || recovered.length || s.reminder.length || frozenNews || uaNews)) {
       const printing = stale.filter((r) => r.printedLast14d > 0).length;
       const frozenPrinting = frozen.filter((r) => r.printedLast14d > 0).length;
       await sendMandrillEmail({
         subject: `Feed health: ${newly.length} newly stopped, ${recovered.length} recovered (${stale.length} stopped)`
+          + (s.reminder.length ? ` · ${s.reminder.length} stopped ${STALE_REMIND_DAYS}+ days` : "")
           + (frozenBaseline ? "" : ` · ${f.newly.length} newly frozen, ${f.recovered.length} unfrozen (${frozen.length} frozen)`)
           + (uaBaseline || ua.error ? "" : ` · ${uaNewly.length} newly unattached feed(s) (${ua.list.length} unattached)`),
         from_email: "noreply@dealeraddendums.com",
         from_name: "DealerAddendums",
-        to: [
-          { email: "support@dealeraddendums.com", name: "Support", type: "to" },
-          { email: "allan@dealeraddendums.com", name: "Allan Tone", type: "to" },
-        ],
+        to: ALERT_TO,
         html: `<div style="font-family:Roboto,Arial,sans-serif;font-size:14px;color:#2a2b3c">`
           + `<p>Daily inventory-feed check. Two kinds of broken feed:</p><ul>`
           + `<li><strong>Feed stopped</strong> — none of the store's feed vehicles was refreshed in the last 3 days and the feed hasn't added a vehicle in over 7 days. `
+          + `CDK stores: no successful CDK pull in ${CDK_STALE_HOURS} hours, or the latest pull failed (reason shown under the store). `
           + `${printing} of the ${stale.length} printed in the last 14 days (highest risk).</li>`
           + `<li><strong>Frozen — refreshing but no new inventory</strong> — the feed keeps touching the store's vehicles, but hasn't added a NEW one in over ${FROZEN_NEWEST_DAYS} days `
           + `(usually the provider resending the same file). ${frozenPrinting} of the ${frozen.length} printed in the last 14 days.</li></ul>`
           + `<p>Stores with no automatic feed (vehicles added by hand) are never flagged here.</p>`
           + `<h2 style="font-size:16px">Feed stopped</h2>`
           + `<h3>Newly stopped (${newly.length})</h3>${table(newly)}`
+          + (s.reminder.length ? `<h3>Stopped ${STALE_REMIND_DAYS}+ days — reminder (${s.reminder.length})</h3>${table(s.reminder)}` : "")
           + `<h3>Recovered (${recovered.length})</h3>${table(recovered)}`
           + `<h3>Still stopped (${still.length})</h3>${table(still)}`
           + `<h2 style="font-size:16px">Frozen — refreshing but no new inventory</h2>`
@@ -247,7 +289,7 @@ export async function runFeedHealthDigest(opts: { send?: boolean } = {}): Promis
     }
     await admin.from("admin_settings").upsert({ key: STATE_KEY, value: JSON.stringify({ stale: s.next, frozen: f.next, unattached: uaNext, lastRunAt: now }), updated_at: now }, { onConflict: "key" });
     return {
-      stale: stale.length, newly: newly.length, recovered: recovered.length,
+      stale: stale.length, newly: newly.length, recovered: recovered.length, reminded: s.reminder.length,
       frozen: frozen.length, frozenNewly: frozenBaseline ? 0 : f.newly.length, frozenRecovered: frozenBaseline ? 0 : f.recovered.length,
       unattached: ua.list.length, unattachedNewly: uaBaseline ? 0 : uaNewly.length, unattachedGone: uaBaseline ? 0 : uaGone.length,
       ...(ua.error ? { unattachedError: ua.error } : {}),

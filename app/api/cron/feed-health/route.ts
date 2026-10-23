@@ -10,8 +10,8 @@ export const maxDuration = 600;
 /**
  * POST /api/cron/feed-health (X-Cron-Secret) — daily stale-feed digest
  * (lib/feed-health-scan.ts). Fire-and-forget: 200 at once, the scan runs in
- * the background and emails support@ + allan@ only when a store becomes stale
- * or recovers (or becomes / stops being frozen). Also kicked daily from /api/cron/harvest-vin-trims; overlapping
+ * the background and emails support@ + allan@ + alex@ only when a store becomes
+ * stale, recovers, hits 7 days stopped, or becomes / stops being frozen. Also kicked daily from /api/cron/harvest-vin-trims; overlapping
  * or repeated runs are harmless (run lock + alert state).
  *
  * ?report=1 — synchronous, READ-ONLY: returns the full scan as JSON, no email,

@@ -25,7 +25,7 @@ export type Member = {
 
 // Mirrors lib/crm/team.ts (server-only because of DOMPurify).
 const TEAMS: Record<string, string> = { customer_support: "Customer Support", management: "Management" };
-const CAPABILITIES: Record<string, string> = { tier1: "Tier 1", tier2: "Tier 2", feed_support: "Feed support", ar_ap: "AR/AP" };
+const CAPABILITIES: Record<string, string> = { tier1: "Tier 1", tier2: "Tier 2", feed_support: "Feed support", ar_ap: "AR/AP", label_shipping: "Label shipping" };
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 const DAY_LABEL: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
 const ZONES = ["America/Los_Angeles", "America/Denver", "America/Phoenix", "America/Chicago", "America/New_York", "Pacific/Honolulu", "America/Anchorage"];
