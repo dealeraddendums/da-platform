@@ -5,7 +5,7 @@ import { sanitizeTemplateHtml } from "./email-html";
 import { normalizePhone } from "./phone";
 
 export const TEAMS = { customer_support: "Customer Support", management: "Management" } as const;
-export const CAPABILITIES = { tier1: "Tier 1", tier2: "Tier 2", feed_support: "Feed support", ar_ap: "AR/AP" } as const;
+export const CAPABILITIES = { tier1: "Tier 1", tier2: "Tier 2", feed_support: "Feed support", ar_ap: "AR/AP", label_shipping: "Label shipping" } as const;
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
