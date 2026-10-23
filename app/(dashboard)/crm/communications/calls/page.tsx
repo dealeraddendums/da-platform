@@ -86,7 +86,6 @@ export default async function CrmCallsPage({ searchParams }: { searchParams: SP 
           : <CallsTable rows={rows} openId={searchParams.call ?? null} />}
       </div>
       <Pager
-        light
         page={page}
         totalPages={Math.max(1, Math.ceil((count ?? 0) / PAGE))}
         prevHref={pageHref("/crm/communications/calls", searchParams, page - 1)}

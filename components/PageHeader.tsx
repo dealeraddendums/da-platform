@@ -24,7 +24,7 @@ export function PageHeader({
             fontSize: 28,
             fontWeight: 700,
             lineHeight: 1.2,
-            color: "#fff",
+            color: "var(--page-title, #fff)",
             margin: 0,
           }}
         >
@@ -34,7 +34,7 @@ export function PageHeader({
           <p
             style={{
               fontSize: 14,
-              color: "rgba(255,255,255,0.7)",
+              color: "var(--page-subtitle, rgba(255,255,255,0.7))",
               marginTop: 4,
               marginBottom: 0,
             }}

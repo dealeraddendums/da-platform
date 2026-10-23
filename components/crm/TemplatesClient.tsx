@@ -5,6 +5,7 @@ import EmailEditor from "./EmailEditor";
 import { RenderedPreview, type RenderedEmail } from "./TemplatePicker";
 import { TEMPLATE_VARIABLES } from "@/lib/crm/template-vars";
 import { FEED_KINDS, FEED_KIND_LABEL } from "@/lib/crm/feeds/templates";
+import { Tag } from "./CrmBadges";
 
 type Finding = { from: string; to?: string; count: number; why?: string };
 type Template = {
@@ -94,7 +95,7 @@ export default function TemplatesClient({ canEdit, initialCategory = "" }: { can
                 <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
                   {t.category ?? "Uncategorized"}{t.source === "hubspot_import" ? " · from HubSpot" : ""}
                 </span>
-                {t.needs_review && <span style={{ marginLeft: 6, background: "#fff8e1", color: "#7a5c00", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 3 }}>Needs review</span>}
+                {t.needs_review && <Tag tone="warn" style={{ marginLeft: 6, height: 20, fontSize: 10.5 }}>Needs review</Tag>}
               </button>
             </li>
           ))}

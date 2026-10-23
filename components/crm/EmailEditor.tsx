@@ -27,8 +27,8 @@ const InlineImage = Node.create({
 
 const tb = (active: boolean): React.CSSProperties => ({
   height: 26, minWidth: 26, padding: "0 7px", fontSize: 12, fontWeight: 600, fontFamily: "inherit",
-  border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer",
-  background: active ? "var(--blue)" : "#fff", color: active ? "#fff" : "var(--text-primary)",
+  border: "1px solid transparent", borderRadius: 6, cursor: "pointer",
+  background: active ? "var(--bg-subtle)" : "transparent", color: "var(--text-primary)",
   display: "inline-flex", alignItems: "center", justifyContent: "center",
 });
 
@@ -72,10 +72,10 @@ export default function EmailEditor({
 
   useEffect(() => { editor?.setEditable(!disabled); }, [disabled, editor]);
 
-  if (!editor) return <div style={{ minHeight, border: "1px solid var(--border)", borderRadius: 6, background: "#fff" }} />;
+  if (!editor) return <div style={{ minHeight, border: "1px solid var(--border-strong)", borderRadius: 8, background: "#fff" }} />;
 
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 6, background: "#fff" }}>
+    <div style={{ border: "1px solid var(--border-strong)", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
       {!disabled && <Toolbar editor={editor} variables={variables} />}
       <EditorContent editor={editor} className="crm-email-editor" style={{ minHeight, padding: "10px 12px", fontFamily: "Arial, Helvetica, sans-serif", fontSize: 14 }} />
       <style>{`

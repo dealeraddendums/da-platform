@@ -5,9 +5,9 @@ export default function ComingSoon({ title, phase, blurb }: { title: string; pha
   return (
     <div>
       <PageHeader title={title} />
-      <div className="card" style={{ padding: 24 }}>
-        <p style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Coming in {phase}</p>
-        <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--text-secondary)" }}>{blurb}</p>
+      <div className="crm-card crm-empty" style={{ padding: "48px 24px" }}>
+        <strong>Coming in {phase}</strong>
+        <span style={{ display: "block", maxWidth: 560, margin: "0 auto", lineHeight: 1.5 }}>{blurb}</span>
       </div>
     </div>
   );

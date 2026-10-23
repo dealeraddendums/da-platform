@@ -7,12 +7,14 @@ import { ActivityTypeBadge, CallStateBadge } from "./CrmBadges";
 import { fmtDateTime } from "@/lib/crm/format";
 
 export default function Timeline({
-  items, staff, contactNames = {}, showContact = true,
+  items, staff, contactNames = {}, showContact = true, anchors = false,
 }: {
   items: TimelineItem[];
   staff: Record<string, string>;
   contactNames?: Record<string, string>;
   showContact?: boolean;
+  /** id="act-{id}" on each row (the company page's Summary sources scroll to them). */
+  anchors?: boolean;
 }) {
   if (!items.length) {
     return <p className="text-sm" style={{ color: "var(--text-muted)", padding: 16, margin: 0 }}>No activity yet.</p>;
@@ -20,7 +22,7 @@ export default function Timeline({
   return (
     <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
       {items.map((a) => (
-        <li key={a.id} style={{ padding: "10px 16px", borderTop: "1px solid var(--border)" }}>
+        <li key={a.id} id={anchors ? `act-${a.id}` : undefined} style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", scrollMarginTop: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <ActivityTypeBadge type={a.type} />
             {a.type === "call" && a.metadata?.state && <CallStateBadge state={a.metadata.state} />}

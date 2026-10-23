@@ -65,13 +65,14 @@ export default function FeedsQueueClient({ meId, initialView, initialOrder }: { 
 
   return (
     <div>
-      <div className="card" style={{ padding: "10px 12px", marginBottom: 12, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ marginBottom: 16, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div className="crm-tabs" role="tablist" aria-label="Feed order views">
         {VIEWS.map(([k, label]) => (
-          <button key={k} type="button" onClick={() => setView(k)}
-            style={{ height: 30, padding: "0 12px", borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${view === k ? "var(--blue)" : "var(--border)"}`, background: view === k ? "var(--blue)" : "#fff", color: view === k ? "#fff" : "var(--text-primary)" }}>
-            {label}{counts[k] != null && <span style={{ opacity: 0.75, marginLeft: 6 }}>{counts[k]}</span>}
+          <button key={k} type="button" role="tab" className="crm-tab" aria-selected={view === k} onClick={() => setView(k)}>
+            {label}{counts[k] != null && <span className="crm-count">{counts[k]}</span>}
           </button>
         ))}
+        </div>
         {picked.length > 0 && view !== "unmatched" && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             <span style={{ fontSize: 12 }}>{picked.length} selected</span>
@@ -84,7 +85,7 @@ export default function FeedsQueueClient({ meId, initialView, initialOrder }: { 
           </div>
         )}
       </div>
-      {msg && <p style={{ margin: "0 0 10px", fontSize: 13, color: msg.ok ? "#fff" : "#ffcdd2" }}>{msg.text}</p>}
+      {msg && <p className={msg.ok ? "crm-notice" : "crm-notice danger"} style={{ margin: "0 0 12px", ...(msg.ok ? { background: "var(--crm-success-soft)", color: "var(--crm-success)", borderColor: "#cfe5d7" } : {}) }}>{msg.text}</p>}
 
       {view === "unmatched" ? (
         <div className="card">

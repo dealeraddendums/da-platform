@@ -43,18 +43,22 @@ export default function CompanyFilesPanel({ companyId, files }: { companyId: str
 
   return (
     <div>
-      <div style={{ padding: 16, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", borderBottom: "1px solid var(--border)" }}>
-        <div><label className="label">File</label><input ref={input} type="file" style={{ fontSize: 13 }} /></div>
-        <div style={{ minWidth: 220 }}><label className="label">Label</label><input className="input" placeholder="e.g. Feed request PDF" value={label} onChange={(e) => setLabel(e.target.value)} /></div>
-        <button type="button" className="btn btn-primary" onClick={upload} disabled={busy}>{busy ? "Uploading…" : "Upload"}</button>
-        {err && <span style={{ fontSize: 12, color: "var(--error)" }}>{err}</span>}
+      {/* Label first, then Attach file: picking the file uploads it. */}
+      <div style={{ padding: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <input className="input" style={{ flex: 1, minWidth: 220 }} placeholder="What is it? e.g. Inventory feed request form" value={label} onChange={(e) => setLabel(e.target.value)} aria-label="File label" />
+        <input ref={input} type="file" hidden onChange={() => void upload()} />
+        <button type="button" className="btn btn-secondary" onClick={() => input.current?.click()} disabled={busy}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" /></svg>
+          {busy ? "Uploading…" : "Attach file"}
+        </button>
+        {err && <span style={{ fontSize: 12, color: "var(--error)", width: "100%" }}>{err}</span>}
       </div>
       {!files.length ? (
-        <p className="text-sm" style={{ color: "var(--text-muted)", padding: 16, margin: 0 }}>No files yet.</p>
+        <p className="text-sm" style={{ color: "var(--text-muted)", padding: "0 16px 16px", margin: 0 }}>No documents yet. Attach forms this company needs, like a feed request PDF.</p>
       ) : (
         <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {files.map((f) => (
-            <li key={f.id} style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center" }}>
+            <li key={f.id} style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center" }}>
               <a href={`/api/crm/files/${f.id}`} style={{ color: "var(--blue)", fontWeight: 500 }}>{f.filename}</a>
               {f.label && <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{f.label}</span>}
               <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>

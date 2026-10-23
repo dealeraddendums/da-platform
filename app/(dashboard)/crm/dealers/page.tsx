@@ -4,6 +4,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import Pager from "@/components/Pager";
 import PartnerForm from "@/components/crm/PartnerForm";
+import { StagePill } from "@/components/crm/CompanyHeader";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { crmAdmin, staffNames } from "@/lib/crm/queries";
 import { KIND_LABEL, STAGES, STAGE_LABEL, fmtAgo, type Stage } from "@/lib/crm/format";
@@ -46,16 +47,11 @@ export default async function CrmDirectoryPage({ searchParams }: { searchParams:
   return (
     <div>
       <PageHeader title="Dealers" subtitle="Dealerships, dealer groups and partners — contacts, owners and communication history." />
-      <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+      <nav className="crm-tabs" aria-label="Directory" style={{ marginBottom: 16 }}>
         {TABS.map((t) => (
-          <Link key={t.key} href={`/crm/dealers?tab=${t.key}`}
-            style={{
-              padding: "8px 16px", borderRadius: "6px 6px 0 0", fontWeight: 600, fontSize: 13, textDecoration: "none",
-              background: t.key === tab.key ? "#fff" : "rgba(255,255,255,0.12)", color: t.key === tab.key ? "var(--navy)" : "#fff",
-              borderBottom: t.key === tab.key ? "2px solid var(--orange)" : "2px solid transparent",
-            }}>{t.label}</Link>
+          <Link key={t.key} href={`/crm/dealers?tab=${t.key}`} className="crm-tab" aria-current={t.key === tab.key ? "page" : undefined}>{t.label}</Link>
         ))}
-      </div>
+      </nav>
       {tab.key === "partners" && <PartnerForm />}
       <form className="card" style={{ padding: 12, marginBottom: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <input type="hidden" name="tab" value={tab.key} />
@@ -101,7 +97,7 @@ export default async function CrmDirectoryPage({ searchParams }: { searchParams:
               {(rows ?? []).map((d: any) => (
                 <tr key={d.id} style={{ borderBottom: "1px solid var(--border)" }}>
                   <td className="px-3 py-2">
-                    <Link href={`/crm/companies/${d.id}`} style={{ color: "var(--blue)", fontWeight: 500 }}>{d.name}</Link>
+                    <Link href={`/crm/companies/${d.id}`} className="crm-link" style={{ fontWeight: 500 }}>{d.name}</Link>
                     {d.dealer_text_id && <span style={{ color: "var(--text-muted)", fontSize: 11 }}> · {d.dealer_text_id}</span>}
                     {!d.active && <span style={{ color: "var(--text-muted)", fontSize: 11 }}> · inactive</span>}
                   </td>
@@ -110,8 +106,11 @@ export default async function CrmDirectoryPage({ searchParams }: { searchParams:
                   <td className="px-3 py-2" style={{ whiteSpace: "nowrap", color: "var(--text-secondary)" }}>{formatPhone(d.phone) || "—"}</td>
                   {tab.key === "dealers" && (
                     <td className="px-3 py-2" style={{ whiteSpace: "nowrap" }}>
-                      {d.pipeline_stage ? STAGE_LABEL[d.pipeline_stage as Stage] : "—"}
-                      {d.pipeline_stage === "trial" && d.trial_day && <span style={{ color: "var(--text-muted)", fontSize: 11 }}> · day {d.trial_day}</span>}
+                      {d.pipeline_stage
+                        ? <StagePill stage={d.pipeline_stage as Stage} label={d.pipeline_stage === "paying" ? STAGE_LABEL.paying : undefined} dot={d.pipeline_stage === "paying" ? "var(--crm-success)" : undefined}
+                            title={d.pipeline_stage === "paying" ? "Billing state (Current / Past Due / Suspended) is on the dealer page" : undefined} />
+                        : "—"}
+                      {d.pipeline_stage === "trial" && d.trial_day && <span style={{ color: "var(--text-muted)", fontSize: 12 }}> · day {d.trial_day}</span>}
                     </td>
                   )}
                   <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{d.owner_staff_id ? staff[d.owner_staff_id] ?? "—" : "—"}</td>
@@ -128,7 +127,6 @@ export default async function CrmDirectoryPage({ searchParams }: { searchParams:
         )}
       </div>
       <Pager
-        light
         page={page}
         totalPages={Math.max(1, Math.ceil((count ?? 0) / PAGE))}
         prevHref={pageHref("/crm/dealers", base, page - 1)}

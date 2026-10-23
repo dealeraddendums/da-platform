@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 import { STAGES, STAGE_LABEL } from "@/lib/crm/format";
 
 export default function CompanyHeaderControls({
-  companyId, kind, stage, ownerId, staff, canChangeOwner, brands, allBrands, currentUserId,
+  companyId, kind, stage, ownerId, staff, canChangeOwner, brands, allBrands, currentUserId, hideOwner = false,
 }: {
   companyId: string;
   kind: string;
@@ -21,6 +21,8 @@ export default function CompanyHeaderControls({
   brands: string[];
   allBrands: string[];
   currentUserId: string;
+  /** The company page's Owner card handles ownership; the Edit panel hides it here. */
+  hideOwner?: boolean;
 }) {
   const router = useRouter();
   const [err, setErr] = useState<string | null>(null);
@@ -53,7 +55,7 @@ export default function CompanyHeaderControls({
           </select>
         </div>
       )}
-      <div>
+      {!hideOwner && <div>
         <p className="label">Owner</p>
         {canChangeOwner ? (
           <div style={{ display: "flex", gap: 6 }}>
@@ -69,14 +71,14 @@ export default function CompanyHeaderControls({
         ) : (
           <p style={{ margin: 0, height: 36, display: "flex", alignItems: "center", fontSize: 14 }}>{ownerName}</p>
         )}
-      </div>
+      </div>}
       {isDealer && (
         <div style={{ flex: 1, minWidth: 240 }}>
           <p className="label">Brands</p>
           {!editBrands ? (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", minHeight: 36 }}>
               {brands.length ? brands.map((b) => (
-                <span key={b} style={{ background: "#e3f2fd", color: "#1565c0", fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 3 }}>{b}</span>
+                <span key={b} className="crm-pill">{b}</span>
               )) : <span style={{ color: "var(--text-muted)", fontSize: 13 }}>None set</span>}
               <button type="button" onClick={() => { setPicked(brands); setEditBrands(true); }} style={{ background: "none", border: "none", color: "var(--blue)", cursor: "pointer", fontSize: 12 }}>Edit</button>
             </div>
@@ -86,11 +88,7 @@ export default function CompanyHeaderControls({
                 {allBrands.map((b) => {
                   const on = picked.includes(b);
                   return (
-                    <button key={b} type="button" onClick={() => setPicked(on ? picked.filter((x) => x !== b) : [...picked, b])}
-                      style={{
-                        fontSize: 12, padding: "3px 8px", borderRadius: 3, cursor: "pointer", fontFamily: "inherit",
-                        border: `1px solid ${on ? "var(--blue)" : "var(--border)"}`, background: on ? "var(--blue)" : "#fff", color: on ? "#fff" : "var(--text-primary)",
-                      }}>{b}</button>
+                    <button key={b} type="button" className="crm-chip" aria-pressed={on} onClick={() => setPicked(on ? picked.filter((x) => x !== b) : [...picked, b])}>{b}</button>
                   );
                 })}
               </div>
