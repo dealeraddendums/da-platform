@@ -68,6 +68,7 @@ export type DetailsData = {
   address: string | null; website: string | null; phone: string | null; emails: { address: string; label: string | null }[];
   dms: boolean | null; feedProvider: string | null; feedId: string | null;
   inventory: Freshness | null;
+  billing?: { label: string; tone: "success" | "danger" | "muted"; summary: string | null; via: string | null; href: string | null; title: string | null } | null;
   group: { href: string; name: string } | null;
   feedOrder: { label: string; open: boolean } | null;
 };
@@ -93,6 +94,16 @@ export function DetailsCard({ d, canDial, feeds }: { d: DetailsData; canDial: bo
           <span className={d.inventory.stale ? "crm-overdue" : undefined}
             title={d.inventory.newest ? `Added ${new Date(d.inventory.newest).toLocaleString()}${d.inventory.stale ? ` — nothing new in ${STALE_DAYS}+ days; check the feed` : ""}` : undefined}>
             {d.inventory.label}</span></div>
+      )}
+      {d.billing && (
+        <div className="crm-detail-row" title={d.billing.title ?? undefined}><span className="k">Billing</span>
+          <span>
+            <span style={{ fontWeight: 600, color: d.billing.tone === "danger" ? "var(--crm-danger)" : d.billing.tone === "success" ? "var(--crm-success)" : "var(--crm-muted)" }}>{d.billing.label}</span>
+            {d.billing.summary && <span style={{ color: "var(--crm-ink-2)" }}> · {d.billing.summary}</span>}
+            {d.billing.via && <span style={{ color: "var(--crm-muted)" }}> · {d.billing.via}</span>}
+            {d.billing.href && <> · <a className="crm-link" href={d.billing.href} target="_blank" rel="noreferrer">DA-Billing</a></>}
+          </span>
+        </div>
       )}
       {d.group && <div className="crm-detail-row"><span className="k">Group</span><Link className="crm-link" href={d.group.href}>{d.group.name}</Link></div>}
       {feeds && (
@@ -198,7 +209,7 @@ export type LinksData = {
 
 export function LinksCard({ l }: { l: LinksData }) {
   const rows: [string, string | null, string?][] = [
-    ["CRM Group", l.crmGroup], ["CRM Users", l.crmUsers], ["DA-Billing", l.billing, "Opens DA-Billing — it has no per-customer link yet"],
+    ["CRM Group", l.crmGroup], ["CRM Users", l.crmUsers], ["DA-Billing", l.billing, "Opens this customer in DA-Billing"],
     ["DA Group", l.daGroup], ["DA Dealer", l.daDealer],
   ];
   const login = (mode: "ghost" | "impersonate") => {

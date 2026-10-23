@@ -47,6 +47,7 @@
     "test:crm-feed-suppliers": "tsx scripts/crm-feed-suppliers-verify-unit.ts",
     "crm:feeds-seed": "tsx scripts/crm-feeds-seed.ts",
     "crm:contacts-backfill": "tsx scripts/crm-contacts-backfill.ts",
+    "crm:billing-refresh": "tsx scripts/crm-billing-refresh.ts",
     "crm:graph-setup": "tsx scripts/crm-graph-setup.ts",
     "crm:graph-backfill": "tsx scripts/crm-graph-backfill.ts"
   },

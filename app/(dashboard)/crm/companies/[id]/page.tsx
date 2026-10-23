@@ -19,7 +19,8 @@ import { ContactsCard, DetailsCard, EditCompanyButton, LinksCard, OwnerCard, typ
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { CALL_COLUMNS, canDial, crmAdmin, decorateCalls, staffNames, timeline } from "@/lib/crm/queries";
 import { contactName, type Stage } from "@/lib/crm/format";
-import { billingPayer, dealerBillingState, type BillingRead } from "@/lib/crm/billing-status";
+import { billingPayer, billingSummary, dealerBillingState, dealersBillingStates, groupBillingState, type BillingRead } from "@/lib/crm/billing-status";
+import { BILLING_STATE_LABEL } from "@/lib/crm/billing-labels";
 import { feedName, inventoryFreshness, isFed } from "@/lib/crm/inventory-freshness";
 import { OPEN_STATUSES, STATUS_LABEL as FEED_STATUS_LABEL, type OrderStatus } from "@/lib/crm/feeds/state";
 import { OWNED_STAGES } from "@/lib/crm/companies";
@@ -50,7 +51,8 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
       : isGroup ? admin.from("groups").select("name, address, city, state, zip, billing_customer_id").eq("id", co.group_id).maybeSingle().then((r: any) => r.data)
       : Promise.resolve(null),
     dir.parent_group_id ? admin.from("crm_companies").select("id, group_id, grp:groups(name)").eq("group_id", dir.parent_group_id).maybeSingle() : Promise.resolve({ data: null }),
-    isDealer && stage === "paying" ? dealerBillingState(admin, co.dealer_id) : Promise.resolve(null as BillingRead | null),
+    // Dealers show billing once paying; a group always shows its own DA-Billing customer.
+    isDealer && stage === "paying" ? dealerBillingState(admin, co.dealer_id) : isGroup ? groupBillingState(admin, co.group_id) : Promise.resolve(null as BillingRead | null),
   ]);
   const feed = isDealer ? feedName(source?.inventory_provider, source?.feed_source) : null;
   const [newestVehicle, payer] = await Promise.all([
@@ -93,10 +95,10 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
   let members: MemberDealer[] | undefined;
   if (isGroup) {
     const rows: any[] = membersRes.data ?? [];
-    const reads = await Promise.all(rows.map((m) => (m.pipeline_stage === "paying" ? dealerBillingState(admin, m.dealer_id) : Promise.resolve(null))));
-    members = rows.map((m, i) => ({
+    const reads = await dealersBillingStates(admin, rows.filter((m) => m.pipeline_stage === "paying").map((m) => m.dealer_id));
+    members = rows.map((m) => ({
       id: m.id, name: m.name, text_id: m.dealer_text_id, stage: m.pipeline_stage ?? null,
-      stageLabel: m.pipeline_stage ? stageDisplay(m.pipeline_stage, reads[i]?.state ?? null).label : null,
+      stageLabel: m.pipeline_stage ? stageDisplay(m.pipeline_stage, reads.get(m.dealer_id)?.state ?? null).label : null,
     }));
   }
 
@@ -104,7 +106,18 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
   const order = orderRes.data as { id: string; status: OrderStatus } | null;
   const groupCompany = parentRes.data as { id: string; group_id: string; grp?: { name?: string } } | null;
   const showOwner = isDealer && !!stage && (OWNED_STAGES as readonly string[]).includes(stage);
-  const billingNote = billing && !billing.state ? `Billing status unavailable — ${billing.error ?? "no DA-Billing read"}` : billing?.billedBy === "group" ? "Billed through the group (DA-Billing)" : billing ? "From DA-Billing" : null;
+  const billingNote = billing && !billing.state ? `Billing status unavailable — ${billing.error ?? "no DA-Billing read"}`
+    : billing?.state === "none" ? "No DA-Billing customer is linked"
+    : billing ? `From DA-Billing${billing.billedBy === "group" ? " · billed through the group" : ""}${billing.stale ? " · last known (DA-Billing unreachable)" : ""}` : null;
+  // Details card: "Billing: Current · 3 open invoices · $2,376 · next due Oct 30" → the DA-Billing customer.
+  const billingLine = billing ? {
+    label: billing.state ? BILLING_STATE_LABEL[billing.state] : "Unknown",
+    tone: billing.state === "past_due" || billing.state === "suspended" ? "danger" as const : billing.state === "current" ? "success" as const : "muted" as const,
+    summary: billing.state && billing.state !== "none" ? billingSummary(billing.detail) : null,
+    via: billing.billedBy === "group" ? "via the group" : null,
+    href: billing.customerId ? `${BILLING_APP}?customer=${billing.customerId}` : null,
+    title: billingNote,
+  } : null;
   const backTab = isDealer ? "dealers" : isGroup ? "groups" : "partners";
 
   return (
@@ -153,6 +166,7 @@ export default async function CrmCompanyPage({ params, searchParams }: { params:
             d={{
               address, website: (isDealer ? source?.website_url : null) ?? co.website ?? null, phone: dir.phone ?? co.phone ?? null, emails: co.emails ?? [],
               dms: isDealer ? !!source?.inventory_provider_is_dms : null, feedProvider: feed, feedId: isDealer ? source?.inventory_dealer_id ?? null : null,
+              billing: billingLine,
               inventory: isDealer ? inventoryFreshness(newestVehicle, isFed(feed, source?.inventory_dealer_id), new Date()) : null,
               group: groupCompany ? { href: `/crm/companies/${groupCompany.id}`, name: groupCompany.grp?.name ?? "Group" } : null,
               feedOrder: order ? { label: FEED_STATUS_LABEL[order.status] ?? order.status, open: (OPEN_STATUSES as readonly string[]).includes(order.status) } : null,

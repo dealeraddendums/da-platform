@@ -6,6 +6,7 @@ import Pager from "@/components/Pager";
 import PartnerForm from "@/components/crm/PartnerForm";
 import { StagePill } from "@/components/crm/CompanyHeader";
 import { Tag } from "@/components/crm/CrmBadges";
+import { dealersBillingStates } from "@/lib/crm/billing-status";
 import { requireCrmPage } from "@/lib/crm/page-guard";
 import { crmAdmin, staffNames } from "@/lib/crm/queries";
 import { KIND_LABEL, STAGES, STAGE_LABEL, fmtAgo, type Stage } from "@/lib/crm/format";
@@ -50,6 +51,11 @@ export default async function CrmDirectoryPage({ searchParams }: { searchParams:
   if (searchParams.owner === "none") query = query.is("owner_staff_id", null);
   else if (searchParams.owner) query = query.eq("owner_staff_id", searchParams.owner);
   const [{ data: rows, count, error }, staff] = await Promise.all([query, staffNames(admin)]);
+  // Paying dealers show DA-Billing's status (stored copy, refreshed in one batch when stale).
+  const dealerIds: string[] = (rows ?? []).filter((d: any) => d.kind === "dealer" && d.pipeline_stage === "paying").map((d: any) => d.id);
+  const { data: dealerRefs } = dealerIds.length ? await admin.from("crm_companies").select("id, dealer_id").in("id", dealerIds) : { data: [] };
+  const billingStates = await dealersBillingStates(admin, (dealerRefs ?? []).map((r: any) => r.dealer_id)).catch(() => new Map());
+  const billingFor = new Map<string, any>((dealerRefs ?? []).map((r: any) => [r.id, billingStates.get(r.dealer_id) ?? null]));
   const base = { ...searchParams, tab: tab.key };
 
   return (
@@ -121,8 +127,8 @@ export default async function CrmDirectoryPage({ searchParams }: { searchParams:
                   {tab.key === "dealers" && (
                     <td className="px-3 py-2" style={{ whiteSpace: "nowrap" }}>
                       {d.pipeline_stage
-                        ? <StagePill stage={d.pipeline_stage as Stage} label={d.pipeline_stage === "paying" ? STAGE_LABEL.paying : undefined} dot={d.pipeline_stage === "paying" ? "var(--crm-success)" : undefined}
-                            title={d.pipeline_stage === "paying" ? "Billing state (Current / Past Due / Suspended) is on the dealer page" : undefined} />
+                        ? <StagePill stage={d.pipeline_stage as Stage} billing={billingFor.get(d.id)?.state ?? null}
+                            title={d.pipeline_stage === "paying" ? "From DA-Billing" : undefined} />
                         : "—"}
                       {d.pipeline_stage === "trial" && d.trial_day && <span style={{ color: "var(--text-muted)", fontSize: 12 }}> · day {d.trial_day}</span>}
                     </td>
